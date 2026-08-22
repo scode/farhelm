@@ -129,7 +129,16 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
+
+/// How many cached titles version 11's collation backfill folds at a time.
+///
+/// The backfill has to run in Rust (SQLite's `lower()` folds ASCII only), so
+/// the batch is what keeps an upgrade's peak memory off the size of the
+/// fleet's cache — see the loop in [`apply_schema`]. Any value bounds the
+/// memory; this one is large enough that the per-batch query is noise on a
+/// realistic cache and small enough to be crossed by a test.
+const TITLE_BACKFILL_BATCH: usize = 512;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -486,6 +495,168 @@ pub fn parse_status_key(text: &str) -> Option<&'static str> {
     .find(|known| *known == text)
 }
 
+/// Which order a merged listing is served in — the `?sort=` vocabulary, and
+/// the single place the three orders are defined.
+///
+/// ## Every order ends in the same total order
+///
+/// Each variant names its own leading component and then falls back to
+/// `created_at` DESCENDING, session id ascending, host id ascending. That
+/// tail is not decoration: a page walk resumes strictly after a position, so
+/// an order that left equal ranks unordered would let two rows swap between
+/// two page fetches and a cursor would skip one and repeat the other. The
+/// leading component is allowed to tie; the order as a whole never is.
+///
+/// ## It is an order over the CACHE, not over the wire
+///
+/// Hosts keep listing their sessions in creation order — the wire order the
+/// drain validates (`crate::manager::drain_sessions`) and depends on. What
+/// this selects is how the helm's own merged view is walked, which is a
+/// property of helm.db's indexes and of the merge beside them. Nothing here
+/// reaches a supervisor.
+///
+/// ## Not part of [`SessionFilter`], deliberately
+///
+/// A filter decides WHICH rows a view holds and a sort decides in what order
+/// it hands them over; folding the second into the first would make a
+/// re-sorted view look like a differently-filtered one, and the matching
+/// count cached per filter (`crate::aggregate::MatchingCounts`) would be
+/// recomputed for every sort even though the answer cannot change. Cursors
+/// are bound to BOTH, separately — see `crate::aggregate`'s cursor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ListSort {
+    /// `created_at` descending — the order every listing had before there
+    /// was a choice, and still the one a caller that names none gets. Kept
+    /// as the default so every client and test written against the original
+    /// list keeps its exact behavior.
+    #[default]
+    Created,
+    /// Effective activity descending, then the creation-order tail.
+    ///
+    /// "Effective" is `SessionInfo::effective_activity`: a session whose
+    /// sender predates `last_activity_at` (or that has produced no observed
+    /// output) sorts by its creation time rather than piling up at the
+    /// epoch.
+    Activity,
+    /// Folded title ascending, then the creation-order tail. See
+    /// [`title_sort_key`] for the collation this is over.
+    Title,
+}
+
+/// The `?sort=` vocabulary, or `None` for a word this build does not know.
+///
+/// Refusing an unrecognized word rather than falling back to the default is
+/// the same judgement [`parse_status_key`] makes: a typo answered with a
+/// silently different order is a list the user reads as authoritative and
+/// cannot tell is wrong.
+pub fn parse_sort_key(text: &str) -> Option<ListSort> {
+    match text {
+        "created" => Some(ListSort::Created),
+        "activity" => Some(ListSort::Activity),
+        "title" => Some(ListSort::Title),
+        _ => None,
+    }
+}
+
+/// The collated form of a title — what the title order actually compares.
+///
+/// ## The collation, and why it is this one
+///
+/// Rust's `str::to_lowercase`, compared afterwards as plain UTF-8 bytes,
+/// which for well-formed UTF-8 is code point order. So the order is
+/// CASE-INSENSITIVE and otherwise code-point ordinal: `apple` < `Banana` <
+/// `cherry`, and `Ärger` sorts after `zebra` because its first code point
+/// does.
+///
+/// Name it precisely, because two nearby things it is NOT get assumed. It is
+/// Unicode's locale-independent FULL lowercase mapping, not the SIMPLE
+/// (one-code-point-per-code-point) one: a fold may lengthen the string, as
+/// `İ` does by becoming `i` plus a combining dot. And it is lowercasing
+/// rather than case FOLDING, so the pairs case folding exists to unify but
+/// lowercasing does not — `ß` against `SS`, final `ς` against medial `σ` —
+/// remain distinct keys here. Neither costs correctness; both would make a
+/// docstring that named the wrong operation mislead the next reader into
+/// "fixing" the fold.
+///
+/// SQLite's `NOCASE` is deliberately NOT used. It folds ASCII only, so
+/// `Ärger` and `ärger` would be two different titles to it, and a helm whose
+/// sessions are titled in the user's own language would show a case-folding
+/// that works for half the alphabet. Folding in Rust also keeps ONE
+/// definition of the collation for the two sources an ordered page is merged
+/// from — the indexed column below and an identity-less host's in-memory
+/// rows — where a SQL-side collation would have to be re-implemented on the
+/// Rust side to match.
+///
+/// What it is NOT is locale-aware collation: no ICU, no language-specific
+/// tailoring, no accent folding. That is a dependency and a per-user
+/// configuration this milestone does not have, and the honest failure of
+/// leaving it out — non-Latin titles grouped after Latin ones — is visible
+/// and stable rather than subtly wrong.
+///
+/// ## The stored keys carry no version of the Unicode tables that made them
+///
+/// A folded key is written into `session_cache.title_sort` and compared there
+/// for as long as the row lives, but nothing records WHICH `std` the fold came
+/// from — and Rust's case-mapping tables do move with the Unicode standard, so
+/// two farhelm builds can in principle fold one exotic title differently.
+///
+/// What keeps that from mattering is the cache's write discipline rather than
+/// any versioning here: a drain replaces the host's WHOLE slice, so a
+/// reconnecting host's every key is re-folded by the running toolchain in one
+/// write. Only a host that is OFFLINE across the upgrade can hold keys folded
+/// by the old tables, and only until it comes back. The worst case is one row
+/// sorting slightly out of place in the title order in the meantime — no lost
+/// row and no broken walk, because the tail every order shares is what makes
+/// the sequence total. Not worth a stamped column and a re-fold pass.
+///
+/// Stored in a column at write time (see [`apply_schema`]'s version 11)
+/// rather than computed per read, for `created_at`'s reason: an ORDER BY
+/// must never mean decoding and folding every payload in the fleet.
+///
+/// ## Why it is BOUNDED, and why the bound is safe
+///
+/// Cut to [`TITLE_SORT_KEY_CHARS`] folded characters. Titles reach this helm
+/// from a peer, and the only cap on them anywhere is the supervisor's
+/// 64 KiB `CREATE_FIELD_CAP` — a ceiling for a request body, and far too
+/// large for a value that is ALSO an index key on every cached row and the
+/// leading component of a cursor the browser replays in a query string. An
+/// unbounded key would let one long title mint a `?cursor=` past a request
+/// head limit (stranding that walk at that row) and make every refresh of
+/// that host's slice copy the whole title into both title-order indexes.
+///
+/// Truncating is only sound because it happens HERE, in the one definition
+/// every writer and every comparison goes through: the cut value IS the
+/// ordering key, for the stored column, for the in-memory rows a merge sorts,
+/// for the cursor, and for the resume predicate alike. Two titles sharing the
+/// first [`TITLE_SORT_KEY_CHARS`] characters therefore TIE and fall through to
+/// the shared `created_at`/id/host tail, which is a legitimate tie and not a
+/// lost row — the same thing that happens to two identical titles. What must
+/// never happen is truncating at the CURSOR instead, where a shortened key
+/// would name a position the order does not contain and the walk would skip
+/// or repeat rows.
+///
+/// The cut is on a CHARACTER boundary of the FOLDED string, not a byte
+/// boundary of the original: slicing UTF-8 mid-code-point panics, and folding
+/// can change a string's length (see the `İ` case above), so measuring before
+/// the fold would bound the wrong string.
+pub fn title_sort_key(title: &str) -> String {
+    let folded = title.to_lowercase();
+    match folded.char_indices().nth(TITLE_SORT_KEY_CHARS) {
+        None => folded,
+        Some((cut, _)) => folded[..cut].to_string(),
+    }
+}
+
+/// How many folded characters of a title [`title_sort_key`] keeps.
+///
+/// Chosen to be comfortably longer than any title a person types into a
+/// sidebar while staying small enough that a title-ordered cursor is a short
+/// query-string component (at most this many characters of UTF-8, JSON-escaped
+/// and base64url'd) rather than a bound set by what a peer chose to send. It
+/// is a collation bound, not a display or storage one: the full title is
+/// untouched in `info_json` and is what every client renders.
+pub const TITLE_SORT_KEY_CHARS: usize = 128;
+
 impl SessionFilter {
     /// Admit archived rows as well as active ones.
     ///
@@ -810,6 +981,17 @@ pub enum MatchingCount {
 /// showing such a row would list it under one identity and route it under
 /// another.
 ///
+/// The two DERIVED ordering columns (`activity_at`, `title_sort`) are
+/// deliberately not in that check, and the difference is worth stating.
+/// `id`/`created_at` are IDENTITY — a row filed under the wrong one is routed
+/// and resumed as a session it is not — while the other two are computed from
+/// the payload by whoever wrote the row. A hand-edited disagreement there
+/// costs a row sorted by a stale key beside a title it no longer matches,
+/// which is cosmetic; poisoning the row instead would remove it from the list
+/// entirely over a cosmetic fault. Nothing this build writes can produce the
+/// disagreement: both columns are extracted in the same statement as the
+/// payload.
+///
 /// The `Err` carries a reason string for the caller to log. It is logged only
 /// where the PAGE would have shown the row: a counting walk covers the whole
 /// scope, and one warning per unreadable row per keystroke in a search box is
@@ -826,41 +1008,130 @@ fn usable_cached_session(key: &CacheKey, json: &str) -> Result<SessionInfo, Stri
     Ok(info)
 }
 
-/// Whether `key` comes STRICTLY AFTER `after` in the merged order
-/// (`created_at` descending, then `session_id` ascending, then `host_id`
-/// ascending).
+/// Whether `key` comes STRICTLY AFTER `after` under `sort`.
 ///
-/// The Rust twin of the three-way disjunction [`HelmStore::scan_page`] hands
-/// SQLite, and it exists because a COUNTING scan cannot use that predicate at
-/// all: it has to see the rows before the cursor in order to count them. The
-/// two spellings must agree exactly — a page whose resume test disagreed with
-/// its own ORDER BY would skip or repeat rows, which is the one thing a
-/// cursor may never do.
-fn follows(key: &CacheKey, after: &CacheKey) -> bool {
-    (
-        std::cmp::Reverse(key.created_at),
-        key.session_id.as_str(),
-        key.host,
-    ) > (
-        std::cmp::Reverse(after.created_at),
-        after.session_id.as_str(),
-        after.host,
-    )
+/// The Rust twin of the disjunction [`HelmStore::scan_page`] hands SQLite,
+/// and it exists because a COUNTING scan cannot use that predicate at all: it
+/// has to see the rows before the cursor in order to count them. The two
+/// spellings must agree exactly — a page whose resume test disagreed with its
+/// own ORDER BY would skip or repeat rows, which is the one thing a cursor
+/// may never do.
+fn follows(sort: ListSort, key: &CacheKey, after: &CacheKey) -> bool {
+    sort.position(key) > sort.position(after)
+}
+
+/// One row's place under one order, as a value Rust compares with `<`.
+///
+/// Every order this helm serves is expressed in this ONE tuple, with the
+/// components a given order does not use left absent — and `None` sorting
+/// before `Some` costs nothing, because a comparison only ever happens
+/// between two positions taken under the SAME sort, so an unused component is
+/// the same value on both sides. That uniformity is the point: the k-way
+/// merge, the resume test, and the cursor's own comparison all take positions
+/// rather than each spelling out a per-order tuple of its own.
+///
+/// `Reverse` on the descending components turns "descending time, ascending
+/// id" into one ordinary ascending comparison.
+///
+/// The components, in comparison order:
+///
+/// 1. the folded title, under [`ListSort::Title`] only — ascending;
+/// 2. effective activity, under [`ListSort::Activity`] only — descending;
+/// 3. `created_at`, descending — leading for [`ListSort::Created`] and the
+///    first tiebreak for the other two;
+/// 4. session id, ascending;
+/// 5. host id, ascending — the component that makes every order TOTAL.
+pub type OrderPosition<'a> = (
+    Option<&'a str>,
+    Option<std::cmp::Reverse<i64>>,
+    std::cmp::Reverse<i64>,
+    &'a str,
+    HostId,
+);
+
+impl ListSort {
+    /// Where `key` sits under this order.
+    ///
+    /// This must agree EXACTLY with [`HelmStore::scan_page`]'s `ORDER BY` for
+    /// the same variant. The page comes back sorted by SQL and
+    /// `crate::aggregate` merges in-memory rows into it by this comparison,
+    /// so a disagreement interleaves them into an order that is neither.
+    pub fn position<'a>(&self, key: &'a CacheKey) -> OrderPosition<'a> {
+        (
+            match self {
+                ListSort::Title => Some(key.title_sort.as_str()),
+                ListSort::Created | ListSort::Activity => None,
+            },
+            match self {
+                ListSort::Activity => Some(std::cmp::Reverse(key.activity_at)),
+                ListSort::Created | ListSort::Title => None,
+            },
+            std::cmp::Reverse(key.created_at),
+            key.session_id.as_str(),
+            key.host,
+        )
+    }
+
+    /// The word this order travels as, in a query string and in a cursor.
+    /// The exact inverse of [`parse_sort_key`].
+    pub fn key(&self) -> &'static str {
+        match self {
+            ListSort::Created => "created",
+            ListSort::Activity => "activity",
+            ListSort::Title => "title",
+        }
+    }
 }
 
 /// One row's position in the cross-host merged order — the resume point
 /// [`HelmStore::merged_page`] pages from.
 ///
-/// All three components, in this order: `created_at` DESCENDING, then
-/// `session_id` ascending, then `host_id` ascending. The third is what makes
-/// the order TOTAL rather than merely usually-total (see [`apply_schema`]'s
-/// version 3), and a resume point over a non-total order can skip or repeat
-/// rows — the one thing a cursor must never do.
+/// Carries every component ANY order needs, not just the one in force: a key
+/// is minted where a row is (a cache row's columns, an in-memory session), and
+/// which of its components matter is [`ListSort`]'s decision at comparison
+/// time. Holding all of them means a key can be handed between the two
+/// without knowing what it will be compared under, and it is why
+/// [`ListSort::position`] can be a pure projection rather than a second
+/// construction.
+///
+/// The last three components — `created_at` DESCENDING, then `session_id`
+/// ascending, then `host_id` ascending — are the tail EVERY order ends in.
+/// The host id is what makes each of them TOTAL rather than merely
+/// usually-total (see [`apply_schema`]'s version 3), and a resume point over
+/// a non-total order can skip or repeat rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheKey {
     pub created_at: i64,
     pub session_id: String,
     pub host: HostId,
+    /// The session's EFFECTIVE activity stamp
+    /// (`SessionInfo::effective_activity`) — read from the
+    /// `session_cache.activity_at` column for a cached row, computed for an
+    /// in-memory one. Only [`ListSort::Activity`] compares it.
+    pub activity_at: i64,
+    /// The session's collated title ([`title_sort_key`]) — the
+    /// `session_cache.title_sort` column for a cached row. Only
+    /// [`ListSort::Title`] compares it.
+    pub title_sort: String,
+}
+
+impl CacheKey {
+    /// The key one live [`SessionInfo`] occupies on `host`.
+    ///
+    /// The in-memory counterpart of reading a cached row's columns, and the
+    /// one place the two derived components are derived for a row that has no
+    /// stored copy of them. A second, subtly different derivation on the
+    /// merge side is exactly how an ordered page comes to interleave its two
+    /// sources wrongly.
+    pub fn of(info: &SessionInfo, host: HostId) -> CacheKey {
+        CacheKey {
+            created_at: info.created_at,
+            session_id: info.id.clone(),
+            host,
+            activity_at: info.effective_activity(),
+            title_sort: title_sort_key(&info.title),
+        }
+    }
 }
 
 /// One host to guarantee registered — the `--ensure-hosts` entry as
@@ -1214,6 +1485,16 @@ pub struct HelmStore {
 ///   every payload to find out. Like version 4 this arrives with DATA that
 ///   predates it — the flag has always lived inside `info_json` — so the
 ///   migration backfills the column by decoding each existing row once.
+/// - 11: `session_cache.activity_at` and `session_cache.title_sort`, plus a
+///   per-host index for each, so `GET /api/sessions?sort=` can serve the
+///   activity and title orders ([`ListSort`]) as index range scans. Same
+///   shape as version 10 and the same reason — an order must not mean
+///   decoding every payload — and the same DATA problem: both values have
+///   only ever existed inside `info_json`, so the migration backfills them
+///   from the rows that predate the columns. No GLOBAL index accompanies
+///   either, unlike the pre-existing creation order: `HelmStore::scan_page`
+///   already reads every order through the per-host `UNION ALL` merge, so a
+///   global index here would never be read by anything.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1325,6 +1606,27 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- backfill files a payload it cannot parse as active, on
                  -- the same reasoning (see HelmStore::count_rows).
                  archived   INTEGER NOT NULL DEFAULT 0,
+                 -- The EFFECTIVE activity stamp
+                 -- (SessionInfo::effective_activity), extracted at write
+                 -- time for created_at's reason (schema version 11): the
+                 -- activity order must be an index range scan, not a decode
+                 -- of every payload in the fleet.
+                 --
+                 -- EFFECTIVE, not the raw wire field: a payload whose sender
+                 -- predates last_activity_at carries 0, which means
+                 -- \"unknown\" rather than 1970, and the fallback to
+                 -- created_at is applied HERE so that exactly one rule
+                 -- decides where such a row sorts. The payload keeps the raw
+                 -- value untouched -- writing a synthesized one back would
+                 -- make a guess indistinguishable from an observation for
+                 -- every later merge (see manager::merge_cached_session).
+                 activity_at INTEGER NOT NULL DEFAULT 0,
+                 -- The collated title the title order compares
+                 -- (store::title_sort_key), extracted at write time for the
+                 -- same reason and folded in RUST rather than by a SQL
+                 -- collation, so the one definition of the collation also
+                 -- serves the in-memory rows an ordered page is merged with.
+                 title_sort TEXT NOT NULL DEFAULT '',
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;
              -- At most one HOST may cache a given session id (schema
@@ -1342,26 +1644,63 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- holds) rather than a failed refresh.
              CREATE UNIQUE INDEX session_cache_one_owner
                  ON session_cache (session_id);
-             -- Serves the merged page query (HelmStore::merged_page): the
-             -- full ordering key, in order, so a page is an index range
-             -- scan with no sort step and no rows touched beyond the page.
+             -- The creation order as a GLOBAL key: the full ordering key, in
+             -- order, so a whole-cache scan of it needs no sort step.
              -- host_id is in the key even though session_id is already
              -- unique above, so the order stays TOTAL even against a
              -- database whose one-owner index is absent (a downgrade, a
              -- hand edit) -- a pagination cursor over a non-total order can
              -- skip or repeat rows, which is precisely what a resume point
              -- must never do.
+             --
+             -- Predates the per-host UNION ALL page query below and is no
+             -- longer on HelmStore::scan_page's path either -- the same
+             -- reason version 11 never gave the activity and title orders a
+             -- global index of their own (see their own comment below). A
+             -- future schema version is free to drop this one too, once
+             -- nothing else claims it.
              CREATE INDEX session_cache_order
                  ON session_cache (created_at DESC, session_id ASC, host_id ASC);
-             -- Serves HelmStore::cached_sessions's per-host read
-             -- separately: session_cache_order above has no host_id prefix,
-             -- so \"WHERE host_id = ? ORDER BY created_at DESC, session_id
-             -- ASC\" against it alone would still have to walk every row
-             -- from every host to filter, not just this host's. Leading
-             -- with host_id here turns that into an index range scan
-             -- instead.
+             -- Serves HelmStore::cached_sessions's per-host read, and -- since
+             -- the page query became one branch per host
+             -- (HelmStore::scan_page) -- every creation-ordered page as well.
+             -- session_cache_order above has no host_id prefix, so \"WHERE
+             -- host_id = ? ORDER BY created_at DESC, session_id ASC\" against
+             -- it alone would still have to walk every row from every host to
+             -- filter, not just this host's. Leading with host_id here turns
+             -- that into an index range scan instead.
              CREATE INDEX session_cache_by_host_order
                  ON session_cache (host_id, created_at DESC, session_id ASC);
+             -- The other two orders GET /api/sessions serves (schema version
+             -- 11) get ONLY the per-host index, not the global/per-host pair
+             -- the creation order above has: HelmStore::scan_page spells its
+             -- host scope as one single-host SELECT per host merged by UNION
+             -- ALL, under every order and at every fleet size, precisely
+             -- because an IN-list of more than one host makes SQLite abandon
+             -- a global index and sort the whole cache into a temp b-tree.
+             -- Each branch is a range scan over one host's slice of these,
+             -- and the merge preserves the order. Since schema version 11
+             -- introduces this pair fresh -- unlike the creation order, which
+             -- carries a global index from before the per-host page query
+             -- existed -- there is no global reader left for one to serve,
+             -- so it is simply never created.
+             --
+             -- Each index carries the FULL ordering key of its order, tail
+             -- included, so the order SQLite produces is total without a
+             -- sort. The price is paid on the write side: a refresh rewrites
+             -- a host's whole slice, so every cached row now maintains four
+             -- ordering index entries (the pre-existing global and per-host
+             -- creation-order pair, plus one per-host index for each of the
+             -- two new orders) where it used to maintain two -- version 11
+             -- added two. That is the cost of serving an order without
+             -- decoding payloads, and the cache is bounded per host
+             -- (manager::REFRESH_SESSION_CAP).
+             CREATE INDEX session_cache_by_host_activity_order
+                 ON session_cache (host_id, activity_at DESC, created_at DESC,
+                                   session_id ASC);
+             CREATE INDEX session_cache_by_host_title_order
+                 ON session_cache (host_id, title_sort ASC, created_at DESC,
+                                   session_id ASC);
              -- The last profile a session was created from, per host
              -- (schema version 5). At most one row per host by
              -- construction: host_id IS the primary key, because
@@ -1410,7 +1749,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  cookie_hash BLOB PRIMARY KEY CHECK (length(cookie_hash) = 32),
                  created_at  INTEGER NOT NULL
              ) STRICT;
-             PRAGMA user_version = 10;",
+             PRAGMA user_version = 11;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1680,6 +2019,186 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 10;")
             .context("migrating helm.db to schema version 10")?;
         version = 10;
+    }
+    if version == 10 {
+        // Two more denormalized ordering columns, on version 10's reasoning
+        // exactly: `GET /api/sessions?sort=` gained an activity order and a
+        // title order, and an ORDER BY that had to decode `info_json` would
+        // read and parse the whole fleet's cache to serve one page. Both
+        // values have only ever lived inside the payload, so — like version
+        // 10 — the backfill IS the migration: without it every pre-upgrade
+        // row would sort at the epoch and under the empty title until its
+        // host's next refresh rewrote it, and a host that never reconnects
+        // would stay there forever.
+        //
+        // `ADD COLUMN` for version 10's reason too (SQLite splices each new
+        // definition in after the last COLUMN, which is where the
+        // fresh-create branch writes them, keeping
+        // `a_migrated_database_matches_a_freshly_created_one` honest), and
+        // the defaults are what make `NOT NULL` legal on an existing table.
+        tx.execute_batch(
+            "ALTER TABLE session_cache ADD COLUMN activity_at INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE session_cache ADD COLUMN title_sort TEXT NOT NULL DEFAULT '';",
+        )
+        .context("adding the session_cache ordering columns")?;
+        // The activity backfill is two whole-table statements rather than one
+        // CASE, because the fallback is the DEFAULT and the stamp is the
+        // exception: every row starts at its own creation time, and only a
+        // row whose payload carries a usable stamp moves off it. That is the
+        // same "0 means unknown, fall back to created_at" rule
+        // `SessionInfo::effective_activity` states, applied once at upgrade.
+        //
+        // Asked of the payload TEXT rather than of a decoded `SessionInfo`,
+        // for version 10's reason: `json_extract` wants only the one member,
+        // so a payload this build's struct cannot decode is still classified
+        // correctly rather than silently filed at the default.
+        //
+        // Be precise about WHICH payloads those are, because the obvious
+        // reading is wrong: `SessionInfo` carries no `deny_unknown_fields`
+        // anywhere on its path, so a newer farhelm merely ADDING members
+        // decodes here perfectly well. What a decode cannot survive is an
+        // INCOMPLETE or INCOMPATIBLE payload — a member missing that has no
+        // `#[serde(default)]`, a member whose type changed, a blob that is
+        // not JSON at all, or a row a hand edit corrupted. Those are the rows
+        // this asks the text about; a valid future write is not one of them.
+        //
+        // BOTH type guards are load-bearing, and neither subsumes the other,
+        // because they constrain different things: `json_type` constrains the
+        // member as it appears in the JSON, `typeof` constrains the SQLite
+        // value `json_extract` renders it as.
+        //
+        // - `json_type` rejects a JSON `true`, which `json_extract` renders as
+        //   the integer 1 -- so `typeof` alone would silently file a boolean
+        //   as an activity stamp of one second past the epoch.
+        // - `typeof` rejects a JSON integer too large for i64, which
+        //   `json_extract` renders as a REAL -- so `json_type` alone would
+        //   hand a float to the STRICT table's INTEGER column and abort the
+        //   whole upgrade over one row. It rejects a JSON string for the same
+        //   reason the guard was written: SQLite orders every TEXT value above
+        //   every number, so a string `last_activity_at` passes `> 0`.
+        tx.execute_batch(
+            "UPDATE session_cache SET activity_at = created_at;
+             UPDATE session_cache \
+                SET activity_at = json_extract(info_json, '$.last_activity_at') \
+              WHERE json_valid(info_json) \
+                AND json_type(info_json, '$.last_activity_at') = 'integer' \
+                AND typeof(json_extract(info_json, '$.last_activity_at')) = 'integer' \
+                AND json_extract(info_json, '$.last_activity_at') > 0;",
+        )
+        .context("backfilling the session_cache activity stamps")?;
+        // The title backfill cannot be a SQL statement, and that is the one
+        // way this migration differs from version 10's. SQLite's `lower()`
+        // folds ASCII only, so a row backfilled by it would compare
+        // differently from the very same row rewritten by the next refresh
+        // (which folds in Rust — see [`title_sort_key`]), and two rows folded
+        // by different rules do not sort against each other at all.
+        //
+        // So the titles are read out here and folded by the same function
+        // every writer uses. The read still goes through `json_extract` for
+        // the newer-payload tolerance above.
+        //
+        // In BATCHES, and that is the point of the loop rather than an
+        // optimization: the shape this replaced collected every folded title
+        // in the fleet into one `Vec` before writing any of them, which makes
+        // an upgrade's peak memory proportional to the whole cache's titles —
+        // the very cost version 10's comment says a migration must not have.
+        // A batch holds at most [`TITLE_BACKFILL_BATCH`] of them.
+        //
+        // Paged by KEYSET over the primary key rather than by `OFFSET`: the
+        // rows are being updated as the walk proceeds, and an offset over a
+        // table under mutation is both quadratic and a way to skip rows. The
+        // successor test is spelled out rather than written as a row-value
+        // comparison, for [`HelmStore::scan_page`]'s reason — no reliance on a
+        // SQLite version's row-value support. `title_sort` is not part of the
+        // key, so writing it cannot move a row past the resume point.
+        //
+        // All of it inside the SAME transaction: a batched backfill that
+        // committed per batch could leave a database half-collated behind a
+        // crash, with `user_version` still naming the old schema and no way to
+        // tell which rows had been done.
+        let mut after: Option<(HostId, String)> = None;
+        loop {
+            // The title is read as RAW BYTES and validated here rather than
+            // through `r.get::<String>`, which is not pedantry: SQLite's JSON
+            // functions accept a lone surrogate escape (`"\ud800"`) as valid
+            // JSON and hand `json_extract` back its CESU-8 encoding, which is
+            // not UTF-8. Asking rusqlite for a `String` turns that one hostile
+            // title into a failed conversion that aborts the entire upgrade.
+            // Such a row falls to the empty key with everything else nothing
+            // can classify (see below).
+            let batch: Vec<(HostId, String, String)> = {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT host_id, session_id, json_extract(info_json, '$.title') \
+                         FROM session_cache \
+                         WHERE (?1 IS NULL \
+                                OR host_id > ?1 \
+                                OR (host_id = ?1 AND session_id > ?2)) \
+                           AND json_valid(info_json) \
+                           AND typeof(json_extract(info_json, '$.title')) = 'text' \
+                         ORDER BY host_id, session_id \
+                         LIMIT ?3",
+                    )
+                    .context("preparing the cached title read")?;
+                let rows = stmt
+                    .query_map(
+                        rusqlite::params![
+                            after.as_ref().map(|(host, _)| *host),
+                            after.as_ref().map(|(_, session_id)| session_id.as_str()),
+                            TITLE_BACKFILL_BATCH as i64,
+                        ],
+                        |r| {
+                            let folded = match r.get_ref(2)? {
+                                rusqlite::types::ValueRef::Text(bytes) => {
+                                    std::str::from_utf8(bytes)
+                                        .map(title_sort_key)
+                                        .unwrap_or_default()
+                                }
+                                _ => String::new(),
+                            };
+                            Ok((r.get(0)?, r.get(1)?, folded))
+                        },
+                    )
+                    .context("reading the cached titles to collate")?;
+                rows.collect::<Result<_, _>>()
+                    .context("collecting the cached titles to collate")?
+            };
+            let Some((host, session_id, _)) = batch.last() else {
+                break;
+            };
+            after = Some((*host, session_id.clone()));
+            // A row no batch writes — an undecodable payload, one whose title
+            // is not text, or one whose title is not UTF-8 — keeps the
+            // column's `''`, which sorts first under the title order. Same
+            // principle as version 10's unreadable-payload default: a row
+            // nothing can classify is placed rather than hidden.
+            for (host, session_id, title_sort) in &batch {
+                tx.execute(
+                    "UPDATE session_cache SET title_sort = ?3 \
+                     WHERE host_id = ?1 AND session_id = ?2",
+                    rusqlite::params![host, session_id, title_sort],
+                )
+                .context("backfilling a session_cache collated title")?;
+            }
+        }
+        // Created after the backfill rather than before it, so the upgrade
+        // builds each of these two once over final values instead of
+        // maintaining both across the whole-table updates above. Per-host
+        // only, on the fresh-create DDL's reasoning for the same two indexes:
+        // every reader of these orders (HelmStore::scan_page) already goes
+        // through the per-host UNION ALL merge, so a global counterpart would
+        // sit unread from the moment it was created.
+        tx.execute_batch(
+            "CREATE INDEX session_cache_by_host_activity_order
+                 ON session_cache (host_id, activity_at DESC, created_at DESC,
+                                   session_id ASC);
+             CREATE INDEX session_cache_by_host_title_order
+                 ON session_cache (host_id, title_sort ASC, created_at DESC,
+                                   session_id ASC);
+             PRAGMA user_version = 11;",
+        )
+        .context("migrating helm.db to schema version 11")?;
+        version = 11;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2828,10 +3347,13 @@ impl HelmStore {
     /// there is no such row to plant honestly; a genuine schema-level
     /// constraint violation is the cheaper, and more realistic, seam.)
     ///
-    /// `created_at` is extracted from each `entry` and stored as its own
-    /// column rather than left for a reader to re-parse from `info_json` —
-    /// see [`Self::cached_sessions`]'s docs for why that split is load-
-    /// bearing, not merely tidy.
+    /// Every ORDERING component is extracted from each `entry` and stored in
+    /// a column of its own rather than left for a reader to re-parse from
+    /// `info_json`: `created_at`, plus the effective activity stamp and the
+    /// collated title the other two orders walk ([`ListSort`]). See
+    /// [`Self::cached_sessions`]'s docs for why that split is load-bearing,
+    /// not merely tidy — it is the difference between an ORDER BY that reads
+    /// an index and one that decodes the fleet.
     ///
     /// Two checks run inside the SAME transaction as the delete-then-insert,
     /// against exactly the state a live refresh's caller cannot otherwise
@@ -2908,9 +3430,13 @@ impl HelmStore {
             // built on), so a row whose payload is unchanged while its
             // timestamp is repaired IS a change — and reporting otherwise
             // would starve the feed of exactly the reordering a client needs
-            // to re-read for. The `archived` column needs no third
-            // comparison: it is extracted from the payload on the way in, so
-            // it cannot move without `info_json` moving with it.
+            // to re-read for. The `archived`, `activity_at` and `title_sort`
+            // columns need no further comparison: every one of them is
+            // extracted from the payload on the way in, so none can move
+            // without `info_json` moving with it. A session that produced
+            // output, or was renamed, therefore already flips `changed` — and
+            // that is what makes the activity and title orders live surfaces
+            // rather than ones that only settle at the next full refresh.
             //
             // ONE map, consumed as the rewrite goes: entries are removed as
             // they are matched, so this holds the host's cache once rather
@@ -2959,10 +3485,19 @@ impl HelmStore {
                         // skipped row is announced below rather than
                         // swallowed.
                         "INSERT INTO session_cache \
-                             (host_id, session_id, created_at, info_json, archived) \
-                         VALUES (?1, ?2, ?3, ?4, ?5) \
+                             (host_id, session_id, created_at, info_json, archived, \
+                              activity_at, title_sort) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
                          ON CONFLICT (session_id) DO NOTHING",
-                        rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
+                        rusqlite::params![
+                            host,
+                            entry.id,
+                            entry.created_at,
+                            json,
+                            entry.archived,
+                            entry.effective_activity(),
+                            title_sort_key(&entry.title),
+                        ],
                     )
                     .context("inserting cached session")?;
                 if inserted == 0 {
@@ -3269,12 +3804,22 @@ impl HelmStore {
             let json = serde_json::to_string(entry).context("serializing cached session")?;
             tx.execute(
                 "INSERT INTO session_cache \
-                     (host_id, session_id, created_at, info_json, archived) \
-                 VALUES (?1, ?2, ?3, ?4, ?5) \
+                     (host_id, session_id, created_at, info_json, archived, \
+                      activity_at, title_sort) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
                  ON CONFLICT (session_id) DO UPDATE SET \
                      created_at = excluded.created_at, info_json = excluded.info_json, \
-                     archived = excluded.archived",
-                rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
+                     archived = excluded.archived, activity_at = excluded.activity_at, \
+                     title_sort = excluded.title_sort",
+                rusqlite::params![
+                    host,
+                    entry.id,
+                    entry.created_at,
+                    json,
+                    entry.archived,
+                    entry.effective_activity(),
+                    title_sort_key(&entry.title),
+                ],
             )
             .context("seeding a cached session")?;
             tx.commit().context("committing cache seed")?;
@@ -3384,9 +3929,7 @@ impl HelmStore {
     /// every host still down serves ONLY from this cache, per PLAN_M6.md's
     /// testing decisions) — the columns make this a plain indexed
     /// `ORDER BY` against `session_cache_by_host_order` instead (see
-    /// [`apply_schema`]; the host_id-less `session_cache_order` index
-    /// serves [`Self::cached_sessions_all`]'s cross-host read, not this
-    /// one).
+    /// [`apply_schema`]).
     ///
     /// SKIP-AND-LOG, not fail-the-whole-read: a row whose `info_json` no
     /// longer decodes (see `session_cache`'s schema comment in
@@ -3440,8 +3983,23 @@ impl HelmStore {
         .context("cached sessions task panicked")?
     }
 
-    /// ONE PAGE of the cross-host merged order, resuming strictly after
-    /// `after` — the substrate of PLAN_M6.md item 5's served session list.
+    /// ONE PAGE of the cross-host merged order under `sort`, resuming
+    /// strictly after `after` — the substrate of PLAN_M6.md item 5's served
+    /// session list.
+    ///
+    /// ## The order is a parameter, and every part of the scan follows it
+    ///
+    /// `sort` selects the `ORDER BY`, the index behind it, and the resume
+    /// disjunction together, because those three are one decision: a resume
+    /// predicate written for a different order than the scan walks skips or
+    /// repeats rows, silently. [`ListSort::position`] is the Rust spelling of
+    /// the same order and MUST agree with the SQL below — the merge in
+    /// `crate::aggregate` interleaves in-memory rows into this page by that
+    /// comparison, and the counting walk applies the resume test with it
+    /// (see [`follows`]).
+    ///
+    /// Every order ends in the same `created_at DESC, session_id ASC, host_id
+    /// ASC` tail, so equal ranks never jump between two page fetches.
     ///
     /// The whole point is that it is a PAGE: the resume predicate, the row
     /// limit, and the byte bound all apply during ONE indexed scan, so a
@@ -3554,10 +4112,42 @@ impl HelmStore {
     /// A count walks the whole scope, and one warning per unreadable row per
     /// keystroke in a search box is a log the user writes by typing.
     ///
+    /// ## One SELECT PER HOST, merged — not one `host_id IN (...)`
+    ///
+    /// The host scope is spelled as a `UNION ALL` of one single-host branch
+    /// each, and that is a query-plan decision rather than a stylistic one.
+    /// With an `IN`-list of more than one host SQLite abandons every ordering
+    /// index and answers the `ORDER BY` with `USE TEMP B-TREE FOR ORDER BY`:
+    /// an ordinary fleet page then sorts the entire cache — under this store's
+    /// one mutex — to hand back its first twenty rows, under every order
+    /// including `created`, which had the problem before the other two orders
+    /// existed. One host was never affected, which is exactly why it went
+    /// unnoticed.
+    ///
+    /// A single-host branch, by contrast, is a range scan over that host's
+    /// slice of `session_cache_by_host_order` (or its activity/title
+    /// counterpart), so each branch arrives already in the requested order and
+    /// SQLite merges them with `MERGE (UNION ALL)` — no sort step at any host
+    /// count. `a_fleet_page_is_index_ordered_under_every_sort` reads
+    /// `EXPLAIN QUERY PLAN` back and fails if a temp b-tree ever returns.
+    ///
+    /// The predicates are duplicated into every branch rather than wrapped
+    /// around the union, because a filter applied outside the compound would
+    /// leave each branch unrestricted and put the sort back. With one host in
+    /// scope this degenerates to exactly the single-branch query it always
+    /// was.
+    ///
     /// Takes a borrowed connection rather than `&self` because it is half of
     /// [`Self::merged_page`]'s single read and must run inside that read's
     /// transaction: a page fetched under its own lock hold could describe a
     /// different moment than the counts reported beside it.
+    ///
+    /// The parameter list is over clippy's threshold and stays a list rather
+    /// than becoming a request struct: every one of these is an independent
+    /// dimension of one read, and a struct would only move the same eight
+    /// values behind a name that adds nothing — while making the private
+    /// caller below construct one to call it.
+    #[allow(clippy::too_many_arguments)]
     fn scan_page(
         conn: &Connection,
         hosts: &[HostId],
@@ -3565,75 +4155,34 @@ impl HelmStore {
         limit: usize,
         byte_budget: usize,
         filter: &SessionFilter,
+        sort: ListSort,
         count: bool,
     ) -> anyhow::Result<(CachePage, Option<u64>)> {
         if hosts.is_empty() {
             return Ok((CachePage::default(), count.then_some(0)));
         }
-        // Built rather than constant because the host scope is an IN-list
-        // whose arity varies; every value is still bound, never interpolated.
-        let placeholders = host_placeholders(hosts.len(), 4);
-        let resume = match (&after, count) {
-            (None, _) | (Some(_), true) => "",
-            // The three-way disjunction IS the strict-successor test for a
-            // composite key, written out because SQLite has no row-value
-            // comparison this code can rely on across every bundled version.
-            // `created_at` is DESCENDING, so "after" means smaller.
-            (Some(_), false) => {
-                " AND (created_at < ?1                      OR (created_at = ?1 AND session_id > ?2)                      OR (created_at = ?1 AND session_id = ?2 AND host_id > ?3))"
-            }
-        };
-        // One row past the limit, so "is there more" is answered by the scan
-        // itself rather than by a second query that could disagree with it.
-        // Neither a FILTERED scan nor a COUNTING one can use that bound — how
-        // many rows either must read is exactly what it is trying to find out
-        // — so they walk the order and stop themselves in the loop below.
-        let fetch = limit.saturating_add(1);
-        let bound_rows = if filter.is_empty() && !count {
-            format!(" LIMIT {fetch}")
-        } else {
-            String::new()
-        };
-        // The archive switch is the ONE filter dimension this SQL applies,
-        // mirroring [`Self::count_rows`] so the page and the total are cut by
-        // the same clause rather than by two spellings that could drift.
-        // [`SessionFilter::matches`] still applies it below, and has to: that
-        // is the contract, and this is only the part SQLite can help with.
-        //
-        // Two things it buys. Archived rows are no longer read and decoded
-        // just to be discarded a few lines down — the default view is the
-        // common request, so that was most of a fleet's archive on every
-        // poll. And a row whose payload has gone bad is now judged by the
-        // flag STORED with it: undecodable-and-archived leaves the default
-        // view entirely, where before it slipped past `matches` (nothing can
-        // judge a payload it cannot read) and occupied a slot in a page whose
-        // total had already excluded it.
-        let archive_clause = if filter.includes_archived() {
-            ""
-        } else {
-            " AND archived = 0"
-        };
-        let sql = format!(
-            "SELECT host_id, session_id, created_at, info_json FROM session_cache \
-             WHERE host_id IN ({placeholders}){archive_clause}{resume} \
-             ORDER BY created_at DESC, session_id ASC, host_id ASC{bound_rows}"
-        );
+        let sql = page_sql(hosts.len(), after.is_some(), limit, filter, sort, count);
         let mut stmt = conn
             .prepare(&sql)
             .context("preparing the merged cache page query")?;
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        // Bound 1..=3 unconditionally so the placeholder numbering in
-        // `resume` is stable whether or not it is present; unused binds are
-        // harmless, an off-by-one in the host list is not.
+        // Bound 1..=5 unconditionally so the placeholder numbering in
+        // `resume` is stable whether or not it is present and whichever order
+        // is in force; unused binds are harmless, an off-by-one in the host
+        // list is not.
         let placeholder_key = CacheKey {
             created_at: 0,
             session_id: String::new(),
             host: 0,
+            activity_at: 0,
+            title_sort: String::new(),
         };
         let bind_key = after.as_ref().unwrap_or(&placeholder_key);
         params.push(Box::new(bind_key.created_at));
         params.push(Box::new(bind_key.session_id.clone()));
         params.push(Box::new(bind_key.host));
+        params.push(Box::new(bind_key.activity_at));
+        params.push(Box::new(bind_key.title_sort.clone()));
         for host in hosts {
             params.push(Box::new(*host));
         }
@@ -3653,10 +4202,19 @@ impl HelmStore {
             let session_id: String = row.get(1).context("reading a cached row's id")?;
             let created_at: i64 = row.get(2).context("reading a cached row's time")?;
             let json: String = row.get(3).context("reading a cached row's payload")?;
+            // The two derived ordering components come from their COLUMNS,
+            // never from the payload beside them, for the same reason
+            // `created_at` does: the columns are what the ORDER BY above
+            // sorted by, so a key built from anything else could name a
+            // position this scan's own order does not contain.
+            let activity_at: i64 = row.get(4).context("reading a cached row's activity")?;
+            let title_sort: String = row.get(5).context("reading a cached row's sort title")?;
             let key = CacheKey {
                 created_at,
                 session_id,
                 host,
+                activity_at,
+                title_sort,
             };
             // ONE validation predicate for both answers (see
             // [`usable_cached_session`]): a row this scan would refuse to
@@ -3667,7 +4225,11 @@ impl HelmStore {
                 matching = matching.saturating_add(1);
             }
             // The resume test, for the counting walk whose SQL carries none.
-            if count && after.as_ref().is_some_and(|after| !follows(&key, after)) {
+            if count
+                && after
+                    .as_ref()
+                    .is_some_and(|after| !follows(sort, &key, after))
+            {
                 continue;
             }
             if page_closed {
@@ -3806,7 +4368,7 @@ impl HelmStore {
         if hosts.is_empty() {
             return Ok(0);
         }
-        let placeholders = host_placeholders(hosts.len(), 1);
+        let placeholders = host_placeholders(hosts.len());
         let archive_clause = if include_archived {
             ""
         } else {
@@ -3866,6 +4428,13 @@ impl HelmStore {
     /// [`Self::count_rows`] for why that one is in the denominator and the
     /// user's filters are not.
     ///
+    /// ## The order changes the page and nothing else
+    ///
+    /// `sort` reaches [`Self::scan_page`] and stops there. Neither `total` nor
+    /// `matching` moves with it — both are counts of a SET, and re-ordering a
+    /// set does not resize it — which is also why the caller's matching-count
+    /// cache stays valid across a sort change (`crate::aggregate`).
+    ///
     /// ## Whether it COUNTS is decided here, inside the lock
     ///
     /// See [`MatchingCount`]. A caller that already holds a matching count
@@ -3887,6 +4456,11 @@ impl HelmStore {
     /// trusted as that row, and the matching count deliberately excludes
     /// exactly those. Reporting `total` as a matching count would make an
     /// unshowable row count as a match only when nobody filtered.
+    ///
+    /// Over clippy's argument threshold for [`Self::scan_page`]'s reason, and
+    /// declined for the same one: these are the independent dimensions of one
+    /// read, and every caller already names all of them.
+    #[allow(clippy::too_many_arguments)]
     pub async fn merged_page(
         &self,
         scope: Vec<HostId>,
@@ -3894,6 +4468,7 @@ impl HelmStore {
         limit: usize,
         byte_budget: usize,
         filter: SessionFilter,
+        sort: ListSort,
         matching: MatchingCount,
     ) -> anyhow::Result<MergedRead> {
         let conn = Arc::clone(&self.conn);
@@ -3933,8 +4508,16 @@ impl HelmStore {
             if count {
                 counting_passes.fetch_add(1, Ordering::Relaxed);
             }
-            let (page, matching) =
-                Self::scan_page(&tx, &page_scope, after, limit, byte_budget, &filter, count)?;
+            let (page, matching) = Self::scan_page(
+                &tx,
+                &page_scope,
+                after,
+                limit,
+                byte_budget,
+                &filter,
+                sort,
+                count,
+            )?;
             Ok(MergedRead {
                 page,
                 total,
@@ -3963,6 +4546,7 @@ impl HelmStore {
         limit: usize,
         byte_budget: usize,
         filter: SessionFilter,
+        sort: ListSort,
     ) -> anyhow::Result<CachePage> {
         Ok(self
             .merged_page(
@@ -3971,6 +4555,7 @@ impl HelmStore {
                 limit,
                 byte_budget,
                 filter,
+                sort,
                 MatchingCount::Skip,
             )
             .await?
@@ -4353,15 +4938,132 @@ impl HelmStore {
     }
 }
 
-/// `?4, ?5, ...` for an IN-list of `count` host ids starting at parameter
-/// index `first`.
+/// The SQL [`HelmStore::scan_page`] runs, built from the shape of one read.
 ///
-/// The host scope is the one part of these queries whose arity is not known
-/// at compile time. Generating PLACEHOLDERS rather than values is what keeps
-/// that from becoming string interpolation of data: every id is still bound
-/// through rusqlite, and this function can only ever emit `?N`.
-fn host_placeholders(count: usize, first: usize) -> String {
-    (first..first + count)
+/// Split out from the scan itself for two reasons. It is the whole of the
+/// order/resume/scope decision in one place, which is where a reader should
+/// be able to check that the `ORDER BY`, the resume disjunction and
+/// [`ListSort::position`] all spell one order; and it lets
+/// `a_fleet_page_is_index_ordered_under_every_sort` hand the exact production
+/// text to `EXPLAIN QUERY PLAN`, which is the only way to assert a query plan
+/// rather than assume one.
+///
+/// Parameters are numbered so that `?1..=?5` are the resume key's components
+/// and `?6` onward are the host ids, one per branch; [`HelmStore::scan_page`]
+/// binds them in that order.
+fn page_sql(
+    hosts: usize,
+    after: bool,
+    limit: usize,
+    filter: &SessionFilter,
+    sort: ListSort,
+    count: bool,
+) -> String {
+    // The disjunction IS the strict-successor test for a composite key,
+    // written out because SQLite has no row-value comparison this code can
+    // rely on across every bundled version. Each order's leading component
+    // is compared in ITS direction — descending stamps mean "after" is
+    // smaller, an ascending title means "after" is larger — and every one
+    // of them then falls through the shared `created_at`/id/host tail.
+    //
+    // A COUNTING scan carries no resume clause at all: it has to see the
+    // rows before the cursor in order to count them, and applies
+    // [`follows`] per row instead.
+    let resume = match (after, count) {
+        (false, _) | (true, true) => "",
+        (true, false) => match sort {
+            ListSort::Created => {
+                " AND (created_at < ?1 \
+                       OR (created_at = ?1 AND session_id > ?2) \
+                       OR (created_at = ?1 AND session_id = ?2 AND host_id > ?3))"
+            }
+            ListSort::Activity => {
+                " AND (activity_at < ?4 \
+                       OR (activity_at = ?4 AND created_at < ?1) \
+                       OR (activity_at = ?4 AND created_at = ?1 AND session_id > ?2) \
+                       OR (activity_at = ?4 AND created_at = ?1 AND session_id = ?2 \
+                           AND host_id > ?3))"
+            }
+            ListSort::Title => {
+                " AND (title_sort > ?5 \
+                       OR (title_sort = ?5 AND created_at < ?1) \
+                       OR (title_sort = ?5 AND created_at = ?1 AND session_id > ?2) \
+                       OR (title_sort = ?5 AND created_at = ?1 AND session_id = ?2 \
+                           AND host_id > ?3))"
+            }
+        },
+    };
+    // The exact spelling of [`ListSort::position`], for SQLite. Each is the
+    // full ordering key of one order, so each branch below is served by that
+    // order's host-leading index with no sort step.
+    let order_by = match sort {
+        ListSort::Created => "created_at DESC, session_id ASC, host_id ASC",
+        ListSort::Activity => "activity_at DESC, created_at DESC, session_id ASC, host_id ASC",
+        ListSort::Title => "title_sort ASC, created_at DESC, session_id ASC, host_id ASC",
+    };
+    // One row past the limit, so "is there more" is answered by the scan
+    // itself rather than by a second query that could disagree with it.
+    // Neither a FILTERED scan nor a COUNTING one can use that bound — how
+    // many rows either must read is exactly what it is trying to find out
+    // — so they walk the order and stop themselves in the scan's loop.
+    let fetch = limit.saturating_add(1);
+    let bound_rows = if filter.is_empty() && !count {
+        format!(" LIMIT {fetch}")
+    } else {
+        String::new()
+    };
+    // The archive switch is the ONE filter dimension this SQL applies,
+    // mirroring [`HelmStore::count_rows`] so the page and the total are cut by
+    // the same clause rather than by two spellings that could drift.
+    // [`SessionFilter::matches`] still applies it in the scan, and has to:
+    // that is the contract, and this is only the part SQLite can help with.
+    //
+    // Two things it buys. Archived rows are no longer read and decoded just
+    // to be discarded a few lines later — the default view is the common
+    // request, so that was most of a fleet's archive on every poll. And a row
+    // whose payload has gone bad is now judged by the flag STORED with it:
+    // undecodable-and-archived leaves the default view entirely, where before
+    // it slipped past `matches` (nothing can judge a payload it cannot read)
+    // and occupied a slot in a page whose total had already excluded it.
+    let archive_clause = if filter.includes_archived() {
+        ""
+    } else {
+        " AND archived = 0"
+    };
+    // One branch per host, each an index range over that host's slice, so the
+    // compound is a MERGE rather than a sort — see [`HelmStore::scan_page`]'s
+    // docs for what an `IN`-list did instead. The host ids are still BOUND
+    // (`?6`, `?7`, …) and never interpolated; only the branch count comes
+    // from Rust. Every predicate is repeated INTO each branch, because one
+    // wrapped around the union would leave each branch unrestricted and put
+    // the sort back.
+    let branches = (0..hosts)
+        .map(|index| {
+            let host = index + 6;
+            format!(
+                "SELECT host_id, session_id, created_at, info_json, activity_at, title_sort \
+                 FROM session_cache \
+                 WHERE host_id = ?{host}{archive_clause}{resume}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    format!("{branches} ORDER BY {order_by}{bound_rows}")
+}
+
+/// `?1, ?2, ...` for an IN-list of `count` host ids.
+///
+/// The host scope is the one part of [`HelmStore::count_rows`]'s query whose
+/// arity is not known at compile time. Generating PLACEHOLDERS rather than
+/// values is what keeps that from becoming string interpolation of data:
+/// every id is still bound through rusqlite, and this function can only ever
+/// emit `?N`.
+///
+/// The PAGE query no longer uses it. An `IN`-list there cost the ordering
+/// index (see [`HelmStore::scan_page`]); a count has no `ORDER BY` to lose,
+/// so the `IN`-list remains the right shape for it.
+fn host_placeholders(count: usize) -> String {
+    (1..=count)
         .map(|index| format!("?{index}"))
         .collect::<Vec<_>>()
         .join(", ")
@@ -4401,6 +5103,26 @@ mod tests {
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+        }
+    }
+
+    /// A cached session with the two fields the non-default orders read.
+    ///
+    /// `last_activity_at` is a PARAMETER rather than a copy of `created_at`,
+    /// because the compatibility rule the activity order rests on is only
+    /// visible when the two differ — including at `0`, which is a sender that
+    /// predates the field and must sort by its creation time rather than at
+    /// the epoch.
+    fn ordered_session(
+        id: &str,
+        created_at: i64,
+        last_activity_at: i64,
+        title: &str,
+    ) -> SessionInfo {
+        SessionInfo {
+            last_activity_at,
+            title: title.to_string(),
+            ..session(id, created_at)
         }
     }
 
@@ -4515,6 +5237,7 @@ mod tests {
                     2,
                     usize::MAX,
                     SessionFilter::default(),
+                    ListSort::Created,
                 )
                 .await
                 .expect("paged read");
@@ -4526,6 +5249,39 @@ mod tests {
                     info,
                 })
             }));
+            if !page.more {
+                break;
+            }
+        }
+        all
+    }
+
+    /// The cached session ids across `hosts` under `sort`, walked page by
+    /// page through the production paging API.
+    ///
+    /// A WALK with a deliberately tiny page, for [`walk_cached`]'s reason and
+    /// one more: an order is only served correctly if its resume predicate
+    /// agrees with its own `ORDER BY`, and the only way to see a disagreement
+    /// is to cross page boundaries. Ids rather than sessions because the
+    /// subject is the SEQUENCE.
+    async fn walk_sorted(store: &HelmStore, hosts: &[HostId], sort: ListSort) -> Vec<String> {
+        let mut all = Vec::new();
+        let mut after: Option<CacheKey> = None;
+        loop {
+            let page = store
+                .cached_page(
+                    hosts.to_vec(),
+                    after.clone(),
+                    2,
+                    usize::MAX,
+                    SessionFilter::default(),
+                    sort,
+                )
+                .await
+                .expect("paged read");
+            let Some(last) = page.rows.last() else { break };
+            after = Some(last.key.clone());
+            all.extend(page.rows.into_iter().map(|row| row.key.session_id));
             if !page.more {
                 break;
             }
@@ -4920,7 +5676,14 @@ mod tests {
         );
 
         let page = store
-            .cached_page(vec![host], None, 10, usize::MAX, SessionFilter::default())
+            .cached_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default(),
+                ListSort::Created,
+            )
             .await
             .expect("merged page");
         assert_eq!(page.rows.len(), 1);
@@ -5055,7 +5818,7 @@ mod tests {
              not JSON at all stays active"
         );
         assert_eq!(
-            user_version, 10,
+            user_version, SCHEMA_VERSION,
             "an unstamped migration replays the ADD COLUMN on the next open and fails there"
         );
 
@@ -5076,6 +5839,7 @@ mod tests {
                             10,
                             usize::MAX,
                             filter,
+                            ListSort::Created,
                             MatchingCount::Skip,
                         )
                         .await
@@ -5096,12 +5860,295 @@ mod tests {
         drop(store);
         let reopened = HelmStore::open(&db_path)
             .await
-            .expect("reopen at version 10");
+            .expect("reopen at the current version");
         assert_eq!(
             both_totals(&reopened, host).await,
             (2, 4),
             "the flag is stored, not recomputed: a reopen that skips the ladder must count the \
              same two views"
+        );
+    }
+
+    /// Version 11 fills both ordering columns from each row's own payload,
+    /// applying the same rules a live write would.
+    ///
+    /// Without the backfill every pre-upgrade row would sort at the epoch and
+    /// under the empty title until its host's next refresh rewrote it — and a
+    /// host that never reconnects would stay there for good, which is exactly
+    /// the stale list this cache exists to serve.
+    ///
+    /// The rows are chosen for the cases the SQL has to survive rather than
+    /// for coverage, and each one is a way an upgrade could abort or file a
+    /// row in the wrong place:
+    ///
+    /// - a payload this build's `SessionInfo` cannot decode (missing required
+    ///   members — NOT merely carrying unknown ones, which serde ignores);
+    /// - a payload that is not JSON at all;
+    /// - a sender that OMITS `last_activity_at` entirely, which is what a
+    ///   supervisor predating the field actually sends, and a legacy explicit
+    ///   `0`, which is what one that knows the field but has observed nothing
+    ///   sends — the missing-member path and the zero path are different SQL;
+    /// - members of the wrong JSON TYPE, which matters more than it looks:
+    ///   SQLite orders every text value above every number, so an unguarded
+    ///   `> 0` accepts a string and then fails the STRICT table's INTEGER
+    ///   column, taking the whole upgrade down over one row;
+    /// - a JSON `true` stamp, which `json_extract` renders as the integer 1 —
+    ///   so a `typeof` guard alone would silently file a boolean as one second
+    ///   past the epoch;
+    /// - an integer stamp too large for i64, which `json_extract` renders as a
+    ///   REAL — so a `json_type` guard alone would hand a float to the INTEGER
+    ///   column and abort;
+    /// - a title that is a LONE SURROGATE. SQLite accepts `"\ud800"` as valid
+    ///   JSON and hands back its CESU-8 encoding, which is not UTF-8, so
+    ///   asking rusqlite for a `String` turns one hostile title into a failed
+    ///   upgrade for the whole install.
+    #[tokio::test]
+    async fn migrating_to_v11_backfills_the_ordering_columns_from_each_payload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        {
+            let conn = plant_v1_database(&db_path);
+            conn.execute_batch("INSERT INTO hosts (kind) VALUES ('local');")
+                .expect("plant the local row");
+            let stamped =
+                serde_json::to_string(&ordered_session("stamped", 300, 900, "Refactor the Drain"))
+                    .unwrap();
+            // The legacy shape: a sender that knows the field but has observed
+            // nothing serializes 0, which means "unknown" and must fall back
+            // to the creation time rather than sorting at the epoch.
+            let legacy =
+                serde_json::to_string(&ordered_session("legacy", 200, 0, "Ärger")).unwrap();
+            // The OLDER shape, and it has to be built by hand: a sender that
+            // predates the field does not write the member at all, so
+            // serializing a current `SessionInfo` with 0 exercises the clause
+            // above rather than the missing-member path. The rest of the
+            // payload is a valid `SessionInfo` so nothing else about the row
+            // is unusual.
+            let older = {
+                let mut value =
+                    serde_json::to_value(ordered_session("older", 150, 0, "Older")).unwrap();
+                value
+                    .as_object_mut()
+                    .expect("a session serializes as an object")
+                    .remove("last_activity_at")
+                    .expect("the field is there to remove");
+                serde_json::to_string(&value).unwrap()
+            };
+            for (id, created_at, json) in [
+                ("stamped", 300, stamped.as_str()),
+                ("legacy", 200, legacy.as_str()),
+                ("older", 150, older.as_str()),
+                ("undecodable", 100, "not valid json"),
+                (
+                    "from-the-future",
+                    50,
+                    r#"{"last_activity_at":777,"title":"Future","shape":"unknown"}"#,
+                ),
+                (
+                    "wrong-types",
+                    40,
+                    r#"{"last_activity_at":"soon","title":42}"#,
+                ),
+                (
+                    "boolean-stamp",
+                    35,
+                    r#"{"last_activity_at":true,"title":"Boolean"}"#,
+                ),
+                (
+                    "huge-stamp",
+                    30,
+                    r#"{"last_activity_at":123456789012345678901234567890,"title":"Huge"}"#,
+                ),
+                (
+                    "lone-surrogate",
+                    25,
+                    r#"{"last_activity_at":600,"title":"\ud800"}"#,
+                ),
+            ] {
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                     VALUES (1, ?1, ?2, ?3)",
+                    rusqlite::params![id, created_at, json],
+                )
+                .expect("plant a pre-column cache row");
+            }
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        let (columns, user_version): (Vec<(String, i64, String)>, i64) = {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                let conn = conn.lock().unwrap();
+                let columns = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT session_id, activity_at, title_sort FROM session_cache \
+                             ORDER BY session_id",
+                        )
+                        .unwrap();
+                    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                        .unwrap()
+                        .collect::<Result<_, _>>()
+                        .unwrap()
+                };
+                let version: i64 = conn
+                    .query_row("PRAGMA user_version", [], |r| r.get(0))
+                    .unwrap();
+                (columns, version)
+            })
+            .await
+            .unwrap()
+        };
+        assert_eq!(
+            columns,
+            vec![
+                // A JSON `true` is not a stamp, however `json_extract`
+                // renders it, so this row keeps its creation time.
+                ("boolean-stamp".to_string(), 35, "boolean".to_string()),
+                ("from-the-future".to_string(), 777, "future".to_string()),
+                // Neither is an integer that does not fit i64.
+                ("huge-stamp".to_string(), 30, "huge".to_string()),
+                ("legacy".to_string(), 200, "ärger".to_string()),
+                // The stamp is perfectly good; only the title is unusable, so
+                // the row lands under the empty key with a real activity time.
+                ("lone-surrogate".to_string(), 600, String::new()),
+                // The member is ABSENT rather than zero, which is a different
+                // SQL path to the same answer.
+                ("older".to_string(), 150, "older".to_string()),
+                ("stamped".to_string(), 900, "refactor the drain".to_string()),
+                ("undecodable".to_string(), 100, String::new()),
+                ("wrong-types".to_string(), 40, String::new()),
+            ],
+            "each row's ordering columns must come from its own payload, with a missing, \
+             zero, unreadable or wrongly-typed value falling back exactly as a live write \
+             would — and the fold is Rust's Unicode one, not SQLite's ASCII-only lower()"
+        );
+        assert_eq!(
+            user_version, SCHEMA_VERSION,
+            "an unstamped migration replays the ADD COLUMN on the next open and fails there"
+        );
+
+        // And the columns actually drive the served orders, so the backfill is
+        // a working list rather than two populated columns.
+        let hosts = all_host_ids(&store).await;
+        assert_eq!(
+            walk_sorted(&store, &hosts, ListSort::Activity).await,
+            vec![
+                "stamped",
+                "from-the-future",
+                "lone-surrogate",
+                "legacy",
+                "older",
+                "undecodable",
+                "wrong-types",
+                "boolean-stamp",
+                "huge-stamp",
+            ],
+            "the migrated rows sort by the stamps the backfill derived"
+        );
+        assert_eq!(
+            walk_sorted(&store, &hosts, ListSort::Title).await,
+            vec![
+                // Everything the backfill could not collate shares the empty
+                // key and separates on the creation-order tail — including the
+                // row whose title was not UTF-8, which is placed rather than
+                // dropped and, critically, did not abort the upgrade.
+                "undecodable",
+                "wrong-types",
+                "lone-surrogate",
+                "boolean-stamp",
+                "from-the-future",
+                "huge-stamp",
+                "older",
+                "stamped",
+                // Ärger after every ASCII initial, which is the ordinal,
+                // locale-free collation this helm documents.
+                "legacy",
+            ],
+            "and by the titles it folded"
+        );
+    }
+
+    /// Version 11's title backfill collates EVERY row when the cache holds
+    /// more of them than one batch, across a host boundary.
+    ///
+    /// Spec: with `TITLE_BACKFILL_BATCH + 3` rows spread over two hosts, every
+    /// row comes out of the upgrade with the collated form of its own title —
+    /// none skipped, none written with another row's key.
+    ///
+    /// The batching exists for MEMORY: the shape it replaced read every folded
+    /// title in the fleet into one `Vec` before writing any of them, so an
+    /// upgrade's peak cost scaled with the whole cache. Batching is also the
+    /// easiest thing to get subtly wrong — an `OFFSET` walk over a table being
+    /// updated, or a resume key that ignores the host, silently drops or
+    /// repeats rows at the boundary and leaves the survivors looking perfectly
+    /// fine. Crossing the boundary is the only way to see that, so the fixture
+    /// is sized from the constant rather than from a round number: a smaller
+    /// batch later must not quietly stop testing the boundary.
+    #[tokio::test]
+    async fn the_v11_title_backfill_collates_every_row_across_batch_boundaries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        let rows = TITLE_BACKFILL_BATCH + 3;
+        // Split so the boundary falls inside the SECOND host's slice, which is
+        // where a resume key that carried only the session id would resume in
+        // the wrong host's rows.
+        let on_first = TITLE_BACKFILL_BATCH / 2;
+        {
+            let conn = plant_v1_database(&db_path);
+            conn.execute_batch(
+                "INSERT INTO hosts (kind) VALUES ('local');
+                 INSERT INTO hosts (kind, destination) VALUES ('ssh', 'user@beta');",
+            )
+            .expect("plant two host rows");
+            // One transaction for the whole fixture: five hundred autocommit
+            // inserts are five hundred fsyncs, which is most of this test's
+            // wall clock and none of its subject.
+            conn.execute_batch("BEGIN").expect("begin the fixture");
+            for index in 0..rows {
+                let host = if index < on_first { 1 } else { 2 };
+                let id = format!("s-{index:04}");
+                let json = serde_json::to_string(&ordered_session(
+                    &id,
+                    index as i64,
+                    0,
+                    &format!("Title-{index:04}"),
+                ))
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![host, id, index as i64, json],
+                )
+                .expect("plant a pre-column cache row");
+            }
+            conn.execute_batch("COMMIT").expect("commit the fixture");
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        let collated: Vec<(String, String)> = {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                let conn = conn.lock().unwrap();
+                let mut stmt = conn
+                    .prepare("SELECT session_id, title_sort FROM session_cache ORDER BY session_id")
+                    .unwrap();
+                stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            })
+            .await
+            .unwrap()
+        };
+
+        let expected: Vec<(String, String)> = (0..rows)
+            .map(|index| (format!("s-{index:04}"), format!("title-{index:04}")))
+            .collect();
+        assert_eq!(
+            collated, expected,
+            "every planted row must carry the collated form of its OWN title, on both sides \
+             of the batch boundary and on both sides of the host boundary"
         );
     }
 
@@ -5167,16 +6214,21 @@ mod tests {
 
         // Back to the shape version 5 shipped: no identity column, and a row
         // recorded under it. The session cache is downgraded too — a fixture
-        // stamped `user_version = 5` while still carrying version 10's
-        // `archived` column would make the ladder replay the ADD COLUMN over
-        // a column that is already there, which is the migration failing
-        // loudly at a state no real database can be in.
+        // stamped `user_version = 5` while still carrying a later version's
+        // `archived` or ordering columns would make the ladder replay the ADD
+        // COLUMN over a column that is already there, which is the migration
+        // failing loudly at a state no real database can be in. The version-11
+        // indexes go first: SQLite refuses to drop a column an index carries.
         {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "DROP TABLE device_sessions;
                  DROP TABLE web_token;
                  DROP TABLE remembered_profiles;
+                 DROP INDEX session_cache_by_host_activity_order;
+                 DROP INDEX session_cache_by_host_title_order;
+                 ALTER TABLE session_cache DROP COLUMN activity_at;
+                 ALTER TABLE session_cache DROP COLUMN title_sort;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id    INTEGER PRIMARY KEY
@@ -5230,11 +6282,17 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             // The session cache goes back with it: a fixture stamped at
-            // version 7 that still carried version 10's `archived` column
-            // would replay the ADD COLUMN over an existing one and fail the
-            // open, on a state no real database reaches.
+            // version 7 that still carried a later version's `archived` or
+            // ordering columns would replay the ADD COLUMN over an existing
+            // one and fail the open, on a state no real database reaches. The
+            // indexes come off first — SQLite refuses to drop an indexed
+            // column.
             conn.execute_batch(
                 "DROP TABLE remembered_profiles;
+                 DROP INDEX session_cache_by_host_activity_order;
+                 DROP INDEX session_cache_by_host_title_order;
+                 ALTER TABLE session_cache DROP COLUMN activity_at;
+                 ALTER TABLE session_cache DROP COLUMN title_sort;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
@@ -6926,6 +7984,529 @@ mod tests {
         );
     }
 
+    /// Each of the three orders walks the merged cache in exactly the
+    /// sequence [`ListSort::position`] defines, across hosts and across page
+    /// boundaries.
+    ///
+    /// This is the agreement the whole paging arrangement rests on. SQLite
+    /// sorts the persisted page and `crate::aggregate` merges in-memory rows
+    /// into it by the Rust comparison, so the two spellings of one order have
+    /// to be the same order — and the resume predicate is a THIRD spelling of
+    /// it, which a walk with a tiny page size is what exercises. A
+    /// disagreement between any of them produces a page that is silently
+    /// missing or repeating rows rather than an error.
+    ///
+    /// The fixture is built so the three orders are three DIFFERENT
+    /// sequences (an order that quietly fell back to `created` would
+    /// otherwise pass), and so every leading component TIES for at least one
+    /// pair — which is what puts the shared creation-order tail under test
+    /// rather than merely present.
+    #[tokio::test]
+    async fn every_order_walks_the_sequence_its_rust_key_defines() {
+        let (_dir, store) = fresh_store().await;
+        let alpha = host_with_identity(&store, "alpha@host", "alpha-identity").await;
+        let beta = host_with_identity(&store, "beta@host", "beta-identity").await;
+
+        // "Ärger" was created most recently and has been quiet since;
+        // "Alpha" and "alpha" tie on both activity and folded title, so only
+        // the tail separates them; "zeta" carries the legacy 0 stamp, so its
+        // effective activity is its own creation time.
+        let alpha_rows = vec![
+            ordered_session("a1", 400, 100, "Ärger"),
+            ordered_session("a2", 300, 900, "Alpha"),
+        ];
+        let beta_rows = vec![
+            ordered_session("b1", 200, 900, "alpha"),
+            ordered_session("b2", 100, 0, "zeta"),
+        ];
+        store
+            .replace_host_sessions(alpha, "alpha-identity", alpha_rows.clone())
+            .await
+            .unwrap();
+        store
+            .replace_host_sessions(beta, "beta-identity", beta_rows.clone())
+            .await
+            .unwrap();
+
+        let hosts = all_host_ids(&store).await;
+        for (sort, expected) in [
+            (ListSort::Created, vec!["a1", "a2", "b1", "b2"]),
+            // Equal activity falls through to creation time descending, and
+            // the two quiet sessions sort by the same tail even though one of
+            // them only has an effective stamp at all because of the 0-means-
+            // unknown rule.
+            (ListSort::Activity, vec!["a2", "b1", "a1", "b2"]),
+            // Case-insensitive, and "Ärger" lands LAST — after "zeta",
+            // because its first code point is above every ASCII letter.
+            // That is the ordinal, locale-free collation this helm
+            // documents, stated here as the sequence a user would see.
+            (ListSort::Title, vec!["a2", "b1", "b2", "a1"]),
+        ] {
+            assert_eq!(
+                walk_sorted(&store, &hosts, sort).await,
+                expected,
+                "{sort:?} must be served in the sequence it names, page boundaries included"
+            );
+
+            // The same sequence, derived from the Rust keys alone. SQL agrees
+            // with `position` or one of the two is wrong, and this is the
+            // assertion that says which.
+            let mut keys: Vec<CacheKey> = alpha_rows
+                .iter()
+                .map(|info| CacheKey::of(info, alpha))
+                .chain(beta_rows.iter().map(|info| CacheKey::of(info, beta)))
+                .collect();
+            keys.sort_by(|left, right| sort.position(left).cmp(&sort.position(right)));
+            let by_key: Vec<&str> = keys.iter().map(|key| key.session_id.as_str()).collect();
+            assert_eq!(
+                by_key, expected,
+                "{sort:?}'s Rust key must define the same sequence the SQL scan produced"
+            );
+        }
+    }
+
+    /// Every page query is answered from an ORDERING INDEX, with no sort
+    /// step, at every host count and under every order.
+    ///
+    /// Spec: `EXPLAIN QUERY PLAN` over the SQL [`page_sql`] builds contains no
+    /// `USE TEMP B-TREE FOR ORDER BY`, for one host, two hosts and the whole
+    /// fleet, under all three orders, with and without a resume clause, in
+    /// both archive modes, and for a counting scan as well as a paging one.
+    ///
+    /// This is a PLAN assertion rather than a behavioral one because the bug
+    /// it stands against is invisible in output. An `IN`-list of more than one
+    /// host made SQLite drop the ordering index and sort the entire cache into
+    /// a temp b-tree to answer one twenty-row page — under this store's single
+    /// mutex, so every other reader waited on it — and the rows it returned
+    /// were perfectly correct. Nothing but the plan can tell the two apart,
+    /// and nothing but a test that reads the plan can keep a later "simplify
+    /// the scope back to one query" from reintroducing it.
+    ///
+    /// It also fixes the history: `created` had this problem from the day the
+    /// merged list existed, long before the other two orders, and the
+    /// single-host case never did — which is exactly why nobody noticed.
+    #[tokio::test]
+    async fn a_fleet_page_is_index_ordered_under_every_sort() {
+        let (_dir, store) = fresh_store().await;
+        let alpha = host_with_identity(&store, "alpha@host", "alpha-identity").await;
+        let beta = host_with_identity(&store, "beta@host", "beta-identity").await;
+        for (host, identity, id) in [
+            (alpha, "alpha-identity", "a1"),
+            (beta, "beta-identity", "b1"),
+        ] {
+            store
+                .replace_host_sessions(
+                    host,
+                    identity,
+                    vec![ordered_session(id, 100, 200, "a title")],
+                )
+                .await
+                .unwrap();
+        }
+        // Three hosts including the reserved local row, so "the whole fleet"
+        // is a genuinely different arity from the two-host case.
+        let fleet = all_host_ids(&store).await.len();
+        assert_eq!(fleet, 3, "the fixture wants a fleet larger than two");
+
+        let conn = Arc::clone(&store.conn);
+        let offenders: Vec<String> = tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().unwrap();
+            let mut offenders = Vec::new();
+            for sort in [ListSort::Created, ListSort::Activity, ListSort::Title] {
+                for hosts in [1, 2, fleet] {
+                    for after in [false, true] {
+                        for count in [false, true] {
+                            for archived in [false, true] {
+                                let filter = SessionFilter::default().include_archived(archived);
+                                let sql = page_sql(hosts, after, 20, &filter, sort, count);
+                                // The plan is read back rather than
+                                // pattern-matched on the SQL: what is under
+                                // test is SQLite's decision, not this
+                                // module's text.
+                                let mut stmt = conn
+                                    .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                                    .expect("the production SQL prepares");
+                                // Bound the way the scan binds them
+                                // (`?1..=?5` the resume key, `?6` onward the
+                                // hosts) rather than left unbound, so nothing
+                                // about the plan can hinge on a parameter
+                                // SQLite was never given.
+                                let binds: Vec<rusqlite::types::Value> =
+                                    [
+                                        rusqlite::types::Value::Integer(0),
+                                        rusqlite::types::Value::Text(String::new()),
+                                        rusqlite::types::Value::Integer(0),
+                                        rusqlite::types::Value::Integer(0),
+                                        rusqlite::types::Value::Text(String::new()),
+                                    ]
+                                    .into_iter()
+                                    .chain((0..hosts).map(|host| {
+                                        rusqlite::types::Value::Integer(host as i64 + 1)
+                                    }))
+                                    .collect();
+                                let plan: Vec<String> = stmt
+                                    .query_map(rusqlite::params_from_iter(binds), |r| {
+                                        r.get::<_, String>(3)
+                                    })
+                                    .expect("explaining the plan")
+                                    .collect::<Result<_, _>>()
+                                    .expect("reading the plan");
+                                if plan.iter().any(|step| step.contains("TEMP B-TREE")) {
+                                    offenders.push(format!(
+                                        "{sort:?} hosts={hosts} after={after} count={count} \
+                                         archived={archived}: {}",
+                                        plan.join(" | ")
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            offenders
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            offenders.is_empty(),
+            "a page must never sort the cache to answer its ORDER BY:\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    /// Every order's page walk resumes correctly when the LEADING key ties all
+    /// the way down to the session id.
+    ///
+    /// Spec: with rows sharing an activity stamp and a folded title, and two of
+    /// them sharing a creation time as well, a one-row-per-page walk visits
+    /// each row exactly once in the order the tail defines.
+    ///
+    /// The tail is the whole reason it is there, and a tie is the only thing
+    /// that exercises it. A resume predicate that stopped at the leading
+    /// component would compare "activity 500" against "activity 500" and
+    /// resolve neither `>` nor `<`, so a one-row page would either serve the
+    /// same row forever or skip every row it tied with — and both look like a
+    /// working list from any single page. Page size one is what puts the
+    /// predicate at every boundary rather than at one of them.
+    ///
+    /// The final component, the host id, is deliberately NOT exercised here:
+    /// `session_cache_one_owner` makes two hosts claiming one session id
+    /// impossible to store, so that tie only exists in memory and is pinned on
+    /// the Rust keys in `crate::aggregate`'s own tests.
+    #[tokio::test]
+    async fn a_one_row_walk_resumes_through_ties_under_every_order() {
+        let (_dir, store) = fresh_store().await;
+        let alpha = host_with_identity(&store, "alpha@host", "alpha-identity").await;
+        let beta = host_with_identity(&store, "beta@host", "beta-identity").await;
+        // One activity stamp and one folded title across all three, so the
+        // sequence is decided entirely by the tail — and two of them share a
+        // creation time, so the tail itself has to fall through to the id.
+        store
+            .replace_host_sessions(
+                alpha,
+                "alpha-identity",
+                vec![
+                    ordered_session("t3", 200, 500, "Same"),
+                    ordered_session("t1", 100, 500, "same"),
+                ],
+            )
+            .await
+            .unwrap();
+        store
+            .replace_host_sessions(
+                beta,
+                "beta-identity",
+                vec![ordered_session("t2", 100, 500, "SAME")],
+            )
+            .await
+            .unwrap();
+
+        let hosts = all_host_ids(&store).await;
+        for sort in [ListSort::Created, ListSort::Activity, ListSort::Title] {
+            let mut walked: Vec<String> = Vec::new();
+            let mut after: Option<CacheKey> = None;
+            let mut pages = 0;
+            loop {
+                let page = store
+                    .cached_page(
+                        hosts.clone(),
+                        after.clone(),
+                        1,
+                        usize::MAX,
+                        SessionFilter::default(),
+                        sort,
+                    )
+                    .await
+                    .expect("a one-row page");
+                pages += 1;
+                assert!(pages <= 8, "{sort:?} did not terminate; a tie is repeating");
+                let Some(last) = page.rows.last() else { break };
+                after = Some(last.key.clone());
+                walked.extend(page.rows.into_iter().map(|row| row.key.session_id));
+                if !page.more {
+                    break;
+                }
+            }
+            assert_eq!(
+                walked,
+                vec!["t3", "t1", "t2"],
+                "{sort:?} must break its tie on creation time, then on the session id"
+            );
+        }
+    }
+
+    /// A COUNTING page that also resumes reports the whole scope's matches
+    /// while returning only the rows after the cursor — under every order, with
+    /// the leading key tied.
+    ///
+    /// Spec: `MatchingCount::Compute` on every page of a filtered one-row walk
+    /// yields the same `matching` each time (the count is of the fleet, not of
+    /// the page) and a page holding exactly the next matching row.
+    ///
+    /// This is the one path where the resume test is Rust rather than SQL: a
+    /// counting scan cannot carry a `WHERE` resume clause, because it has to
+    /// see the rows BEFORE the cursor in order to count them, so it walks the
+    /// whole scope and applies [`follows`] per row. That makes [`follows`] a
+    /// third spelling of each order alongside the `ORDER BY` and the SQL
+    /// disjunction, and a tied leading key is exactly where a spelling that
+    /// compares one component too few stops agreeing with the other two.
+    #[tokio::test]
+    async fn a_counting_walk_resumes_by_the_rust_key_under_every_order() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "count@host", "count-identity").await;
+        let kept = |id: &str, created_at: i64, title: &str| SessionInfo {
+            cwd: "/keep".to_string(),
+            ..ordered_session(id, created_at, 900, title)
+        };
+        store
+            .replace_host_sessions(
+                host,
+                "count-identity",
+                vec![
+                    kept("k1", 400, "Alpha"),
+                    // Non-matching, and placed BETWEEN two matching rows under
+                    // both orders: a counting walk has to step over it without
+                    // counting it and without spending a page slot on it.
+                    SessionInfo {
+                        cwd: "/other".to_string(),
+                        ..ordered_session("skip", 350, 900, "alpha")
+                    },
+                    kept("k2", 300, "alpha"),
+                    kept("k3", 200, "beta"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let filter = SessionFilter::default().directory("/keep");
+        for sort in [ListSort::Activity, ListSort::Title] {
+            let mut walked: Vec<String> = Vec::new();
+            let mut after: Option<CacheKey> = None;
+            for _ in 0..8 {
+                let read = store
+                    .merged_page(
+                        vec![host],
+                        after.clone(),
+                        1,
+                        usize::MAX,
+                        filter.clone(),
+                        sort,
+                        MatchingCount::Compute,
+                    )
+                    .await
+                    .expect("a counting page");
+                assert_eq!(
+                    read.matching,
+                    Some(3),
+                    "{sort:?} must report the SCOPE's matches on every page, not the page's"
+                );
+                walked.extend(read.page.rows.iter().map(|row| row.key.session_id.clone()));
+                let Some(last) = read.page.rows.last() else {
+                    break;
+                };
+                after = Some(last.key.clone());
+                if !read.page.more {
+                    break;
+                }
+            }
+            assert_eq!(
+                walked,
+                vec!["k1", "k2", "k3"],
+                "{sort:?}'s counting walk must visit each matching row once, in its own order"
+            );
+        }
+    }
+
+    /// An ARCHIVED row sitting on a page boundary changes neither the sequence
+    /// nor the termination of a walk, and the archive switch moves it into both
+    /// together.
+    ///
+    /// Spec: at one row per page, under the activity and title orders, the
+    /// default view walks straight past an archived row that sorts between two
+    /// active ones, and the widened view walks through it — with `total`
+    /// following the switch and the walk terminating either way.
+    ///
+    /// The archive predicate is the ONE filter dimension applied in SQL, and it
+    /// is applied to the same scan that produces the resume key. A row the
+    /// clause removes must therefore never become a frontier or a cursor
+    /// position — if it did, the next page would resume from a row that view
+    /// cannot see and the rows after it would be unreachable. One row per page
+    /// is what forces the removed row to be exactly where the boundary falls.
+    #[tokio::test]
+    async fn an_archived_row_on_a_page_boundary_changes_neither_walk() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "arch@host", "arch-identity").await;
+        store
+            .replace_host_sessions(
+                host,
+                "arch-identity",
+                vec![
+                    ordered_session("first", 300, 900, "aaa"),
+                    // Between the other two under BOTH orders.
+                    SessionInfo {
+                        archived: true,
+                        ..ordered_session("middle", 200, 600, "mmm")
+                    },
+                    ordered_session("last", 100, 300, "zzz"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        for (include_archived, expected, total) in [
+            (false, vec!["first", "last"], 2u64),
+            (true, vec!["first", "middle", "last"], 3),
+        ] {
+            for sort in [ListSort::Activity, ListSort::Title] {
+                let filter = SessionFilter::default().include_archived(include_archived);
+                let mut walked: Vec<String> = Vec::new();
+                let mut after: Option<CacheKey> = None;
+                let mut terminated = false;
+                for _ in 0..8 {
+                    let read = store
+                        .merged_page(
+                            vec![host],
+                            after.clone(),
+                            1,
+                            usize::MAX,
+                            filter.clone(),
+                            sort,
+                            MatchingCount::Skip,
+                        )
+                        .await
+                        .expect("a one-row page");
+                    assert_eq!(
+                        read.total, total,
+                        "{sort:?} archived={include_archived}: the total follows the switch"
+                    );
+                    walked.extend(read.page.rows.iter().map(|row| row.key.session_id.clone()));
+                    let Some(last) = read.page.rows.last() else {
+                        terminated = true;
+                        break;
+                    };
+                    after = Some(last.key.clone());
+                    if !read.page.more {
+                        terminated = true;
+                        break;
+                    }
+                }
+                assert!(
+                    terminated,
+                    "{sort:?} archived={include_archived}: the walk must end on its own"
+                );
+                assert_eq!(
+                    walked, expected,
+                    "{sort:?} archived={include_archived}: the archived row is skipped whole or \
+                     walked through, never half of either"
+                );
+            }
+        }
+    }
+
+    /// A create, rename or restart reply refreshes BOTH derived ordering
+    /// columns the moment it lands, on the insert and on the update alike.
+    ///
+    /// Spec: after [`HelmStore::remember_session`] seeds a row, that row is
+    /// already in its right place under the activity and title orders; after a
+    /// later reply renames it and carries a newer stamp, it has MOVED in both.
+    ///
+    /// Without this the two new orders would be surfaces that only settle at
+    /// the owning host's next refresh — a session renamed in the UI would keep
+    /// its old place in a title-sorted list for as long as the refresh interval,
+    /// which reads as the rename having failed. The wholesale refresh path has
+    /// its own coverage; this is the single-row writer, which is a separate
+    /// statement with its own column list and can drift from it.
+    #[tokio::test]
+    async fn remember_session_refreshes_both_ordering_columns_at_once() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "seed@host", "seed-identity").await;
+        // Two anchors straddling where the seeded row lands, so an unwritten
+        // column (activity 0, the empty title) would put it at an end of the
+        // order rather than in the middle — visible in the sequence rather
+        // than only in the column.
+        store
+            .replace_host_sessions(
+                host,
+                "seed-identity",
+                vec![
+                    ordered_session("busy", 250, 1_000, "m-busy"),
+                    ordered_session("quiet", 300, 200, "m-quiet"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let hosts = all_host_ids(&store).await;
+        assert!(
+            store
+                .remember_session(
+                    host,
+                    "seed-identity",
+                    &ordered_session("seeded", 100, 600, "zzz")
+                )
+                .await
+                .expect("seed the row"),
+            "a row that was not there is a change"
+        );
+        assert_eq!(
+            walk_sorted(&store, &hosts, ListSort::Activity).await,
+            vec!["busy", "seeded", "quiet"],
+            "the seeded row is placed by its own stamp immediately, not at the epoch"
+        );
+        assert_eq!(
+            walk_sorted(&store, &hosts, ListSort::Title).await,
+            vec!["busy", "quiet", "seeded"],
+            "and by its own collated title, not under the empty one"
+        );
+
+        // The UPDATE path: a rename plus a newer observation on the row that
+        // is already there. The stamp only ever moves forward
+        // (`manager::merge_cached_session`), so this pushes it past both
+        // anchors rather than trying to pull it back.
+        assert!(
+            store
+                .remember_session(
+                    host,
+                    "seed-identity",
+                    &ordered_session("seeded", 100, 1_500, "Aaa")
+                )
+                .await
+                .expect("update the row"),
+            "a rename with a newer stamp is a change"
+        );
+        assert_eq!(
+            walk_sorted(&store, &hosts, ListSort::Activity).await,
+            vec!["seeded", "busy", "quiet"],
+            "the update rewrote the activity column rather than leaving the seed's value"
+        );
+        assert_eq!(
+            walk_sorted(&store, &hosts, ListSort::Title).await,
+            vec!["seeded", "busy", "quiet"],
+            "and rewrote the collated title, so a rename reorders a title-sorted list at once"
+        );
+    }
+
     /// `cached_sessions_all` merges across hosts in the same wire order —
     /// the cross-host counterpart to
     /// `read_order_follows_the_extracted_columns_not_the_json`, and the
@@ -7144,7 +8725,14 @@ mod tests {
 
         // Page one ends ON a poisoned row.
         let first = store
-            .cached_page(vec![host], None, 2, usize::MAX, SessionFilter::default())
+            .cached_page(
+                vec![host],
+                None,
+                2,
+                usize::MAX,
+                SessionFilter::default(),
+                ListSort::Created,
+            )
             .await
             .expect("first page");
         assert_eq!(
@@ -7167,6 +8755,7 @@ mod tests {
                 1,
                 usize::MAX,
                 SessionFilter::default(),
+                ListSort::Created,
             )
             .await
             .expect("second page");
@@ -7183,6 +8772,7 @@ mod tests {
                 2,
                 usize::MAX,
                 SessionFilter::default(),
+                ListSort::Created,
             )
             .await
             .expect("third page");
@@ -7224,7 +8814,14 @@ mod tests {
             .expect("seed the cache");
 
         let page = store
-            .cached_page(vec![host], None, 10, 4_000, SessionFilter::default())
+            .cached_page(
+                vec![host],
+                None,
+                10,
+                4_000,
+                SessionFilter::default(),
+                ListSort::Created,
+            )
             .await
             .expect("bounded page");
         assert_eq!(
@@ -7237,7 +8834,14 @@ mod tests {
         // A single row larger than the whole budget must still be served,
         // or the walk stalls on it forever.
         let tiny = store
-            .cached_page(vec![host], None, 10, 1, SessionFilter::default())
+            .cached_page(
+                vec![host],
+                None,
+                10,
+                1,
+                SessionFilter::default(),
+                ListSort::Created,
+            )
             .await
             .expect("degenerate budget");
         assert_eq!(tiny.rows.len(), 1, "at least one row always makes progress");
@@ -7465,6 +9069,7 @@ mod tests {
                     10,
                     usize::MAX,
                     SessionFilter::default(),
+                    ListSort::Created,
                     MatchingCount::Skip,
                 )
                 .await
@@ -8036,6 +9641,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().title("keeper"),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8123,6 +9729,7 @@ mod tests {
                     10,
                     usize::MAX,
                     filter,
+                    ListSort::Created,
                     MatchingCount::Skip,
                 )
                 .await
@@ -8215,6 +9822,7 @@ mod tests {
                 2,
                 usize::MAX,
                 SessionFilter::default(),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8251,6 +9859,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().include_archived(true),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8298,6 +9907,7 @@ mod tests {
                     10,
                     usize::MAX,
                     SessionFilter::default(),
+                    ListSort::Created,
                     MatchingCount::Compute,
                 )
                 .await
@@ -8377,6 +9987,7 @@ mod tests {
                 1,
                 usize::MAX,
                 SessionFilter::default().directory("/keep"),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8397,6 +10008,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default(),
+                ListSort::Created,
                 MatchingCount::Skip,
             )
             .await
@@ -8453,6 +10065,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().directory("/keep"),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8469,6 +10082,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().directory("/keep"),
+                ListSort::Created,
                 MatchingCount::ComputeUnless(sampled),
             )
             .await
@@ -8501,6 +10115,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().directory("/keep"),
+                ListSort::Created,
                 MatchingCount::ComputeUnless(sampled),
             )
             .await
@@ -8547,6 +10162,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().title("s-1"),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8575,6 +10191,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().title("s-1"),
+                ListSort::Created,
                 MatchingCount::ComputeUnless(before),
             )
             .await
@@ -8623,6 +10240,7 @@ mod tests {
                 2,
                 usize::MAX,
                 filter.clone(),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8652,6 +10270,7 @@ mod tests {
                     2,
                     usize::MAX,
                     filter.clone(),
+                    ListSort::Created,
                     MatchingCount::ComputeUnless(generation),
                 )
                 .await
@@ -8693,6 +10312,7 @@ mod tests {
                 2,
                 usize::MAX,
                 filter.clone(),
+                ListSort::Created,
                 MatchingCount::ComputeUnless(generation),
             )
             .await
@@ -8710,6 +10330,7 @@ mod tests {
                 2,
                 usize::MAX,
                 filter,
+                ListSort::Created,
                 MatchingCount::ComputeUnless(recounted.generation),
             )
             .await
@@ -8748,6 +10369,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().host(beta),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8773,6 +10395,7 @@ mod tests {
                 10,
                 usize::MAX,
                 SessionFilter::default().host(beta),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8900,6 +10523,7 @@ mod tests {
                 1,
                 usize::MAX,
                 filter.clone(),
+                ListSort::Created,
                 MatchingCount::Compute,
             )
             .await
@@ -8915,6 +10539,7 @@ mod tests {
                 1,
                 usize::MAX,
                 filter.clone(),
+                ListSort::Created,
                 MatchingCount::ComputeUnless(first.generation),
             )
             .await
@@ -9307,5 +10932,135 @@ mod tests {
                 "{unknown:?} is not a status"
             );
         }
+    }
+
+    /// Every order this helm serves has a `?sort=` word, and nothing else is
+    /// accepted.
+    ///
+    /// [`parse_status_key`]'s reasoning one dimension over: an order whose
+    /// word did not parse back would be unreachable from a query string, and
+    /// a word accepted that names no order would serve a list in a sequence
+    /// the caller did not ask for — which, unlike an empty result, looks
+    /// entirely plausible.
+    #[test]
+    fn every_sort_key_round_trips_and_unknown_words_are_refused() {
+        for sort in [ListSort::Created, ListSort::Activity, ListSort::Title] {
+            assert_eq!(
+                parse_sort_key(sort.key()),
+                Some(sort),
+                "{sort:?} must parse back to itself"
+            );
+        }
+        assert_eq!(
+            ListSort::default(),
+            ListSort::Created,
+            "the absent-parameter order is the one every client had before there was a choice"
+        );
+        for unknown in ["", "cwd", "Created", "activity ", "-created"] {
+            assert_eq!(parse_sort_key(unknown), None, "{unknown:?} is not an order");
+        }
+    }
+
+    /// The title collation is case-insensitive over the WHOLE of Unicode and
+    /// ordinal beyond that — the contract [`title_sort_key`] documents.
+    ///
+    /// Pinned as a property of its own because it is the part a future reader
+    /// is most likely to "fix" toward SQLite's `NOCASE` or toward a locale's
+    /// idea of alphabetical order. The first would silently stop folding
+    /// anything outside ASCII (the `Ärger`/`ärger` pair below is the case that
+    /// breaks); the second is a dependency and a per-user setting this
+    /// milestone does not have, and its absence is why `Ärger` sorts after
+    /// `zebra` rather than beside `Arger`.
+    #[test]
+    fn the_title_collation_folds_case_unicode_wide_and_is_otherwise_ordinal() {
+        assert_eq!(title_sort_key("Refactor the Drain"), "refactor the drain");
+        assert_eq!(
+            title_sort_key("ÄRGER"),
+            title_sort_key("ärger"),
+            "case folding must not stop at ASCII, or half a user's alphabet is case-sensitive"
+        );
+        assert_eq!(
+            title_sort_key("İ").chars().count(),
+            2,
+            "Rust's fold is the Unicode one, which can lengthen a string — a sort key is not a \
+             character-for-character transliteration"
+        );
+        assert!(
+            title_sort_key("apple") < title_sort_key("Banana"),
+            "folding is what makes the order case-insensitive rather than uppercase-first"
+        );
+        assert!(
+            title_sort_key("zebra") < title_sort_key("Ärger"),
+            "and beyond case the order is by code point, with no locale tailoring"
+        );
+    }
+
+    /// The collation key is CUT at [`TITLE_SORT_KEY_CHARS`] characters, on a
+    /// character boundary of the FOLDED string, and the cut value is what the
+    /// served order actually compares.
+    ///
+    /// Both halves matter. The bound exists because this key is an index entry
+    /// on every cached row and the leading component of a cursor the browser
+    /// replays in a query string, while the only cap on a title anywhere is
+    /// the supervisor's 64 KiB create-field limit — so without it one peer's
+    /// long title mints a cursor no client can send and strands that walk.
+    ///
+    /// And the cut has to reach the SQL, not just the Rust helper: the column,
+    /// the two indexes, the resume predicate and the cursor are all built from
+    /// this one function, so two titles sharing the first
+    /// [`TITLE_SORT_KEY_CHARS`] characters must TIE and fall through to the
+    /// creation-order tail exactly as two identical titles do. The walk below
+    /// is what says so — with the truncation removed it comes back in the
+    /// other order, because `…aaa` sorts before `…zzz`.
+    #[tokio::test]
+    async fn a_title_key_is_cut_on_a_character_boundary_and_equal_prefixes_tie() {
+        // Multi-byte on purpose: a cut measured in BYTES would either panic on
+        // a code point boundary or silently produce a different key length.
+        let over = "ä".repeat(TITLE_SORT_KEY_CHARS + 40);
+        assert_eq!(
+            title_sort_key(&over).chars().count(),
+            TITLE_SORT_KEY_CHARS,
+            "an over-long title is cut to the bound, counted in characters"
+        );
+        assert_eq!(
+            title_sort_key(&"a".repeat(TITLE_SORT_KEY_CHARS))
+                .chars()
+                .count(),
+            TITLE_SORT_KEY_CHARS,
+            "a title exactly at the bound is not cut"
+        );
+        // Folding can LENGTHEN, so the bound has to be applied after it: `İ`
+        // becomes two characters, and half as many of them fill the key.
+        assert_eq!(
+            title_sort_key(&"İ".repeat(TITLE_SORT_KEY_CHARS))
+                .chars()
+                .count(),
+            TITLE_SORT_KEY_CHARS,
+            "the bound is measured on the folded string, not on the original"
+        );
+
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "long@host", "long-identity").await;
+        let prefix = "x".repeat(TITLE_SORT_KEY_CHARS);
+        store
+            .replace_host_sessions(
+                host,
+                "long-identity",
+                vec![
+                    ordered_session("newer", 200, 100, &format!("{prefix}zzz")),
+                    ordered_session("older", 100, 100, &format!("{prefix}aaa")),
+                    ordered_session("short", 300, 100, "aardvark"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let hosts = all_host_ids(&store).await;
+        assert_eq!(
+            walk_sorted(&store, &hosts, ListSort::Title).await,
+            vec!["short", "newer", "older"],
+            "two titles sharing the bound's worth of prefix tie, so the newer one leads on the \
+             shared creation-order tail rather than the alphabetically earlier one"
+        );
     }
 }

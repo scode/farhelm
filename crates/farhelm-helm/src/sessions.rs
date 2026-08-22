@@ -130,6 +130,21 @@ pub(crate) struct ListQuery {
     status: Option<String>,
     /// Only sessions whose title CONTAINS this text, ignoring case.
     title: Option<String>,
+    /// Which order to serve the page in: `created` (the default when the
+    /// parameter is absent), `activity`, or `title`. See
+    /// [`store::ListSort`] for what each one is and for the tie-break tail
+    /// they share.
+    ///
+    /// Absent means `created`, which is what every client and test written
+    /// before there was a choice keeps getting. An unrecognized word is a
+    /// 400 for the same reason an unknown status is: a list silently served
+    /// in a different order than the one asked for is one the user reads as
+    /// authoritative and has no way to question.
+    ///
+    /// It is not a filter. It changes the sequence, never the membership, so
+    /// neither count in the reply moves with it — but a cursor IS bound to
+    /// it, because a resume point names a place in one order only.
+    sort: Option<String>,
 }
 
 /// Build the merged view's predicate from one request's query string, or
@@ -189,14 +204,48 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
     Ok(filter)
 }
 
+/// Read one request's `?sort=`, or refuse it.
+///
+/// Absent — and, on the same "an empty value is a cleared control" rule
+/// [`list_filter`] applies, exactly-empty — means the default order rather
+/// than an error: a client that renders a sort control and clears it is
+/// asking for the ordinary list, not making a mistake.
+///
+/// That an exactly-empty `?sort=` reads as absent is a CONSISTENCY decision,
+/// not an accident of parsing. Every other listing parameter this handler
+/// takes treats `?x=` as "not narrowing by x" — the convention
+/// [`store::SessionFilter`] documents and [`list_filter`] applies — and a
+/// query string that clears four controls one way and refuses the fifth would
+/// be a rule nobody could hold in their head. The 400 is reserved for a word
+/// that means something this build does not serve.
+fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
+    let Some(sort) = q.sort.as_deref().filter(|text| !text.is_empty()) else {
+        return Ok(store::ListSort::default());
+    };
+    store::parse_sort_key(sort).ok_or_else(|| {
+        anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: format!(
+                "{sort:?} is not a session list order; this helm serves created, activity, and \
+                 title"
+            ),
+        })
+    })
+}
+
 /// `GET /api/sessions` — one page of the MERGED, multi-host session list
 /// (PLAN_M6.md item 5).
 ///
-/// The rows are every registered host's sessions in one creation-time
-/// order, each tagged with the host it lives on and marked `stale` when
-/// that host is not currently connected — SPEC.md's "sessions on an
+/// The rows are every registered host's sessions in ONE order across the
+/// fleet — creation time by default, recent activity or title on request
+/// (`?sort=`) — each tagged with the host it lives on and marked `stale` when
+/// that host is not currently connected. SPEC.md's "sessions on an
 /// unreachable host stay in the list, clearly marked" is this handler plus
 /// the cache behind it, and nothing else.
+///
+/// The order is served out of the helm's own cache and its indexes; no host
+/// is asked to sort anything, and the wire order the drains depend on is
+/// untouched (see [`aggregate`]'s module docs).
 ///
 /// The body keeps its M2 shape (`sessions`/`total`/`truncated`) with the
 /// host fields added to each row and `next_cursor` and `matching` added
@@ -264,6 +313,10 @@ pub(crate) async fn list_sessions(
         Ok(filter) => filter,
         Err(e) => return http_error(e),
     };
+    let sort = match list_sort(&q) {
+        Ok(sort) => sort,
+        Err(e) => return http_error(e),
+    };
     // The filtered cap, checked after the filter is known rather than
     // guessed at from the query string: a filtered page does not read the
     // rows it returns, it reads the order until it has filled itself, so the
@@ -290,6 +343,7 @@ pub(crate) async fn list_sessions(
         q.cursor.as_deref(),
         limit,
         &filter,
+        sort,
     )
     .await
     {

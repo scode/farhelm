@@ -991,11 +991,14 @@ impl WalkClock {
 ///
 /// ## The order is the helm's
 ///
-/// No client-side sort. The helm serves creation-time-descending with
-/// stable tiebreaks, and its cursor walks that exact order — so re-sorting
-/// the rows here (this used to sort by session id) would scramble the pages
-/// back together in an order no cursor agrees with, making the boundary
-/// between page 1 and page 2 land in the middle of the list.
+/// No client-side sort. The helm serves the order the request asked for —
+/// creation-time-descending unless a `?sort=` says otherwise, each with the
+/// same stable tiebreaks — and its cursor walks that exact order, so
+/// re-sorting the rows here (this used to sort by session id) would scramble
+/// the pages back together in an order no cursor agrees with, making the
+/// boundary between page 1 and page 2 land in the middle of the list. The way
+/// to change the order is therefore to ASK for a different one, never to
+/// rearrange what came back.
 ///
 /// ## Three bounds, and what hitting one means
 ///

@@ -605,9 +605,63 @@ remains that can never be represented on any page.
   endpoint then merges what is there — live hosts' latest refresh and down hosts' last-known entries alike — into one
   order, tagging each row with its host and marking it stale unless that host is connected right now. A host being
   connected changes only that flag, never where its rows are read from.
-- The order is `created_at` DESCENDING, then session id ascending, then HOST ID ascending. The first two are the wire's
-  own total order; the third is what keeps the merged order total even in a database whose one-owner index is absent,
-  and a cursor over a non-total order can skip or repeat rows.
+- The list is served in one of THREE orders, chosen by the request (`?sort=`, defaulting to `created` when absent so
+  every client written before there was a choice keeps its behavior; an unrecognized word is a 400, like an unknown
+  status). `created` is `created_at` DESCENDING, then session id ascending, then HOST ID ascending — the first two are
+  the wire's own total order and the third is what keeps the merged order total even in a database whose one-owner index
+  is absent. `activity` leads with the session's effective activity stamp descending, and `title` with its collated
+  title ascending; both then fall into that same creation-order tail. Every order therefore ends in the same total
+  order, which is not decoration: a cursor over an order that left equal ranks unordered can skip one row and repeat
+  another when two of them swap between page fetches. The effective activity stamp is `last_activity_at` when the sender
+  supplied one and `created_at` when it did not, so a session that has produced no observed output — or whose supervisor
+  predates the field — sorts by its creation time rather than piling up at the epoch. The title collation is Rust's
+  `str::to_lowercase` compared as code points: Unicode's locale-independent FULL lowercase mapping (it can lengthen a
+  string, as `İ` does), which is neither SIMPLE lowercasing nor case FOLDING — so `ß` and `SS` stay distinct keys. The
+  result is case-insensitive and otherwise ordinal, deliberately not locale-aware (that is an ICU dependency and a
+  per-user setting this milestone does not have), and deliberately not SQLite's `NOCASE`, which folds ASCII only and
+  would case-fold half of a non-English user's alphabet. The folded key is CUT to 128 characters, because it is also an
+  index key on every cached row and the leading component of a cursor the browser replays in a query string, and the
+  only bound on a title anywhere is the supervisor's 64 KiB create-field cap. Cutting is sound only because it happens
+  where the key is minted rather than where the cursor is written: the cut value IS the row's position, so two titles
+  sharing a 128-character prefix tie and fall through to the shared tail, exactly as two identical titles do.
+- Keyset cursors are stable under insert and delete because the key they name does not move — and under `activity` and
+  `title` that is no longer unconditionally true. `created_at` is immutable, so the old order was immune; an activity
+  stamp advances and a rename rewrites a folded title, so a row can cross the cursor between two page fetches of one
+  walk and be shown twice or not at all. There is deliberately no snapshot or generation machinery against that: it
+  would mean per-walk server state and an expiry policy, for a list the user re-reads constantly anyway. Two things
+  already in place bound the damage instead. The supervisor advances an activity stamp at most once a minute
+  (`ACTIVITY_STAMP_QUANTUM`) rather than per byte of output, so a row can only cross that rarely; and the UI's own
+  coherence checks re-read the whole list when the numbers stop agreeing, saying so on screen ("the list changed while
+  it was being read; refreshing"). A duplicated or missed row is a stale read of a visibly moving list, not a lost
+  session.
+- Both new ordering keys are denormalized into `session_cache` columns extracted at write time (schema version 11,
+  backfilled from the existing payloads, with one HOST-LEADING index per new order — version 11 adds two ordering
+  indexes, bringing the total to four for the three logical orders). `created` alone keeps a global/host-leading pair,
+  inherited from before the page query became per-host; `activity` and `title` get only the host-leading index, because
+  by the time they were added nothing would ever read a global one. The host-leading index is what a page actually
+  walks, at every fleet size and under every order: an `IN`-list of more than one host makes SQLite abandon a global
+  ordering index and sort the whole cache into a temp b-tree, so the page query is written as one single-host SELECT per
+  host merged by `UNION ALL`, and each branch is a range scan over that host's slice. That was true of `created` before
+  the other two orders existed; it is fixed for all three together. Same reason `created_at` and the archive flag are
+  columns: an ORDER BY must not mean decoding every payload in the fleet. The activity column stores the EFFECTIVE value
+  so the fallback rule is applied in exactly one place, while the payload keeps the raw field untouched — a synthesized
+  value written back would be indistinguishable from an observation at the next merge. The title is folded in Rust
+  rather than by a SQL collation so that the one definition of the collation also serves the in-memory rows an ordered
+  page is merged with. Nothing new is needed for change detection: both columns are derived from the payload on the way
+  in, so a session that produced output or was renamed already flips the cache's changed flag and reaches open clients
+  on the invalidation feed.
+- A cursor is bound to its ORDER exactly as it is bound to its filter, and replaying one under a different `sort` is a
+  400 telling the caller to start a fresh walk. A resume point names a place in one sequence; applied to another it
+  resumes mid-list and silently drops everything that sorts before it. The token carries the order it was taken in and
+  only the key components that order compares, so a creation-ordered cursor omits both new components and stays
+  fixed-size (version 3 grew it by the order word and the longer domain tag, not by anything that scales with a peer's
+  text) while a title-ordered one pays for the title only where the title is what it is ordered by; a token naming an
+  order without its leading component is refused rather than defaulted, since every default is itself a real position in
+  the order — where that position falls differs per order, so the damage is a silent skip or a silent repeat depending
+  on which. The cursor's domain tag is versioned for exactly this, so tokens minted before the order was named fail
+  cleanly.
+- Ordering is not filtering, and the two are kept apart: a sort changes the sequence, never the membership, so neither
+  `total` nor `matching` moves with it and the helm's per-filter matching-count cache stays valid across a sort change.
 - One host does not fit the cache rule and cannot be made to: a supervisor reporting NO identity, against a registry row
   that has none on record either, has nothing for the identity-bound cache write to bind to. Its refreshes are kept in
   the connection manager's memory and merged into the list and the owner lookup from there; they serve while it is
@@ -663,7 +717,11 @@ remains that can never be represented on any page.
   identity-less host's list is binary-searched for a resume point and merged in lockstep with the persisted page, and
   both are meaningless over an unsorted sequence. The failure would otherwise be silent pages that skip or repeat
   entries. Session ids are bounded at every peer ingress for a related reason: an id near the frame limit produces a
-  cursor no client could replay, which would strand a walk at that row forever.
+  cursor no client could replay, which would strand a walk at that row forever. The served `sort` does not reach this:
+  it is a property of the helm's own merged cache, so hosts go on listing in creation order and the drain goes on
+  validating exactly that. The consequence for the one host that serves from memory rather than from the cache is that
+  its list arrives in creation order whatever was asked for, and the merge re-orders it per request — a k-way merge is
+  only correct over sources that are each already ordered.
 - Every mutation whose result changes what the helm has RECORDED records it before answering: a create seeds its new
   session, a restart and a rename store the reply's fresh `SessionInfo`, and a delete forgets the row. The merged list
   and the owner lookup are both served from those records, so a mutation that recorded nothing leaves the list
