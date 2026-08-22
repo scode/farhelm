@@ -387,6 +387,26 @@ pub type NaturalDetachGate = SinkReservationGate;
 /// Production installs none.
 pub type ForwarderCleanupGate = SinkReservationGate;
 
+/// A hook awaited after a tab's window exists and is marked, but before the
+/// dead-at-open-reply settle looks at its pane.
+///
+/// The refusal it guards is defined by a race the SUPERVISOR is supposed to
+/// win — a shell that cannot start dies within the settle window, so the open
+/// refuses — and a test cannot arrange the losing side of that race from
+/// outside: the pane it needs to watch does not exist until `new-window`
+/// returns, and between that and the settle (sizing, marking) there was no
+/// boundary a test could hold — the settle began whenever the open reached
+/// it, bounded only by [`TAB_LAUNCH_SETTLE`]. Under enough load the fixture shell's death has been
+/// observed landing after the settle (2026-08-18, three concurrent e2e
+/// binaries on a four-core box), turning the refusal test into a successful
+/// open of a live tab. Holding this boundary lets a test wait for tmux itself
+/// to report the pane dead before the settle runs, so "already dead by reply
+/// time" is a fact rather than a bet.
+///
+/// Production installs none, so the cost is one `Option` check per open, and
+/// the settle's own timing is untouched.
+pub type TabSettleGate = SinkReservationGate;
+
 /// A named boundary in archive teardown where tests may pause or fail the
 /// operation before it publishes the archived row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -557,6 +577,8 @@ pub struct SupervisorSeams {
     pub launch_shell: Option<String>,
     /// See [`TabOpenFault`]. `None` in production.
     pub tab_open_fault: Option<TabOpenFault>,
+    /// See [`TabSettleGate`]. `None` in production.
+    pub tab_settle_gate: Option<TabSettleGate>,
     /// The filesystem an attachment upload stages through
     /// (`crate::files::FaultSeam`). [`crate::files::RealFs`] in
     /// production, which is the real syscalls.
@@ -619,6 +641,7 @@ impl Default for SupervisorSeams {
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
             launch_shell: None,
             tab_open_fault: None,
+            tab_settle_gate: None,
             upload_fs: Arc::new(crate::files::RealFs),
         }
     }
@@ -7694,6 +7717,14 @@ impl Supervisor {
         // window, so it is sized for a hand-driven operation rather than a
         // hot path. The settle ends early the moment the pane IS dead, so
         // the failing case stays fast.
+        //
+        // The gate is the test-only handle on the "already dead" side of
+        // that window: the window and its marker exist here, so a waiting
+        // test can watch tmux for the pane's death and only then let the
+        // settle run. See [`TabSettleGate`]; production installs none.
+        if let Some(gate) = &self.seams.tab_settle_gate {
+            gate().await;
+        }
         match self.settled_tab_pane(&terminal).await {
             Ok(Some(state)) if !state.dead => {}
             Ok(state) => {

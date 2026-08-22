@@ -72,25 +72,6 @@ roadmap and carries no priorities unless an entry says so itself.
   middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
   section as amended in #117.
 
-- Deflake `terminal_tabs::a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words` if it ever fires
-  outside an artificial recipe. The test's premise is a race it assumes it wins: the fixture shell (`exit 9`) must be
-  dead BEFORE `open_tab`'s reply, so the open is refused with the shell's last words. Under a deliberately brutal repro
-  recipe (2026-08-18: THREE concurrent e2e test binaries pinned to the terminal_tabs module on a 4-core box — harsher
-  than any real runner) the dying shell was routinely delayed past reply time, `open_tab` returned a live TabInfo, and
-  the `expect_err` at terminal_tabs.rs:428 fired in roughly half the iterations. It has never failed on CI or under a
-  normal local run, which is why this is recorded rather than fixed: the honest fix (have the test wait for the pane to
-  be observed dead before opening the tab, or drive the shell's death through a barrier instead of a sprint) is real
-  work, and the failure mode is currently confined to a recipe nothing real resembles. If it shows up on CI, this entry
-  has the mechanism ready. Same recipe, same class, one occurrence and recorded here rather than separately:
-  `a_tab_runs_a_shell_in_the_sessions_working_directory` failed once with "timed out waiting for XREADYX", transcript
-  empty. The interesting part is WHERE it failed: `wait_for_shell` (terminal_tabs.rs) retries a 3-second shell round
-  trip inside a 30-second budget, but each round's inner `wait_for` panics at its OWN 3-second deadline, racing the
-  outer `tokio::time::timeout` that was supposed to convert the round into a retry — when the panic wins, one slow first
-  round fails the test with 27 seconds of budget unspent. Fixing the ladder (give the inner wait no deadline of its own,
-  or a longer one than the wrapper) would make the observed failure impossible without changing what is pinned. (The
-  same campaign's third finding — SIGKILLing a supervisor with queued control output can abort the tmux server itself —
-  lives in BUGS.md: it is a substrate defect nothing here can fix, not wanted work.)
-
 - Deflake `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation` under local full-suite
   load. One occurrence so far: 2026-08-18, full workspace suite at libtest's default thread count (one runnable test per
   logical CPU — six on this devbox); passed in isolation immediately after, and has never failed on CI. The assertion at
