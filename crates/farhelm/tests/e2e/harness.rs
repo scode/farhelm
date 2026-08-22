@@ -280,6 +280,12 @@ pub(crate) async fn connect_client(sup: &Arc<Supervisor>) -> Arc<SupervisorClien
 /// directory — the preamble almost every test in the suite shares.
 /// Returns the workdir too: it must outlive the launch (it is the
 /// session's cwd), so callers hold it as `_work`.
+///
+/// Returns as soon as `create` has REPLIED, which says a pane exists and
+/// nothing more — the agent inside it may not have execed yet, and may
+/// never. Prefer [`basic_session_ready`] wherever the test's assertions
+/// are about a running agent; see [`wait_for_agent_ready`] for the flake
+/// that distinction produces when it is skipped.
 pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
@@ -293,6 +299,174 @@ pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, farhelm_teststat
         )
         .await
         .expect("create");
+    (session, work)
+}
+
+/// The sentinel every fake-agent script prints exactly once, after the
+/// `exec` that replaced the shim with the agent and after whatever setup
+/// that script does first (`fake_agent.rs`'s "contract with tests").
+///
+/// Named here rather than spelled inline because [`wait_for_agent_ready`]
+/// rests on WHERE in the launch chain it is written, not merely on the
+/// text: nothing before the exec can print it. The converse is weaker —
+/// its absence says only that readiness was never observed, not at which
+/// link the chain died.
+pub(crate) const AGENT_READY_MARKER: &str = "FAKE-AGENT READY";
+
+/// How long [`wait_for_agent_ready`] gives a launch to reach the agent.
+///
+/// Matches the suite's other post-exec waits (`wait_for`'s 20–30s calls)
+/// rather than being tuned down: this is a setup barrier on a machine that
+/// may be running four harnesses plus a full workspace suite, so it has to
+/// be generous enough that a merely SLOW launch never fails it. What keeps
+/// the generosity honest is that a DEAD pane fails immediately rather than
+/// waiting the budget out, and the panic reports the pane's own state.
+const AGENT_READY_SECS: u64 = 30;
+
+/// Wait until `session_id`'s agent has actually STARTED — i.e. has printed
+/// [`AGENT_READY_MARKER`] into its pane on the private server at `sock` —
+/// failing the test by name, with the pane's own last words, if it never
+/// does or if the pane dies first.
+///
+/// # Why a post-exec marker and not a live pane
+///
+/// A launch is a chain: tmux runs a login shell, the shell runs the
+/// transient cgroup scope wrapper (`systemd-run --user --scope`, wherever
+/// a systemd user manager exists), the wrapper `exec`s farhelm's launch
+/// shim, and the shim `exec`s the agent. Every link before the last one
+/// holds a LIVE pane, so "the pane exists" and even "the session lists as
+/// live" are satisfied by a launch that is about to die without ever
+/// having run an agent. Only a post-exec write proves the chain completed.
+///
+/// # The bug history this exists for
+///
+/// On 2026-08-18 a full-suite run at libtest's default thread count failed
+/// `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation`
+/// on its `Exited` assertion, having gotten `Error { "the agent was never
+/// started: the launch never reached farhelm's exec shim …" }` — the
+/// supervisor's own never-started classifier
+/// (`service::launch_artifacts::wrapper_failure_detail`). The session's
+/// launch had died somewhere before the shim, so the stop under test
+/// recorded a launch failure instead of the annotated exit, and the
+/// assertion reported the WRONG thing as broken. Every `basic_session`
+/// caller shares that exposure; this barrier converts it from a corrupted
+/// assertion into a setup failure that names what actually went wrong.
+///
+/// # Contract
+///
+/// For a FRESH session — generation zero, no tabs yet, a quiet fixture.
+/// The bare `fh-<id>` target resolves to the session's current pane, which
+/// is the agent's only until a tab exists; the marker is searched in the
+/// last 200 lines of history, which a noisy fixture could push it past;
+/// and a retained marker from an earlier generation would satisfy a
+/// relaunch falsely. Every caller today runs straight after `create`,
+/// where all three hold. A caller that does not must not use this.
+///
+/// # Reading the failure
+///
+/// - a DEAD pane fails at once, and the captured text is what the chain
+///   left on the pty — the scope wrapper's or the login shell's stderr when
+///   the launch died before the shim, the agent's own output when it died
+///   during its setup, or tmux's bare "Pane is dead" banner when nothing
+///   was printed at all. The text is diagnostics, not attribution: it does
+///   not say which link failed;
+/// - a LIVE pane with no marker at the deadline is a launch that was
+///   merely slow.
+///
+/// Every tmux call is bounded by the same deadline, because
+/// `Command::output` has no timeout of its own and a tmux that stops
+/// answering must surface as this setup failure rather than as a hung
+/// test. Asks tmux directly rather than polling `list_sessions`, and that
+/// is load-bearing for at least one caller: a list is how a supervisor
+/// WITNESSES an exit, and
+/// `same_boot_classification_is_per_session_and_never_interrupted` depends
+/// on no list having happened before its reload.
+pub(crate) async fn wait_for_agent_ready(sock: &std::path::Path, session_id: &str) {
+    // No `=` exact-match prefix, unlike the `kill-session` targets
+    // elsewhere in this suite: that prefix is a target-SESSION spelling,
+    // and a pane target wearing it is refused outright ("can't find pane:
+    // =fh-…") while `display-message` quietly expands every format to the
+    // empty string — a failure mode that reads exactly like "the pane is
+    // alive but silent", which is the one thing this helper must never
+    // confuse. Bare `fh-<uuid>` is unambiguous anyway.
+    let target = format!("fh-{session_id}");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(AGENT_READY_SECS);
+    let mut last_text = String::new();
+    loop {
+        // Scrollback as well as the visible grid: a dead pane's grid is
+        // replaced by tmux's own "Pane is dead" banner, so the text worth
+        // reporting only lives in history.
+        let capture = tokio::time::timeout_at(
+            deadline,
+            tmux_query(sock, &["capture-pane", "-p", "-t", &target, "-S", "-200"]),
+        )
+        .await;
+        let Ok(out) = capture else {
+            panic!(
+                "test setup: tmux stopped answering while waiting for session {session_id}'s \
+                 agent to print {AGENT_READY_MARKER:?}; last pane text:\n{last_text}"
+            );
+        };
+        last_text = String::from_utf8_lossy(&out.stdout).into_owned();
+        if last_text.contains(AGENT_READY_MARKER) {
+            return;
+        }
+        let dead = pane_format(sock, &target, "#{pane_dead}", deadline).await;
+        let expired = tokio::time::Instant::now() >= deadline;
+        if dead.as_deref() == Some("1") || expired {
+            let status = pane_format(sock, &target, "#{pane_dead_status}", deadline).await;
+            panic!(
+                "test setup: session {session_id}'s agent never printed \
+                 {AGENT_READY_MARKER:?} (pane_dead={dead:?}, pane_dead_status={status:?}, \
+                 deadline expired={expired}), so this test's subject never started. A dead \
+                 pane means the launch died before printing readiness — before farhelm's \
+                 exec shim, or inside the agent's own setup — and the text below is whatever \
+                 it left on the pty; a live pane means the launch was merely slow. Pane \
+                 text:\n{last_text}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// One `display-message` format string evaluated against `target`, as a
+/// trimmed string, or `None` when tmux refused to answer (the pane, its
+/// window, or the whole server is gone) or did not answer by `deadline`.
+///
+/// Diagnostics only — every caller is already on a failure path, so a tmux
+/// that cannot answer must not itself panic and replace the report with a
+/// less informative one. The deadline is the caller's own, so a stuck
+/// tmux cannot extend the wait it already lost.
+async fn pane_format(
+    sock: &std::path::Path,
+    target: &str,
+    format: &str,
+    deadline: tokio::time::Instant,
+) -> Option<String> {
+    let out = tokio::time::timeout_at(
+        deadline,
+        tmux_query(sock, &["display-message", "-p", "-t", target, format]),
+    )
+    .await
+    .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// [`basic_session`] plus [`wait_for_agent_ready`]: the shape to prefer
+/// whenever a test's assertions are about an agent that is actually
+/// RUNNING — which is to say almost all of them.
+///
+/// Kept separate from [`basic_session`] rather than folded into it so that
+/// adopting the barrier stays a per-test decision: a handful of tests
+/// deliberately act on a launch mid-flight, and a create that silently
+/// waited for the agent would change what those pin. See
+/// [`wait_for_agent_ready`] for the never-started failure this converts
+/// from a corrupted assertion into a named setup failure.
+pub(crate) async fn basic_session_ready(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
+    let (session, work) = basic_session(h).await;
+    wait_for_agent_ready(&h.state.path().join("tmux.sock"), &session.id).await;
     (session, work)
 }
 

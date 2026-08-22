@@ -6012,7 +6012,10 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
     else {
         return;
     };
-    let (session, _work) = basic_session(&h).await;
+    // Waits for the agent to have execed: the launch must really have been
+    // scoped — and have reached its agent — for the planted never-started
+    // shape below to be about THIS launch rather than a real early death.
+    let (session, _work) = basic_session_ready(&h).await;
     assert!(
         launch_scope_of(&h, &session.id).await.is_some(),
         "test setup: this launch must have selected a scope"
