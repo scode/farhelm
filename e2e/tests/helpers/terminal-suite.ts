@@ -20,10 +20,15 @@ import { waitForTermText } from "./term";
 // unrelated failures; worse, it would fail for a session that is perfectly
 // healthy and merely quiet.
 //
-// Exact words are still asserted, deliberately, in two places: the retained
-// badge-render test in terminal.spec.ts (which is ABOUT the vocabulary) and
-// route fixtures across the family (which choose the status themselves and
-// must see it rendered back verbatim).
+// Exact words are still asserted, deliberately, where a test already KNOWS
+// the word: the badge-render test in terminal.spec.ts (which is ABOUT the
+// vocabulary, and waits for the live classification to settle before
+// asserting the word the listing itself carries), and those route fixtures
+// that compare the status they authored verbatim. Neither PREDICTS one — a
+// test that predicts which of the three a real session will be in is the
+// flake this constant exists to prevent, and that is exactly how the
+// badge-render test used to fail (see `settledSharedSessionRow` in
+// terminal.spec.ts).
 export const LIVE_BADGE = /^(running|waiting|idle)$/;
 
 // The same set as `LIVE_BADGE`, for the API-level assertions that read a

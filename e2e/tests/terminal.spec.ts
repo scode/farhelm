@@ -37,8 +37,16 @@
 // contracts: the former defines "the feed is healthy"; the latter owns
 // `window.__farhelmTerm`, `term.buffer.active`, and readiness globals. A
 // genuinely one-off snippet still stays local with the test that needs it.
-import { test, expect } from "@playwright/test";
-import { createSession, openRowMenu, pinAutoSelect, SESSION_LISTING, stubFeed } from "./helpers/fleet";
+import { test, expect, type APIRequestContext } from "@playwright/test";
+import {
+  createSession,
+  listSessions,
+  openRowMenu,
+  pinAutoSelect,
+  SESSION_LISTING,
+  type SessionRow,
+  stubFeed,
+} from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import {
   FAKE_AGENT_INVOCATION,
@@ -67,29 +75,93 @@ test("renders the session and the agent's TUI output", async ({ page }) => {
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-AGENT READY");
 });
 
+/**
+ * The shared session's listing row, read only once the supervisor's live
+ * classification of it has stopped moving.
+ *
+ * ## The flake this replaces
+ *
+ * The badge below used to be asserted as the literal "running", on the
+ * premise that the fake agent behind "e2e-session" is long-running.
+ * Long-running is not what the classifier measures. `basic` (see
+ * `fake_agent.rs`) prints its banner and a prompt and then blocks on stdin
+ * forever, so its SCREEN stops changing about a second after launch — and
+ * the live split (PLAN_M6_75.md item 2) reports a live pane `idle` once
+ * `QUIET_SAMPLES_BEFORE_IDLE` consecutive samples have found it unchanged,
+ * which at the shipped two-second ticker is about ten seconds from launch
+ * (measured against a stack standing on its own, with no browser at all).
+ * What resets that streak is a CHANGE in the captured screen between two
+ * samples — not process output as such — and nothing in this test changes
+ * it: the fixture's banner-and-prompt screen is short enough that the
+ * attach-time resize leaves the capture identical, so the session leaves
+ * `running` shortly after `beforeAll` recreated it and never comes back.
+ * Attaching a terminal does not rescue it, which is worth stating because
+ * the page's own auto-select opens this very session: a run instrumented
+ * at the failure sat at `idle` for the whole assertion with the terminal
+ * attached.
+ *
+ * Whether the old assertion passed therefore came down to whether the
+ * preceding test plus this one's setup finished inside that window, which
+ * on an unloaded machine left it perhaps six seconds of headroom. Twice
+ * they did not. Its ten-second timeout could not help, because the
+ * transition it was waiting for had already happened in the other
+ * direction.
+ *
+ * ## Why waiting for `idle` is a barrier and not a longer sleep
+ *
+ * `idle` is the FIXED POINT of a quiet agent: a state this session cannot
+ * leave on its own. Everything asserted after this call therefore reads a
+ * value that has stopped moving, which is what makes naming one exact word
+ * sound at all. A supervisor that never gets there fails HERE, by name,
+ * rather than surfacing further down as a badge that mysteriously
+ * disagrees with the listing it is supposed to render.
+ */
+async function settledSharedSessionRow(
+  request: APIRequestContext,
+): Promise<SessionRow & { status: { state: string } }> {
+  let settled: SessionRow | undefined;
+  await expect
+    .poll(async () => {
+      settled = (await listSessions(request)).sessions.find((s) => s.title === "e2e-session");
+      return settled?.status?.state ?? "no such session";
+    }, {
+      timeout: 30_000,
+      message:
+        "the supervisor must classify the quiet shared session `idle` before its badge can be pinned to one word",
+    })
+    .toBe("idle");
+  // The poll only returns once `status.state` read "idle", so both are present.
+  return settled as SessionRow & { status: { state: string } };
+}
+
 // The list view itself (PLAN_M2.md step 7): title, cwd, invocation, and a
 // truthful status badge per row, sourced from the same GET /api/sessions
-// every other test exercises indirectly through openTerminal. cwd and
-// invocation are checked against the API's OWN listing rather than mere
-// non-emptiness, so a row silently rendering the wrong session's
-// metadata (e.g. a copy-paste bug swapping two fields) would still fail
-// this test even though every field it prints is individually non-blank.
-// The fake agent process backing "e2e-session" is long-running, so the
-// row's status must settle on "running" rather than the create-time
-// unclassified placeholder — `toHaveText` retries on its own, since the
-// list computes status fresh from tmux on every fetch rather than
-// caching the placeholder forever. What that placeholder renders as while
-// it lasts is the separate no-badge rule (PLAN_M6_75.md item 3), pinned
-// by the route-controlled unknown-status test further down: an
-// unclassified session shows NO badge, so this assertion is waiting for a
-// badge to appear at all, not for one word to replace another.
-test("list renders the session row with title, cwd, invocation, and a running badge", async ({
+// every other test exercises indirectly through openTerminal. The title is
+// the fixture's fixed name; cwd, invocation, and the badge are checked
+// against the API's OWN listing rather than against a hardcoded
+// expectation or mere non-emptiness, so a row silently rendering the wrong
+// session's metadata (e.g. a copy-paste bug swapping two fields) would
+// still fail this test even though every field it prints is individually
+// non-blank.
+//
+// The badge is held to that same standard, which is why this test names an
+// exact status word where the rest of the family accepts `LIVE_BADGE`: the
+// word asserted is the one the listing itself carries, so the row is
+// pinned to REPORTING the classification rather than to any particular
+// classification. `settledSharedSessionRow` is what makes that sound; see
+// its docs for the flake that taught us the word cannot be assumed in
+// advance.
+//
+// That a badge is rendered AT ALL is the other half of this. An
+// unclassified session shows NO badge (PLAN_M6_75.md item 3, pinned by the
+// route-controlled unknown-status test further down), so a row still
+// sitting on the create-time placeholder fails here rather than passing on
+// an absent element.
+test("list renders the session row with title, cwd, invocation, and the status the API reports", async ({
   page,
   request,
 }) => {
-  const listing = await (await request.get("/api/sessions")).json();
-  const expected = listing.sessions.find((s: any) => s.title === "e2e-session");
-  expect(expected).toBeTruthy();
+  const expected = await settledSharedSessionRow(request);
 
   await page.goto("/");
   const row = sharedSessionRow(page);
@@ -97,9 +169,11 @@ test("list renders the session row with title, cwd, invocation, and a running ba
   await expect(row.locator(".session-title")).toHaveText("e2e-session");
   await expect(row.locator(".session-cwd")).toHaveText(expected.cwd);
   await expect(row.locator(".session-invocation")).toHaveText(expected.invocation);
-  await expect(row.locator(".status-badge")).toHaveText("running", {
-    timeout: 10_000,
-  });
+  // No extended timeout: the row being visible means this listing has
+  // already rendered, and the status it carries settled before the
+  // navigation. A wait longer than the default here would be waiting for
+  // something that cannot arrive later.
+  await expect(row.locator(".status-badge")).toHaveText(expected.status.state);
 });
 
 // The create form's working-directory field defaults to "~"
@@ -1200,15 +1274,23 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(page.locator(".titlebar .title")).toHaveText(titleB);
 
-    // Both rows are visible in the permanent sidebar, alive.
-    await expect(rowByTitle(page, titleA).locator(".status-badge")).toHaveText(
-      "running",
-      { timeout: 10_000 },
-    );
-    await expect(rowByTitle(page, titleB).locator(".status-badge")).toHaveText(
-      "running",
-      { timeout: 10_000 },
-    );
+    // Both rows are visible in the permanent sidebar, alive. `LIVE_BADGE`
+    // rather than the literal "running": session A's last output was its
+    // marker echo, and everything since — creating B, opening its terminal
+    // — is time in which the classifier can have settled A to `idle` (see
+    // `settledSharedSessionRow` above for the mechanism and the flake it
+    // caused). What is pinned is that both rows are ALIVE, and a literal
+    // word would be predicting the classifier's timing instead.
+    // The 10s allowance is for the listing to move off its create-time
+    // unclassified state (no badge at all) to a live one; READY in the
+    // terminal proves attachment, not that the separately refreshed
+    // listing has classified the row yet.
+    await expect(rowByTitle(page, titleA).locator(".status-badge")).toHaveText(LIVE_BADGE, {
+      timeout: 10_000,
+    });
+    await expect(rowByTitle(page, titleB).locator(".status-badge")).toHaveText(LIVE_BADGE, {
+      timeout: 10_000,
+    });
 
     // Stop session B via its row button. No confirmation for stop
     // (SPEC.md gives confirmation to delete/archive, not stop), and the

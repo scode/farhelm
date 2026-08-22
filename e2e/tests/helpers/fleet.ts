@@ -63,6 +63,10 @@ export interface SessionRow {
   id: string;
   title: string;
   status?: { state: string };
+  /** Working directory and invocation as the listing reports them; the
+   * badge-render test compares the rendered row against these. */
+  cwd?: string;
+  invocation?: string;
   /**
    * The profile this session was created from, absent for a raw-created one.
    *
