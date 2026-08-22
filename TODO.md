@@ -172,11 +172,6 @@ roadmap and carries no priorities unless an entry says so itself.
   state, all "not run"). Blocked on the macOS release bundle above and a human with a real Mac. Not covered by any CI:
   Playwright's WebKit is not WKWebView.
 
-- Decide the count banner's denominator: "N matching of M sessions" counts the whole fleet as M while the default view
-  excludes archived sessions, so the two numbers disagree out of the box. Shipped choice: fleet total (archived sessions
-  are still fleet members); alternative: exclude archived so the default view is self-consistent. Cheap UX verdict,
-  worth making explicitly.
-
 - Add a "sort by" control for the left sidebar's session rows. Default to most recently active, with alphabetical and
   newest-created options; newest-created is the current behavior (`created_at` descending). Define the activity signal
   and stable tie-breakers when implementing it so equally active rows do not jump around nondeterministically.

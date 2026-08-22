@@ -604,6 +604,23 @@ remains that can never be represented on any page.
   clamped) and an encoded-byte budget that shrinks a page of fat records rather than oversizing the reply. The ordering
   key carries the host id as its final component so the order is total even where the one-owner index below is absent —
   a cursor over a non-total order can skip or repeat rows.
+- A listing reply carries two counts, and they answer different questions. `matching` is how many rows satisfy the
+  caller's filter across the whole merged view, and it is present exactly when a predicate is active. `total` is how big
+  the VIEW is — the denominator the UI's "N matching of M sessions" prints — and it deliberately does not move when the
+  user types, because a denominator that tracked the filter would compare a number against itself. The one thing that
+  does move it is the archive-inclusion switch: that switch selects which list is being served rather than narrowing
+  one, so the default view's rows and its total are both about the non-archived fleet and `include_archived=true` widens
+  both. The flag is denormalized into a `session_cache.archived` column (schema version 10, backfilled from each
+  payload) for the same reason `created_at` is: counting must not mean decoding every blob. A row whose payload no
+  longer decodes stays inside the `total` of whichever view its stored flag names, and outside `matching` in both, which
+  is what keeps "showing 4 of 5" reading as one unshowable entry rather than as data loss. The flag is what it was when
+  the row was written, so such a row keeps the classification it was filed under rather than reverting to active; the
+  one place an unreadable payload does land active is the version-10 backfill, which has no stored flag to keep and
+  reads the archive member out of the JSON text — a payload SQLite cannot parse at all is counted rather than hidden.
+  Changed 2026-08-22: `total` used to count archived rows in every view, so out of the box the default list showed ten
+  rows above a count of twelve, with no filter typed and nothing on screen able to explain the gap. The accepted
+  consequence is that the ordinary list now reads as unfiltered — "M sessions" — and the filtered wording belongs to
+  filters a person applied.
 - At most one HOST may cache a given session id, as a schema invariant. Session ids are supervisor-minted UUIDs, so two
   hosts naming one is either a bug or a hostile supervisor claiming a session it does not own — and the consequence is a
   routing decision, not a display one: owner lookup would resolve one host while the list showed another's row, so a

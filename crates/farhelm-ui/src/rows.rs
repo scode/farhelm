@@ -201,10 +201,19 @@ pub(crate) fn menu_row_reordered(
 /// Both counts are checked rather than only the rows, because a walk that
 /// returned no rows against a non-zero total is a truncation, not an empty
 /// fleet — that one belongs in the banner's "showing 0 of N" wording.
+///
+/// The reply must also COVER the fleet
+/// (`SessionListing::omits_fleet_members`), which is the stricter of the two
+/// filter flags and deliberately so: the ordinary view's own total is now a
+/// count of the non-archived list, so `total == 0` there means "nothing
+/// active", not "nothing at all". Keyed on `filtered` instead, a fleet of
+/// nothing but archived sessions would announce itself as empty. The right
+/// pane says "no active sessions" for that case, which is the claim the
+/// reply actually supports.
 pub(crate) fn is_empty_fleet(listing: &SessionListing) -> bool {
     listing.sessions.is_empty()
         && listing.total == 0
-        && !listing.filtered
+        && !listing.omits_fleet_members
         // A COMPLETE, COHERENT reply, or the shortcut is a claim the reply
         // does not support. A truncated walk with no rows says "I could not
         // read this list", not "there is nothing in it" — and an incoherent
@@ -225,9 +234,13 @@ pub(crate) fn is_empty_fleet(listing: &SessionListing) -> bool {
 /// that is not in this reply. Two facts have to hold, and only one of them
 /// was being checked:
 ///
-/// - **The reply speaks for the whole fleet.** A filtered listing omits
-///   every session that did not match, and "did not match" is not "went
-///   away".
+/// - **The reply speaks for the whole fleet.** A narrowed listing omits
+///   every session it left out, and "left out" is not "went away". Read from
+///   `SessionListing::omits_fleet_members` rather than from `filtered`, and
+///   the difference is the DEFAULT view: it reads as unfiltered to a user
+///   (that is the banner's question) while still hiding every archived
+///   session, so a session archived from another client would otherwise
+///   vanish from this reply and be mistaken for one that left.
 /// - **The walk actually finished.** A truncated walk stops at a ceiling —
 ///   pages, rows, bytes, time — and every session past that cutoff is
 ///   missing for a reason that has nothing to do with existing. Reading
@@ -241,7 +254,7 @@ pub(crate) fn is_empty_fleet(listing: &SessionListing) -> bool {
 /// has none: a mutation's immediate refetch exists to show ONE session and
 /// is not a statement about the rest.
 pub(crate) fn absence_is_evidence(listing: &SessionListing) -> bool {
-    !listing.filtered && !listing.truncated
+    !listing.omits_fleet_members && !listing.truncated
 }
 
 /// Whether the list should say, in words, that this filter matched nothing.
@@ -323,9 +336,15 @@ const FILTER_UNSUPPORTED_NOTE: &str =
 ///   incoherent. Every condition is checked because they can disagree:
 ///   totals can differ under concurrent creation without `truncated` being
 ///   set, and a ceiling sets `truncated` without the totals having to
-///   differ. The shortfall is measured against MATCHING, because the page
-///   walk is over what matched — comparing against the fleet total instead
-///   would report every working filter as a truncated list.
+///   differ. The shortfall is measured against WHATEVER THIS BANNER IS
+///   ABOUT TO PRINT as its denominator, which is what keeps "showing N of
+///   M" checkable against the M beside it: `matching` for a filtered banner
+///   (the walk is over what matched, and measuring a working filter against
+///   the view's size would report every one of them as truncated), the
+///   view's own `total` for an unfiltered one. The default view is why
+///   those two are not the same thing — the helm answers it with a real
+///   `matching`, because its archive exclusion is a server-side predicate,
+///   while the sentence a reader sees counts the view.
 /// - **Filtering.** A filtered list says "N matching of M sessions"
 ///   (PLAN_M6_75.md item 7), which is the distinction the second count
 ///   exists to make: without it, a filter that hid 690 of 700 rows and a
@@ -336,11 +355,16 @@ const FILTER_UNSUPPORTED_NOTE: &str =
 ///   silently reverted to the unfiltered sentence would leave a user unsure
 ///   whether their filter took at all.
 ///
-///   The default archive exclusion is one of those filters. It therefore
-///   says "N matching of M" even when every existing row is active and the
-///   two numbers happen to agree. `M` remains the fleet total, including
-///   archived rows; changing its meaning with the toggle would make the
-///   denominator move while the fleet did not.
+///   The archive switch is NOT one of those filters, in either position.
+///   `M` is the size of the view the rows came from — the non-archived list
+///   by default, the whole fleet with the switch on (`api::SessionListing::
+///   total`, and `store::count_rows` on the helm side) — so the ordinary
+///   list reads "12 sessions" rather than "12 matching of 12 sessions". The
+///   shipped alternative, an M that counted archived rows the list did not
+///   show, made the two numbers disagree with nothing typed into any filter
+///   and no wording able to explain the gap. The accepted consequence is
+///   that "filtered" now means a filter a PERSON applied (maintainer's
+///   verdict, 2026-08-22).
 /// - **A filter the helm did not answer.** `matching` is absent only where
 ///   substituting a number would be a fabrication (`api::matching_count`),
 ///   and that case gets the unfiltered sentence plus a clause saying why —
@@ -348,38 +372,59 @@ const FILTER_UNSUPPORTED_NOTE: &str =
 ///
 /// ## Contradictions the helm's own flags cannot express
 ///
-/// `api::fetch_sessions` measures incoherence against the FLEET total, which
-/// is the helm's own reading of the two numbers and stays that way. Two
-/// contradictions live below that check and have to be caught here, because
-/// both produce a confident banner that the rows underneath it disprove:
+/// `api::fetch_sessions` measures incoherence against the VIEW's total,
+/// which is the helm's own reading of the two numbers and stays that way.
+/// Two contradictions live below that check and have to be caught here,
+/// because both produce a confident banner that the rows underneath it
+/// disprove:
 ///
 /// - **More rows than matched.** A walk can hold more rows than the final
-///   page's refreshed `matching` while still sitting under the fleet total —
-///   neither short nor fleet-incoherent — so the flags alone would print "3
-///   matching of 700" above five visible rows.
+///   page's refreshed `matching` while still sitting under the view's total
+///   — neither short nor view-incoherent — so the flags alone would print
+///   "3 matching of 700" above five visible rows. Checked on any listing
+///   carrying a `matching`, filtered or not: the DEFAULT view carries one
+///   too, and there the unfiltered sentence would be the confident half of
+///   the same contradiction.
 /// - **More matched than exist.** `matching > total` cannot be true of any
-///   fleet; it is what a list changing under a multi-page walk looks like
+///   view; it is what a list changing under a multi-page walk looks like
 ///   when the two counts come from different moments.
 ///
-/// Both mean the same thing as the fleet-scoped version (the list moved
+/// Both mean the same thing as the view-scoped version (the list moved
 /// under the walk), so both raise the same note and take the same truncated
 /// wording, which already exist for it.
 ///
-/// The shortfall is measured against what the reply CLAIMS is behind it —
-/// `matching` where the helm gave one, and the fleet total where it did not.
-/// That last part is the ignored-filter case: those rows are the whole
-/// fleet, so a walk that stopped short of the fleet has to say "showing N of
-/// M" like any other, rather than presenting an ignored filter's partial
-/// list as if it were everything.
+/// A filtered banner whose helm gave NO matching count falls back to the
+/// view's total for the same shortfall test, which is the ignored-filter
+/// case: those rows are the whole view, so a walk that stopped short of it
+/// has to say "showing N of M" like any other, rather than presenting an
+/// ignored filter's partial list as if it were everything.
 pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
     let shown = listing.sessions.len() as u64;
-    // What the rows on screen are a subset OF, from this reply's own claims.
-    let claimed = listing.matching.unwrap_or(listing.total);
-    // The two contradictions above. `overshot` stays confined to filtered
-    // listings because unfiltered `matching` IS the fleet total and that
-    // comparison is already the helm's own — duplicating it would make one
-    // flag two.
-    let overshot = listing.filtered && listing.matching.is_some_and(|matching| shown > matching);
+    // What the rows on screen are a subset OF — always the number the chosen
+    // arm is about to PRINT as its denominator, which is what keeps "showing
+    // N of M" measurable against the M beside it.
+    //
+    // For an unfiltered banner that is `total`, even where the helm reported
+    // a matching count: it does so for the default view (the archive
+    // exclusion is a predicate on its side), and there the two differ only by
+    // rows nothing can show. Measuring against that count would make the same
+    // fleet read as a complete walk in the default view and a truncated one
+    // with the archive switch on, which reports no matching count at all.
+    let claimed = if listing.filtered {
+        listing.matching.unwrap_or(listing.total)
+    } else {
+        listing.total
+    };
+    // The two contradictions above, and both are checked wherever the helm
+    // made a claim to contradict — `matching.is_some()`, not `filtered`.
+    // The default view is why that distinction matters now: it reads as
+    // unfiltered while the helm still answers it with a real matching count
+    // (its archive exclusion is a predicate on the server side), so keying
+    // `overshot` on `filtered` would leave "5 sessions" printed above five
+    // rows the helm said only three of matched. Under the old shape the
+    // unfiltered `matching` was just `total` by another name and the check
+    // would have been the fleet-coherence one duplicated; it no longer is.
+    let overshot = listing.matching.is_some_and(|matching| shown > matching);
     let counts_contradict = listing
         .matching
         .is_some_and(|matching| matching > listing.total);
@@ -398,7 +443,7 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
             format!("{matching} matching of {} sessions", listing.total),
         ),
         // Three numbers, because all three are different questions: how many
-        // are on screen, how many match, and how big the fleet is. Dropping
+        // are on screen, how many match, and how big the view is. Dropping
         // the last would leave a user unable to tell a narrow filter from a
         // small fleet.
         (true, Some(matching), true) => (
@@ -670,13 +715,15 @@ mod tests {
         assert!(!menu_row_reordered(None, &current, "a"));
     }
 
-    /// An UNFILTERED listing carrying `rows` sessions, with the count fields
+    /// A FLEET-WIDE listing carrying `rows` sessions, with the count fields
     /// set explicitly — the banner reads nothing else, so the sessions
     /// themselves are placeholders.
     ///
-    /// `matching` mirrors `total`, which is what the helm reports whenever
-    /// no filter was given: the unfiltered cases must be built the way the
-    /// server actually builds them, or they would pin wording against a
+    /// This is the archive-switch-on reply: nothing is filtered and nothing
+    /// is withheld, so both request flags are false. `matching` mirrors
+    /// `total`, which is what `api::matching_count` substitutes when the helm
+    /// makes no matching claim — the unfiltered cases must be built the way
+    /// the walk actually builds them, or they would pin wording against a
     /// reply shape that cannot occur.
     fn listing(rows: usize, total: u64, truncated: bool, incoherent: bool) -> SessionListing {
         SessionListing {
@@ -686,20 +733,61 @@ mod tests {
             total,
             matching: Some(total),
             filtered: false,
+            omits_fleet_members: false,
             truncated,
             incoherent,
         }
     }
 
-    /// The same, for a walk that CARRIED a filter: `matching` is now its own
-    /// number, and `filtered` comes from the request rather than from
-    /// comparing the two counts.
+    /// The DEFAULT view's reply: no filter a person applied — so the banner
+    /// treats it as unfiltered — over a request that still permits the helm
+    /// to withhold every archived session.
+    ///
+    /// The one listing where the two request flags disagree, and therefore
+    /// the fixture every test of that divergence is built from. Both flags
+    /// describe what was ASKED, so `omits_fleet_members` is true here
+    /// whether or not this particular fleet has an archived session in it.
+    fn default_view_listing(rows: usize, total: u64) -> SessionListing {
+        SessionListing {
+            omits_fleet_members: true,
+            ..listing(rows, total, false, false)
+        }
+    }
+
+    /// The same, for a walk that carried a filter a PERSON applied:
+    /// `matching` is now its own number, and both request flags are set.
+    ///
+    /// Neither flag is derived from the rows below it — a request carrying
+    /// a filter may match everything and still answer yes to both, which is
+    /// exactly the case the banner has to keep saying "N matching of M" for.
     fn filtered_listing(rows: usize, matching: u64, total: u64, truncated: bool) -> SessionListing {
         SessionListing {
             matching: Some(matching),
             filtered: true,
-            truncated,
+            omits_fleet_members: true,
             ..listing(rows, total, truncated, false)
+        }
+    }
+
+    /// A filtered request answered by a helm that predates server-side
+    /// filtering: `matching` is absent because no honest number exists
+    /// (`api::matching_count`), and the rows are the whole fleet because
+    /// that helm ignored the query.
+    ///
+    /// Both request flags are still true, and that is the compatibility
+    /// point worth pinning: they are read off the REQUEST, so an old peer
+    /// serving more than it was asked for cannot flip them. Deriving them
+    /// from the reply instead would let this listing claim the unfiltered
+    /// wording — vouching for a filter that never ran — and grant absence
+    /// the standing to retire work, on the say-so of a helm that could not
+    /// have narrowed anything.
+    fn old_peer_filtered_listing(rows: usize, total: u64, truncated: bool) -> SessionListing {
+        SessionListing {
+            matching: None,
+            // The `0` below is overwritten by the line above and never
+            // reaches a banner; this builds on `filtered_listing` for the
+            // request flags, which are the part that has to stay in step.
+            ..filtered_listing(rows, 0, total, truncated)
         }
     }
 
@@ -754,6 +842,16 @@ mod tests {
                 "banner truncation-banner",
                 "showing 0 of 3 sessions",
             ),
+            // The DEFAULT view takes the unfiltered wording. The total it
+            // prints is the size of the list it is showing, because archived
+            // sessions are now outside both — the shape that used to say "4
+            // matching of N sessions" here, with N counting rows the list
+            // withheld and nothing typed into any filter.
+            (
+                default_view_listing(4, 4),
+                "banner session-count",
+                "4 sessions",
+            ),
         ];
         for (listing, class, text) in cases {
             let banner = count_banner(&listing);
@@ -764,6 +862,65 @@ mod tests {
                 "no incoherence was reported, so no suffix belongs on {text:?}"
             );
         }
+    }
+
+    /// An unfiltered banner measures its shortfall against the number it
+    /// PRINTS, even when the helm also sent a matching count.
+    ///
+    /// The default view is the case: the helm treats its archive exclusion as
+    /// a predicate and answers with a `matching` that omits rows no page can
+    /// show, while the banner's denominator is `total`. Measured against
+    /// `matching` instead, a fleet holding one corrupt row would read as a
+    /// finished walk here and as "showing N of M" the moment the archive
+    /// switch went on — same fleet, same rows, two different verdicts, with
+    /// the more confident one wrong.
+    #[test]
+    fn an_unfiltered_shortfall_is_measured_against_the_printed_total() {
+        let with_an_unshowable_row = SessionListing {
+            matching: Some(3),
+            ..default_view_listing(3, 4)
+        };
+        let banner = count_banner(&with_an_unshowable_row);
+        assert_eq!(banner.class, "banner truncation-banner");
+        assert_eq!(
+            banner.text, "showing 3 of 4 sessions",
+            "three rows under a view of four is a subset, and the banner says which numbers"
+        );
+        assert_eq!(banner.incoherence, None);
+
+        // And the ordinary default view, where the two counts agree, keeps
+        // the confident sentence.
+        assert_eq!(
+            count_banner(&default_view_listing(4, 4)).class,
+            "banner session-count"
+        );
+    }
+
+    /// The default view holding MORE rows than the helm said matched is a
+    /// contradiction, and it is reported even though the sentence reads as
+    /// unfiltered.
+    ///
+    /// The shape that makes this reachable is new: the helm applies the
+    /// archive exclusion itself, so the default view comes back with a real
+    /// `matching`, and a multi-page walk can end up holding rows the final
+    /// page's refreshed count no longer covers. `shown <= total` throughout,
+    /// so neither the helm's own row-against-view check nor the
+    /// `matching > total` one fires — the confident "5 sessions" would be
+    /// printed above five rows the same reply said three of matched.
+    #[test]
+    fn a_default_view_holding_more_rows_than_matched_is_reported() {
+        let moved_under_the_walk = SessionListing {
+            matching: Some(3),
+            ..default_view_listing(5, 5)
+        };
+        let banner = count_banner(&moved_under_the_walk);
+        assert_eq!(banner.class, "banner truncation-banner");
+        assert_eq!(
+            banner.text, "showing 5 of 5 sessions",
+            "the wording still measures against the printed denominator; the note carries the \
+             contradiction"
+        );
+        assert_eq!(banner.incoherence, Some(INCOHERENCE_NOTE));
     }
 
     /// The incoherence note is its OWN field, appended to the truncated
@@ -947,6 +1104,11 @@ mod tests {
             !absence_is_evidence(&filtered_listing(3, 3, 700, false)),
             "and a filter omits what did not match, which is not what left"
         );
+        assert!(
+            !absence_is_evidence(&default_view_listing(3, 3)),
+            "the default view reads as unfiltered and still hides archived rows, so a session \
+             archived from another client must not be mistaken for one that left"
+        );
         // Incoherence arrives as truncation from the walk
         // (`api::fetch_sessions` sets `truncated: truncated || incoherent`),
         // which is what makes one check cover both: counts that disagree
@@ -970,6 +1132,11 @@ mod tests {
         assert!(
             !is_empty_fleet(&filtered_listing(0, 0, 0, false)),
             "a filter over an empty fleet is a search that found nothing, and must say so"
+        );
+        assert!(
+            !is_empty_fleet(&default_view_listing(0, 0)),
+            "the default view's zero total means nothing ACTIVE; a fleet of archived sessions \
+             must not announce itself as empty"
         );
         assert!(
             !is_empty_fleet(&listing(0, 3, false, false)),
@@ -1009,11 +1176,7 @@ mod tests {
     /// what is actually being shown.
     #[test]
     fn a_filter_the_helm_ignored_is_said_out_loud_rather_than_counted() {
-        let unanswered = SessionListing {
-            matching: None,
-            filtered: true,
-            ..listing(700, 700, false, false)
-        };
+        let unanswered = old_peer_filtered_listing(700, 700, false);
         let banner = count_banner(&unanswered);
         assert_eq!(banner.class, "banner session-count filtered");
         assert_eq!(
@@ -1024,11 +1187,7 @@ mod tests {
 
         // A walk that also stopped short keeps both facts: the shortfall in
         // the numbers, the ignored filter in the clause.
-        let short = SessionListing {
-            matching: None,
-            filtered: true,
-            ..listing(20, 700, true, false)
-        };
+        let short = old_peer_filtered_listing(20, 700, true);
         let banner = count_banner(&short);
         assert_eq!(banner.class, "banner truncation-banner filtered");
         assert_eq!(
@@ -1049,11 +1208,7 @@ mod tests {
     /// the list on screen is not the list that exists.
     #[test]
     fn an_ignored_filters_shortfall_is_measured_against_the_fleet() {
-        let cut_short = SessionListing {
-            matching: None,
-            filtered: true,
-            ..listing(20, 700, false, false)
-        };
+        let cut_short = old_peer_filtered_listing(20, 700, false);
         let banner = count_banner(&cut_short);
         assert_eq!(
             banner.class, "banner truncation-banner filtered",
@@ -1068,11 +1223,7 @@ mod tests {
         // A complete unfiltered walk under an ignored filter still reads as
         // complete: the rows ARE the fleet, and claiming otherwise would be
         // the same lie in the opposite direction.
-        let complete = SessionListing {
-            matching: None,
-            filtered: true,
-            ..listing(700, 700, false, false)
-        };
+        let complete = old_peer_filtered_listing(700, 700, false);
         assert_eq!(
             count_banner(&complete).class,
             "banner session-count filtered"
@@ -1081,13 +1232,19 @@ mod tests {
 
     /// More matched than exist is a contradiction, and the banner says so.
     ///
-    /// `matching > total` cannot describe any fleet. It is what a list
+    /// `matching > total` cannot describe any view. It is what a list
     /// changing under a multi-page walk looks like when the two counts are
     /// read a moment apart, and it arrives with neither flag set — the
-    /// helm's own incoherence check is about ROWS against the fleet, and
+    /// helm's own incoherence check is about ROWS against the view, and
     /// this is one count against the other. Left alone the banner would
     /// print "40 matching of 3 sessions" in the confident wording, which is
     /// the count line contradicting itself in a single sentence.
+    ///
+    /// Pinned for the UNFILTERED default view as well, because that listing
+    /// carries a real `matching` while printing the plain sentence: the
+    /// contradiction is invisible in its wording, so a check keyed on
+    /// `filtered` would let "3 sessions" stand above a reply that just said
+    /// 40 of them matched.
     #[test]
     fn more_matched_than_exist_is_reported_as_incoherence() {
         let banner = count_banner(&filtered_listing(3, 40, 3, false));
@@ -1095,7 +1252,19 @@ mod tests {
         assert_eq!(banner.text, "showing 3 of 40 matching sessions (3 in all)");
         assert_eq!(banner.incoherence, Some(INCOHERENCE_NOTE));
 
-        // The ordinary case is untouched: matching below the fleet total is
+        let unfiltered = count_banner(&SessionListing {
+            matching: Some(40),
+            ..default_view_listing(3, 3)
+        });
+        assert_eq!(unfiltered.class, "banner truncation-banner");
+        assert_eq!(
+            unfiltered.text, "showing 3 of 3 sessions",
+            "the unfiltered sentence has nowhere to print the impossible count, so the note \
+             beside it is the whole report"
+        );
+        assert_eq!(unfiltered.incoherence, Some(INCOHERENCE_NOTE));
+
+        // The ordinary case is untouched: matching below the view's total is
         // what every working filter looks like.
         assert_eq!(
             count_banner(&filtered_listing(3, 3, 700, false)).incoherence,
@@ -1122,16 +1291,17 @@ mod tests {
             "twelve matched and this walk collected none of them: a truncation, not an empty search"
         );
         assert!(
-            !no_matches(&SessionListing {
-                matching: None,
-                filtered: true,
-                ..listing(0, 0, false, false)
-            }),
+            !no_matches(&old_peer_filtered_listing(0, 0, false)),
             "a helm that ignored the filter counted nothing, so it cannot be quoted as counting zero"
         );
         assert!(
             !no_matches(&listing(0, 0, false, false)),
             "and an unfiltered listing has no filter to report on"
+        );
+        assert!(
+            !no_matches(&default_view_listing(0, 0)),
+            "an empty default view is a list with nothing in it, not a search that found \
+             nothing — nobody typed a query to be told about"
         );
         assert!(
             !no_matches(&filtered_listing(2, 0, 700, false)),

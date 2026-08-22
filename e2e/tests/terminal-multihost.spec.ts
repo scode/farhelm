@@ -1724,8 +1724,10 @@ test.describe("multi-host", () => {
               stale: false,
             })),
             total: 4,
-            // No explicit search is still the default archive-exclusion
-            // filter. `total` is the fleet; `matching` is the walk's size.
+            // The default view: `total` is that view's own size, and
+            // `matching` is what the helm's implicit archive predicate
+            // counted inside it. The page treats neither as a filter a
+            // person applied.
             matching: 4,
             truncated: !!served.next,
             next_cursor: served.next,
@@ -1750,9 +1752,10 @@ test.describe("multi-host", () => {
     expect(requested.slice(0, 4)).toEqual(["", "cursor-1", "cursor-2", "cursor-3"]);
 
     // A completed walk does NOT claim to be showing a subset: "showing N of
-    // M" is reserved for a walk that stopped short. The ordinary request is
-    // still a filter, so the complete form reports both counts.
-    await expect(page.locator(".session-count")).toHaveText("4 matching of 4 sessions");
+    // M" is reserved for a walk that stopped short. The ordinary request
+    // carries no filter anybody applied either, so what is left is the plain
+    // count of the view the four rows came from.
+    await expect(page.locator(".session-count")).toHaveText("4 sessions");
     await expect(page.locator(".truncation-banner")).toHaveCount(0);
   });
 

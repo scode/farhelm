@@ -3301,9 +3301,10 @@ test("truncation banner shows when the listing reports truncated", async ({
           { id: "synthetic-2", title: "synthetic-2", cwd: "/tmp", invocation: "true" },
         ],
         total: 700,
-        // The ordinary request excludes archived rows, so it is a filter
-        // even though the query string is empty. Keep the fixture on the
-        // current helm contract instead of exercising the old-peer fallback.
+        // The ordinary request excludes archived rows server-side, so the
+        // helm answers it with a real matching count even though nobody
+        // typed a filter. Keep the fixture on the current helm contract
+        // instead of exercising the old-peer fallback.
         matching: 700,
         truncated: true,
       }),
@@ -3312,9 +3313,13 @@ test("truncation banner shows when the listing reports truncated", async ({
 
   await page.goto("/");
   await expect(page.locator(".truncation-banner")).toBeVisible();
-  await expect(page.locator(".truncation-banner")).toHaveText(
-    "showing 2 of 700 matching sessions (700 in all)",
-  );
+  // The UNFILTERED shortfall wording, and that is the whole point of
+  // pinning it here: the archive switch is a view rather than a filter, so
+  // an untouched list says "showing N of M sessions" and carries no
+  // `filtered` modifier — even though the reply beside it does carry a
+  // matching count.
+  await expect(page.locator(".truncation-banner")).toHaveText("showing 2 of 700 sessions");
+  await expect(page.locator(".truncation-banner.filtered")).toHaveCount(0);
 });
 
 // Polling is M2's whole live-update mechanism (PLAN_M2.md's "Out" defers

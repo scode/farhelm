@@ -238,6 +238,13 @@ controls are closed, the list says visibly that a filter is in force, so a narro
 fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable as a filter, but
 parentage does not nest the list and implies nothing about VCS state.
 
+The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
+view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That
+switch is which list you are looking at rather than a filter you applied, so it does not make the list call itself
+filtered. A filter someone typed or chose does, and the count then says how many matched alongside how big the view is.
+A list the client could not read to the end says that in the same place, rather than presenting a partial list as the
+whole one.
+
 Per-host connection state is always visible, as a compact per-host indicator naming each host with its current phase;
 the full hosts panel — retry, retargeting, removal, profiles — opens on demand rather than occupying the session list
 permanently. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm

@@ -65,12 +65,17 @@
 //! So both sources are narrowed by one predicate ([`store::SessionFilter`],
 //! which lives in the store precisely so the SQL scan and the in-memory
 //! merge cannot come to disagree), and a FILTERED reply carries TWO counts:
-//! how many matched, and how many the fleet holds. The second is not
+//! how many matched, and how many the VIEW holds. The second is not
 //! redundant — it is the number the list's own coherence check has always
-//! described, and a filtered list showing fewer rows than the fleet holds is
+//! described, and a filtered list showing fewer rows than the view holds is
 //! a working filter rather than a missing page.
 //!
-//! An UNFILTERED reply carries only the fleet total and makes no matching
+//! "The view" rather than "the fleet" because one dimension is not a
+//! narrowing at all: the archive switch decides which list is being served,
+//! so `total` follows it and follows nothing else (see
+//! [`SessionPageBody::total`]).
+//!
+//! An UNFILTERED reply carries only that total and makes no matching
 //! claim at all (see [`SessionPageBody::matching`]).
 //!
 //! ## Counting once per walk, honestly (PLAN_M6_75.md item 5)
@@ -268,13 +273,22 @@ pub(crate) struct SessionRow {
 pub(crate) struct SessionPageBody {
     pub(crate) sessions: Vec<SessionRow>,
     /// Every session in the MERGED view, across every host, before this
-    /// page's cut and BEFORE any filter — not one supervisor's count, and
-    /// not a count of what the caller asked to see. That is the number
-    /// SPEC.md's "showing N of M" is about once a fleet has more than one
-    /// host in it, and it is deliberately the one the list's coherence check
-    /// has always been made against (PLAN_M6_75.md item 5): a filtered page
-    /// showing fewer rows than the fleet holds is not an incoherent list, it
-    /// is a working filter.
+    /// page's cut and before any of the caller's search dimensions — not one
+    /// supervisor's count, and not a count of what this page holds. That is
+    /// the number SPEC.md's "showing N of M" is about once a fleet has more
+    /// than one host in it, and it is deliberately the one the list's
+    /// coherence check has always been made against (PLAN_M6_75.md item 5):
+    /// a filtered page showing fewer rows than the view holds is not an
+    /// incoherent list, it is a working filter.
+    ///
+    /// WHICH VIEW is the request's archive switch, and that one dimension
+    /// does move this number: with the switch off — the public default —
+    /// archived rows are outside the view and outside this count; with it on
+    /// this is the whole fleet. The switch is not a narrowing the user
+    /// applied, it is which list they are looking at, and a denominator that
+    /// ignored it left the ordinary list showing ten rows above "of 12
+    /// sessions" (maintainer's verdict, 2026-08-22; `store::count_rows` has
+    /// the full reasoning).
     pub(crate) total: u64,
     /// How many sessions match the request's filter, across the whole
     /// merged view — the other half of "N matching of M sessions"
@@ -777,9 +791,11 @@ impl<'a> MergeSource<'a> {
 /// and it applies before the page cut on each of them: the persisted side
 /// filters inside its own scan, the live side by skipping non-matching
 /// entries as the merge walks. A filtered reply therefore carries two
-/// counts — `matching` for the filter, `total` for the fleet — because "N
-/// matching of M sessions" needs both, and a client cannot derive either
-/// from a page it was handed. An unfiltered reply carries only `total` and
+/// counts — `matching` for the filter, `total` for the view it narrowed —
+/// because "N matching of M sessions" needs both, and a client cannot derive
+/// either from a page it was handed. Which view `total` counts is the
+/// archive switch's to say and no other dimension's (see
+/// [`SessionPageBody::total`]). An unfiltered reply carries only `total` and
 /// claims nothing about matching (see [`SessionPageBody::matching`]).
 ///
 /// The page and its totals come from ONE store read
@@ -970,11 +986,23 @@ async fn session_page_staged(
         let Some(live) = snapshot.live_sessions.as_ref() else {
             continue;
         };
-        // Every identity-less host counts toward the FLEET total, host
-        // filter or not: `total` is what the fleet holds, and narrowing it
+        // Every identity-less host counts toward the view's total, host
+        // filter or not: `total` is what the view holds, and narrowing it
         // to the filter's own scope would make "N matching of M" compare a
         // number against itself.
-        live_total = live_total.saturating_add(live.len() as u64);
+        //
+        // The ARCHIVE switch is the exception, exactly as it is for the
+        // persisted side (`store::count_rows`): it says which view is being
+        // counted, so an archived in-memory row is outside the default view's
+        // denominator too. Counted by walking the list rather than by a
+        // column, because this side has no storage to extract one into — the
+        // cost is one flag test per in-memory row per page, over a list
+        // bounded by `crate::manager::REFRESH_SESSION_CAP`.
+        live_total = live_total.saturating_add(if filter.includes_archived() {
+            live.len() as u64
+        } else {
+            live.iter().filter(|info| !info.archived).count() as u64
+        });
         // A host the filter excludes contributes no matches and no rows, so
         // it is skipped whole rather than walked and rejected item by item.
         if filter
