@@ -4,16 +4,20 @@ A running list of things the maintainer wants fixed or built, in no particular o
 entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
 roadmap and carries no priorities unless an entry says so itself.
 
-- Add a visual highlight in the left-hand sidebar showing clearly which agent session the main pane is currently
-  interacting with. The selected row should be obvious at a glance, not inferable only from the titlebar.
-
-- Make Shift+Enter insert a line break everywhere it plausibly should, not just in Claude Code. The terminal sends ESC
-  CR for the chord (the binding Claude Code's terminal-setup guide names, and it works there), but observed behavior
-  elsewhere: Codex treats the pair like a plain Enter (or close to it) — so Codex evidently does not honor ESC CR as
-  insert-newline and the right sequence for it needs investigating (candidates: whatever Codex's own terminal-setup
-  binds, or the CSI-u encoding `ESC [ 13 ; 2 u` that kitty-protocol-aware TUIs understand) — and a plain shell tab does
-  nothing visible with it. Decide and implement per-target behavior: Codex must get a real line break, and define what
-  (if anything) the chord should do in a bare shell rather than leaving it a silent no-op.
+- Consider always running the bundled, pinned tmux instead of gating on a minimum host version. Today a host tmux at or
+  above the floor (3.3) is accepted and the private build is used only when the host's is missing or too old
+  (SPEC_impl.md's terminal-substrate section) — for Linux provisioning and any ordinarily started supervisor, that is;
+  the desktop app already puts its bundle directory first on its managed supervisor's PATH, so there the bundled tmux
+  wins even beside a supported host copy. That policy treats tmux versions as interchangeable above the floor, and
+  experience says they are not: the supervisor's tmux driver is full of behavior audited per version (3.3a, 3.4, 3.7b
+  each differ in ways that shaped real code), the pinned 3.7b build has its own crash-regression suite
+  (`scripts/test-tmux-3.7b-shutdown.sh`), and on 2026-08-16 the bundled 3.7b server segfaulted and took every session
+  with it — BUGS.md records a related abort class on distro 3.6. For a substrate this sensitive, "the exact version we
+  built, tested, and ship" may be a better bet than "anything at or above N", and raising the floor does not buy that. A
+  decision would have to weigh: build and packaging cost on every supported platform (Linux release tarballs already
+  carry a private build; the Mac app must, since macOS ships none), losing the distro's patched tmux and its security
+  updates, operators who expect their own tmux to be used, and whether the floor check stays as a fallback when the
+  bundle is absent (a from-source install today has no bundle at all). This is a consider, not a decision.
 
 - Finish the macOS release bundle. The release workflow's `macos` job (workflow_dispatch-gated; builds an
   aarch64-apple-darwin `Farhelm.app` with embedded helm, managed supervisor, private tmux, and the CLI at
