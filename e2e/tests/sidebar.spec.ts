@@ -18,9 +18,8 @@
  * toggles, the compact host strip, the applied-filter note).
  *
  * Like every per-area file since M6.5, new coverage starts its own spec
- * rather than growing terminal.spec.ts: that file's size already makes it
- * the suite's slowest project, and an area file keeps one subject's tests
- * findable and runnable together.
+ * rather than growing the terminal spec family. An area file keeps one
+ * subject's tests findable and runnable together.
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import {
@@ -416,7 +415,7 @@ test("an unanswered view operation disables row selection until it completes", a
 
     // Wait for the view's status-derived decision to settle on "this
     // click will confirm" (the view opens on the create reply's Unknown
-    // placeholder — same discipline as terminal.spec.ts's restart tests),
+    // placeholder — same discipline as terminal-restart.spec.ts's tests),
     // then click through the confirmation; the POST is now held open by
     // the route.
     const restartButton = page.locator(".restart-primary");

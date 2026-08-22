@@ -4,7 +4,7 @@
 //
 // A dedicated per-area file, per this milestone's own testing convention
 // (see sidebar.spec.ts's header for why new coverage starts its own spec
-// rather than growing terminal.spec.ts). The helpers it shares with
+// rather than growing the terminal spec family). The helpers it shares with
 // filters.spec.ts and m6-5-debts.spec.ts live in helpers/fleet.ts — see that
 // file for why these three share a module while the older specs duplicate
 // theirs.

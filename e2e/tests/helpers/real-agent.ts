@@ -4,14 +4,12 @@
 // let its plumbing be exercised in CI without vendor credentials
 // (PLAN_M6_5.md item 3).
 //
-// This is a helper MODULE, not a spec file, and that is deliberate: every
-// other spec in this suite duplicates its own small helpers rather than
-// importing across files (terminal.spec.ts exports nothing, and
-// mouse-modes.spec.ts's own header explains why — new specs are meant to
-// start clean). This one is the named exception the plan calls for: the
-// lessons below are expensive enough to relearn that a copy-per-spec
-// would defeat the point, so this module exports them for
-// real-agent.spec.ts to import directly.
+// This is a helper MODULE, not a spec file, and that is deliberate. The
+// terminal-family specs share their baseline fixtures through
+// helpers/term.ts and helpers/terminal-suite.ts; this module stays separate
+// for real-agent-specific readiness and onboarding. Those lessons are
+// expensive enough to relearn that a copy-per-spec would defeat the point,
+// so real-agent.spec.ts imports them directly.
 //
 // Every function here distills one of three lessons the first
 // agent-driven smoke test paid for by hand:
@@ -173,9 +171,10 @@ async function bufferText(page: Page, mode: "full" | "viewport"): Promise<string
  * motivated the second case, from before that pre-mount settling
  * existed).
  *
- * Not exported (no use exists outside this module) — duplicated from
- * terminal.spec.ts's identical helper rather than imported, per this
- * suite's testing decision that specs stay self-contained.
+ * Not exported (no use exists outside this module). Like the terminal
+ * family's shared `termText`, it promises the full buffer, but it is built
+ * on the local `bufferText` so full-buffer and viewport reads keep one
+ * wrapped-line reconstruction for readiness checks and timeout diagnostics.
  */
 async function termText(page: Page): Promise<string> {
   return bufferText(page, "full");

@@ -962,7 +962,7 @@ fn flood() -> anyhow::Result<()> {
 /// fast enough to outrun every consumer on the path, which on a fast host
 /// can mean the ENTIRE burst is already sitting in tmux's pane history
 /// before a test even finishes attaching — the browser-driven watermark
-/// tests (PLAN_M2_5.md, e2e/tests/terminal.spec.ts) need the opposite: a
+/// tests (PLAN_M2_5.md, e2e/tests/terminal-flood.spec.ts) need the opposite: a
 /// LIVE producer racing a client that is already attached, instrumented,
 /// and watching, not a sub-watermark replay of a burst that already
 /// finished. Gating on real terminal input — sent only once a test's own

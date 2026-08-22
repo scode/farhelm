@@ -1,9 +1,8 @@
 // The mouse-mode fake-agent script's reattach-restoration coverage
 // (PLAN_M6_5.md item 2). A dedicated file, not an addition to
-// terminal.spec.ts: that file is already enormous and every remaining
-// milestone adds named tests, so per this milestone's own testing
-// decision, new specs start their own per-area file instead of growing
-// it further.
+// the terminal spec family: per this milestone's own testing decision,
+// new coverage starts in its own per-area file so one subject stays
+// findable and runnable together.
 //
 // This is the one end-to-end path that proves mouse-mode restoration
 // survives a client detach/reattach cycle, and it deliberately drives the
@@ -150,8 +149,9 @@ async function waitForReportCount(
 
 /**
  * Wait until THIS attachment's replay has fully revealed — the same
- * `replay.revealed` flag terminal.spec.ts's own reattach tests
- * synchronize on (its `waitForReplayReveal`/`ReplayRecord` machinery),
+ * `replay.revealed` flag the `waitForReplayReveal`/`ReplayRecord` machinery in
+ * helpers/terminal-suite.ts synchronizes on (mainly for
+ * terminal-replay-rename.spec.ts's reattach tests),
  * read here directly off the primary terminal's singleton test hook
  * (`window.__farhelmTest`, published alongside `__farhelmTermReady`)
  * rather than the per-island registry those tests use, since this file

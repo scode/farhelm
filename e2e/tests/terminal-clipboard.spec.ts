@@ -12,10 +12,10 @@
 // ends, with no "already copied this" cache to silently suppress a
 // legitimate re-copy).
 //
-// A dedicated file rather than an addition to terminal.spec.ts, per this
+// A dedicated file rather than an addition to the terminal spec family, per this
 // suite's own standing convention for new coverage (mouse-modes.spec.ts's
 // header) — one subject, findable and runnable together, in a file that
-// does not make an already enormous project slower.
+// does not make another project's browser lifetime longer.
 //
 // ## Chromium only, and why that is not a weaker proof
 //

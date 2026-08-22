@@ -1,5 +1,5 @@
 // The drive-a-real-agent Playwright helper's own spec (PLAN_M6_5.md item
-// 3). A dedicated file, not an addition to terminal.spec.ts, per this
+// 3). A dedicated file, not an addition to the terminal spec family, per this
 // milestone's testing decision (see mouse-modes.spec.ts's identical
 // header note).
 //
@@ -40,8 +40,8 @@ import { stackScratchDir } from "./helpers/scratch";
 
 /**
  * The fake-agent invocation for every CI-runnable leg below, built from
- * an absolute path exactly like terminal.spec.ts's and
- * mouse-modes.spec.ts's own identical constants.
+ * an absolute path exactly like the terminal family's shared fixture and
+ * mouse-modes.spec.ts's own constant.
  */
 const FAKE_AGENT_INVOCATION = `"${
   path.resolve(__dirname, "../../target/debug/farhelm")

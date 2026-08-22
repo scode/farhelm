@@ -1443,7 +1443,7 @@
     return reconnects.has(el);
   }
 
-  // Test-only registry (e2e/tests/terminal.spec.ts), keyed by element id:
+  // Test-only registry (the e2e terminal spec family), keyed by element id:
   // the per-island term/ws/test-hook triple, so the suite can read a
   // SPECIFIC terminal's buffer and socket rather than only whichever one
   // happens to own the legacy singletons below. Published and deleted in
@@ -2959,7 +2959,7 @@
         let pendingWrite = 0;
         let paused = false;
 
-        // Test-only observability (e2e/tests/terminal.spec.ts): the
+        // Test-only observability (e2e/tests/terminal-flood.spec.ts): the
         // watermark state machine lives entirely inside this closure, so
         // the suite has no way to see it crossed a mark or which way
         // without a hook. Never read by production code.
@@ -3579,7 +3579,7 @@
           clearIdleTimer();
           clearHeartbeat();
         };
-        // Test-only (e2e/tests/terminal.spec.ts): resume a catch-up phase
+        // Test-only (e2e/tests/terminal-replay-rename.spec.ts): resume a catch-up phase
         // held open by `replayControls`'s `holdMarker`, applying whatever
         // ending was deferred. Published on the hook rather than inside
         // `replay` so that object stays plain data — the suite reads it
