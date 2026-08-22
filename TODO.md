@@ -110,18 +110,6 @@ roadmap and carries no priorities unless an entry says so itself.
   assertion under test — every basic_session caller shares this exposure — and capture the scope wrapper's stderr on the
   never-started path so the next occurrence says which of the two candidates it was.
 
-- Deflake `session_lifecycle::reattach_replays_history_and_modes` on four-thread CI. The exact fingerprint is a replay
-  that contains the later `before-reattach` marker but has lost the earlier `FAKE-AGENT READY` line, ending at
-  session_lifecycle.rs's `replay missing pre-detach history` assertion. A scan of the preceding 200 CI runs found eight
-  occurrences (4%); three failed commits also had a simultaneous successful run, and PR #194 repeated that same
-  pass/fail pair on one commit SHA. This proves the result is intermittent, not whether the cause is fragile test timing
-  or a rare product replay-boundary race. First steps: loop the exact test under CI-like process load while retaining
-  the full replay transcript and tmux capture at detach and reattach, then locate whether the earlier history is absent
-  from tmux, lost while Farhelm constructs the replay, or dropped by the test's receive window. Do not merely lengthen
-  the wait: the assertion runs after the later marker has already arrived, so more time cannot restore bytes that should
-  precede it. Once the boundary that loses the line is known, replace the race with a deterministic barrier and keep a
-  regression for the discovered mechanism.
-
 - Deflake `terminal.spec.ts`'s `list renders the session row with title, cwd, invocation, and a running badge`. During
   the Design 1 split it failed once in a focused Chromium run and once under WebKit in the full two-engine suite: the
   shared session row was present with the expected metadata, but its badge stayed `idle` through the 10-second assertion

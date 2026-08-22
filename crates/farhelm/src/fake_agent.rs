@@ -590,6 +590,15 @@ fn fresh_conversation_id() -> String {
 /// exercise scrollback, real PTY geometry, and clean exit respectively.
 /// Bracketed paste stays enabled so reattach tests can assert the mode
 /// survives replay (the audited silent-loss case in SPEC_impl.md).
+///
+/// The `> ` prompt is the fixture's SAFE-TO-TYPE barrier, and a test that
+/// asserts on what the startup output left in tmux's grid must wait for it
+/// rather than for `FAKE-AGENT READY`. The marker's text can reach a
+/// reader while its own line is still half-written, and a pty echoes
+/// incoming input into the middle of an in-flight write — so input sent on
+/// the strength of the marker alone can be echoed ON TOP of the marker row
+/// and erase it. The prompt is only written once the marker line is fully
+/// out, so nothing typed after it can land there.
 fn basic() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     // Bracketed paste on. Set before the ready marker so a test that

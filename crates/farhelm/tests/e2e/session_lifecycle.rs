@@ -333,11 +333,106 @@ async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
     let _ = serve_task.await;
 }
 
+/// tmux's OWN view of a session's agent pane, out of band from anything
+/// Farhelm delivered: the mode/cursor format line a replay is built from,
+/// then both captures — scrollback+visible, then visible only — that
+/// `replay_command_group` chooses between.
+///
+/// Exists so `reattach_replays_history_and_modes` can tell three
+/// indistinguishable-by-transcript failures apart: text that was never in
+/// tmux's grid, a replay assembled from the wrong capture, and bytes lost
+/// between the supervisor and the test. Its recorded flake (a replay
+/// carrying the later marker but not the earlier one) turned out to be the
+/// first of those, and only a capture the test takes itself could say so —
+/// the replay transcript alone proves nothing beyond "a byte range is
+/// missing". Keep it: the next regression in this area will need the same
+/// three-way split.
+///
+/// The overwrite evidence is the surviving tail of the marker: a row that
+/// reads `before-reattachY` is `FAKE-AGENT READY` with fifteen characters
+/// of echoed input written over it, and that `Y` is what distinguishes it
+/// from an unrelated short line. `-N` only keeps each row's trailing
+/// padding so the capture shows the full grid row rather than a trimmed
+/// one; the padding itself proves nothing.
+///
+/// Panics if the query fails, so a tmux that cannot answer reads as the
+/// setup failure it is rather than as an empty pane: the caller searches
+/// this text for the marker, and a failed query that returned nothing
+/// would otherwise be indistinguishable from the overwrite race.
+///
+/// One tmux invocation rather than three, because this runs on the passing
+/// path too and each `tmux` process is a fork/exec against the harness's
+/// server; the `;` separators are tmux's own command sequencing, and a
+/// failing command aborts the rest with its stderr intact.
+async fn pane_forensics(h: &Harness, session_id: &str) -> String {
+    // `=name:` — exact session match, resolved to that session's current
+    // pane. The bare `=name` spelling tmux accepts for session targets is
+    // NOT a valid pane target ("can't find pane"), which would degrade
+    // this whole helper to an empty capture that reads like a lost line.
+    let target = format!("=fh-{session_id}:");
+    let out = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &target,
+            "[modes] alt=#{alternate_on} bp=#{bracket_paste_flag} \
+             cursor=#{cursor_x},#{cursor_y} dead=#{pane_dead} \
+             size=#{pane_width}x#{pane_height} history=#{history_size} \
+             clients=#{session_attached}\n[history+visible capture]",
+            ";",
+            "capture-pane",
+            "-p",
+            "-N",
+            "-t",
+            &target,
+            "-S",
+            "-2000",
+            ";",
+            "display-message",
+            "-p",
+            "-t",
+            &target,
+            "[visible capture]",
+            ";",
+            "capture-pane",
+            "-p",
+            "-N",
+            "-t",
+            &target,
+        ],
+    )
+    .await;
+    assert!(
+        out.status.success(),
+        "test setup: the tmux forensics query for session {session_id} failed (status {:?}); \
+         stderr: {:?}\npartial output:\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout),
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 /// Reconnect-with-replay: detach, reattach, and require the replay to
 /// contain output produced before the reattach AND the bracketed-paste
 /// mode the fake agent enabled. Mode restoration is the audited
 /// silent-loss case (SPEC_impl.md) — content alone passing this test
 /// would be the bug.
+///
+/// What is pinned, precisely: after a detach and a fresh attach, the
+/// prefill Farhelm synthesizes carries BOTH pre-detach markers (the
+/// fixture's ready line and the echoed input that followed it) and then
+/// the bracketed-paste mode (when tmux exposes `bracket_paste_flag`), and
+/// the reattached terminal is live rather than a frozen render of that
+/// prefill.
+///
+/// Waiting for the PROMPT rather than the ready marker is a barrier, not
+/// a nicety — see the comment at that wait. This test spent eight of two
+/// hundred CI runs failing on the ready line's absence from the replay,
+/// and the cause was this test typing into a pane the fixture was still
+/// mid-write on.
 #[tokio::test]
 async fn reattach_replays_history_and_modes() {
     let h = harness().await;
@@ -345,11 +440,48 @@ async fn reattach_replays_history_and_modes() {
 
     let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
     let mut seen = Vec::new();
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    // The barrier is the fixture's PROMPT, not its ready marker, and the
+    // difference is this test's recorded flake.
+    //
+    // `basic()` writes the marker line and then `"> "` as two separate
+    // writes to its pty. Seeing the marker's TEXT arrive proves only that
+    // the first write started: the line's own `\r` may be the last byte
+    // tmux has parsed, leaving the cursor back at column 1 of that row
+    // with the `\n` still in flight. Typing at that instant makes the tty
+    // interleave the input's echo into the middle of the fixture's write
+    // — the kernel's echo path does not hold the writer's lock — so the
+    // echo lands ON the marker row and overwrites it in tmux's grid:
+    // `before-reattachY   `, `FAKE-AGENT READY`'s tail poking out from
+    // under fifteen characters of echoed input. Nothing downstream can
+    // recover the line after that. The replay is faithful; the grid is
+    // what lost it, which is why more waiting later cannot help and why
+    // this is a fixture race rather than a Farhelm replay bug.
+    //
+    // The prompt is the fixture's own signal that it is between writes
+    // and reading stdin, so an echo arriving after it cannot land on any
+    // row the assertions care about. Anchored AFTER the marker because
+    // `"> "` alone is not unique to startup.
+    wait_for_after(&mut rx, &mut seen, "FAKE-AGENT READY", "> ", 20).await;
     h.client
         .send_input(chan, b"before-reattach\r".to_vec())
         .await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
+
+    // Fail the SETUP by name. Without this, a regression in the barrier
+    // above reappears as "replay missing pre-detach history" — an
+    // accusation against Farhelm's replay for a line the fixture had
+    // already scribbled over before any replay existed. Reading tmux's
+    // grid here separates the two once and for all.
+    let at_detach = pane_forensics(&h, &session.id).await;
+    assert!(
+        at_detach.contains("FAKE-AGENT READY"),
+        "setup: the fixture's ready marker was already gone from tmux's own grid before the \
+         detach, so this run cannot say anything about replay — the pre-detach input's echo \
+         overwrote it (see the prompt barrier above)\n\
+         --- pre-detach live transcript ---\n{:?}\n\
+         --- tmux at detach ---\n{at_detach}",
+        String::from_utf8_lossy(&seen),
+    );
     h.client.detach(chan).await;
 
     let (chan2, mut rx2) = h
@@ -357,6 +489,7 @@ async fn reattach_replays_history_and_modes() {
         .attach(&session.id, 80, 24)
         .await
         .expect("reattach");
+    let at_reattach = pane_forensics(&h, &session.id).await;
     let mut replay = Vec::new();
     wait_for(&mut rx2, &mut replay, "before-reattach", 10).await;
     // Input-mode restoration follows the content prefill, so wait for it
@@ -373,7 +506,13 @@ async fn reattach_replays_history_and_modes() {
     let replay_text = String::from_utf8_lossy(&replay);
     assert!(
         replay_text.contains("FAKE-AGENT READY"),
-        "replay missing pre-detach history"
+        "replay missing pre-detach history\n\
+         --- replay transcript ({} bytes) ---\n{replay_text:?}\n\
+         --- pre-detach live transcript ---\n{:?}\n\
+         --- tmux at detach ---\n{at_detach}\n\
+         --- tmux at reattach ---\n{at_reattach}",
+        replay.len(),
+        String::from_utf8_lossy(&seen),
     );
 
     // A fresh echo, not just replay: detach-then-reattach is one of the

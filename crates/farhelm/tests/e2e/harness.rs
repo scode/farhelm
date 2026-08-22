@@ -732,6 +732,13 @@ pub(crate) async fn wait_for(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &s
 /// assertion about them races. Anchoring the content wait after the
 /// divider's own position is version-proof: the divider exists only in
 /// the suffix.
+///
+/// Its second job is the fixture-readiness barrier: `("FAKE-AGENT READY",
+/// "> ")` waits for the fake agent's PROMPT rather than its ready marker,
+/// which is what a test must do before it types if it later asserts on the
+/// startup rows (see `reattach_replays_history_and_modes`). Anchoring
+/// matters there for a different reason than above — `"> "` is not unique
+/// to startup, so only its position after the marker identifies it.
 pub(crate) async fn wait_for_after(
     rx: &mut TermStream,
     seen: &mut Vec<u8>,
