@@ -780,7 +780,7 @@ struct RepeatedFailure {
 /// rather than once per viewer.
 ///
 /// **The page count is not free, and not just in round trips.** The
-/// supervisor's conversation-capture sweep (`core::capture_pass`) rides
+/// supervisor's conversation-capture sweep (`capture::capture_pass`) rides
 /// the `ListSessions` handler, so it runs once PER PAGE — a walk that takes
 /// four pages performs four whole-host scans, not one. That is why every
 /// caller passes `limit: None` and lets the supervisor apply its own

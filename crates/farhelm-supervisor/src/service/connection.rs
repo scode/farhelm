@@ -7,7 +7,8 @@
 //! peer goes away. `Forwarder` is the other half — one per attachment,
 //! pumping tmux output back to the client and detecting a stalled reader.
 
-use super::core::{Supervisor, note_first_input};
+use super::capture::note_first_input;
+use super::core::Supervisor;
 use super::handlers::{handle_control, handle_restricted_control};
 use super::snapshots::load_alt_screen_snapshot;
 use super::terminals::{ActiveAttach, AttachmentKey, InputRoute, OutputReapOutcome, TerminalId};

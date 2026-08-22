@@ -416,8 +416,9 @@ pub(crate) async fn load_alt_screen_snapshot(
 
 #[cfg(test)]
 mod tests {
+    use super::super::capture::{CaptureState, FirstInput};
+    use super::super::core::SessionEntry;
     use super::super::core::tests::{StateDir, dummy_exe};
-    use super::super::core::{CaptureState, FirstInput, SessionEntry};
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
     use crate::store::LastOutcome;

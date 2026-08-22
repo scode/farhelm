@@ -41,7 +41,7 @@
 //! reply from a pre-commit `restart_offer`.
 //!
 //! [`Supervisor::capture_pass_for`] replaces both behaviors with one
-//! scheduling rule per caller ([`super::core::CaptureReason`]): a
+//! scheduling rule per caller ([`super::capture::CaptureReason`]): a
 //! reply-producing caller WAITS and then runs unless the pass it joined
 //! began after its own request; a tick SKIPS a pass in flight and
 //! SUPPRESSES itself when a REPLY-driven pass completed within the tick
@@ -135,7 +135,8 @@
 //! `TickerHandle::watch` is what turns the same information into a loud
 //! log line — see `serve`.
 
-use super::core::{CaptureReason, SampleRead, SessionEntry, Supervisor};
+use super::capture::CaptureReason;
+use super::core::{SampleRead, SessionEntry, Supervisor};
 use super::terminals::{Terminal, tabs_from_pane_states};
 use std::sync::Arc;
 use std::time::Duration;
@@ -985,11 +986,10 @@ async fn reap_dead_tabs(
 
 #[cfg(test)]
 mod tests {
+    use super::super::capture::note_first_input;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
-    use super::super::core::{
-        CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts, note_first_input,
-    };
+    use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::session_status;
     use super::*;
@@ -2491,7 +2491,7 @@ mod tests {
             .expect("insert the row that claims that tmux session");
     }
 
-    /// A [`super::super::core::CaptureGate`] that parks ONE capture pass —
+    /// A [`super::super::capture::CaptureGate`] that parks ONE capture pass —
     /// the first after it is armed — until the test releases it.
     ///
     /// The barrier both scheduling tests need, since the window they are
@@ -2513,7 +2513,7 @@ mod tests {
     /// every test here releases the barrier and then asserts on what
     /// happens NEXT.
     struct PassBarrier {
-        gate: super::super::core::CaptureGate,
+        gate: super::super::capture::CaptureGate,
         entered: Arc<AtomicBool>,
         /// Where an armed barrier parks the pass. Empty until `arm`.
         slot: Arc<std::sync::Mutex<Option<oneshot::Receiver<()>>>>,
@@ -2529,7 +2529,7 @@ mod tests {
                 Arc::new(std::sync::Mutex::new(None));
             let gate_entered = Arc::clone(&entered);
             let gate_slot = Arc::clone(&slot);
-            let gate: super::super::core::CaptureGate = Arc::new(move || {
+            let gate: super::super::capture::CaptureGate = Arc::new(move || {
                 // Taken, not peeked: the seam is an `Fn` that may run many
                 // times while the receiver can only be awaited once.
                 let waiting = gate_slot.lock().expect("barrier slot poisoned").take();
@@ -2551,7 +2551,7 @@ mod tests {
         }
 
         /// The seam to hand to `SupervisorSeams`. Inert until [`Self::arm`].
-        fn gate(&self) -> super::super::core::CaptureGate {
+        fn gate(&self) -> super::super::capture::CaptureGate {
             Arc::clone(&self.gate)
         }
 

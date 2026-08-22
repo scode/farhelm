@@ -348,8 +348,8 @@ fn waiting_or_baseline(baseline: SessionStatus, sharpened: SessionStatus) -> Ses
 /// pass can upgrade a session from `FreshOnly` to `Resume` at any moment,
 /// so the value stored in `SessionEntry::info` at create or reload is a
 /// starting point rather than an answer. Reads only the COMMITTED identity
-/// (`CaptureState::committed_conversation`), which is what keeps the offer
-/// from promising a resume that no stored value could fill.
+/// ([`super::capture::CaptureState::committed_conversation`]), which keeps
+/// the offer from promising a resume that no stored value could fill.
 fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
     let capture = entry.capture.lock().expect("capture mutex poisoned");
     entry
