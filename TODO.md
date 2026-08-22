@@ -110,17 +110,6 @@ roadmap and carries no priorities unless an entry says so itself.
   assertion under test — every basic_session caller shares this exposure — and capture the scope wrapper's stderr on the
   never-started path so the next occurrence says which of the two candidates it was.
 
-- Deflake `provisioning::tests::local_provisioning_and_update_preserve_a_running_session` under heavy CPU contention.
-  One occurrence so far: 2026-08-18 on the 6-core devbox, panic "real provisioning run did not finish: deadline has
-  elapsed" (crates/farhelm-helm/src/provisioning.rs, the bounded wait around the real local provisioning run), during a
-  full workspace suite that was — honest context — sharing the box with an unrelated multi-agent review workload, so
-  total load was well above a normal full-suite run. Passed in isolation right after, taking 79s alone, which says the
-  test's real work is already a large fraction of whatever deadline it is given. Candidate mechanism, unverified: the
-  deadline is sized for an idle box and the test loses it under CPU contention rather than anything being wedged. First
-  steps: find the deadline constant behind that panic and measure the test's runtime distribution under a loaded
-  full-suite loop; if the margin is thin, either give the bound honest headroom or make the panic distinguish "no
-  progress" from "progress but slow" so a genuine wedge stays loud.
-
 - Deflake `session_lifecycle::reattach_replays_history_and_modes` on four-thread CI. The exact fingerprint is a replay
   that contains the later `before-reattach` marker but has lost the earlier `FAKE-AGENT READY` line, ending at
   session_lifecycle.rs's `replay missing pre-detach history` assertion. A scan of the preceding 200 CI runs found eight
