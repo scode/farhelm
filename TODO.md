@@ -4,53 +4,58 @@ A running list of things the maintainer wants fixed or built, in no particular o
 entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
 roadmap and carries no priorities unless an entry says so itself.
 
-- Consider always running the bundled, pinned tmux instead of gating on a minimum host version. Today a host tmux at or
-  above the floor (3.3) is accepted and the private build is used only when the host's is missing or too old
-  (SPEC_impl.md's terminal-substrate section) — for Linux provisioning and any ordinarily started supervisor, that is;
-  the desktop app already puts its bundle directory first on its managed supervisor's PATH, so there the bundled tmux
-  wins even beside a supported host copy. That policy treats tmux versions as interchangeable above the floor, and
-  experience says they are not: the supervisor's tmux driver is full of behavior audited per version (3.3a, 3.4, 3.7b
-  each differ in ways that shaped real code), the pinned 3.7b build has its own crash-regression suite
-  (`scripts/test-tmux-3.7b-shutdown.sh`), and on 2026-08-16 the bundled 3.7b server segfaulted and took every session
-  with it — BUGS.md records a related abort class on distro 3.6. For a substrate this sensitive, "the exact version we
-  built, tested, and ship" may be a better bet than "anything at or above N", and raising the floor does not buy that. A
-  decision would have to weigh: build and packaging cost on every supported platform (Linux release tarballs already
-  carry a private build; the Mac app must, since macOS ships none), losing the distro's patched tmux and its security
-  updates, operators who expect their own tmux to be used, and whether the floor check stays as a fallback when the
-  bundle is absent (a from-source install today has no bundle at all). This is a consider, not a decision.
+- Adopt an aggressive tmux version floor (decided 2026-08-22) in place of today's "any host tmux at or above 3.3"
+  policy. Today a host tmux at or above the floor is accepted and the private build is used only when the host's is
+  missing or too old (SPEC_impl.md's terminal-substrate section). That treats tmux versions as interchangeable above the
+  floor, and experience says they are not: Farhelm exercises the nooks and crannies of tmux — control mode,
+  output-client teardown, pane-death timing — and the supervisor's driver is full of behavior audited per version (3.3a,
+  3.4, 3.7b each differ in ways that shaped real code); crashes have been observed on older versions (the distro 3.4
+  server hosting every production session on the devbox died in BUGS.md's fatal()-abort shape on 2026-08-19, and BUGS.md
+  records the same abort class reproduced on distro 3.6), and the pinned 3.7b build has its own crash-regression suite
+  (`scripts/test-tmux-3.7b-shutdown.sh`). The alternative of always running a bundled static tmux was considered and
+  rejected: it loses distro security patching (tmux AND libevent, which is where the 2026-08-16 3.7b segfault lived),
+  concentrates a bad build's blast radius on every host at once, needs a static build per platform — the darwin one has
+  never completed — and a from-source install has no bundle to run anyway, so a floor check survives as the fallback
+  regardless. The decision, in three parts: (1) The floor is the regression-tested version, currently 3.7b, bumped
+  deliberately together with the regression suite — not "whatever Homebrew ships today". Be explicit in the spec that
+  this floor is DESIGNED to exclude current distro packages (Ubuntu 24.04 ships 3.4, 26.04 about 3.6, Debian 13 and
+  Fedora 42 3.5a): on Linux this is close to always-bundled in practice, with the opt-outs below. Versions above the
+  floor are accepted; consider a tested-through ceiling that warns rather than refuses, since Homebrew will ship 3.8
+  before anyone has audited it. (2) User instructions route through Homebrew: on macOS the app requires
+  `brew install tmux` (3.7c today) and probes the known prefixes itself (`/opt/homebrew/bin`, `/usr/local/bin`,
+  `/opt/local/bin`) because GUI apps do not inherit the shell PATH; on Linux, Linuxbrew is the documented way to meet
+  the floor without taking Farhelm's static build, and provisioning keeps installing the private musl build when the
+  host has nothing acceptable. The quickstart grows a "brew install tmux" step and a clear first-run refusal that names
+  the version found and the floor. (3) A simple, documented "pick your own" override — one knob (a `--tmux <path>` flag
+  / `FARHELM_TMUX` / config key) honored by every launch path, desktop app included — with documented caveats: the
+  chosen binary is floor-checked like any other candidate and refused by name if too old; Farhelm drives tmux harder
+  than interactive use does, versions below the floor have crashed under it, and versions above the tested one are
+  unaudited, so the override is "you own the substrate", not a supported configuration. The devbox already runs this
+  policy by hand (Homebrew tmux pinned at or above 3.7c behind a `tmux-gate` ExecStartPre); this is making that the
+  product. Changes SPEC.md / SPEC_impl.md's terminal-substrate sections, so surface the conflict there rather than
+  quietly editing.
 
 - Finish the macOS release bundle. The release workflow's `macos` job (workflow_dispatch-gated; builds an
-  aarch64-apple-darwin `Farhelm.app` with embedded helm, managed supervisor, private tmux, and the CLI at
-  `Contents/MacOS/farhelm`) has never completed, which means the README's primary quickstart references an artifact that
-  does not exist. Two failed attempts so far, 23 minutes spent of a standing 180-minute macOS-runner budget: attempt 1
-  died on ncurses terminfo installation under case-insensitive APFS (already fixed — `--disable-db-install` + system
-  terminfo); attempt 2 died because tmux's darwin configure demands an explicit utf8proc decision. That demand is
-  deliberate upstream and not going away: 3.7b errors outright when neither flag is given, and 3.7c/master instead
-  auto-tries utf8proc on darwin and falls back to the same error when it is not found — an upgrade would only change who
-  makes the decision, and a silently found Homebrew utf8proc is exactly what the private build must not link. The
-  decision is `--disable-utf8proc` (2026-08-22): add it to the darwin `tmux_configure` in
-  `scripts/build-private-tmux.sh`. Cost: macOS's stale `wcwidth(3)` misreports widths for newer Unicode (emoji
-  sequences, CJK extensions), so Mac-LOCAL sessions may draw those glyphs a cell off; remote Ubuntu sessions run Linux
-  tmux and are unaffected. Enabling it properly means a fourth pinned static source, and is worth revisiting only if
-  Mac-local rendering becomes a real complaint. Do the same change with a link-isolation assertion, decided at the same
-  time: after `make`, in the darwin case, fail the build unless every load command in `otool -L tmux` is an Apple system
-  library under `/usr/lib/`. The concern it closes: macOS cannot link a fully static executable, so "static" here means
-  every non-Apple library is a private `.a` under the script's prefix — and the darwin leg of that isolation (the
-  `--disable-shared`/`--without-shared` builds, the `PKG_CONFIG_LIBDIR` restriction, the ncurses symlink) has never
-  actually executed on a Mac. `ld` prefers a `.dylib` over a `.a` in the same directory, so any dynamic library that
-  reaches the prefix or a pkg-config-leaked `-L/opt/homebrew/lib` would produce a tmux that works on the runner and dies
-  on every user's Mac with `dyld: Library not loaded`. Linux gets this guarantee for free from `-static`; darwin
-  currently has nothing, and the assertion turns "we believe the prefix isolation works" into a build failure if it does
-  not, at the cost of one `otool` call. It also makes a later `--enable-utf8proc` safe to attempt (the
-  dylib-beside-archive trap is the main reason not to), provided utf8proc is then installed as an archive only and
-  linked by path. Then: land both script changes on main, tag the release commit, and
-  `gh workflow run release.yml --ref <tag> -f release_tag=<tag>`, counting the job against the remaining 157 minutes.
-  Budget for one more configure-iteration stop behind the utf8proc one; everything after tmux's configure — the
-  ncursesw/ncurses symlink trick, the prefix-restricted pkg-config, `dx bundle`, and the bundle assembly's `find` for
-  dx's `.app` output — has never run on darwin either. If a Mac is available, run
-  `scripts/build-private-tmux.sh aarch64-apple-darwin <out>` there first; it costs no CI budget and flushes out anything
-  past the utf8proc stop. Unblocks the manual Mac checklist (`docs/manual-mac-checklist.md`) and the README quickstart
-  NOTE.
+  aarch64-apple-darwin `Farhelm.app` with embedded helm, managed supervisor, and the CLI at `Contents/MacOS/farhelm`)
+  has never completed, which means the README's primary quickstart references an artifact that does not exist. Under the
+  tmux floor decision above, the job no longer needs to build a private darwin tmux at all — the app requires Homebrew's
+  tmux and probes for it — so the first step is removing the "Build Apple arm64 tmux" step, its cache, and the
+  `cp … Contents/MacOS/tmux` from the bundle assembly, then dispatching. Both prior failures (23 minutes spent of a
+  standing 180-minute macOS-runner budget) were inside that tmux build: attempt 1 died on ncurses terminfo installation
+  under case-insensitive APFS (fixed — `--disable-db-install` + system terminfo); attempt 2 died because tmux's darwin
+  configure demands an explicit utf8proc decision — deliberate upstream and still present in 3.7c/master, which
+  auto-tries utf8proc on darwin and falls back to the same error. Should the private darwin build ever come back (a
+  bundled fallback, say), the decisions already made for it stand: `--disable-utf8proc` (macOS's stale `wcwidth(3)` may
+  draw newer Unicode a cell off in Mac-local sessions; enabling means a fourth pinned static source, installed as an
+  archive only and linked by path), plus an `otool -L` assertion that every load command is under `/usr/lib/`, because
+  macOS cannot link a fully static executable, `ld` prefers a `.dylib` over a `.a` in the same directory, and a leaked
+  dynamic library yields a tmux that works on the runner and dies on every user's Mac with `dyld: Library not
+  loaded`
+  — the darwin leg of the script's prefix isolation has never executed on a Mac. The remaining unknowns are the
+  never-run darwin steps after that: `dx bundle` and the bundle assembly's `find` for dx's `.app` output. Then tag the
+  release commit and `gh workflow run release.yml --ref <tag> -f release_tag=<tag>`, counting the job against the
+  remaining 157 minutes. Unblocks the manual Mac checklist (`docs/manual-mac-checklist.md`) and the README quickstart
+  NOTE, both of which must also gain the Homebrew tmux step.
 
 - Review the two security-relevant resolutions made during the M7 run, and record a dated verdict (a note in
   SPEC_impl.md or a review comment on PR #117). (a) A product-spec/impl-spec conflict over where the web token is stored
