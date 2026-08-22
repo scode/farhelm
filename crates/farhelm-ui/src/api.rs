@@ -210,6 +210,100 @@ impl SessionFilter {
     }
 }
 
+/// The order a listing is asked for — SPEC.md's three, in the helm's own
+/// `?sort=` vocabulary.
+///
+/// A value of its own rather than a field on [`SessionFilter`], and the
+/// split is the helm's (`farhelm_helm::store::ListSort` makes the same
+/// statement from its side): a filter decides WHICH sessions a listing
+/// holds, an order decides in what sequence they arrive. Folded together,
+/// re-sorting would look like re-filtering — the count banner would announce
+/// a filter nobody applied, and the evidence predicates
+/// ([`SessionFilter::omits_fleet_members`]) would answer for a dimension
+/// that cannot change what a reply covers.
+///
+/// The default here is deliberately NOT the wire's. A request naming no
+/// order gets `created`, which is what every client written before there was
+/// a choice keeps getting; this UI names one on EVERY read, and the one it
+/// names before the user has expressed a preference is [`ListSort::Activity`]
+/// — a list someone opens wants the sessions they were last working in at
+/// the top. Nothing here reads the helm's default, so the two differ without
+/// either being wrong.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ListSort {
+    /// Effective activity descending: the session last observed producing
+    /// output first, with one that has produced none sorting by its creation
+    /// time rather than piling up at the epoch (the helm's
+    /// `SessionInfo::effective_activity`).
+    #[default]
+    Activity,
+    /// Creation time descending — the order this list had before there was a
+    /// choice, and still the one the helm serves a request that names none.
+    Created,
+    /// Title ascending, case-insensitively, under the helm's own collation.
+    Title,
+}
+
+impl ListSort {
+    /// The word this order travels as, and the exact inverse of
+    /// [`Self::from_key`].
+    ///
+    /// The helm's spelling rather than a translation of it: an unrecognized
+    /// `sort` is a 400 there, so a private vocabulary on this side would
+    /// produce a listing that FAILS rather than one that sorts differently.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            ListSort::Activity => "activity",
+            ListSort::Created => "created",
+            ListSort::Title => "title",
+        }
+    }
+
+    /// One of the three words, or `None` for anything else.
+    ///
+    /// `None` is what a persisted preference from a build that knew another
+    /// order decodes to, and what a hand-edited or truncated storage value
+    /// decodes to. The PERSISTED-PREFERENCE decoder
+    /// (`list::view::decoded_sort`) answers that with the default rather than
+    /// with an error: a stored preference is a convenience, and refusing to
+    /// draw a list over one would be a page that will not load because of a
+    /// word in localStorage.
+    ///
+    /// Defaulting is that decoder's rule and not a property of this
+    /// function, which is why it returns an `Option` at all. The select
+    /// handler is the caller that makes the opposite choice: every option in
+    /// the control is one this build wrote, so an unrecognized value there is
+    /// a word nobody offered, and it is ignored rather than defaulted —
+    /// silently re-sorting the list would be a worse answer than doing
+    /// nothing.
+    pub(crate) fn from_key(text: &str) -> Option<Self> {
+        match text {
+            "activity" => Some(ListSort::Activity),
+            "created" => Some(ListSort::Created),
+            "title" => Some(ListSort::Title),
+            _ => None,
+        }
+    }
+}
+
+/// One listing request's whole query string: the order first, then the
+/// filter's own parameters.
+///
+/// The order is present on every request this UI makes, including the
+/// unfiltered ones — see [`ListSort`] for why the UI never leans on the
+/// helm's own default. The consequence worth naming here is that the string
+/// is never empty, which is what lets the walk below build its URLs without
+/// a has-any-parameters case.
+fn list_query(filter: &SessionFilter, sort: ListSort) -> String {
+    let ordering = format!("sort={}", sort.key());
+    let filtered = filter.query();
+    if filtered.is_empty() {
+        ordering
+    } else {
+        format!("{ordering}&{filtered}")
+    }
+}
+
 /// The whole session list, as this UI holds it: every page of the helm's
 /// cursor walk concatenated, in the helm's own order.
 ///
@@ -992,13 +1086,14 @@ impl WalkClock {
 /// ## The order is the helm's
 ///
 /// No client-side sort. The helm serves the order the request asked for —
-/// creation-time-descending unless a `?sort=` says otherwise, each with the
-/// same stable tiebreaks — and its cursor walks that exact order, so
-/// re-sorting the rows here (this used to sort by session id) would scramble
-/// the pages back together in an order no cursor agrees with, making the
-/// boundary between page 1 and page 2 land in the middle of the list. The way
-/// to change the order is therefore to ASK for a different one, never to
-/// rearrange what came back.
+/// `sort` names it, each order with the same stable tiebreaks — and its
+/// cursor walks that exact order, so re-sorting the rows here (this used to
+/// sort by session id) would scramble the pages back together in an order no
+/// cursor agrees with, making the boundary between page 1 and page 2 land in
+/// the middle of the list. The way to change the order is therefore to ASK
+/// for a different one, never to rearrange what came back — which is exactly
+/// what the sidebar's sort control does: it changes `sort` and the next walk
+/// starts over.
 ///
 /// ## Three bounds, and what hitting one means
 ///
@@ -1023,16 +1118,20 @@ impl WalkClock {
 /// and status are folded into the message here rather than logged and
 /// dropped.
 ///
-/// ## The filter travels on every page
+/// ## The filter AND the order travel on every page
 ///
-/// `filter` is appended to each request, cursor pages included, because a
+/// Both are appended to each request, cursor pages included, because a
 /// cursor names a position in the helm's ORDER rather than in a result set:
 /// a walk whose later pages dropped the filter would quietly start listing
-/// rows its first page had excluded. The helm makes the same statement from
-/// its side (`ListQuery::cursor`), and this is the client half of it.
+/// rows its first page had excluded, and one that dropped the order would be
+/// resuming a position in a sequence it is no longer walking. The helm makes
+/// the same statement from its side (`ListQuery::cursor`, which refuses a
+/// cursor replayed under a different `sort` outright), and this is the client
+/// half of it.
 pub(crate) async fn fetch_sessions(
     base: &str,
     filter: &SessionFilter,
+    sort: ListSort,
 ) -> Result<SessionListing, String> {
     let mut sessions: Vec<Session> = Vec::new();
     let mut cursor: Option<String> = None;
@@ -1053,7 +1152,7 @@ pub(crate) async fn fetch_sessions(
     // logical read rather than each page's share of it (see
     // `MAX_LIST_MILLIS`).
     let clock = WalkClock::start();
-    let query = filter.query();
+    let query = list_query(filter, sort);
     // Hoisted: the filter cannot change under a walk (it is a snapshot the
     // caller took before the first request), so asking it once per page was
     // asking the same question over and over.
@@ -1065,13 +1164,11 @@ pub(crate) async fn fetch_sessions(
     let filtered = filter.narrows_beyond_archive();
     let omits_fleet_members = filter.omits_fleet_members();
     loop {
-        let url = match (&cursor, query.is_empty()) {
-            (None, true) => format!("{base}/api/sessions"),
-            (None, false) => format!("{base}/api/sessions?{query}"),
-            (Some(cursor), true) => {
-                format!("{base}/api/sessions?cursor={}", encode_query_value(cursor))
-            }
-            (Some(cursor), false) => format!(
+        // No empty-query case: `list_query` always carries the order, so
+        // every request this UI makes has at least one parameter.
+        let url = match &cursor {
+            None => format!("{base}/api/sessions?{query}"),
+            Some(cursor) => format!(
                 "{base}/api/sessions?{query}&cursor={}",
                 encode_query_value(cursor)
             ),
@@ -1172,6 +1269,45 @@ pub(crate) async fn fetch_sessions(
         truncated: truncated || incoherent,
         incoherent,
     })
+}
+
+/// The fleet's newest-created non-archived session, in one request.
+///
+/// The auto-select fallback's escape hatch. SPEC.md specifies that fallback
+/// as "the newest-created non-archived session", and `list::ListView` picks
+/// it out of the rows it already has — which is right exactly while those
+/// rows are the whole list. They are not when a walk stopped at a ceiling or
+/// came back underfilled AND the applied order is not creation order: under
+/// `title` or `activity` the newest session sits wherever its name or its
+/// last output put it, which may be past the cut. Picking the newest of a
+/// prefix would then open a session that is merely the newest one the walk
+/// happened to reach.
+///
+/// One page of one row, in creation order, under the DEFAULT filter — not
+/// the applied one, because the fallback SPEC.md describes is about the
+/// fleet rather than about whatever the user has narrowed the sidebar to.
+/// `limit=1` is the smallest page the helm accepts (it refuses zero, see
+/// `sessions::ListQuery`), which makes this the cheapest question the list
+/// API can be asked. Deliberately not a walk: there is no second page to
+/// want and no cursor to keep coherent.
+///
+/// `Ok(None)` means the helm served no usable row — an empty fleet, or (a
+/// case this tolerates rather than trusts) a default-view page whose only
+/// row came back archived. An `Err` is the helm failing to answer at all,
+/// which the caller reads as "no better answer than the rows in hand" rather
+/// than as a reason to leave the pane empty.
+pub(crate) async fn fetch_newest_created(base: &str) -> Result<Option<Session>, String> {
+    let query = list_query(&SessionFilter::default(), ListSort::Created);
+    let url = format!("{base}/api/sessions?{query}&limit=1");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    let page = resp
+        .json::<SessionPage>()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(page.sessions.into_iter().find(|session| !session.archived))
 }
 
 /// How often the FALLBACK polls refetch (PLAN_M6_75.md item 6).
@@ -3151,6 +3287,56 @@ mod tests {
             filter.query(),
             "include_archived=true&host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
              profile=claude%20code&status=waiting&title=a%26b"
+        );
+    }
+
+    /// Every listing request names its order, unfiltered ones included, and
+    /// names it in the helm's own vocabulary.
+    ///
+    /// The always half is what makes the sidebar's control mean anything: the
+    /// helm answers a request that names no order with `created`, so a UI
+    /// whose default was "send nothing" would show creation order while its
+    /// control said "recently active". The vocabulary half is why the words
+    /// are asserted literally rather than round-tripped through
+    /// [`ListSort::from_key`] — a round trip agrees with itself no matter
+    /// which words it invented, and an invented one is a 400 at the helm.
+    #[test]
+    fn every_listing_request_names_its_order() {
+        assert_eq!(
+            list_query(&SessionFilter::default(), ListSort::default()),
+            "sort=activity",
+            "the default view is still an explicit request for activity order"
+        );
+        assert_eq!(
+            list_query(&SessionFilter::default(), ListSort::Created),
+            "sort=created"
+        );
+        assert_eq!(
+            list_query(&SessionFilter::default(), ListSort::Title),
+            "sort=title"
+        );
+
+        // Alongside a filter, the order leads and the filter's own
+        // parameters follow unchanged — the two are independent dimensions
+        // of one request (see `ListSort`), not one merged query.
+        let searched = SessionFilter {
+            title: "needle".to_string(),
+            ..SessionFilter::default()
+        };
+        assert_eq!(
+            list_query(&searched, ListSort::Title),
+            "sort=title&title=needle"
+        );
+
+        // And the words survive a round trip, so a value written to storage
+        // under one build is read back as the same order by the next.
+        for sort in [ListSort::Activity, ListSort::Created, ListSort::Title] {
+            assert_eq!(ListSort::from_key(sort.key()), Some(sort));
+        }
+        assert_eq!(
+            ListSort::from_key("recent"),
+            None,
+            "a word this build does not know must not resolve to some other order"
         );
     }
 

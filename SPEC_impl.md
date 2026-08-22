@@ -44,6 +44,45 @@ no semantic selectors. Among DOM-based Rust options, Dioxus is the most active a
 Tauri+Leptos would mean gluing two frameworks for no clear gain. Skipping dioxus-fullstack keeps the API a first-class
 tested surface (the spawn CLI and test fixtures need it anyway) and avoids the framework's most churn-prone part.
 
+The session list's chosen ORDER is a per-client preference, kept outside the filter state. The browser keeps it in
+localStorage under `farhelm.sort`, beside the `farhelm.last-selected` record, as the bare word the helm's `?sort=`
+takes; an absent or unrecognized value reads as the UI default (`activity`). Falling back rather than failing matters
+because that storage outlives the build that wrote it: a word a later build stored is one the helm answers with a 400,
+so passing it through unchecked would leave the sidebar unable to list anything until someone cleared their browser
+storage. It is written only when the control changes, so a client that never touches it never writes. Desktop holds the
+same word in a process-local static for now — the webview's localStorage is not synchronously reachable from native
+Rust, the same constraint that leaves the remembered selection process-local there — so a fresh desktop launch starts on
+the default order until a follow-up wires real desktop persistence.
+
+Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
+reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
+list is filtered, whether a session's absence means it left the fleet, whether an optimistic rename may be retired — and
+not one of those answers can change because the same rows arrived in a different sequence. Reply ADMISSION is the one
+question that does depend on both: a listing walked under the previous order is a correct list of the wrong sequence
+arriving under a control that names another one, so it is refused exactly as a listing answering a stale filter is. The
+UI names the order on every read instead of leaning on the helm's `created` default, which is what keeps the control on
+screen and the rows beneath it from disagreeing. Changing it restarts the walk, since a cursor names a position in one
+order and the helm refuses one replayed under another.
+
+Two consequences are worth recording because nothing on screen shows either. The first is the auto-select fallback
+(SPEC.md's "newest-created non-archived session", for a client with no remembered selection): it can no longer be
+assumed to be the first row of the listing, because the first row is now whatever the chosen order put there. It picks
+by the session's `created_at` instead, which is why that field is decoded by the UI at all, and treats a missing stamp
+(an older helm) as unknown rather than as 1970 — a fleet with no stamps degrades to the listing's own first non-archived
+row. When the listing is INCOMPLETE and the applied order is not `created`, even that is not enough, since the newest
+session may lie past the cut; the fallback then asks the helm directly, with a one-row creation-order request under the
+default filter.
+
+The second is that a listing can now come back underfilled without any flag saying so. Sort keys are mutable — activity
+advances when a session prints, a title changes when someone renames it — so a live row can cross the cursor's position
+between two pages of one walk and be served by neither, while the walk ends normally with no ceiling hit and no
+`next_cursor`. Only the counts show it. "Short" is therefore one predicate with three readers rather than a rule each
+place restates: it is exactly the condition the count banner already prints "showing N of M" for, and the same answer
+now decides whether an absence may be read as a departure (otherwise the missing row's rename is retired, its editor
+closed, and — if it is the selected one — its pane torn down and replaced) and whether the auto-select fallback may
+trust its prefix. A UI that tells the user its list is incomplete and then reasons as though it were complete would be
+disagreeing with the one line whose job is to be believed.
+
 Known risks, accepted deliberately:
 
 - API churn between Dioxus 0.x releases. Mitigation: pin, avoid internals, budget for migrations.

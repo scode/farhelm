@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------
 
 import { expect, test } from "@playwright/test";
+import { SESSION_LISTING } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import {
   FAKE_AGENT_INVOCATION,
@@ -40,7 +41,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
 }) => {
   const sessionId = "11111111-2222-3333-4444-555555555555";
   const title = `interrupted-offer-${Date.now()}`;
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
