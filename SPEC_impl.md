@@ -106,6 +106,21 @@ closed, and — if it is the selected one — its pane torn down and replaced) a
 trust its prefix. A UI that tells the user its list is incomplete and then reasons as though it were complete would be
 disagreeing with the one line whose job is to be believed.
 
+Styling is the single hand-written application stylesheet, `crates/farhelm-ui/assets/app.css`: plain CSS, with no
+preprocessing and no framework transformation, though Dioxus still registers it as a packaged asset and decides its
+served path the same way it does every other asset. xterm.js's own look is a separate vendored stylesheet
+(`vendor/xterm.css`), loaded alongside app.css rather than folded into it. Its colors, font stacks, and non-zero corner
+radii are declared once as CSS custom properties in a `:root` block at the top of the file and referenced as
+`var(--token)` everywhere else; the rule is that no use site holds a literal, with one carve-out — a structural `0`,
+where a corner has to stay square because it joins a neighboring control, names no design value and stays a literal. The
+tokens are named for the role a value plays — surface levels (`--bg-*`), foreground levels (`--fg-*`), one accent
+family, `--ok`/`--warn`/`--danger` with their fill and border variants, `--radius-*`, `--font-ui`/`--font-mono` — rather
+than for the color it happens to be, so a restyle is an edit to one block instead of to every rule that mentioned the
+same hex. The palette is dark-only today; a light theme lands as a second `:root` block redefining the same names, which
+is the arrangement the no-literals rule exists to protect. A few tokens carry an `-alt` suffix: they are near-duplicate
+values the sheet accumulated before it had tokens, kept exactly as they were because introducing the token layer was
+required to change nothing on screen.
+
 Known risks, accepted deliberately:
 
 - API churn between Dioxus 0.x releases. Mitigation: pin, avoid internals, budget for migrations.

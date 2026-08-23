@@ -162,16 +162,8 @@ roadmap and carries no priorities unless an entry says so itself.
 - UI refresh (brainstormed 2026-08-22 from screenshots of the web UI): a set of chrome tweaks to make the shell read as
   modern rather than as the "minimal M1 chrome, nothing decorative" placeholder app.css still declares itself to be. The
   terminal itself is off-limits throughout — fidelity to the agent's real TUI is the product — and the sidebar stays
-  fixed-width (a recorded decision; denser rows solve the same pain). Each sub-item is its own PR; the token item goes
-  first (see it for why):
-
-  - Introduce design tokens in app.css — RECOMMENDED FIRST, before any other entry (here or elsewhere) that tweaks the
-    UI's look, since every later visual change otherwise pays a scattered-edit tax. Today the file has no CSS custom
-    properties and ~40 distinct hex literals inline (`#8a919e` 24 times, a long tail of one-offs that are probably
-    unintended near-duplicates). Replace with a `:root` block of named roles — surface levels (`--bg-0/1/2`), foreground
-    levels, one accent, ok/warn/danger, radius, and `--font-ui`/`--font-mono` — and `var()` at use sites.
-    Pixel-identical refactor; audit the one-offs into roles as part of it. Same file, no framework, no build change; a
-    light theme later becomes a second `:root` block.
+  fixed-width (a recorded decision; denser rows solve the same pain). Each sub-item is its own PR, and every one of them
+  builds on the design-token layer app.css now has (its `:root` block) rather than on literals:
 
   - Finish the JetBrains Mono conversion. The chrome font is still `system-ui` (app.css's html/body rule) and the
     vendored face is applied only through xterm's `fontFamily`; app.css's own header says nothing else uses it. The
