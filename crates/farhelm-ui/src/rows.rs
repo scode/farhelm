@@ -566,6 +566,7 @@ mod tests {
             annotation: None,
             restart_offer: crate::RestartOffer::FreshOnly,
             created_at: 0,
+            last_activity_at: 0,
             archived: false,
             tabs: Vec::new(),
             host: None,

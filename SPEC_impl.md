@@ -120,6 +120,47 @@ unattended-mode flag (`claude · skip-perms`). The working directory is tilde-fo
 abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
 truth stays one hover away.
 
+The status badge's dot-or-word split (SPEC.md's Status section) is decided in Rust, in `status::status_badge`, not in
+CSS: the badge carries its word on every path and a flag saying whether that word is shown or only left for a screen
+reader, so the badge element's text content is the status word on every status, live or ended. That is deliberate beyond
+accessibility — the browser suite's status oracles read text, and a design where a live status existed only as a color
+would have cost every one of them.
+
+The split is NARROWER than the TODO entry that asked for it, and deliberately so. That entry said "replace the
+`running`/`idle`/`exited` text with a color-coded dot", naming an ended status among the words to remove; the decision
+taken before the work started was to convert the LIVE statuses only. A dot is a good trade for a live status because
+there is nothing to lose: `running`, `waiting`, and `idle` are one word each carrying no information the color does not
+already carry. An ended status is not: its badge also carries the exit code, the "stopped by user" annotation, and the
+launch shim's exec-failure detail — facts no dot can hold and no tooltip should be the only home for, since they are
+usually the reason the row needs attention at all. Rendering them somewhere else on the row was considered and rejected
+as spending more of the density the refresh was buying than the words cost. SPEC.md's Status section is the
+authoritative statement of the resulting rule; this paragraph only records why it is not what the TODO said.
+
+The relative age beside it needs a `now`, and there is no honest one on the wire. `last_activity_at` is written by the
+session's HOST and compared against the VIEWER's wall clock, which on a remote helm is a different machine and in a
+multi-host fleet is several of them at once. The UI corrects for none of that. The one reference a client could obtain —
+the helm's own clock, off an HTTP `Date` header — would fix at most one of the N edges involved and would lend the rest
+a precision they do not have, so the code instead refuses to print nonsense (a stamp in the future reads `now` rather
+than a negative age) and keeps the raw stamp one hover away. The `Session` mirror decodes `last_activity_at` for this
+and applies the proto's own fallback rule, `last_activity_at` when positive and `created_at` otherwise, copied into
+`Session::effective_activity` rather than shared: this crate mirrors the HTTP contract rather than depending on proto
+internals, but the helm ORDERS an activity-sorted page by its copy of that rule, so a client rendering ages by a
+different one would print a column contradicting the order it was printed in. A zero means "this helm predates the
+field" and renders no age at all rather than an age counted from 1970. The viewer's end of the subtraction can go
+missing too — a platform clock that will not answer, or one sitting at or before the epoch — and that is carried as an
+absent value rather than as a zero, because subtracting a good host stamp from a zero "now" would clamp every session in
+the fleet to `now` and paint a dormant fleet as a busy one.
+
+Ages advance on a dedicated 30-second tick — one page-wide signal, written by a component mounted beside the
+invalidation feed and read by the list and the open session's header. The listing's fallback poll was the obvious thing
+to reuse and is the wrong one: it runs only while the feed is DOWN, so on a healthy page it never fires at all. The
+signal outlives the component that writes it, so the component republishes the current time at MOUNT before starting its
+loop: it is unmounted and remounted whenever the authenticated tree is rebuilt, and without that first write the page
+would spend a full tick — or, after a reauthentication that followed a long idle, much longer — rendering ages against a
+reading from before the gap. The list formats each row's age itself and hands the row a finished string, which is what
+keeps the tick from re-rendering rows whose displayed age has not moved — an `8h` row survives sixty ticks comparing
+equal.
+
 Styling is the single hand-written application stylesheet, `crates/farhelm-ui/assets/app.css`: plain CSS, with no
 preprocessing and no framework transformation, though Dioxus still registers it as a packaged asset and decides its
 served path the same way it does every other asset. xterm.js's own look is a separate vendored stylesheet

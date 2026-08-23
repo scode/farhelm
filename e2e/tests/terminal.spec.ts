@@ -2659,9 +2659,10 @@ test("a failed action's error is keyed to its own session, not shared across row
 
     await openRowMenu(rowB);
     await rowB.locator(".session-row-stop").click();
-    // "exited — stopped by user": the durable stop annotation qualifies
-    // the exited badge (PLAN_M3.md item 4, SPEC.md's "'stopped' is not a
-    // distinct status").
+    // The durable stop annotation qualifies the exited badge rather than
+    // replacing it (PLAN_M3.md item 4, SPEC.md's "'stopped' is not a
+    // distinct status"); `STOPPED_BADGE` carries the exact shape, exit
+    // code and ordering included.
     await expect(rowB.locator(".status-badge")).toHaveText(
       STOPPED_BADGE,
       { timeout: 10_000 },
@@ -3140,10 +3141,13 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
     // already pinned unconditionally by
     // `status_badge_matches_text_and_class_for_each_status` in lib.rs.
     //
-    // "exited — stopped by user": this session ended because the user
-    // stopped it, and PLAN_M3.md item 4's durable annotation QUALIFIES
-    // the exited badge rather than replacing it (SPEC.md: "'stopped' is
-    // not a distinct status").
+    // This session ended because the user stopped it, and PLAN_M3.md item
+    // 4's durable annotation QUALIFIES the exited badge rather than
+    // replacing it (SPEC.md: "'stopped' is not a distinct status").
+    // `STOPPED_BADGE` leaves the exit code optional for the same reason
+    // the paragraph above leaves the coarse state loose — this shutdown
+    // path may or may not produce one — while still pinning that the code,
+    // when present, LEADS the annotation.
     await expect(row.locator(".status-badge.exited")).toHaveText(
       STOPPED_BADGE,
       { timeout: 10_000 },
@@ -3397,6 +3401,193 @@ test("an error detail containing executable HTML renders literally in the badge"
     timeout: 10_000,
   });
   expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
+});
+
+// One synthetic running session, listed through a route mock with a
+// fabricated activity stamp.
+//
+// Fabricated rather than driven off a real session because a real one's age
+// is whatever the supervisor last observed, which no test can pin without
+// predicting the classifier — and the age's exact value is half of what the
+// dot tests below assert.
+const LIVE_DOT_ACTIVITY_AGE_SECS = 125;
+
+/** The listing body the dot tests below serve, with `now` resolved at call time. */
+function liveDotListing(extra: Record<string, unknown> = {}) {
+  return {
+    id: "synthetic-live-dot",
+    title: "synthetic-live-dot",
+    cwd: "/tmp",
+    invocation: "sleep 300",
+    status: { state: "running" },
+    annotation: null,
+    // Two minutes and five seconds: squarely inside the `Nm` bucket instead
+    // of on either edge. The boundaries themselves belong to `activity`'s
+    // unit tests, and a browser assertion sitting on one would fail whenever
+    // the page happened to render a second late.
+    last_activity_at: Math.floor(Date.now() / 1000) - LIVE_DOT_ACTIVITY_AGE_SECS,
+    ...extra,
+  };
+}
+
+// The 2026-08-23 UI refresh: a LIVE status is a colored dot beside the
+// title, its word kept as visually-hidden text, with a relative
+// last-activity age where the word used to be.
+//
+// Only the browser can prove the half that matters here. `status.rs`'s unit
+// tests pin which statuses hide their word and `activity`'s pin the age
+// buckets, but neither can see whether the hidden word actually got hidden.
+// Two opposite regressions are both invisible to Rust:
+//
+//   - `.visually-hidden` stops clipping, and the word is painted beside the
+//     dot — which no text assertion notices, because the text was always
+//     there.
+//   - `.visually-hidden` becomes `display: none` or picks up `aria-hidden`,
+//     and the word leaves the accessibility tree, leaving a status that is a
+//     color and nothing else. `toHaveText` still passes, because
+//     `textContent` includes hidden descendants; so does every `LIVE_BADGE`
+//     oracle in this suite (see that constant's own note).
+//
+// So this test asserts the two halves SEPARATELY — an accessible name for
+// the readable half, painted geometry for the visible half — and then proves
+// the accessibility assertion actually bites by breaking the word on purpose.
+//
+// The accessible name is read off the ROW, not off the badge: the badge
+// carries `title="running"`, and a `title` is the accname algorithm's last
+// resort, so a badge whose word had gone `display: none` would still answer
+// "running" for itself. The row button has no such fallback — its name comes
+// from its contents, and hidden contents drop out of it.
+test("a live session draws a dot with a hidden word and a relative age", async ({
+  page,
+}) => {
+  const session = liveDotListing();
+  await page.route(SESSION_LISTING, (route) =>
+    fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ sessions: [session], total: 1, truncated: false }),
+    }),
+  );
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${session.id}"]`);
+  const openButton = row.locator(".session-row-open");
+  const badge = row.locator(".status-badge.running");
+  // The badge's own text content is still exactly the status word: the
+  // contract the rest of this suite's status oracles are written against.
+  await expect(badge).toHaveText("running", { timeout: 10_000 });
+  // And the word reaches the accessibility tree, which is the claim the
+  // dot's existence depends on — a color is not a status anything can read.
+  await expect(openButton).toHaveAccessibleName(/running/);
+
+  // The dot is the visible half: present, inside the status-carrying badge,
+  // painted, and round rather than a stray square.
+  const dot = badge.locator(".status-dot");
+  await expect(dot).toHaveCount(1);
+  const dotBox = (await dot.boundingBox())!;
+  expect(dotBox).not.toBeNull();
+  expect(dotBox.width).toBeGreaterThan(0);
+  expect(dotBox.height).toBeGreaterThan(0);
+  expect(Math.abs(dotBox.width - dotBox.height)).toBeLessThanOrEqual(1);
+  expect(
+    await dot.evaluate((element) => getComputedStyle(element).borderRadius),
+  ).toBe("50%");
+
+  // The word is the invisible half: still in the DOM and still named above,
+  // but clipped to a box nobody can read it in.
+  const wordBox = await badge
+    .locator(".visually-hidden")
+    .evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    });
+  expect(wordBox.width).toBeLessThanOrEqual(1);
+  expect(wordBox.height).toBeLessThanOrEqual(1);
+
+  // And the age sits where the word used to: its own element (outside the
+  // badge, precisely so the badge's text content stays the status word), on
+  // the title's line, to the right of both the title and the badge. Geometry
+  // rather than sibling order, because Dioxus places its own placeholder
+  // nodes between conditional children.
+  const age = row.locator(".status-time");
+  await expect(age).toHaveText("2m");
+  await expect(age).toHaveAttribute(
+    "title",
+    /^last activity \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$/,
+  );
+  const titleBox = (await row.locator(".session-title").boundingBox())!;
+  const badgeBox = (await badge.boundingBox())!;
+  const ageBox = (await age.boundingBox())!;
+  expect(ageBox.x).toBeGreaterThan(titleBox.x);
+  expect(ageBox.x).toBeGreaterThanOrEqual(badgeBox.x);
+  const centerOf = (box: { y: number; height: number }) => box.y + box.height / 2;
+  expect(Math.abs(centerOf(ageBox) - centerOf(titleBox))).toBeLessThanOrEqual(4);
+
+  // The negative half: prove the accessible-name assertion above is load
+  // bearing rather than trivially true. Each of the two ways a "hidden" word
+  // could stop being readable must break it — otherwise this whole test
+  // would keep passing for a status that had become a color and nothing
+  // else. The mutations are made and reverted in the page, so the row is
+  // left exactly as it was found.
+  const word = badge.locator(".visually-hidden");
+  await word.evaluate((element: HTMLElement) => {
+    element.style.display = "none";
+  });
+  await expect(openButton).not.toHaveAccessibleName(/running/);
+  await word.evaluate((element: HTMLElement) => {
+    element.style.display = "";
+    element.setAttribute("aria-hidden", "true");
+  });
+  await expect(openButton).not.toHaveAccessibleName(/running/);
+  await word.evaluate((element: HTMLElement) => {
+    element.removeAttribute("aria-hidden");
+  });
+  await expect(openButton).toHaveAccessibleName(/running/);
+});
+
+// The pulse is a claim about RIGHT NOW, and a stale session cannot make it.
+//
+// A stale row's status is the helm's last-known report from a host nobody
+// can reach — the agent may have exited an hour ago. Animating that dot
+// would fabricate liveness, which is the same no-guessing violation as
+// giving `Unknown` a word, and worse in kind: motion reads as evidence of
+// something happening, and no static screenshot review would ever catch it.
+//
+// Asserted through the COMPUTED animation name rather than by watching
+// pixels: the fixed-point question is which rule won the cascade, and the
+// stale override sits at higher specificity than the base running rule (see
+// `.session-row.stale .status-badge.running .status-dot` in app.css), which
+// is exactly the kind of thing a later selector edit breaks silently.
+test("only a reachable running dot pulses", async ({ page }) => {
+  const reachable = liveDotListing();
+  const unreachable = liveDotListing({
+    id: "synthetic-stale-dot",
+    title: "synthetic-stale-dot",
+    stale: true,
+  });
+  await page.route(SESSION_LISTING, (route) =>
+    fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessions: [reachable, unreachable],
+        total: 2,
+        truncated: false,
+      }),
+    }),
+  );
+
+  await page.goto("/");
+  const dotOf = (id: string) =>
+    page.locator(`[data-session-id="${id}"] .status-badge.running .status-dot`);
+  const animationOf = (id: string) =>
+    dotOf(id).evaluate((element) => getComputedStyle(element).animationName);
+
+  await expect(dotOf(reachable.id)).toHaveCount(1, { timeout: 10_000 });
+  await expect(dotOf(unreachable.id)).toHaveCount(1);
+
+  expect(await animationOf(reachable.id)).toBe("farhelm-status-pulse");
+  expect(await animationOf(unreachable.id)).toBe("none");
 });
 
 test("truncation banner shows when the listing reports truncated", async ({

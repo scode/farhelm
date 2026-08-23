@@ -548,9 +548,15 @@ samp {
    its host-unreachable notice instead (see `.stale-metadata` and
    `status_badge_destination`), which is why this never doubles up.
 
-   `flex-shrink: 0`: a badge is one word, and ellipsizing a one-word badge
-   would not save meaningful space while making the word itself unreadable
-   — unlike `.meta` and `.title`, which have somewhere useful to give. */
+   Tightens the padding for an ENDED session's word only: the live statuses'
+   dot-only rule in the status-badge section below is later in the sheet at
+   equal specificity, so it still wins for the three that draw as a dot.
+
+   `flex-shrink: 0`: the badge is a 7px dot or a string already capped at
+   32ch by `.status-badge` itself, so shrinking it further would not free
+   meaningful space while making the one thing it exists to state
+   unreadable — unlike `.meta` and `.title`, which have somewhere useful to
+   give. */
 .titlebar .status-badge {
   padding: 1px 6px;
   flex-shrink: 0;
@@ -684,13 +690,29 @@ samp {
 
 /* Present to assistive technology and to nobody's eyes: the clip-rect
    idiom rather than `display: none` or `visibility: hidden`, both of which
-   remove an element from the accessibility tree entirely — which for an
-   `aria-describedby` target means the description silently does not exist.
-   Used for the restart offer's explanation, which reaches a user through
-   two channels: the button's `title` as a mouse's hover tooltip, and this
-   element — via `aria-describedby` — as assistive technology's accessible
-   description. Those are the two channels this class actually serves, not
-   a claim about every user without a pointer. */
+   remove an element from the accessibility tree entirely.
+
+   Two use sites, and the class is deliberately ONE for both — a second
+   copy under another name is a drift risk with no upside, and both want
+   exactly this behavior:
+
+   - The restart offer's explanation, an `aria-describedby` target. Removing
+     it from the accessibility tree would mean the description silently does
+     not exist. It reaches a user through two channels: the button's `title`
+     as a mouse's hover tooltip, and this element as assistive technology's
+     accessible description. Those are the two channels this class actually
+     serves, not a claim about every user without a pointer.
+   - A live status badge's WORD, whose visible half is a colored dot (see
+     `.status-dot`) and a color is not a status anything can read. This is
+     what keeps a screen reader able to say which of running/waiting/idle a
+     row is in. The browser suite's text oracles depend on the word being in
+     the DOM as well, though that is a property of the markup rather than of
+     this rule — CSS does not change an element's `textContent` either way.
+
+   The absolute positioning is what makes it free: with no `top`/`left` the
+   box sits at its static position, so it displaces nothing and takes no
+   part in its parent's line box — which matters at the badge, whose
+   baseline has to come from the dot rather than from a hidden 1px span. */
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -748,7 +770,8 @@ samp {
      stared at all day: a fade long enough to notice becomes a tic, and
      a blanket `transition: all` would animate layout properties nobody
      asked to move. Hover tints on rows and buttons are the whole budget
-     — this sheet has no `@keyframes` and gains none here. */
+     — this sheet's ONLY `@keyframes` is the running dot's pulse (see
+     `.status-dot`), and controls gain none here. */
   transition: background-color 100ms;
 }
 
@@ -1516,7 +1539,14 @@ samp {
 
 /* Status styling is deliberately minimal and honest (PLAN_M2.md): a
    color signals the coarse category, never a guess about what the
-   session is doing. */
+   session is doing.
+
+   The badge has TWO shapes, decided in `status.rs` rather than here (see
+   `StatusBadge::visible`). A LIVE session draws as a colored dot with its
+   word kept as `.visually-hidden` text; an ENDED one keeps the word visible,
+   because an exit code, a "stopped by user" annotation, and the shim's
+   exec-failure detail are facts a dot cannot carry. Both shapes go through
+   the same modifier classes below, so the color story is one story. */
 .status-badge {
   font-size: 12px;
   padding: 2px 8px;
@@ -1536,6 +1566,117 @@ samp {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A LIVE badge is its dot and nothing else, so it carries no padding: the
+   dot is 7px wide and 16px of padding around it would read as a gap rather
+   than as a mark. The line's own `gap` is the whole spacing story there.
+   Enumerated rather than derived from a modifier class because it is the
+   same three statuses the color rules below already enumerate — and it is a
+   fact about which statuses `status.rs` renders dot-only, so the two lists
+   move together or not at all. */
+.status-badge.running,
+.status-badge.waiting,
+.status-badge.idle {
+  padding: 2px 0;
+}
+
+/* The dot itself. `currentColor` rather than a color of its own is what
+   lets this one rule serve every status: the badge's own modifier class
+   (below) sets the color, and the dot inherits whatever verdict that was —
+   so the SHAPE is centralized here even though the palette is not.
+
+   A status added later still costs three edits, and this rule is not one of
+   them: it needs a `.status-badge.<name>` color rule below, an entry in the
+   zero-padding selector above if it draws dot-only, and a `visible` answer
+   in `status.rs`. `currentColor` removes the fourth, nothing more — do not
+   read it as "new statuses are free".
+
+   Sized in px rather than em because it is a MARK, not text — it has to
+   stay the same size beside a 14px row title and a 13px header title. */
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The only animation in the app, and it is spent here deliberately: running
+   is the one status that means something is happening RIGHT NOW, and a
+   still dot cannot distinguish "working" from "alive but at rest" without
+   asking the user to compare two greens. Slow (2s) and shallow (down to 45%
+   opacity, never off) so it reads as a heartbeat in peripheral vision
+   rather than as a blink demanding attention — this sits in a sidebar
+   someone stares at all day.
+
+   Opacity only: animating size or color would move layout or fight the
+   status palette, and opacity is the one property a compositor can animate
+   without touching either. */
+@keyframes farhelm-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.status-badge.running .status-dot {
+  animation: farhelm-status-pulse 2s ease-in-out infinite;
+}
+
+/* A stale row, and the stale session's own metadata band, get a STILL dot.
+   The pulse is a claim about right now — "something is happening" — and
+   staleness is precisely the state in which nobody can make that claim: the
+   host is unreachable, and the running status on screen is the last report
+   anyone received rather than a live one. A heartbeat over a session that
+   may have exited an hour ago on a machine nobody can reach is the exact
+   fabricated liveness SPEC.md's no-guessing rule forbids, and it is worse
+   than a wrong word because motion reads as evidence.
+
+   Both surfaces are named because the same badge renders in both (see
+   `status_badge_destination`), and neither is a descendant of the other. */
+.session-row.stale .status-badge.running .status-dot,
+.stale-metadata .status-badge.running .status-dot {
+  animation: none;
+}
+
+/* Someone who asked their system for less motion gets a steady dot. The
+   status is still fully readable — the color says running and the hidden
+   word says it in text — so nothing is lost by standing the pulse down,
+   which is exactly the test for whether an animation may be removed. */
+@media (prefers-reduced-motion: reduce) {
+  .status-badge.running .status-dot {
+    animation: none;
+  }
+}
+
+/* How long ago the session was last active, beside the status rather than
+   about it — the stamp says when the agent's pane last changed, not when
+   anyone classified the status next to it.
+
+   Deliberately outside `.status-badge` — the badge's text content is the
+   status word and nothing else, which is what a screen reader announces and
+   what the browser suite asserts on — and deliberately in the muted
+   foreground rather than the status color: an age is not a verdict, and
+   "2m" painted amber would read as one.
+
+   Never shrinks, and note what that does NOT assume: the age is short in
+   practice ("2m", "23h") but is not capped in width — `activity.rs` prints
+   `1000d` for a session quiet long enough, deliberately, since a cap would
+   need a "more than" marker to stay honest. This field is what makes the
+   list's "recently active" order legible, so it holds its width and the
+   title and metadata line give instead; an age wide enough to squeeze them
+   is a fleet with a bigger problem than a wide row. `white-space` is left
+   alone on purpose — every age is one unbreakable token, so there is
+   nothing for `nowrap` to prevent. */
+.status-time {
+  color: var(--fg-1);
+  font-size: 12px;
+  flex: 0 0 auto;
 }
 
 /* The three live statuses (PLAN_M6_75.md item 3) are TWO groups, not three
@@ -2174,6 +2315,9 @@ samp {
    own badge while this band is up (`status_badge_destination`), so the two
    never print the same word twice. */
 .stale-metadata {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   padding: 0 10px 6px;
   background: var(--bg-1);
 }

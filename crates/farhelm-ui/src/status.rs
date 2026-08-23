@@ -1,6 +1,25 @@
 //! What a session's status SAYS: the badge every surface renders it as, and
 //! the consequence sentence a delete confirmation opens with.
 //!
+//! ## The badge is a dot for some statuses and a word for others
+//!
+//! A live session (running/waiting/idle) draws as a colored dot beside the
+//! title, with its word kept in the DOM as screen-reader-only text; an ended
+//! one (exited/interrupted/error) keeps its word visible. The split is not
+//! cosmetic: what a live badge has to communicate is one of three states,
+//! which a color says faster than a word and in less of a dense row's width,
+//! while an ended badge carries an exit code, a "stopped by user"
+//! annotation, or the shim's exec-failure detail — facts no dot can hold.
+//! The relative age that now sits beside the badge (`activity`) is what took
+//! over the width the live word gave up.
+//!
+//! The word never LEAVES the DOM, which is the load-bearing half of that
+//! design. A color-only status is unreadable to a screen reader and
+//! unassertable by anything that reads text, so [`StatusBadge::visible`]
+//! chooses between showing the text and hiding it visually — never between
+//! having it and not. The badge element's text content is therefore exactly
+//! the same string it was before the dot existed, on every status.
+//!
 //! Both are pure `SessionStatus` -> text mappings with no renderer and no
 //! I/O, which is what lets them be pinned by unit tests here rather than only
 //! through the browser. The status itself, and the predicates that ask about
@@ -25,20 +44,35 @@
 //! promise to kill something that is already gone. Those are the assertions
 //! the tests at the bottom exist for.
 
+use dioxus::prelude::*;
+
 use crate::SessionStatus;
 
-/// A rendered badge's CSS modifier class paired with its display text, or
-/// `None` for a status that must not be badged at all — named so every
-/// call site (and `session_view`'s destination-routing helper, which
-/// juggles TWO of these at once) spells one type rather than repeating the
-/// tuple shape.
-pub(crate) type StatusBadge = Option<(&'static str, String)>;
+/// One rendered status badge: its CSS modifier class, the text it states,
+/// and whether that text is SHOWN or only available to a screen reader.
+///
+/// The `visible` flag is the dot-versus-word split (see the module docs).
+/// Callers must render `text` either way — a hidden word is still the badge's
+/// whole textual content, and it is what assistive technology and the browser
+/// suite read the status off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StatusBadge {
+    /// Matches the status name (`running`, `exited`, …), one vocabulary from
+    /// the wire to the stylesheet, and carries the badge's color.
+    pub(crate) class: &'static str,
+    /// What this badge states, annotation and exit code included.
+    pub(crate) text: String,
+    /// `false` for the live statuses, whose dot is the visible half. It is
+    /// `SessionStatus::has_ended` by construction, never a per-status
+    /// judgement — a badge shows its word exactly when the status has
+    /// something a dot cannot carry.
+    pub(crate) visible: bool,
+}
 
-/// Map a status — and, for an ended session, its annotation — to the
-/// badge's CSS modifier class and display text, or `None` for a status
-/// that must not be badged at all. Kept as one function so
-/// every case stays next to its siblings instead of drifting apart across
-/// separate match arms in the render tree.
+/// Map a status — and, for an ended session, its annotation — to the badge to
+/// render, or `None` for a status that must not be badged at all. Kept as one
+/// function so every case stays next to its siblings instead of drifting
+/// apart across separate match arms in the render tree.
 ///
 /// ## `Unknown` renders NO BADGE
 ///
@@ -79,8 +113,11 @@ pub(crate) type StatusBadge = Option<(&'static str, String)>;
 /// host-unreachable notice (SPEC.md's "title, directory, last-known status")
 /// — and two copies of this mapping would let one surface describe a session
 /// differently from the other.
-pub(crate) fn status_badge(status: &SessionStatus, annotation: Option<&str>) -> StatusBadge {
-    Some(match status {
+pub(crate) fn status_badge(
+    status: &SessionStatus,
+    annotation: Option<&str>,
+) -> Option<StatusBadge> {
+    let (class, text) = match status {
         // The three live statuses get three words and three CSS modifiers,
         // because the whole point of the split is that a user can tell them
         // apart at a glance across a list. The class names match the status
@@ -120,7 +157,62 @@ pub(crate) fn status_badge(status: &SessionStatus, annotation: Option<&str>) -> 
         SessionStatus::Error { detail } => ("error", format!("error — {detail}")),
         // Deliberately the one early return: see this function's own docs.
         SessionStatus::Unknown => return None,
+    };
+    Some(StatusBadge {
+        class,
+        text,
+        // Derived from the status rather than spelled out per arm, because
+        // it is not a per-status choice: the dot-versus-word split IS the
+        // live-versus-ended split (see this module's docs), and the arms
+        // above are only about wording. Restating the boolean six times
+        // would invite a seventh arm to get it wrong on its own.
+        visible: status.has_ended(),
     })
+}
+
+/// The badge element itself, shared by every surface that draws one: the
+/// sidebar's rows, the open session's header, and the stale-metadata band
+/// under a host-unreachable notice.
+///
+/// A component rather than three copies of the same rsx because the DOT and
+/// the visually-hidden word have to agree everywhere — a surface that
+/// rendered the dot without the word would be a status no screen reader can
+/// read, and one that rendered the word without the dot would be a status
+/// nobody can see. The badge element's own text content is the status text
+/// on every path through this, hidden or not.
+///
+/// The dot is drawn only for a status whose word is hidden. An ended
+/// session's badge already carries its color on visible text, so a dot
+/// beside it would repeat in a symbol what the word says in letters.
+///
+/// `title` carries the full text on every badge, for two different reasons
+/// that happen to want the same attribute. An ended badge is capped at 32ch
+/// and ellipsizes (`app.css`'s `.status-badge`) — the shim's own `error`
+/// detail rides straight into this text and can run long, so the tooltip is
+/// the only way back to a badge that has visibly clipped. A live badge has
+/// no visible text at all, so the tooltip is what lets a mouse user recover
+/// the word its color stands in for.
+#[component]
+pub(crate) fn StatusBadgeView(badge: StatusBadge) -> Element {
+    rsx! {
+        span { class: "status-badge {badge.class}", title: "{badge.text}",
+            if badge.visible {
+                "{badge.text}"
+            } else {
+                // The dot is empty and `aria-hidden`: it contributes nothing
+                // to the accessible name (the word beside it is the whole of
+                // that), and its color comes from the badge's own status
+                // class through `currentColor` — see `.status-dot` in
+                // app.css. The word follows it under `.visually-hidden`,
+                // which CLIPS rather than removes: `display: none` and
+                // `visibility: hidden` would take it out of the
+                // accessibility tree, leaving a status that is a color and
+                // nothing else.
+                span { class: "status-dot", "aria-hidden": "true" }
+                span { class: "visually-hidden", "{badge.text}" }
+            }
+        }
+    }
 }
 
 /// The safety-critical half of the inline delete-confirmation prompt:
@@ -197,41 +289,71 @@ pub(crate) fn confirm_consequence(status: &SessionStatus) -> &'static str {
 mod tests {
     use super::*;
 
-    /// Pins BOTH the badge's display text and its CSS modifier class per
-    /// status — not just the text — since a class regression (e.g. an
-    /// `Exited` row silently keeping a live class) would only
-    /// otherwise surface as a wrong-COLORED row in the browser, which no
-    /// text-only assertion here would ever catch.
+    /// The three properties of a badge, spelled out at each call site so the
+    /// assertions below read as the specification they are rather than as
+    /// struct literals.
+    fn badge(class: &'static str, text: &str, visible: bool) -> Option<StatusBadge> {
+        Some(StatusBadge {
+            class,
+            text: text.to_string(),
+            visible,
+        })
+    }
+
+    /// Pins BOTH the badge's text and its CSS modifier class per status —
+    /// not just the text — since a class regression (e.g. an `Exited` row
+    /// silently keeping a live class) would only otherwise surface as a
+    /// wrong-COLORED row in the browser, which no text-only assertion here
+    /// would ever catch. That matters more now than it did when the class
+    /// merely tinted a word: for a live status the class IS the badge, since
+    /// the color is the only part of it anyone sees.
     ///
     /// The three live statuses are the M6.75 split (PLAN_M6_75.md item 3),
     /// and each gets its own word AND its own class: the badge is the whole
     /// user-visible product of this milestone, so two statuses sharing a
     /// colour would defeat the point of splitting them at all.
+    ///
+    /// The `visible` column is the dot-versus-word split, and it is spelled
+    /// out per status HERE precisely because the implementation now derives
+    /// it from `SessionStatus::has_ended`: an assertion written the same way
+    /// would restate the code instead of checking it. The two directions
+    /// fail differently and both fail quietly. A live status that turned
+    /// visible again puts the word back in a row that was densified to lose
+    /// it — cosmetic, and obvious the moment anyone looks. An ended status
+    /// that turned INVISIBLE hides an exit code, a "stopped by user"
+    /// annotation, or the shim's exec-failure detail behind a dot that
+    /// cannot carry any of them, and nothing on screen would say a fact went
+    /// missing.
+    ///
+    /// What it deliberately does NOT cover is the rendered element:
+    /// `StatusBadgeView` turning `visible: false` into a dot plus clipped
+    /// text is a browser fact (`.visually-hidden` has to actually clip), and
+    /// the terminal spec's live-dot test is what asserts it.
     #[test]
     fn status_badge_matches_text_and_class_for_each_status() {
         assert_eq!(
             status_badge(&SessionStatus::Running, None),
-            Some(("running", "running".to_string()))
+            badge("running", "running", false)
         );
         assert_eq!(
             status_badge(&SessionStatus::Waiting, None),
-            Some(("waiting", "waiting".to_string()))
+            badge("waiting", "waiting", false)
         );
         assert_eq!(
             status_badge(&SessionStatus::Idle, None),
-            Some(("idle", "idle".to_string()))
+            badge("idle", "idle", false)
         );
         assert_eq!(
             status_badge(&SessionStatus::Exited { exit_code: Some(7) }, None),
-            Some(("exited", "exited (code 7)".to_string()))
+            badge("exited", "exited (code 7)", true)
         );
         assert_eq!(
             status_badge(&SessionStatus::Exited { exit_code: None }, None),
-            Some(("exited", "exited".to_string()))
+            badge("exited", "exited", true)
         );
         assert_eq!(
             status_badge(&SessionStatus::Interrupted, None),
-            Some(("interrupted", "interrupted".to_string()))
+            badge("interrupted", "interrupted", true)
         );
         assert_eq!(
             status_badge(
@@ -240,10 +362,7 @@ mod tests {
                 },
                 None
             ),
-            Some((
-                "error",
-                "error — exec_failed argv0=/nope errno=2".to_string()
-            )),
+            badge("error", "error — exec_failed argv0=/nope errno=2", true),
             "the shim's own recorded detail must reach the badge text, not just its class"
         );
     }
@@ -286,7 +405,9 @@ mod tests {
     /// reads as a fourth status word and drops the one fact the badge
     /// exists to state. The `exited` CSS class is asserted alongside the
     /// text for the same reason: a stopped session must still LOOK like an
-    /// ended one.
+    /// ended one. The annotation is also the concrete reason ended badges
+    /// kept a VISIBLE word while live ones gave theirs up — "stopped by
+    /// user" is a fact no dot can carry.
     ///
     /// The live-session case is the one a naive implementation gets
     /// wrong: an annotation describes how a run ENDED, so it must never
@@ -299,19 +420,19 @@ mod tests {
                 &SessionStatus::Exited { exit_code: None },
                 Some("stopped by user")
             ),
-            Some(("exited", "exited — stopped by user".to_string()))
+            badge("exited", "exited — stopped by user", true)
         );
         assert_eq!(
             status_badge(
                 &SessionStatus::Exited { exit_code: Some(0) },
                 Some("stopped by user")
             ),
-            Some(("exited", "exited (code 0) — stopped by user".to_string())),
+            badge("exited", "exited (code 0) — stopped by user", true),
             "the code leads so it survives the badge's character cap ahead of a long annotation"
         );
         assert_eq!(
             status_badge(&SessionStatus::Running, Some("stopped by user")),
-            Some(("running", "running".to_string())),
+            badge("running", "running", false),
             "an annotation must never describe a session that is running"
         );
     }

@@ -3,6 +3,7 @@
 //! These types keep the view, row, and create form on one representation of
 //! row state and host identity.
 
+use crate::activity::ActivityStamp;
 use crate::hosts::{host_incarnation, is_connected, phase_label};
 use crate::peer::display_peer;
 use crate::{Host, HostId, HostKind, Session, SessionStatus};
@@ -62,6 +63,18 @@ pub(super) struct RowState {
     /// where every session is local therefore renders no host lines and
     /// still re-renders exactly the rows a selection change touched.
     pub(super) host_is_local: bool,
+    /// How long ago this session was last active, already FORMATTED, or
+    /// `None` for a helm that sends no activity stamp at all.
+    ///
+    /// Formatted by `ListView` rather than by the row precisely so the
+    /// clock's 30-second tick (`activity::ACTIVITY_NOW`) does not re-render
+    /// every row every half minute: a row reading the raw stamp would see
+    /// each tick as a change, while the formatted age of a session last
+    /// active eight hours ago is the same string across sixty of them and
+    /// compares equal. The one place that pays per tick is `ListView`
+    /// itself, which re-renders and hands each row a value that mostly has
+    /// not moved.
+    pub(super) activity: Option<ActivityStamp>,
 }
 
 /// Whether a session sits on the helm's own machine, given the registry's

@@ -70,6 +70,13 @@
 //!   the session view render it as, and the consequence sentence a delete
 //!   confirmation opens with. Wording only; what a status MEANS is
 //!   `SessionStatus`'s own business, right here.
+//! - `activity`: how long ago a session was last OBSERVED ACTIVE — the
+//!   short relative age rendered beside its status, the absolute stamp
+//!   behind it, and the one coarse clock signal every surface computes
+//!   those against. Formatting and a tick, nothing more: the stamp itself
+//!   is the supervisor's record of the agent pane changing
+//!   (`Session::last_activity_at`), which is an independent fact from the
+//!   status beside it — neither says when the status was classified.
 //! - `tabs`: the tab-domain half of terminal tabs (PLAN_M4.md item 6) —
 //!   the renderer-free derivations (which tabs to show, their labels and
 //!   DOM ids, the WebSocket path) plus the strip's one presentational
@@ -120,6 +127,7 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
 
+mod activity;
 mod api;
 mod archive;
 mod attachments;
@@ -389,6 +397,31 @@ pub struct Session {
     /// happened to favor.
     #[serde(default)]
     pub created_at: i64,
+    /// Seconds since the Unix epoch when the supervisor last saw this
+    /// session's agent pane CHANGE, straight off the wire
+    /// (`SessionInfo::last_activity_at`).
+    ///
+    /// Read it as "activity around this time", never as a precise instant:
+    /// the observation is the same coarse screen comparison that drives
+    /// `status`, and the supervisor quantizes the value at the source,
+    /// moving it only when what it saw is at least a minute newer than what
+    /// it already holds. Nothing about liveness follows from it either —
+    /// `status` is the only field that answers "is this doing something
+    /// right now", and this one keeps its last value for a session that has
+    /// exited. The proto's own docs carry the full contract.
+    ///
+    /// Decoded so the chrome can SHOW the order it already sorts by: the
+    /// list's default order is "recently active" (SPEC.md's Session list),
+    /// and before this the number behind that order appeared nowhere on
+    /// screen. Rendered through `activity::ActivityStamp` as a short age
+    /// beside the status, never as a raw stamp.
+    ///
+    /// `#[serde(default)]` to `0` carries the proto's reading exactly: a
+    /// helm that predates the field, not a session last active in 1970. Read
+    /// it through [`Session::effective_activity`] rather than raw unless the
+    /// difference between "unknown" and a real stamp is the point.
+    #[serde(default)]
+    pub last_activity_at: i64,
     /// Whether archive has deliberately removed this session's processes
     /// and terminal while retaining the conversation metadata and committed
     /// attachments.
@@ -473,6 +506,32 @@ pub struct Session {
     /// an `Option` as `None`, which is also what a helm predating the field
     /// sends. Both readings agree: no profile is known for this session.
     pub source_profile: Option<SourceProfile>,
+}
+
+impl Session {
+    /// The activity stamp to DISPLAY by: [`Session::last_activity_at`] when
+    /// the helm supplied one, [`Session::created_at`] when it did not.
+    ///
+    /// A deliberate copy of `farhelm_proto::SessionInfo::effective_activity`,
+    /// which is the same rule on the other side of the wire. Copied rather
+    /// than shared because this crate mirrors the HTTP CONTRACT rather than
+    /// depending on proto internals (see `Session`'s own docs) — but the two
+    /// must not drift: the helm ORDERS an activity-sorted page by its
+    /// version of this rule, and a client that rendered ages by a different
+    /// one would print a column that contradicted the order it was printed
+    /// in. If the proto's fallback changes, this changes with it.
+    ///
+    /// A zero here is "this helm predates the field", never 1970 — the
+    /// fallback exists for exactly that compatibility case. When both are
+    /// zero the answer stays zero, and `activity::ActivityStamp` renders
+    /// nothing at all rather than an age counted from the epoch.
+    pub(crate) fn effective_activity(&self) -> i64 {
+        if self.last_activity_at > 0 {
+            self.last_activity_at
+        } else {
+            self.created_at
+        }
+    }
 }
 
 /// Deserialize `Session::host_identity`, whose key PRESENCE carries meaning
@@ -1053,6 +1112,12 @@ fn AppBody() -> Element {
             // item 6); what it produces is the revision counter each page
             // re-reads on.
             feed::FleetFeed {}
+            // Beside the feed, and for the same reason: the coarse "now"
+            // every relative activity age is computed against belongs to
+            // the PAGE, not to whichever pane happens to print an age, and
+            // a clock owned by the keyed view below would restart on every
+            // selection switch. Renders nothing (see `activity`).
+            activity::ActivityClock {}
             // The two-pane shell (BUGS_BURNDOWN.md issue 5): the session
             // list is a permanent SIDEBAR and the right pane holds the
             // selected session — both mounted at once, which is the whole
@@ -1715,5 +1780,73 @@ mod tests {
                 "{incomplete} must not decode into fabricated values"
             );
         }
+    }
+
+    /// The activity fallback this crate COPIES from the wire contract,
+    /// pinned on this side of the copy.
+    ///
+    /// `Session::effective_activity` is a deliberate duplicate of
+    /// `farhelm_proto::SessionInfo::effective_activity` — this crate mirrors
+    /// the HTTP contract rather than depending on proto internals — and a
+    /// duplicate with no test of its own is a rule that can drift silently.
+    /// What drift would cost is specific: the helm ORDERS an activity-sorted
+    /// page by its copy, so a client that resolved `0` differently would
+    /// print an age column contradicting the order the rows arrived in, with
+    /// nothing failing anywhere. The proto's own test pins the same table on
+    /// the other side; both have to hold for the two to stay one rule.
+    ///
+    /// The `0` row is the compatibility case the whole method exists for: a
+    /// helm predating `last_activity_at` sends nothing, `#[serde(default)]`
+    /// fills in a zero, and that zero means "unknown", never 1970.
+    #[test]
+    fn effective_activity_falls_back_to_creation_time_only_when_unknown() {
+        let at = |last_activity_at: i64, created_at: i64| Session {
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Running,
+            annotation: None,
+            restart_offer: RestartOffer::FreshOnly,
+            created_at,
+            last_activity_at,
+            archived: false,
+            tabs: Vec::new(),
+            host: None,
+            host_identity: None,
+            host_name: None,
+            stale: false,
+            source_profile: None,
+        };
+
+        assert_eq!(
+            at(1_700_000_600, 1_700_000_000).effective_activity(),
+            1_700_000_600,
+            "an observed stamp always wins, including one OLDER than creation time — \
+             the rule is presence, not recency"
+        );
+        assert_eq!(
+            at(0, 1_700_000_000).effective_activity(),
+            1_700_000_000,
+            "a sender that predates the field falls back to creation time"
+        );
+        assert_eq!(
+            at(-1, 1_700_000_000).effective_activity(),
+            1_700_000_000,
+            "and so does any nonpositive value: the guard is `> 0`, not `!= 0`"
+        );
+        assert_eq!(
+            at(0, 0).effective_activity(),
+            0,
+            "with neither stamp the answer stays 0, which `ActivityStamp` renders \
+             as no age at all rather than as an age counted from the epoch"
+        );
+
+        let unknown = at(0, 1_700_000_000);
+        assert_eq!(
+            unknown.last_activity_at, 0,
+            "the fallback is DERIVED at read time and never written back — a stored \
+             guess would be indistinguishable from an observation afterwards"
+        );
     }
 }
