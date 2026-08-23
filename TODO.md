@@ -152,17 +152,6 @@ roadmap and carries no priorities unless an entry says so itself.
   ordered trace. That should show whether WebKit delays teardown or opens a replacement after the refusal. Replace the
   race with a deterministic lifecycle barrier once the ordering is known; do not hide it behind a longer sleep.
 
-- Deflake `manager::tests::default_changed_alone_bumps_the_fleet_revision` (crates/farhelm-helm/src/manager.rs) if it
-  fires again. One occurrence: 2026-08-22, CI `test` job on PR #206 at e44900f9 (run 32561406561); the same job passed
-  on the PR's previous head two hours earlier with identical manager/profile code, and the helm lib suite passed
-  repeatedly on the devbox with the test in it. The assertion at the end of the test expected the remembered default to
-  read `profile-a` and got `profile-b` — i.e. the refresh's disappearance repair (which is what should overwrite the
-  `profile-b` the test itself planted) had not landed within the test's three `advance(REFRESH_INTERVAL)` + `yield_now`
-  iterations on the paused tokio clock. That loop breaks early when the store already shows `profile-a`, so the shape is
-  a bounded poll that can lose to actor scheduling, not a wrong expectation. First steps: widen the poll to a
-  deadline-bounded wait on the store value (or on the fleet revision bump the test is actually about) rather than a
-  fixed three ticks, and confirm under `--test-threads=4` with the rest of the helm suite running.
-
 - Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
   only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real
   tag was required). Not before a real release exists: rc.1 currently carries the only published Linux artifact, so

@@ -5195,31 +5195,46 @@ mod tests {
             .await
             .unwrap();
         let before = fixture.manager.events().revision();
-        for _ in 0..3 {
-            tokio::time::advance(REFRESH_INTERVAL).await;
-            tokio::task::yield_now().await;
-            if fixture
-                .store
-                .remembered_profile(host)
-                .await
-                .unwrap()
-                .as_deref()
-                == Some("profile-a")
-            {
+        // A fixed count of `advance` calls is not a deterministic wait:
+        // `tokio::time::advance` jumps the paused clock and yields once, and
+        // that single yield does not wait for the multi-hop work the jump
+        // woke up — the drain's request/reply over the test transport, the
+        // store's cache-replace transaction, the publish that follows — to
+        // run to completion. So a fixed number of advances is not a
+        // completion barrier, and three of them could end mid-chain with no
+        // way to tell. That is exactly the one recorded flake (PR #206,
+        // 2026-08-22): the assertion read the `profile-b` the test itself
+        // planted because the repair's last hop had not landed by the third
+        // `advance`, not because the repair was wrong.
+        //
+        // A deadline-bounded `sleep` loop fixes the mechanism rather than
+        // the timeout: under a paused clock, blocking on `sleep` lets the
+        // runtime's auto-advance carry every task through as many internal
+        // hops as a tick actually needs before jumping to the next timer,
+        // so the loop only ever stops once true progress has happened. This
+        // mirrors `a_periodic_refresh_replaces_the_cached_list_wholesale`'s
+        // wait for the same reason: that test hit the identical "how many
+        // ticks does a refresh need" question first.
+        //
+        // The repair is two sequential publications, not one: the store
+        // commits the replacement default first, and the actor bumps the
+        // fleet revision only after the refresh returns. Stopping on the
+        // store alone would leave the revision assertion racing that second
+        // hop, so the loop's terminal condition is BOTH observations.
+        let deadline = tokio::time::Instant::now() + REFRESH_INTERVAL * 4;
+        loop {
+            let remembered = fixture.store.remembered_profile(host).await.unwrap();
+            let revision = fixture.manager.events().revision();
+            if remembered.as_deref() == Some("profile-a") && revision > before {
                 break;
             }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "disappearance repair never finished publishing: still remembers \
+                 {remembered:?}, fleet revision {revision} (was {before})"
+            );
+            tokio::time::sleep(REFRESH_INTERVAL / 2).await;
         }
-
-        assert!(fixture.manager.events().revision() > before);
-        assert_eq!(
-            fixture
-                .store
-                .remembered_profile(host)
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("profile-a")
-        );
     }
 
     // ---- Cadences ---------------------------------------------------
