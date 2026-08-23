@@ -19,6 +19,17 @@
  * a restyle edits one block instead of the ~150 declarations that used to
  * hold hex codes directly.
  *
+ * Three surface levels and one accent carry the whole layout, and both
+ * are design constraints rather than accidents of what the sheet grew.
+ * The page ground is the terminal's own black; chrome (sidebar, main
+ * header, tab strip) sits one step above it; panels that float over
+ * chrome — menus, dialogs, forms, bands that interrupt a pane — sit one
+ * step above that. The accent is a single blue, spent today on
+ * selection and focus rings; a filled primary control is reserved for
+ * it too, but that control has not landed yet (TODO.md's "Two-tier
+ * buttons" item). The `:root` comments below carry the element-by-
+ * element map.
+ *
  * The dark palette is the only one today. A light theme is a decision
  * already made, and it arrives as a SECOND `:root` block redefining the
  * same names — which only stays a one-block change for as long as no use
@@ -99,55 +110,99 @@
    design value to name when a corner is square because it joins a
    neighbor, so that literal stays a literal.
 
-   Several tokens carry an `-alt` suffix. Those are near-duplicates the
-   file had accumulated before tokens existed — a handful of units apart
-   and indistinguishable in practice. They are recorded as they were
-   instead of folded, because introducing this layer was meant to change
-   zero rendered pixels; folding them is the layering item in TODO.md's
-   UI refresh, where it can be a deliberate visual decision. */
+   The `-alt` tokens this block once carried — near-duplicates the file
+   had accumulated before tokens existed, a handful of units apart and
+   indistinguishable in practice — are gone, folded into the role they
+   were a second copy of. They were recorded verbatim when the token
+   layer landed only because that change was meant to move zero pixels;
+   the layering item in TODO.md's UI refresh is where the fold could be
+   a deliberate decision, and this is that change. */
 :root {
-  /* Surfaces, darkest first. --bg-0 is the page ground. */
-  --bg-0: #14161a; /* page and the recessed well of inputs, selects, code boxes */
-  --bg-1: #1d2026; /* raised chrome (titlebar, menus, forms, tabs), and the
-                      row hover/focus tint */
-  --bg-2: #232833; /* inline notice bands that interrupt a pane */
-  --bg-3: #262a31; /* button hover fill */
-  --bg-4: #2a2f37; /* the default-profile badge fill */
+  /* Surfaces. THREE levels are in use, and which level a thing sits on
+     is a decision recorded here rather than something each rule picks
+     for itself: ground for content, one step up for the chrome around
+     it, one more for anything that floats over that chrome. The two
+     tokens after them are fills for a control's hover state and a small
+     chip, not a fourth and fifth level — named for that role
+     (`--control-hover-bg`, `--chip-bg`) rather than `--bg-3`/`--bg-4`
+     specifically so nothing reads them as a rung on this ladder.
 
-  /* Foregrounds. --fg-0 through --fg-2 are one scale, loudest first.
-     --fg-bright sits outside that scale entirely: it is not a fifth,
-     even-louder step, but a separate high-contrast cue used only where
-     text sits on a filled/colored surface rather than the page ground. */
+     The ground is pure black because the terminal's is: xterm.js is
+     mounted with no `theme` (terminal.js), so it paints its default
+     #000 and the vendored xterm.css hard-codes the same on
+     `.xterm-viewport`. Any other ground would frame every terminal in a
+     visibly different rectangle, with the seam falling in `.terminal`'s
+     own 4px gutter. The terminal is off-limits to restyling, so the
+     agreement has to be made from this side. */
+  --bg-0: #000; /* GROUND: the page, the terminal's field, and the recessed
+                   well of inputs, selects, and code boxes */
+  --bg-1: #1a1d23; /* RAISED CHROME: the sidebar column and everything in it,
+                      the main pane's titlebar, the tab strip, and the quiet
+                      bands (stale notice, stale metadata) */
+  --bg-2: #252a35; /* FLOATING: surfaces that sit above chrome — the row
+                      actions menu, the auth card, the create form, the bands
+                      that interrupt a pane (restart offer, tab confirm,
+                      count banner, attach status) — and the tint a session
+                      row takes while hovered or holding focus */
+  --control-hover-bg: #2e333f; /* the hover fill of a bordered control, which
+                                   has to read on --bg-2 as well as on --bg-1 */
+  --chip-bg: #394252; /* the default-profile badge's small filled chip */
+
+  /* Foregrounds, loudest first. Each clears WCAG AA (4.5:1) against
+     every surface it actually lands on, and for the two quiet ones that
+     is a binding constraint rather than an observation: --fg-1 is set by
+     the brightest surface it has to survive (--accent-fill-hover, the
+     hovered selected row, where it is 4.6:1) and --fg-2 by the ground
+     (4.6:1). Darkening either, or lightening the surfaces under them,
+     takes metadata below AA. */
   --fg-0: #d8dee9; /* primary text */
-  --fg-0-alt: #c5cad3; /* near-duplicate of --fg-0; candidate to fold in the layering PR */
   --fg-dim: #b8c0cc; /* explanatory prose on a notice or placeholder surface */
-  --fg-dim-alt: #aeb4bf; /* near-duplicate of --fg-dim; candidate to fold in the layering PR */
-  --fg-dim-alt2: #aeb6c3; /* near-duplicate of --fg-dim; candidate to fold in the layering PR */
-  --fg-1: #8a919e; /* secondary/muted: labels, metadata lines, quiet status words */
-  --fg-2: #5b6270; /* faint: empty-state text nobody needs to read twice */
+  --fg-1: #9199a7; /* secondary/muted: labels, metadata lines, quiet status words */
+  --fg-2: #6e7684; /* faint: empty-state text nobody needs to read twice */
   --fg-bright: #fff; /* high-contrast cue on a filled surface (selected row/tab, red banner); not part of the loudness scale above */
 
-  /* The one accent. It is a neutral rather than a hue today — the
-     selection indicator has to out-contrast both the fill under it and
-     the page, and the palette has no chromatic accent to spend. Same
-     value as --fg-1 by history, kept separate so a later PR can give
-     selection a real hue without touching every muted label. */
-  --accent: #8a919e; /* selection indicator (the selected row's inset bar) */
-  --accent-fill: #2f3641; /* the selected row's and selected tab's background */
-  --accent-fill-hover: #3a4250; /* hover/focus inside an already-selected row */
-  --accent-edge: #4d5666; /* the selected tab's border tint */
+  /* The one accent, and the only chromatic thing in the chrome. Blue
+     because the greys are already blue-cast, so it reads as the same
+     family turned up rather than as a foreign hue, and because every
+     other hue in this sheet is spoken for by a state (green ok, amber
+     warn, red danger, orange archive, mauve archived). --info's sky blue
+     is the near neighbor; the two are kept apart by role and weight —
+     --info is a light tone that carries a WORD, the accent is a
+     saturated fill or edge that never carries text.
+
+     Spend it on selection and `:focus-visible` — today. Nothing else. A
+     filled primary control is RESERVED for this accent too (TODO.md's
+     "Two-tier buttons" item in the UI refresh), not yet spent: that
+     control has not landed, so claiming it here would describe a UI this
+     sheet does not render. SPEC.md requires the sidebar to mark the
+     selected session's row "readable at a glance rather than only from
+     the titlebar", and a palette that used the accent for decoration
+     before that control exists would have nothing left to make that
+     true. */
+  --accent: #5896e8; /* the accent at full strength: the selected row's inset
+                        bar and every focus ring */
+  --accent-fill: #16294a; /* accent-tinted SURFACE: the selected row, the selected
+                             tab, and the fill a primary button would take */
+  --accent-fill-hover: #1b3054; /* hover/focus inside an already-selected row */
+  --accent-edge: #3d6ba8; /* the accent at border weight: the selected tab's outline,
+                             and the outline a filled primary would take */
 
   /* Rules and control outlines. */
-  --border: #3a3f47; /* the standard control outline: buttons, inputs, menu panel, auth card */
-  --border-bright: #4a505a; /* near-duplicate of --border; candidate to fold in the layering PR */
-  --border-dim: #2d3138; /* the quiet rule around an embedded detail box */
-  --border-sidebar-edge: #262a31; /* the sidebar's own edge against the main pane */
-  --border-row: #1d2026; /* hairline between stacked items: shared by the session row's bottom
-                             separator and the hosts panel's own bottom rule, which are the same
-                             role (a divider between stacked list entries/sections) wearing two
-                             class names */
-  --border-nested: #2a2f37; /* the rule marking an indented sub-section (host profile nesting);
-                                same hex as --bg-4 today but a distinct role from that badge fill */
+  --border: #434a55; /* the standard control outline: buttons, inputs, menu panel, auth card */
+  --border-dim: #2d3138; /* the quiet rule: the box around an embedded detail */
+  --border-sidebar-edge: #434a55; /* the sidebar's own edge against the main pane; same value as
+                                     --border today but its own role, so a theme can move one
+                                     without the other */
+  --border-row: #2d3138; /* hairline between stacked items: the session row's bottom separator
+                             and the hosts panel's own bottom rule, the same role wearing two
+                             class names. A rule token, not a surface one: the row and the
+                             sidebar under it are both --bg-1 now, so a separator borrowing a
+                             surface value would be invisible against what it separates */
+  --border-nested: #434a55; /* the rule marking an indented sub-section subordinate to the row
+                                above it — host profile nesting (.profiles-section) and host
+                                provisioning (.provisioning-panel) are the same idiom under two
+                                class names. A surface value used to do this job and stopped
+                                working the moment the surfaces moved */
 
   /* Semantic states. `ok` is the healthy/live family, `warn` the
      attention-but-not-broken family (see `.status-badge.interrupted` and
@@ -158,14 +213,21 @@
 
   --warn: #d8b45f; /* the amber label/badge tone */
   --warn-bright: #e0d090; /* amber PROSE, which needs more lift than a badge does */
-  --warn-bright-alt: #e0c890; /* near-duplicate of --warn-bright; fold in the layering PR */
   --warn-bg: #3a3520; /* the filled amber band (truncated-walk banner) */
   --warn-bg-dim: #2a2620; /* the quieter amber band (build skew) */
   --warn-border: #4a4230; /* rule under an amber band */
   --warn-fill-hover: #6a5a34; /* hover on a control that sits on amber */
 
   --danger: #e08080; /* the red text tone: errors and destructive actions */
-  --danger-strong: #e0685f; /* saturated red: a state that IS failure, not a risky button */
+  --danger-strong: #e47a72; /* saturated red: a state that IS failure, not a
+                                risky button. Calibrated to clear WCAG AA
+                                (4.5:1) on every row surface the error status
+                                badge and an error row's own text can sit on
+                                — --bg-1, --bg-2, --accent-fill, and
+                                --accent-fill-hover, the tightest of the four
+                                at ~4.59:1 — so an error stays legible while
+                                its row is plain, hovered, focused, or
+                                selected. */
   --danger-soft: #e0b0b0; /* pale red, for an outline that has to read against a red fill */
   --danger-border: #5a3838; /* outline of a destructive confirmation */
   --danger-bg: #7a3b3b; /* the filled red banner */
@@ -178,8 +240,11 @@
   --archive: #d08770; /* archive notices and archive-path errors */
   --archived-badge: #b48ead; /* the "archived" marker itself */
 
-  /* Overlay. */
-  --scrim: rgba(24, 27, 34, 0.82); /* dims a stale terminal while it reconnects */
+  /* Overlay. Black rather than the blue-grey it used to be: the ground
+     is now the terminal's own black, and a veil lighter than the ground
+     would LIFT the reconnecting pane instead of dimming it — which is
+     the floating-rectangle effect the surface levels exist to remove. */
+  --scrim: rgba(0, 0, 0, 0.82); /* dims a stale terminal while it reconnects */
 
   /* Corner radii. */
   --radius-sm: 3px; /* controls and inputs */
@@ -262,7 +327,20 @@ samp {
    * this column while open; the clip is what keeps their overflow from
    * widening the page. Still required, not redesign debt. */
   overflow: hidden auto;
+  /* The sidebar is CHROME, not content: it sits one level above the
+     ground the terminal shares with the page, which is the single
+     biggest reason this shell no longer reads as one flat field.
+     Everything inside it — rows, hosts panel, filter bar, banners —
+     inherits this level unless it deliberately floats above it.
+
+     The hairline survives the level change rather than being made
+     redundant by it. Down most of the window the sidebar meets the
+     terminal's black and the level step alone is a clear edge, but the
+     top of the main pane is its OWN chrome (`.titlebar`, `.tab-strip`)
+     at this same level, and there the two panes would merge into one
+     continuous bar with nothing to say where one ends. */
   border-right: 1px solid var(--border-sidebar-edge);
+  background: var(--bg-1);
 }
 
 .app-main {
@@ -433,15 +511,47 @@ samp {
   color: var(--fg-0);
   font: inherit;
   cursor: pointer;
+  /* ~100ms, and only on the color that actually changes. This chrome is
+     stared at all day: a fade long enough to notice becomes a tic, and
+     a blanket `transition: all` would animate layout properties nobody
+     asked to move. Hover tints on rows and buttons are the whole budget
+     — this sheet has no `@keyframes` and gains none here. */
+  transition: background-color 100ms;
 }
 
+/* `--control-hover-bg`, not `--bg-2`, and that is exactly the role this
+   token exists to fill: a control can sit on the chrome level or on a
+   floating panel, and a hover fill equal to the floating level would
+   vanish for every button inside the row actions menu, the create form,
+   and the auth card. */
 .btn:hover:not(:disabled) {
-  background: var(--bg-3);
+  background: var(--control-hover-bg);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ===== Focus ====================================================== */
+
+/* One accent ring for every keyboard-reachable control, declared once
+   rather than per control class, so a control added later is focusable
+   VISIBLY by default instead of by remembering to opt in.
+
+   `:focus-visible` rather than `:focus`: the ring is for the keyboard
+   user who cannot see where they are, and painting it on every mouse
+   click is exactly the noise that got outlines suppressed by hand
+   (`.session-row-open` below still does that for its own `:focus`).
+
+   Safe to leave unscoped despite the terminal being off-limits: the only
+   focusable node xterm.js puts in the DOM is `.xterm-helper-textarea`,
+   which the vendored xterm.css parks at `opacity: 0`, `left: -9999em`,
+   and zero width and height — an outline on it is neither visible nor
+   on screen. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ===== Session list and rows ====================================== */
@@ -464,6 +574,9 @@ samp {
   display: flex;
   flex-direction: column;
   width: 100%;
+  /* A rule token, not a surface one: the row and the sidebar under it
+     are both --bg-1 now, so a separator borrowing a surface value would
+     be invisible against the very thing it separates. */
   border-bottom: 1px solid var(--border-row);
   /* No `position: relative` here: the actions-menu panel below used to
      anchor to this row with `position: absolute`, which meant every
@@ -477,26 +590,45 @@ samp {
      needs to BE an anchor for anything. */
 }
 
+/* A row holding focus is momentarily promoted to the floating level —
+   the same tint hovering gives it below, so the two ways of pointing at
+   a row look like one state and not two. */
 .session-row:focus-within {
-  background: var(--bg-1);
+  background: var(--bg-2);
 }
 
 /* The selected row is the session the right pane currently shows. Same
    visual language as `.tab.selected` (filled background plus an inset
-   accent bar), and for the same stated reason: selection has to be
-   readable at a glance from across the whole sidebar, not inferable from
-   the titlebar. The fill is deliberately a step brighter than the
-   `--bg-1` hover/focus tint so the two states cannot be confused, the
-   accent bar is the brightest neutral in the palette (the accent is a
-   state indicator, so it needs real contrast against both the fill and
-   the page, which the strip's `--accent-edge` border tint does not
-   reach), and the title goes full white below — three cues, so no single
-   one has to carry a low-vision reader alone. `box-shadow: inset` for the accent
-   bar simply because it needs no extra element and no positioning rule —
-   a left border would shift the row's content by its own width. NOT
-   opacity-based: stale rows and disabled open buttons already speak
-   through opacity, and a background fill composes with both instead of
-   multiplying against them. */
+   accent bar), and for the same stated reason, which SPEC.md states as a
+   requirement rather than a preference: the sidebar marks the selected
+   session's row "readable at a glance rather than only from the
+   titlebar".
+
+   Three cues, so no single one has to carry a low-vision reader alone:
+   an accent-TINTED fill, the accent bar at full strength, and a title
+   that goes full white below. What makes them work is HUE, not just
+   lightness — the fill is the only chromatic SESSION-ROW surface (the
+   sidebar's amber truncation banner is chromatic too, but it is a band
+   stating a fact, not a row marking a selection, so it competes with
+   nothing here), so it cannot be mistaken for the neutral `--bg-2` tint a
+   hovered row takes even though the two sit at nearly the same lightness
+   (measured: ΔE76 ≈ 15 between them, against ΔE76 ≈ 20 from the fill to
+   the plain row). Before the palette had a real accent this rule had to
+   buy that separation with a lightness step alone, which is exactly why
+   selection was hard to see.
+
+   The fill deliberately stops short of where lightness would help more:
+   `--fg-1` metadata has to clear AA (4.5:1) on every row surface this
+   fill and its hover step produce. The resting fill has real headroom
+   (~5.05:1); the hover fill sits close to the floor (~4.58:1) — the
+   hover pair is the actual binding constraint on how much brighter
+   either step could go, not the resting one.
+
+   `box-shadow: inset` for the accent bar simply because it needs no
+   extra element and no positioning rule — a left border would shift the
+   row's content by its own width. NOT opacity-based: stale rows and
+   disabled open buttons already speak through opacity, and a background
+   fill composes with both instead of multiplying against them. */
 .session-row.selected {
   background: var(--accent-fill);
   box-shadow: inset 3px 0 0 var(--accent);
@@ -507,11 +639,13 @@ samp {
 }
 
 /* Without these, the open button's own hover/focus rule (below) paints
-   its `--bg-1` tint over nearly the whole row — and since clicking a row
-   is exactly what selects it, the highlight would be at its weakest the
-   moment it appears, under the still-focused, still-hovered button. A
-   brighter tint keeps hover/focus feedback on a selected row without
-   letting it swallow the selection. */
+   its neutral `--bg-2` tint over nearly the whole row — and since
+   clicking a row is exactly what selects it, the highlight would be at
+   its weakest the moment it appears, under the still-focused,
+   still-hovered button. Staying in the accent family and going one step
+   up keeps hover/focus feedback on a selected row without letting it
+   swallow the selection, and stays under the same `--fg-1` AA cap the
+   resting fill is bound by. */
 .session-row.selected .session-row-open:hover:not(:disabled),
 .session-row.selected .session-row-open:focus {
   background: var(--accent-fill-hover);
@@ -558,6 +692,10 @@ samp {
   font: inherit;
   text-align: left;
   cursor: pointer;
+  /* Same ~100ms as `.btn`, and for the same reason: a row is under the
+     pointer constantly while someone scans the fleet, so the tint has to
+     arrive without reading as an effect. */
+  transition: background-color 100ms;
 }
 
 /* One line of a stacked sidebar row. `min-width: 0` is what lets each
@@ -693,7 +831,10 @@ samp {
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  background: var(--bg-1);
+  /* The floating level, literally: this panel is `position: fixed` over
+     the rows it belongs to, and a panel painted at the rows' own level
+     would have only its 1px border to say it is in front of them. */
+  background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   max-width: 288px;
@@ -720,8 +861,20 @@ samp {
 
 .session-row-open:hover:not(:disabled),
 .session-row-open:focus {
-  background: var(--bg-1);
+  background: var(--bg-2);
   outline: none;
+}
+
+/* The ring the rule above suppresses, put back for the keyboard case
+   only. It has to be restated here rather than left to the sheet's
+   global `:focus-visible`: that selector is one class less specific than
+   `.session-row-open:focus`, so the `outline: none` above would win
+   against it no matter where either rule sits in the file. The offset is
+   NEGATIVE because this button fills the row edge to edge — an outward
+   ring would be clipped by the sidebar's own `overflow: hidden`. */
+.session-row-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* Disabled while navigation or a row-local operation owns the action area
@@ -1059,9 +1212,34 @@ samp {
    staleness covers EVERY non-connected phase — unreachable, skew, an
    identity decision, duplicate, retired — so the color must not imply any
    one of them. The badge's phase story lives on the host chip; this only
-   says "what you see was true at last contact." */
-.session-row.stale .session-row-open {
-  opacity: 0.65;
+   says "what you see was true at last contact."
+
+   NOT `opacity` on the whole button (an earlier revision of this rule):
+   opacity multiplies every descendant's color toward whatever surface
+   sits under it, which took `--fg-1` metadata to roughly 3.3:1 against
+   the row's own background at 0.65 — under the 4.5:1 floor the palette
+   comments promise — and worse again once a stale row was ALSO selected
+   or hovered onto a brighter surface, since opacity stacks with
+   whatever that state paints. Dimming only the title keeps every color
+   on screen a token this sheet already calibrates to clear AA on the
+   surfaces it lands on (see the foreground block's own comment above),
+   so the stale look degrades to "quieter than an ordinary row" instead
+   of failing quietly under a state combination nobody screenshots in
+   isolation. The metadata lines need no separate rule: they were
+   already `--fg-1` at rest, so this loses none of their own signal, and
+   the badge stays the semantic marker it always was. */
+.session-row.stale .session-title {
+  color: var(--fg-1);
+}
+
+/* Selection normally lifts the title to `--fg-bright` (see
+   `.session-row.selected .session-title` above); a stale row overrides
+   that back down so a stale-and-selected row still reads as quieter
+   than an ordinary selection instead of the two states cancelling each
+   other out. The extra `.stale` class outranks the plain selected rule
+   on specificity regardless of source order. */
+.session-row.stale.selected .session-title {
+  color: var(--fg-1);
 }
 
 /* Shared shape for the two small status capsules; their meaning lives in
@@ -1088,6 +1266,8 @@ samp {
    the actions (add/retry/retarget/remove/adopt/profiles). Mounted
    permanently but collapsed while closed — see .hosts-panel-holder. */
 .hosts-panel {
+  /* Same story as `.session-row`'s separator: the panel and the sidebar
+     around it share --bg-1, so the foot has to be drawn with a rule. */
   border-bottom: 1px solid var(--border-row);
   padding: 8px 14px;
 }
@@ -1306,7 +1486,15 @@ samp {
    left rule makes the long action list subordinate to the row without making
    it look page-blocking — it is not; OpLock ends at acceptance. */
 .provisioning-panel {
-  border-left: 2px solid var(--border-dim);
+  /* The same rule weight `.profiles-section` uses for the same idiom — an
+     indented block subordinate to the host row above it — and, since this
+     fixup, the same TOKEN too. This used `--border` instead of
+     `--border-nested` until now, which is exactly the kind of drift
+     `--border-nested`'s own :root comment warns about: a surface value
+     doing a border's job stops working the moment the surfaces move, and
+     nothing catches it happening independently to two rules that are
+     supposed to be the same idiom. */
+  border-left: 2px solid var(--border-nested);
   margin: 5px 0 1px 10px;
   padding: 3px 0 3px 10px;
 }
@@ -1334,7 +1522,7 @@ samp {
   background: var(--bg-0);
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-sm);
-  color: var(--fg-0-alt);
+  color: var(--fg-0);
   font: inherit;
   font-size: 12px;
   line-height: 1.45;
@@ -1358,7 +1546,7 @@ samp {
 }
 
 .provisioning-steps {
-  color: var(--fg-dim-alt);
+  color: var(--fg-dim);
   font-size: 12px;
   margin: 4px 0 2px;
   padding-left: 22px;
@@ -1401,7 +1589,7 @@ samp {
 
 .provisioning-step-message,
 .provisioning-run-message {
-  color: var(--fg-dim-alt);
+  color: var(--fg-dim);
 }
 
 /* The manual command never disappears. It is quiet while automatic setup
@@ -1425,6 +1613,8 @@ samp {
   gap: 6px;
   margin: 6px 0 8px 12px;
   padding-left: 10px;
+  /* A rule, drawn with a rule token: this was a surface value doing a
+     border's job, which stopped working the moment the surfaces moved. */
   border-left: 2px solid var(--border-nested);
 }
 
@@ -1504,7 +1694,7 @@ samp {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: var(--radius-lg);
-  background: var(--bg-4);
+  background: var(--chip-bg);
   color: var(--fg-0);
   flex-shrink: 0;
 }
@@ -1678,7 +1868,11 @@ samp {
   gap: 8px;
   padding: 10px 14px;
   margin: 0 14px 10px;
-  background: var(--bg-1);
+  /* A form is a thing that appeared over the list, so it takes the
+     floating level; at the sidebar's own level it would be a rounded
+     rectangle with nothing inside it to see. Its fields stay --bg-0,
+     which is what makes them read as wells cut into this card. */
+  background: var(--bg-2);
   border-radius: var(--radius-md);
 }
 
@@ -1823,7 +2017,11 @@ samp {
    that did not finish. */
 .banner.session-count {
   display: block;
-  background: var(--bg-1);
+  /* The band level the other interrupting notices use (`.restart-offer`,
+     `.tab-confirm`), not the sidebar's own: this line sits inside the
+     sidebar, so --bg-1 would paint it onto the surface it is trying to
+     stand out from. */
+  background: var(--bg-2);
   color: var(--fg-1);
   font-size: 12px;
 }
@@ -1935,7 +2133,7 @@ samp {
    keeps that frozen content from reading as live. */
 .terminal-connecting.terminal-reconnecting {
   background: var(--scrim);
-  color: var(--warn-bright-alt);
+  color: var(--warn-bright);
 }
 
 /* The manual control on that surface. Interactivity is restored for the
@@ -1947,7 +2145,7 @@ samp {
   pointer-events: auto;
   font-size: 12px;
   padding: 1px 8px;
-  border-color: var(--warn-bright-alt);
+  border-color: var(--warn-bright);
   color: var(--fg-bright);
 }
 
@@ -1973,6 +2171,21 @@ samp {
 
 .banner-reclaim:hover:not(:disabled) {
   background: var(--danger-fill-hover);
+}
+
+/* The sheet-wide `:focus-visible` ring (`outline: 2px solid var(--accent)`,
+   declared once near the top of this file) reads at only ~2.8:1 against
+   `--danger-bg` — well under the 3:1 a non-text UI indicator needs — because
+   the accent blue was tuned to stand out against this sheet's dark
+   neutrals, not against a saturated red banner. `--fg-bright` is what the
+   rest of this banner already uses for exactly that reason (the button's
+   own text and the reconnect control share it), and at ~8.3:1 against
+   `--danger-bg` it clears the floor with room to spare. Restated here
+   rather than left to the global rule, the same way `.session-row-open`
+   restates its own focus ring above for its own contextual reason. */
+.banner-reclaim:focus-visible {
+  outline: 2px solid var(--fg-bright);
+  outline-offset: 1px;
 }
 
 /* A tab past the mounted-island cap (`MAX_MOUNTED_TAB_ISLANDS` in
@@ -2037,6 +2250,10 @@ samp {
   font-size: 12px;
   padding: 3px 7px;
   cursor: pointer;
+  /* Restated rather than inherited: this button deliberately does not
+     carry `.btn` (see above), so it would otherwise be the one control
+     in the sheet whose hover snaps. */
+  transition: background-color 100ms;
 }
 
 .tab-close:hover:not(:disabled) {
@@ -2056,6 +2273,20 @@ samp {
   background: var(--accent-fill);
   color: var(--fg-bright);
   border-color: var(--accent-edge);
+}
+
+/* Every tab carries `.btn` too (see `TabStripItem` in tabs.rs), and
+   `.btn:hover:not(:disabled)` above OUTRANKS `.tab.selected` on
+   specificity — one class plus two pseudo-classes beats two plain
+   classes — regardless of which rule comes later in the file. Without
+   this, hovering the selected tab replaced its accent fill with the
+   neutral control-hover tint, the same swallowed-selection failure
+   `.session-row.selected`'s own hover rule exists to prevent below. One
+   more class than `.tab.selected` alone, plus the same two pseudo-
+   classes `.btn:hover:not(:disabled)` has, is enough to win the fill
+   back for the accent family. */
+.tab.selected:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
 }
 
 /* The close confirmation and the tab-operation error line both sit on
@@ -2099,7 +2330,13 @@ samp {
   padding: 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--bg-1);
+  /* Not a dialog — `.auth-page` above already says device authentication
+     REPLACES the app rather than floating over it (see that class's own
+     comment), so this is a standalone form/card on a page, not a modal.
+     Floating level anyway: `.auth-page` has no surface of its own, so this
+     card still sits two steps above the bare ground, the same as every
+     other floating panel in this sheet. */
+  background: var(--bg-2);
 }
 
 .auth-card h1,
@@ -2109,12 +2346,12 @@ samp {
 
 .auth-card label {
   font-size: 13px;
-  color: var(--fg-dim-alt2);
+  color: var(--fg-dim);
 }
 
 .auth-token-input {
   padding: 8px 10px;
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-0);
   color: var(--fg-0);
