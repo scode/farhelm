@@ -82,7 +82,17 @@ pub(super) struct Reach {
     pub(super) user_unit_dir: PathBuf,
     pub(super) arch: PayloadArch,
     pub(super) needs_tmux: bool,
-    pub(super) tmux_dir: Option<PathBuf>,
+    /// The host's OWN tmux executable, absolute, when it cleared the
+    /// floor — `None` whenever `needs_tmux` is set.
+    ///
+    /// The whole executable, not just its directory, because the plan has
+    /// to be able to name it: an accepted host tmux is pinned into the
+    /// unit as `FARHELM_TMUX`, so a leftover private tmux in Farhelm's own
+    /// lib directory cannot shadow the binary provisioning approved. The
+    /// directory this used to carry is still derived from it for the
+    /// unit's PATH, which serves the different purpose of letting a
+    /// user-manager process find tmux at all.
+    pub(super) host_tmux: Option<PathBuf>,
 }
 
 /// Supported hosts continue to a plan; every other host keeps the manual
@@ -1548,19 +1558,21 @@ pub(super) fn hex_sha256(bytes: &[u8]) -> String {
     out
 }
 
-/// Parse tmux's user-facing version line conservatively; anything malformed
+/// Whether a host's own `tmux -V` output clears the supervisor's version
+/// floor, deciding whether provisioning installs Farhelm's private build.
+///
+/// The comparison is imported from the supervisor rather than reimplemented
+/// so the two can never disagree. Divergence here is not a cosmetic bug: a
+/// laxer test would accept a host tmux, skip the payload, and hand the
+/// remote supervisor a binary it then refuses at startup — provisioning
+/// would report success on a host that cannot start.
+///
+/// Conservative in the same direction the supervisor is: anything
+/// unparseable — including the empty string a host with no tmux reports —
 /// requests the private payload rather than assuming compatibility.
-pub(super) fn tmux_at_least_3_3(output: &str) -> bool {
-    let version = output
-        .strip_prefix("tmux ")
-        .unwrap_or(output)
-        .split(|character: char| !character.is_ascii_digit() && character != '.')
-        .next()
-        .unwrap_or_default();
-    let mut parts = version.split('.');
-    let major = parts.next().and_then(|part| part.parse::<u32>().ok());
-    let minor = parts.next().and_then(|part| part.parse::<u32>().ok());
-    matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (3, 3))
+pub(super) fn tmux_meets_floor(output: &str) -> bool {
+    farhelm_supervisor::tmux::parse_tmux_version(output)
+        .is_ok_and(|version| version >= farhelm_supervisor::tmux::TMUX_FLOOR)
 }
 
 pub(super) fn linger_was_refused(code: Option<i32>, stderr: &str) -> bool {
@@ -1647,14 +1659,12 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
     })?;
     let tmux = String::from_utf8_lossy(fields[5]);
     let tmux_ok =
-        tmux_at_least_3_3(&tmux) && tmux_path.is_absolute() && path_text(&tmux_path).is_ok();
+        tmux_meets_floor(&tmux) && tmux_path.is_absolute() && path_text(&tmux_path).is_ok();
     Ok(ReachOutcome::Supported(Reach {
         home,
         user_unit_dir,
         arch,
         needs_tmux: !tmux_ok,
-        tmux_dir: tmux_ok
-            .then(|| tmux_path.parent().map(Path::to_path_buf))
-            .flatten(),
+        host_tmux: tmux_ok.then_some(tmux_path),
     }))
 }

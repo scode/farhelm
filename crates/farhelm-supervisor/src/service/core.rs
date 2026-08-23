@@ -440,6 +440,20 @@ pub type ArchiveGate = Arc<
 pub struct SupervisorSeams {
     /// See [`BootIdSource`]. Defaults to reading this host's real boot id.
     pub boot_id: BootIdSource,
+    /// The tmux binary this supervisor drives — the resolved value of
+    /// `--tmux` / `FARHELM_TMUX` (see
+    /// [`crate::tmux::resolve_tmux_program`]), defaulting to plain `tmux`
+    /// off `PATH`.
+    ///
+    /// A production knob rather than a test fault seam, and it lives here
+    /// anyway for the reason this struct exists: the alternative was a
+    /// fifth positional parameter on `new_with_seams` that every one of
+    /// the crate's several dozen test constructions would have to spell
+    /// out as "no opinion". Resolution deliberately happens ONCE, at
+    /// `farhelm supervisor run`'s startup, so nothing below this line ever
+    /// consults the environment again and no two launch paths can disagree
+    /// about which tmux this supervisor is driving.
+    pub tmux_program: PathBuf,
     /// See [`CreateCrashSeam`]. `None` in production.
     pub create_crash: Option<CreateCrashSeam>,
     /// Where the agents' own record directories are rooted (PLAN_M3.md
@@ -622,6 +636,7 @@ impl Default for SupervisorSeams {
     fn default() -> Self {
         SupervisorSeams {
             boot_id: Arc::new(read_host_boot_id),
+            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             create_crash: None,
             agent_home: None,
             user_home: None,
@@ -2896,8 +2911,32 @@ impl Supervisor {
     /// binary. Test harnesses must NOT use this — their `current_exe` is
     /// the libtest runner, not farhelm — and use `new_with_exe` instead.
     pub async fn new(state_dir: &Path) -> anyhow::Result<Arc<Supervisor>> {
+        Self::new_with_tmux(state_dir, PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM)).await
+    }
+
+    /// [`Self::new`] with the tmux binary named explicitly — the resolved
+    /// `--tmux` / `FARHELM_TMUX` override (see
+    /// [`crate::tmux::resolve_tmux_program`]).
+    ///
+    /// Its own constructor rather than a parameter on [`Self::new`]
+    /// because the override has exactly one caller — `farhelm supervisor
+    /// run`, which resolves it once at startup — while everything else
+    /// wants plain `tmux` off `PATH`.
+    pub async fn new_with_tmux(
+        state_dir: &Path,
+        tmux_program: PathBuf,
+    ) -> anyhow::Result<Arc<Supervisor>> {
         let exe = std::env::current_exe().context("resolving own binary path")?;
-        Self::new_with_exe(state_dir, exe).await
+        Self::new_with_seams(
+            state_dir,
+            exe,
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                tmux_program,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
     }
 
     /// Constructor with an explicit farhelm binary path for the launch
@@ -3031,13 +3070,18 @@ impl Supervisor {
         // Threaded from `timeouts` rather than `TmuxDriver::new`'s
         // production default so an integration test's loosened budgets
         // (see `SupervisorTimeouts::tmux_exchange`) actually reach the
-        // driver every attach and send-keys call goes through.
-        let tmux = TmuxDriver::new_with_timeouts(
+        // driver every attach and send-keys call goes through. The tmux
+        // binary rides along for the same reason at the other end of the
+        // scale: this is the only production driver a supervisor ever
+        // builds, so it is the one place the `--tmux` / `FARHELM_TMUX`
+        // override has to land for every launch path to honor it.
+        let tmux = TmuxDriver::new_with_program(
             &state_dir,
             crate::tmux::TmuxBudgets {
                 exchange: timeouts.tmux_exchange,
                 pane_list: timeouts.tmux_pane_list,
             },
+            seams.tmux_program.clone(),
         );
         tmux.ensure_server().await?;
         // Anything attached to the private server at this instant
@@ -8601,8 +8645,15 @@ fn tab_close_cleanup_result(
 /// `farhelm supervisor run` in one call: build a supervisor on `state_dir`
 /// and serve its socket until the process dies. Returns only on a fatal
 /// error — a successful supervisor never returns.
-pub async fn run(state_dir: &Path) -> anyhow::Result<()> {
-    let sup = Supervisor::new(state_dir).await?;
+///
+/// `tmux_program` is the already-resolved override (see
+/// [`crate::tmux::resolve_tmux_program_from_env`]) and is a REQUIRED
+/// parameter rather than an optional one: this is the whole supervisor
+/// entry point, so a caller that could omit it is a launch path that
+/// silently ignores `--tmux` and `FARHELM_TMUX`. Callers with no opinion
+/// pass [`crate::tmux::DEFAULT_TMUX_PROGRAM`].
+pub async fn run(state_dir: &Path, tmux_program: PathBuf) -> anyhow::Result<()> {
+    let sup = Supervisor::new_with_tmux(state_dir, tmux_program).await?;
     sup.serve().await
 }
 

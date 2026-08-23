@@ -277,6 +277,17 @@ pub(crate) const PANE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::f
 pub struct TmuxDriver {
     socket: PathBuf,
     config: PathBuf,
+    /// The tmux binary EVERY invocation from this driver runs, including
+    /// the `-V` floor probe.
+    ///
+    /// Carried per-driver rather than hardcoded so the `--tmux` /
+    /// `FARHELM_TMUX` override (see [`resolve_tmux_program`]) reaches all
+    /// of them: an override honored by only some call sites would
+    /// floor-check one binary and then drive another, which is worse than
+    /// having no override at all. Constructors that do not name one — the
+    /// test constructors, and any embedder that has no opinion — default
+    /// to [`DEFAULT_TMUX_PROGRAM`].
+    program: PathBuf,
     /// The budget for one control-mode exchange (attach, send-keys,
     /// filter command). See [`CONTROL_EXCHANGE_TIMEOUT`] for what this
     /// bounds and why production keeps it tight; carried per-instance
@@ -344,28 +355,385 @@ impl Default for TmuxBudgets {
     }
 }
 
-/// Enforce the control-mode floor before starting or adopting a server.
+/// A tmux release as Farhelm orders it: the numeric `major.minor` pair
+/// plus tmux's patch-release letter.
 ///
-/// tmux suffixes patch releases (`3.3a`) and development builds with
-/// letters; only the numeric major/minor pair decides compatibility.
-fn require_supported_tmux(output: &str) -> anyhow::Result<()> {
-    let version = output
-        .split_whitespace()
-        .nth(1)
-        .context("tmux -V returned no version")?;
-    let (major, minor) = version
+/// The letter is not decoration, which is why this type exists at all.
+/// [`TMUX_FLOOR`] names one specific regression-tested build, and the
+/// letter is the only thing distinguishing it from the distinct
+/// below-floor releases it shares a `major.minor` with: 3.7, 3.7a and
+/// 3.7b are three separate releases, and 3.7b in particular is heavily
+/// exercised in this file's own history — below the current pin, not
+/// untried. The version check this replaced compared `(major, minor)`
+/// alone, so it could not tell them apart and would have accepted any of
+/// them as the pinned one.
+///
+/// Ordering is the derived lexicographic one, and it matches tmux's own
+/// release order because `None < Some('a')`: a bare `3.7` shipped before
+/// `3.7a`, which shipped before `3.7b`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TmuxVersion {
+    major: u32,
+    minor: u32,
+    /// tmux's patch-release letter (`3.7b`'s `b`); `None` for a bare
+    /// `3.7`. At most one lowercase letter — see [`parse_tmux_version`]
+    /// for why anything else is refused rather than approximated.
+    patch: Option<char>,
+}
+
+impl std::fmt::Display for TmuxVersion {
+    /// Round-trips [`parse_tmux_version`]'s input spelling, because this
+    /// is what the refusal message and the release pin are compared
+    /// against — a version that printed differently from how tmux spells
+    /// it would make both unreadable.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}.{}", self.major, self.minor)?;
+        if let Some(patch) = self.patch {
+            write!(formatter, "{patch}")?;
+        }
+        Ok(())
+    }
+}
+
+/// The oldest tmux Farhelm will drive: the version its own regression
+/// suites are run against, not the oldest one that happens to work.
+///
+/// Farhelm drives tmux far harder than interactive use does — control
+/// mode, output-client teardown, pane-death timing — and versions are not
+/// interchangeable there. Crashes have been observed on older ones (a
+/// distro 3.4 server hosting live sessions aborted on 2026-08-19, and
+/// BUGS.md records the same abort class reproduced on distro 3.6), while
+/// the pinned build carries a crash-regression suite of its own
+/// (`scripts/test-tmux-pinned-shutdown.sh`). So the floor tracks the pinned
+/// build in `.github/release/source-pins.env` rather than tracking what
+/// distributions ship.
+///
+/// It is DESIGNED to exclude current distro packages (Ubuntu 24.04 ships
+/// 3.4, 26.04 about 3.6, Debian 13 and Fedora 42 3.5a). The documented
+/// ways to satisfy it are Homebrew/Linuxbrew, Farhelm's own private build
+/// that provisioning installs, and the `--tmux` / `FARHELM_TMUX` override
+/// (see [`resolve_tmux_program`]).
+///
+/// Bumping it is a deliberate act taken TOGETHER with the pinned build and
+/// its regression suite, never on its own. The tests'
+/// `floor_and_release_pin_cannot_drift` enforces that half mechanically:
+/// it fails the moment this constant and `TMUX_VERSION=` in
+/// `.github/release/source-pins.env` disagree.
+pub const TMUX_FLOOR: TmuxVersion = TmuxVersion {
+    major: 3,
+    minor: 7,
+    patch: Some('c'),
+};
+
+/// The exact prefix `tmux -V` puts in front of the version. Nothing else
+/// is accepted: a line that does not start this way did not come from a
+/// tmux this project knows how to reason about.
+const TMUX_VERSION_LINE_PREFIX: &str = "tmux ";
+
+/// Parse a whole `tmux -V` line — `"tmux 3.7b\n"` — into an orderable
+/// version.
+///
+/// Conservative by contract: anything this cannot read exactly is an
+/// error, never a guess. Every caller turns that error into "refuse" or
+/// "install our own build", which is the safe direction — a version
+/// Farhelm cannot name is a version nobody has audited it against, and
+/// guessing high buys a wedged or crashing substrate.
+///
+/// THE WHOLE LINE is validated, not just a token lifted out of it. An
+/// earlier revision took `split_whitespace().nth(1)`, which happily read
+/// `not-tmux 3.7c`, `tmux 3.7c vendor-patch` and `tmux +3.07c` as clean
+/// releases. That is not a cosmetic gap: this same parser decides whether
+/// provisioning SKIPS installing Farhelm's own audited build, so a
+/// decorated or forged line that scans as an audited release is exactly
+/// how an unaudited substrate gets adopted silently. So: the `tmux `
+/// prefix exactly, one version token and nothing after it, at most one
+/// trailing newline, and canonical decimal components (no sign, no
+/// leading zeros).
+///
+/// It takes the whole line rather than a bare number because that is the
+/// shape callers have — the provisioning probe forwards a remote host's
+/// `tmux -V` output verbatim, and "tmux is not installed" text must fail
+/// parsing rather than resemble a version. [`parse_tmux_version_number`]
+/// is the entry point for the places that legitimately hold a bare
+/// version instead (tmux's `#{version}` format).
+///
+/// DELIBERATELY NARROW, and this is a product decision rather than a
+/// parser limitation: Farhelm supports stable releases and tmux's
+/// single-letter patch releases, so tmux's official development
+/// (`next-3.8`) and release-candidate (`3.8-rc`, `3.8-rc2`) spellings are
+/// refused even though they are numerically above the floor. Ordering
+/// those stages against a stable release is guesswork, and the `--tmux`
+/// escape hatch exists for anyone who wants to own that risk in a build
+/// of their own. See the `--tmux` flag's help, which states the same
+/// contract to users.
+pub fn parse_tmux_version(v_output: &str) -> anyhow::Result<TmuxVersion> {
+    // Exactly one optional trailing newline; a second one, a `\r`, or any
+    // other trailing whitespace falls through to the token check below
+    // and is refused there.
+    let line = v_output.strip_suffix('\n').unwrap_or(v_output);
+    let version = line
+        .strip_prefix(TMUX_VERSION_LINE_PREFIX)
+        .with_context(|| {
+            format!("tmux -V returned {line:?}, which is not a {TMUX_VERSION_LINE_PREFIX:?} line")
+        })?;
+    if version.is_empty() || version.contains(char::is_whitespace) {
+        bail!("tmux -V returned {line:?}, which is not exactly one version token");
+    }
+    parse_tmux_version_number(version)
+        .with_context(|| format!("tmux -V returned an unrecognized version {version:?}"))
+}
+
+/// [`parse_tmux_version`] minus the `tmux ` prefix and the line framing.
+///
+/// Split out for two callers, not just for tidiness: the `-V` line parser
+/// above, and the adopted-server check, which reads tmux's `#{version}`
+/// format — verified against 3.7b and 3.7c to print the bare version
+/// (`3.7c\n`) with no `tmux ` prefix. The error context naming the
+/// offending token is added once, by whichever of the two called in.
+fn parse_tmux_version_number(version: &str) -> anyhow::Result<TmuxVersion> {
+    let (major, rest) = version
         .split_once('.')
-        .context("tmux -V returned an unrecognized version")?;
-    let major: u32 = major.parse().context("parsing tmux major version")?;
-    let minor_digits: String = minor
-        .chars()
-        .take_while(|character| character.is_ascii_digit())
-        .collect();
-    let minor: u32 = minor_digits.parse().context("parsing tmux minor version")?;
-    if (major, minor) < (3, 3) {
-        bail!("tmux {version} is unsupported; Farhelm requires tmux 3.3 or newer");
+        .context("expected a major.minor version")?;
+    let major = parse_version_component(major, "major")?;
+    let suffix_at = rest
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(rest.len());
+    let (minor, suffix) = rest.split_at(suffix_at);
+    let minor = parse_version_component(minor, "minor")?;
+    // tmux's own patch spelling is exactly one lowercase letter. Anything
+    // longer is a build this project has never seen, and pretending the
+    // first letter of it is a patch level would silently admit it.
+    let patch = match suffix.as_bytes() {
+        [] => None,
+        [letter] if letter.is_ascii_lowercase() => Some(char::from(*letter)),
+        _ => bail!("unrecognized patch suffix {suffix:?}"),
+    };
+    Ok(TmuxVersion {
+        major,
+        minor,
+        patch,
+    })
+}
+
+/// One numeric component of a version, in tmux's own canonical spelling.
+///
+/// Stricter than `u32::from_str` on purpose. `parse` accepts `+3` and
+/// `0007`, both of which would then round-trip through [`TmuxVersion`]'s
+/// `Display` as a DIFFERENT string from the one tmux printed — and the
+/// refusal message, the release-pin lockstep test, and provisioning's
+/// floor comparison all trade in those printed forms. Refusing the
+/// non-canonical spellings keeps parse and print exact inverses.
+fn parse_version_component(text: &str, which: &str) -> anyhow::Result<u32> {
+    if text.is_empty() {
+        bail!("the {which} version is empty");
+    }
+    if !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        bail!("the {which} version {text:?} is not a plain decimal number");
+    }
+    if text.len() > 1 && text.starts_with('0') {
+        bail!("the {which} version {text:?} has a leading zero");
+    }
+    text.parse()
+        .with_context(|| format!("parsing the {which} version {text:?}"))
+}
+
+/// Where one discovered tmux version sits relative to [`TMUX_FLOOR`].
+///
+/// A pure verdict, deliberately separated from the messages: the SAME
+/// policy has to govern two different subjects — the client executable
+/// this driver spawns, and the long-lived server it may ADOPT (see
+/// [`TmuxDriver::require_supported_server`]) — and those two need
+/// different prose while sharing one definition of acceptable. Splitting
+/// them also makes the policy testable without capturing log output, so
+/// "3.7c must not warn, 3.7d must" is an ordinary assertion instead of a
+/// tracing-subscriber fixture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TmuxSupport {
+    /// Older than the regression-tested build: refuse.
+    BelowFloor,
+    /// Exactly the pinned, regression-tested build: the silent, blessed
+    /// case.
+    AtFloor,
+    /// Newer than the pin: accepted, but nobody has audited Farhelm
+    /// against it, so the caller warns.
+    AbovePin,
+}
+
+/// Classify a discovered version against the floor.
+///
+/// Newer-than-pinned is deliberately NOT a refusal. Homebrew will ship a
+/// version nobody has audited Farhelm against long before this floor
+/// moves, and refusing it would strand users on a release the project
+/// itself recommends installing; the warning its callers emit records
+/// that the combination is untested so a later bug report starts from the
+/// right place.
+fn classify_tmux_version(found: TmuxVersion) -> TmuxSupport {
+    match found.cmp(&TMUX_FLOOR) {
+        std::cmp::Ordering::Less => TmuxSupport::BelowFloor,
+        std::cmp::Ordering::Equal => TmuxSupport::AtFloor,
+        std::cmp::Ordering::Greater => TmuxSupport::AbovePin,
+    }
+}
+
+/// Enforce the version floor against the binary this driver will actually
+/// run, before a server is started or adopted.
+///
+/// `program` is the path the caller probed, and it is in the refusal text
+/// on purpose: the failure this message exists for is "the wrong tmux was
+/// on PATH", which is unfixable without knowing WHICH tmux answered. It is
+/// the loudest on macOS, where a GUI app inherits no shell PATH.
+///
+/// This covers only HALF the substrate. Clearing it means a fresh server
+/// would be started from an acceptable binary; it says nothing about a
+/// server already running on the private socket, which `start-server`
+/// adopts instead of replacing. [`TmuxDriver::require_supported_server`]
+/// is the other half and runs right after.
+fn require_supported_tmux(program: &Path, v_output: &str) -> anyhow::Result<()> {
+    let found = parse_tmux_version(v_output)
+        .with_context(|| format!("checking the tmux at {}", program.display()))?;
+    match classify_tmux_version(found) {
+        TmuxSupport::BelowFloor => bail!(
+            "tmux {found} at {} is below Farhelm's floor {TMUX_FLOOR} (see README: tmux)",
+            program.display()
+        ),
+        TmuxSupport::AtFloor => {}
+        TmuxSupport::AbovePin => warn!(
+            tmux = %program.display(),
+            found = %found,
+            tested = %TMUX_FLOOR,
+            "tmux is newer than the version Farhelm is tested against; this combination is \
+             unaudited"
+        ),
     }
     Ok(())
+}
+
+/// The environment variable naming the tmux binary to drive.
+///
+/// Public because the desktop app sets it on the supervisor it spawns:
+/// macOS GUI apps inherit no shell PATH, so the app probes the Homebrew
+/// prefixes itself and hands the winner down through this variable.
+pub const TMUX_PROGRAM_ENV: &str = "FARHELM_TMUX";
+
+/// What Farhelm drives when nothing overrides it: plain `tmux`, resolved
+/// by the operating system against `PATH` at spawn time, exactly as every
+/// release before the override knob existed.
+pub const DEFAULT_TMUX_PROGRAM: &str = "tmux";
+
+/// Resolve which tmux binary a supervisor drives: `--tmux` wins, then
+/// [`TMUX_PROGRAM_ENV`], then [`DEFAULT_TMUX_PROGRAM`] off `PATH`.
+///
+/// Both inputs are parameters rather than reads of this process's
+/// environment, which is what makes the precedence testable: this repo's
+/// tests never mutate the test process's environment, and a resolution
+/// that read `FARHELM_TMUX` itself could only be exercised by doing so.
+/// Production reaches the real environment through
+/// [`resolve_tmux_program_from_env`].
+///
+/// An empty `FARHELM_TMUX` counts as unset. A systemd unit or shell
+/// profile that writes `FARHELM_TMUX=` means "no override" to whoever
+/// wrote it, and the alternative reading — spawn a program with an empty
+/// name — can only ever fail.
+///
+/// Choosing a binary here does not exempt it from anything: the result is
+/// floor-checked like any other candidate and refused by name if it is too
+/// old (see [`require_supported_tmux`]). The override means "you own the
+/// substrate", not "this configuration is supported" — Farhelm drives tmux
+/// harder than interactive use, versions below [`TMUX_FLOOR`] have crashed
+/// under it, and versions above it are unaudited.
+pub fn resolve_tmux_program(flag: Option<&Path>, env: Option<&std::ffi::OsStr>) -> PathBuf {
+    if let Some(flag) = flag {
+        return flag.to_path_buf();
+    }
+    match env {
+        Some(value) if !value.is_empty() => PathBuf::from(value),
+        _ => PathBuf::from(DEFAULT_TMUX_PROGRAM),
+    }
+}
+
+/// [`resolve_tmux_program`] against this process's real environment.
+///
+/// The single caller is `farhelm supervisor run`'s startup, which is what
+/// makes "chosen once, then threaded everywhere" true: no code below it
+/// ever consults the environment again, so no launch path can disagree
+/// with another about which tmux this supervisor drives.
+///
+/// What is fixed here is the SPELLING, not a file. A bare name stays a
+/// bare name and is looked up against `PATH` afresh by each spawn — see
+/// [`program_display_path`] for why that is deliberate, and for the
+/// replacement race it leaves open.
+pub fn resolve_tmux_program_from_env(flag: Option<&Path>) -> PathBuf {
+    resolve_tmux_program(flag, std::env::var_os(TMUX_PROGRAM_ENV).as_deref())
+}
+
+/// Spell a program the way a human can act on it: a bare name is reported
+/// as the `PATH` entry it resolves to.
+///
+/// ADVISORY, not authoritative, and the distinction is the whole reason
+/// this doc exists. Nothing is executed through the returned path: the
+/// driver keeps the SPELLING it was given and lets `Command` redo the
+/// `PATH` lookup on every spawn, because resolving here and spawning by
+/// absolute path would open a time-of-check gap the OS's own lookup does
+/// not have. The flip side is honest to state: between this lookup and
+/// the spawn, the winning `PATH` entry can be replaced, so the path in a
+/// diagnostic is the best available name for what answered, not proof of
+/// which inode did.
+///
+/// It exists because "tmux 3.6 is too old" is unactionable while "the
+/// tmux 3.6 at /usr/bin/tmux is too old" tells the reader which entry to
+/// fix. `path_var` is a parameter so the search is testable without
+/// touching the test process's environment.
+///
+/// The search must match the OS's, not merely find a file by name: `execvp`
+/// SKIPS a non-executable candidate and keeps walking `PATH`. A plain
+/// `is_file` check stopped at the first shadow — a leftover `tmux` config
+/// fragment, a `noexec` copy, a root-owned unreadable stub — and named a
+/// file that was never run, which is a diagnostic that actively misleads.
+fn program_display_path(program: &Path, path_var: Option<&std::ffi::OsStr>) -> PathBuf {
+    // A name with any separator is already a path; the OS would not
+    // consult PATH for it either.
+    if program.components().count() != 1 {
+        return program.to_path_buf();
+    }
+    let Some(path_var) = path_var else {
+        return program.to_path_buf();
+    };
+    std::env::split_paths(path_var)
+        .map(|dir| dir.join(program))
+        .find(|candidate| is_executable_file(candidate))
+        // Falling back to the bare name is right: the spawn that follows
+        // will fail with the OS's own "no such file" and that error is
+        // clearer than a path this function invented.
+        .unwrap_or_else(|| program.to_path_buf())
+}
+
+/// Whether a `PATH` candidate is something the OS would actually execute.
+///
+/// An approximation of `execvp`'s test, and knowingly so: it asks whether
+/// ANY execute bit is set rather than whether THIS process's uid/gid can
+/// use the one that applies, and it cannot see a `noexec` mount or an
+/// LSM denial. That is the right trade for a diagnostic — the cheap check
+/// removes the shadows that actually occur (data files, unstripped
+/// permissions on a copied binary) without a permission model this code
+/// would then have to keep true.
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    // Windows has no execute bit; being a regular file with the right
+    // name is as close as this diagnostic can get.
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Pane state needed to make a fresh xterm.js behave as if it had been
@@ -928,9 +1296,11 @@ fn env_assignments(env: &[(String, String)]) -> Vec<String> {
 /// Version floor: `respawn-pane -k`, `-e` environment injection,
 /// history retention, the shrink-scrolls-into-history rule, and the
 /// grow-pulls-back rule were all audited empirically against tmux 3.3a
-/// (this crate's documented floor — see `require_supported_tmux`), 3.4
-/// (Ubuntu 24.04's package, so CI's), and 3.7b (the development host).
-/// All three behave identically; nothing here needs a version gate.
+/// (the crate's floor when this was written), 3.4 (Ubuntu 24.04's
+/// package, so CI's), and 3.7b (the development host at the time; today's
+/// [`TMUX_FLOOR`] is newer still). All three behave identically; nothing
+/// here needs a version gate, and raising the floor past them only
+/// narrowed the range this evidence has to cover.
 ///
 /// Every step is BEST EFFORT and never fails the relaunch: a resize or
 /// capture that does not land costs scrollback fidelity, while refusing
@@ -961,19 +1331,44 @@ impl TmuxDriver {
     }
 
     /// Like [`Self::new`], with the two control-mode budgets supplied
-    /// explicitly.
+    /// explicitly and the tmux program left at the `PATH` default.
     ///
-    /// `pub(crate)`, not `pub`: the production constants remain the only
-    /// values any real supervisor uses (see [`Self::new`]), so the only
-    /// legitimate callers of this seam are this crate's own
-    /// `Supervisor::new_with_seams` (threading `SupervisorTimeouts`
-    /// through) and this module's own tests — never an embedder, and never
-    /// an e2e test directly (those go through `SupervisorTimeouts`, not
-    /// this driver).
+    /// The budgets-only convenience: it exists for callers that need to
+    /// stretch a control-mode deadline (a loaded CI box) but have no
+    /// opinion about WHICH tmux runs. `pub(crate)`, not `pub`: the
+    /// production constants remain the only values any real supervisor
+    /// uses (see [`Self::new`]), so the only legitimate callers are this
+    /// crate's own `Supervisor::new_with_seams` (threading
+    /// `SupervisorTimeouts` through) and this module's own tests — never
+    /// an embedder, and never an e2e test directly (those go through
+    /// `SupervisorTimeouts`, not this driver).
     pub(crate) fn new_with_timeouts(state_dir: &Path, budgets: TmuxBudgets) -> TmuxDriver {
+        Self::new_with_program(state_dir, budgets, PathBuf::from(DEFAULT_TMUX_PROGRAM))
+    }
+
+    /// The one real constructor, and the production route: everything
+    /// above it supplies a default for one of its arguments.
+    ///
+    /// `program` is the resolved tmux binary (see [`resolve_tmux_program`]).
+    /// It carries BOTH the control-mode budgets and the program choice,
+    /// which is what the supervisor's own startup needs — the single
+    /// production call site that has an opinion about the program. It is
+    /// a separate constructor rather than a fourth parameter on the
+    /// existing ones because nearly every test in this crate wants the
+    /// `PATH` default, and churning several dozen call sites to say "no
+    /// opinion" would obscure the one that has one. The exceptions are
+    /// this module's focused override tests, which name a stand-in binary
+    /// here precisely to prove the choice reaches the floor probe and the
+    /// command funnel.
+    pub(crate) fn new_with_program(
+        state_dir: &Path,
+        budgets: TmuxBudgets,
+        program: PathBuf,
+    ) -> TmuxDriver {
         TmuxDriver {
             socket: state_dir.join("tmux.sock"),
             config: state_dir.join("tmux.conf"),
+            program,
             exchange_timeout: budgets.exchange,
             pane_list_timeout: budgets.pane_list,
             shutdown_admission: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -997,9 +1392,16 @@ impl TmuxDriver {
     ///   inner apps probe $TERM.
     /// - `escape-time 0`: tmux waits after a lone ESC byte to see whether
     ///   an escape sequence follows. The default is 500ms before tmux 3.5
-    ///   and 10ms from 3.5 on — so at the 3.3 floor the delay is half a
-    ///   second, showing up as visibly laggy Esc handling in agent TUIs
-    ///   and vim; 0 removes it entirely.
+    ///   and 10ms from 3.5 on — half a second of visibly laggy Esc
+    ///   handling in agent TUIs and vim on the older builds, 10ms of it
+    ///   on everything at today's [`TMUX_FLOOR`]; 0 removes it entirely.
+    ///   Kept rather than dropped with the floor's rise because 10ms of
+    ///   latency on every Esc is still latency Farhelm has no reason to
+    ///   pay. Like every line here it reaches FRESH servers only — tmux
+    ///   reads a `-f` config when it starts a server, so an adopted one
+    ///   keeps whatever `escape-time` it was started with, and this
+    ///   driver does not reconcile it after the fact (`focus-events`,
+    ///   below, is the one option that gets that treatment).
     ///
     /// NOT set here: `focus-events`. It is a server option that must be
     /// reconciled on EVERY `ensure_server` call, not just a fresh start —
@@ -1018,10 +1420,12 @@ impl TmuxDriver {
     ///
     /// Option tables are named explicitly — `set -s` for server options,
     /// `set -g` for session, `setw -g` for window — rather than relying
-    /// on tmux inferring the table. Inference works on recent versions;
-    /// being explicit works on every version at the 3.3 floor, and a
-    /// config line tmux cannot place is a config line that silently does
-    /// nothing.
+    /// on tmux inferring the table. Inference works on recent versions
+    /// and explicit tables work on every version back to 3.3, so being
+    /// explicit costs nothing and is kept even though [`TMUX_FLOOR`] now
+    /// excludes the versions that needed it: a config line tmux cannot
+    /// place is a config line that silently does nothing, and that is not
+    /// a failure mode worth re-earning on the next floor change.
     fn config_body() -> String {
         format!(
             "set -s exit-empty off\n\
@@ -1039,9 +1443,18 @@ impl TmuxDriver {
     /// EVERY tmux invocation in this module is built here, which is what
     /// makes the `-S`/`-f` isolation unforgettable: touching the user's
     /// own tmux server and config would be a serious violation, and a
-    /// forgotten flag is exactly how that happens.
+    /// forgotten flag is exactly how that happens. The same funnel is what
+    /// makes the `--tmux` / `FARHELM_TMUX` override total — see
+    /// [`TmuxDriver::program`] — with NO exceptions, `ensure_server`'s
+    /// `-V` floor probe included. That probe runs before any server
+    /// exists, but the extra `-S`/`-f` arguments cost it nothing: tmux
+    /// answers `-V` from the client binary and exits without contacting a
+    /// server or loading the config file (verified against 3.7c with both
+    /// paths pointing at a directory that does not exist). Routing it
+    /// here anyway is what keeps "every invocation runs the chosen
+    /// program" a property of the code rather than a claim in a comment.
     fn command(&self) -> Command {
-        let mut cmd = Command::new("tmux");
+        let mut cmd = Command::new(&self.program);
         cmd.arg("-S").arg(&self.socket).arg("-f").arg(&self.config);
         cmd
     }
@@ -1335,9 +1748,9 @@ impl TmuxDriver {
         Ok(out.stdout)
     }
 
-    /// Start (or adopt) the private server, then reconcile the one live
-    /// option this driver actively manages after the fact, regardless of
-    /// which path was taken.
+    /// Start (or adopt) the private server, floor-check whichever one we
+    /// ended up with, then reconcile the one live option this driver
+    /// actively manages, regardless of which path was taken.
     ///
     /// The running substrate itself — sessions, panes, scrollback history
     /// — is left exactly as it is on adoption, per the discovery-first
@@ -1348,6 +1761,10 @@ impl TmuxDriver {
     /// value it already had for the rest of its life — see the
     /// `set-option` call below for why a config-file line cannot do this
     /// job alone, and for what the option actually buys us.
+    ///
+    /// TWO floor checks, not one, and both are load-bearing: see
+    /// [`Self::require_supported_server`] for why upgrading the client
+    /// binary does not upgrade the server it adopts.
     pub async fn ensure_server(&self) -> anyhow::Result<()> {
         self.ensure_server_with_seam(crate::files::RealFs).await
     }
@@ -1368,19 +1785,30 @@ impl TmuxDriver {
     where
         S: crate::files::FaultSeam + Copy + Send + 'static,
     {
-        let version = Command::new("tmux")
+        // Resolved for the message only, never for the spawn: `Command`
+        // does its own PATH lookup below, and pre-resolving would add a
+        // time-of-check gap for nothing. See `program_display_path`.
+        let named = program_display_path(&self.program, std::env::var_os("PATH").as_deref());
+        // Through the ordinary funnel (see `command`): tmux answers `-V`
+        // without touching the socket or the config, so the private
+        // arguments are inert here and routing around them would only
+        // create a call site the override could be forgotten at.
+        let version = self
+            .command()
             .arg("-V")
+            .stdin(Stdio::null())
             .output()
             .await
-            .context("checking tmux version")?;
+            .with_context(|| format!("checking the tmux version of {}", named.display()))?;
         if !version.status.success() {
             bail!(
-                "tmux -V failed ({}): {}",
+                "{} -V failed ({}): {}",
+                named.display(),
                 version.status,
                 String::from_utf8_lossy(&version.stderr).trim()
             );
         }
-        require_supported_tmux(&String::from_utf8_lossy(&version.stdout))?;
+        require_supported_tmux(&named, &String::from_utf8_lossy(&version.stdout))?;
         if let Some(dir) = self.socket.parent() {
             tokio::fs::create_dir_all(dir).await?;
         }
@@ -1400,6 +1828,10 @@ impl TmuxDriver {
         .await
         .map_err(|join_err| anyhow::anyhow!("tmux config write task panicked: {join_err}"))??;
         self.run(&["start-server"]).await?;
+        // Only now is the substrate's version actually known: the call
+        // above either started a server from the binary just checked, or
+        // silently adopted one that was already there.
+        self.require_supported_server().await?;
 
         // `focus-events` is deliberately NOT part of `config_body`: tmux
         // only reads a `-f` config when it STARTS a server, so a config
@@ -1433,6 +1865,64 @@ impl TmuxDriver {
         // advertised state match what a well-behaved agent expects to see.
         self.run(&["set-option", "-s", "focus-events", "on"])
             .await?;
+        Ok(())
+    }
+
+    /// Apply the floor to the SERVER now on the private socket, which is
+    /// not necessarily the version the `-V` probe cleared.
+    ///
+    /// Farhelm drives a long-lived tmux server through short-lived client
+    /// processes, and it keeps that server across supervisor restarts on
+    /// purpose so sessions survive an upgrade. `start-server` ADOPTS a
+    /// server already owning the socket rather than replacing it. So
+    /// installing a 3.7c client over a running 3.4 or 3.7b server clears
+    /// the client-side check and then drives every subsequent command
+    /// against the old, crash-prone substrate — precisely the situation
+    /// [`TMUX_FLOOR`] exists to prevent, arrived at through the upgrade
+    /// path most likely to be taken.
+    ///
+    /// The version comes from tmux's `#{version}` format, which reports
+    /// the SERVER's version to the connecting client (verified: a 3.7c
+    /// client against a 3.7b server prints `3.7b`) and, unlike `-V`,
+    /// prints the bare number with no `tmux ` prefix.
+    ///
+    /// REFUSES WITHOUT KILLING. A below-floor server is hosting the
+    /// user's live sessions; tearing it down to satisfy a version policy
+    /// would destroy exactly what the never-restart-a-running-substrate
+    /// rule protects. Draining it is a decision only its owner can make,
+    /// so the refusal says so and names what to act on.
+    async fn require_supported_server(&self) -> anyhow::Result<()> {
+        let reported = self
+            .run(&["display-message", "-p", "#{version}"])
+            .await
+            .context("asking the tmux server on the private socket for its version")?;
+        let reported = reported.trim_end_matches('\n');
+        let found = parse_tmux_version_number(reported).with_context(|| {
+            format!(
+                "the tmux server on {} reported an unrecognized version {reported:?}",
+                self.socket.display()
+            )
+        })?;
+        match classify_tmux_version(found) {
+            TmuxSupport::BelowFloor => bail!(
+                "the tmux server already running on {} is {found}, below Farhelm's floor \
+                 {TMUX_FLOOR} (see README: tmux). Upgrading the tmux binary does not upgrade a \
+                 server that is already running: it keeps serving its existing sessions until it \
+                 exits. Farhelm will not kill it for you. Drain it deliberately — stop the \
+                 sessions you still need elsewhere, then `tmux -S {} kill-server` once nothing on \
+                 it matters — before running a supervisor on this state directory.",
+                self.socket.display(),
+                self.socket.display()
+            ),
+            TmuxSupport::AtFloor => {}
+            TmuxSupport::AbovePin => warn!(
+                socket = %self.socket.display(),
+                found = %found,
+                tested = %TMUX_FLOOR,
+                "the tmux server on the private socket is newer than the version Farhelm is \
+                 tested against; this combination is unaudited"
+            ),
+        }
         Ok(())
     }
 
@@ -2991,16 +3481,489 @@ mod tests {
         assert_eq!((modes.cursor_x, modes.cursor_y), (7, 3));
     }
 
-    /// The supported-version check accepts patch suffixes but rejects the
-    /// control-mode versions below the documented 3.3 floor.
+    /// Version ordering must separate a release from its own patch
+    /// letters, which is the whole reason [`TmuxVersion`] exists: the
+    /// check this replaced compared `(major, minor)` and could not tell
+    /// the regression-tested 3.7c from a 3.7 nobody has run Farhelm on.
+    ///
+    /// Pins the two orderings that are easy to get wrong — a bare release
+    /// sorts BEFORE its first patch letter (tmux shipped 3.7 then 3.7a),
+    /// and the minor number is numeric, not textual, so 3.10 is newer
+    /// than 3.9 rather than older.
     #[test]
-    fn tmux_version_floor_is_enforced() {
-        assert!(require_supported_tmux("tmux 3.3").is_ok());
-        assert!(require_supported_tmux("tmux 3.3a").is_ok());
-        assert!(require_supported_tmux("tmux 3.10").is_ok());
-        assert!(require_supported_tmux("tmux 4.0").is_ok());
-        assert!(require_supported_tmux("tmux 3.2a").is_err());
-        assert!(require_supported_tmux("not-a-version").is_err());
+    fn version_ordering_separates_patch_letters_and_compares_minors_numerically() {
+        let parse = |line: &str| parse_tmux_version(line).expect("a well-formed version");
+        assert!(parse("tmux 3.7") < parse("tmux 3.7a"));
+        assert!(parse("tmux 3.7a") < parse("tmux 3.7b"));
+        assert!(parse("tmux 3.7b") < parse("tmux 3.7c"));
+        assert!(parse("tmux 3.7c") < parse("tmux 3.8"));
+        assert!(parse("tmux 3.9") < parse("tmux 3.10"));
+        assert!(parse("tmux 3.10") < parse("tmux 4.0"));
+        assert_eq!(parse("tmux 3.7c"), TMUX_FLOOR);
+    }
+
+    /// Parsing is the trust boundary in front of the floor, so what it
+    /// REFUSES matters as much as what it reads: every shape here would
+    /// otherwise have to be guessed at, and a wrong guess admits an
+    /// unaudited substrate. Also pins the round-trip through `Display`,
+    /// since the refusal message and the release-pin lockstep test both
+    /// compare printed versions.
+    #[test]
+    fn version_parsing_refuses_everything_it_cannot_read_exactly() {
+        for line in ["tmux 3.7b", "tmux 3.7", "tmux 4.0", "tmux 3.10"] {
+            let parsed = parse_tmux_version(line).expect("a well-formed version");
+            assert_eq!(format!("tmux {parsed}"), line, "Display must round-trip");
+        }
+        // A trailing newline is the shape tmux actually emits, so it must
+        // parse identically to the trimmed line.
+        assert_eq!(
+            parse_tmux_version("tmux 3.7c\n").expect("tmux's own output"),
+            TMUX_FLOOR
+        );
+        // No version token at all, a development build, a decorated
+        // distro string, and a suffix that is not tmux's single lowercase
+        // patch letter.
+        for line in [
+            "",
+            "tmux",
+            "not-a-version",
+            "tmux next-3.8",
+            "tmux 3.7-rc",
+            "tmux 3.7ab",
+            "tmux 3.7B",
+            "tmux 3",
+            "tmux .7",
+            "tmux 3.a",
+        ] {
+            assert!(
+                parse_tmux_version(line).is_err(),
+                "{line:?} must not parse as a version"
+            );
+        }
+        // Whole-line shapes an earlier token-only parser read as clean
+        // releases. Each one is a way an unaudited or forged substrate
+        // could have been classified as the pinned build — the wrong
+        // program answering, a vendor decoration, or a non-canonical
+        // spelling that would then print back differently than it came
+        // in. `tmux 3.8-rc` and `tmux next-3.8` above are the same
+        // refusal by policy rather than by accident: see
+        // [`parse_tmux_version`] on why tmux's official development and
+        // release-candidate stages are out of contract.
+        for line in [
+            "not-tmux 3.7c",
+            "TMUX 3.7c",
+            "tmux3.7c",
+            " tmux 3.7c",
+            "tmux 3.7c vendor-patch",
+            "tmux 3.7c\ntmux 3.6",
+            "tmux 3.7c\n\n",
+            "tmux 3.7c\r\n",
+            "tmux 3.7c ",
+            "tmux +3.7c",
+            "tmux 3.+7c",
+            "tmux -3.7c",
+            "tmux 03.7c",
+            "tmux 3.07c",
+            "tmux 3.8-rc",
+            "tmux 3.8-rc2",
+        ] {
+            assert!(
+                parse_tmux_version(line).is_err(),
+                "{line:?} must not parse as a version"
+            );
+        }
+    }
+
+    /// The floor refuses everything below the pinned build and accepts
+    /// everything at or above it — including versions nobody has audited,
+    /// which warn instead (a refusal there would strand users on the
+    /// Homebrew release the project's own install instructions ask for).
+    ///
+    /// Malformed input stays a refusal: an unreadable version is an
+    /// unknown version, and the conservative direction is the one that
+    /// does not start a server.
+    #[test]
+    fn the_floor_refuses_older_builds_and_admits_newer_ones() {
+        let check = |line: &str| require_supported_tmux(Path::new("/usr/bin/tmux"), line);
+        assert!(check("tmux 3.7c").is_ok(), "the floor itself is accepted");
+        assert!(
+            check("tmux 3.8").is_ok(),
+            "a newer release warns, not fails"
+        );
+        assert!(check("tmux 4.0").is_ok());
+        assert!(
+            check("tmux 3.7b").is_err(),
+            "the previous pin is below the floor"
+        );
+        assert!(check("tmux 3.7a").is_err());
+        assert!(check("tmux 3.7").is_err());
+        assert!(check("tmux 3.6").is_err());
+        assert!(check("tmux 3.4").is_err());
+        assert!(check("tmux 3.3a").is_err());
+        assert!(check("not-a-version").is_err());
+    }
+
+    /// The floor's THREE outcomes, pinned as values rather than as "the
+    /// call returned Ok".
+    ///
+    /// The version this replaced asserted only success, so it stayed green
+    /// if the newer-than-pinned warning were deleted, if it fired at the
+    /// exact pinned version, or if a later patch letter of the pinned
+    /// release were mishandled. Those are the three ways the policy can go
+    /// wrong quietly: an unaudited substrate that says nothing, and noise
+    /// on the one combination that is actually blessed. Classifying into
+    /// an enum is what makes them assertable without installing a
+    /// process-global tracing subscriber, which would collide with every
+    /// other test in the binary.
+    #[test]
+    fn classification_is_silent_at_the_pin_and_flags_everything_newer() {
+        let at = |line: &str| {
+            classify_tmux_version(parse_tmux_version(line).expect("a well-formed version"))
+        };
+        assert_eq!(at("tmux 3.7c"), TmuxSupport::AtFloor);
+        // The next patch letter of the SAME release is still not the
+        // build the regression suites run against.
+        assert_eq!(at("tmux 3.7d"), TmuxSupport::AbovePin);
+        assert_eq!(at("tmux 3.8"), TmuxSupport::AbovePin);
+        assert_eq!(at("tmux 4.0"), TmuxSupport::AbovePin);
+        assert_eq!(at("tmux 3.7b"), TmuxSupport::BelowFloor);
+        assert_eq!(at("tmux 3.6"), TmuxSupport::BelowFloor);
+    }
+
+    /// The refusal is the first thing a user hits on a distro tmux, and it
+    /// is useless unless it answers "which binary, how old, and how old is
+    /// too old" — the actual failure it exists for is "the wrong tmux was
+    /// on PATH", which cannot be fixed without knowing which one answered.
+    #[test]
+    fn the_refusal_names_the_binary_the_version_and_the_floor() {
+        let error = require_supported_tmux(Path::new("/usr/bin/tmux"), "tmux 3.6\n")
+            .expect_err("3.6 is below the floor");
+        let message = format!("{error:#}");
+        assert!(message.contains("/usr/bin/tmux"), "{message}");
+        assert!(message.contains("tmux 3.6"), "{message}");
+        assert!(message.contains(&TMUX_FLOOR.to_string()), "{message}");
+        assert!(message.contains("README"), "{message}");
+    }
+
+    /// A version Farhelm cannot READ is as much a startup blocker as one
+    /// that is too old, and it is a harder one to act on: the user sees a
+    /// refusal for a tmux that looks fine to them. So the error chain has
+    /// to carry both halves of the answer — the exact token that could
+    /// not be parsed, and which binary produced it.
+    ///
+    /// Asserted against the full `{:#}` chain, not the outermost message,
+    /// because the token and the program are contributed by different
+    /// `context` layers; a refactor that drops either layer would leave an
+    /// `is_err`-only test perfectly green.
+    #[test]
+    fn a_malformed_version_names_the_token_and_the_binary() {
+        let error =
+            require_supported_tmux(Path::new("/opt/weird/tmux"), "tmux 9.9zzz-vendor-mangled\n")
+                .expect_err("an unreadable version must refuse");
+        let message = format!("{error:#}");
+        assert!(message.contains("9.9zzz-vendor-mangled"), "{message}");
+        assert!(message.contains("/opt/weird/tmux"), "{message}");
+    }
+
+    /// The floor and the release pin must not be able to drift apart.
+    ///
+    /// [`TMUX_FLOOR`] means "the version Farhelm's regression suites
+    /// actually run against", and the build that gets regression-tested is
+    /// the one `.github/release/source-pins.env` names. Nothing else
+    /// couples the two files, so bumping the pinned tarball without
+    /// bumping the floor would silently leave the floor pointing at a
+    /// build the project no longer ships — and bumping the floor alone
+    /// would refuse the build provisioning installs. Failing here is the
+    /// intended way to learn that the other half of the bump is missing.
+    ///
+    /// EVERY assignment is collected and exactly one is required, rather
+    /// than reading the first. The pin file is SOURCED by shell scripts,
+    /// where the LAST assignment wins, so an old line left above a new one
+    /// would leave this test comparing the floor against a version nothing
+    /// actually builds — the precise drift it exists to catch, dressed as
+    /// a pass.
+    #[test]
+    fn floor_and_release_pin_cannot_drift() {
+        // Reaching outside the crate with a relative `include_str!` is
+        // fine here: this is a workspace-only repository, never packaged
+        // or published as a standalone crate.
+        const SOURCE_PINS: &str = include_str!("../../../.github/release/source-pins.env");
+        let pinned: Vec<&str> = SOURCE_PINS
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("TMUX_VERSION="))
+            .collect();
+        assert_eq!(
+            pinned.len(),
+            1,
+            "source-pins.env must declare TMUX_VERSION exactly once, found {pinned:?}"
+        );
+        assert_eq!(
+            pinned[0],
+            TMUX_FLOOR.to_string(),
+            "TMUX_FLOOR and the pinned tmux release must be bumped together"
+        );
+    }
+
+    /// The override's precedence is a user-facing contract: `--tmux` beats
+    /// `FARHELM_TMUX` beats PATH, so an operator can override a unit
+    /// file's environment from the command line without editing it.
+    ///
+    /// Both inputs are injected rather than read from the process, which
+    /// is deliberate — this repo's tests never mutate the test process's
+    /// environment, and a shared `FARHELM_TMUX` would leak into every
+    /// concurrently running harness.
+    #[test]
+    fn the_flag_beats_the_environment_which_beats_path() {
+        use std::ffi::OsStr;
+
+        let flag = PathBuf::from("/opt/flag/tmux");
+        let env = OsStr::new("/opt/env/tmux");
+        assert_eq!(
+            resolve_tmux_program(Some(&flag), Some(env)),
+            PathBuf::from("/opt/flag/tmux")
+        );
+        assert_eq!(
+            resolve_tmux_program(Some(&flag), None),
+            PathBuf::from("/opt/flag/tmux")
+        );
+        assert_eq!(
+            resolve_tmux_program(None, Some(env)),
+            PathBuf::from("/opt/env/tmux")
+        );
+        assert_eq!(
+            resolve_tmux_program(None, None),
+            PathBuf::from(DEFAULT_TMUX_PROGRAM)
+        );
+        // An empty override is what a unit file or profile writes to mean
+        // "no override"; the other reading spawns a program with no name.
+        assert_eq!(
+            resolve_tmux_program(None, Some(OsStr::new(""))),
+            PathBuf::from(DEFAULT_TMUX_PROGRAM)
+        );
+    }
+
+    /// Write an executable shell script, for the tmux stand-ins below.
+    ///
+    /// Factored out because several override tests need a program that
+    /// exists, runs, and answers in a controlled way; a non-executable
+    /// file would be refused by the OS long before the behavior under
+    /// test.
+    #[cfg(unix)]
+    fn write_executable(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, body).expect("write the stand-in");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+            .expect("make the stand-in executable");
+    }
+
+    /// A tmux stand-in that answers `-V` with `version` and REFUSES any
+    /// other invocation with exit 2.
+    ///
+    /// The strictness is the point. A stand-in that printed a version for
+    /// every invocation could not distinguish "the probe asked for `-V`"
+    /// from "the probe asked for something else and we answered anyway",
+    /// so the earlier version of these tests proved only that a refusal
+    /// happened, not that the right question was asked. This one also
+    /// pins the funnel: the probe is built by `TmuxDriver::command`, so
+    /// the exact argument vector must be `-S <socket> -f <config> -V`, and
+    /// an invocation that lost the private isolation flags — the one
+    /// mistake this module's whole `command()` discipline exists to
+    /// prevent — fails here rather than silently touching a real server.
+    #[cfg(unix)]
+    fn write_version_standin(path: &Path, version: &str) {
+        write_executable(
+            path,
+            &format!(
+                "#!/bin/sh\n\
+                 if [ \"$#\" -eq 5 ] && [ \"$1\" = -S ] && [ \"$3\" = -f ] && [ \"$5\" = -V ]; \
+                 then echo '{version}'; exit 0; fi\n\
+                 echo \"unexpected invocation: $*\" >&2\n\
+                 exit 2\n"
+            ),
+        );
+    }
+
+    /// The override has to reach the FLOOR PROBE, not just the commands
+    /// after it. A driver that checked whatever `tmux` PATH resolves to
+    /// and then ran the overridden binary would be strictly worse than no
+    /// override at all — it would clear the floor against one program and
+    /// drive another — so this drives `ensure_server` through a stand-in
+    /// binary that reports a too-old version and proves the refusal both
+    /// happens and names that binary.
+    ///
+    /// The stand-in is a shell script rather than a real tmux because the
+    /// probe under test is a `-V` exchange: nothing here needs a server,
+    /// and a test that needed one could not run where the floor is unmet.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_overridden_binary_is_the_one_the_floor_probe_checks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = dir.path().join("pretend-tmux");
+        write_version_standin(&fake, "tmux 3.6");
+
+        let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), fake.clone());
+        let error = driver
+            .ensure_server()
+            .await
+            .expect_err("a 3.6 substrate is below the floor");
+        let message = format!("{error:#}");
+        assert!(message.contains(&fake.display().to_string()), "{message}");
+        assert!(message.contains("tmux 3.6"), "{message}");
+        assert!(message.contains(&TMUX_FLOOR.to_string()), "{message}");
+        assert!(
+            !driver.config.exists(),
+            "a refused floor check must not have written a server config"
+        );
+    }
+
+    /// The override must also survive the ORDINARY command path, which the
+    /// floor-refusal tests never reach: they fail before the funnel runs.
+    ///
+    /// Two properties in one place because they are the two halves of the
+    /// same promise. The chosen program is what gets spawned — otherwise
+    /// the floor is enforced against one binary and the sessions run on
+    /// another — and it does NOT displace the private `-S`/`-f`
+    /// arguments, because an override that quietly dropped those would
+    /// point Farhelm at the user's own tmux server and configuration.
+    #[test]
+    fn an_overridden_driver_keeps_the_program_and_the_private_arguments() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = dir.path().join("pretend-tmux");
+        let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), fake.clone());
+
+        let command = driver.command();
+        let command = command.as_std();
+        assert_eq!(Path::new(command.get_program()), fake);
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            args,
+            vec![
+                std::ffi::OsStr::new("-S"),
+                driver.socket.as_os_str(),
+                std::ffi::OsStr::new("-f"),
+                driver.config.as_os_str(),
+            ]
+        );
+    }
+
+    /// A tmux the driver cannot even SPAWN must refuse by name and leave
+    /// no trace, which is the ordinary shape of a mistyped `--tmux` or a
+    /// unit file naming a path that a later upgrade removed.
+    ///
+    /// Pinning "no config written" alongside the message matters because
+    /// the config write sits between the probe and `start-server`: a
+    /// reordering that wrote it first would leave a stale file behind on
+    /// every failed startup, in a state directory the next supervisor
+    /// reads.
+    #[tokio::test]
+    async fn a_tmux_that_cannot_be_spawned_refuses_by_name() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let absent = dir.path().join("no-such-tmux");
+
+        let driver =
+            TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), absent.clone());
+        let error = driver
+            .ensure_server()
+            .await
+            .expect_err("a program that does not exist cannot be driven");
+        let message = format!("{error:#}");
+        assert!(message.contains(&absent.display().to_string()), "{message}");
+        assert!(
+            !driver.config.exists(),
+            "a failed probe must not have written a server config"
+        );
+    }
+
+    /// A tmux that runs but FAILS its `-V` is a different diagnostic from
+    /// one that cannot be spawned, and the thing that makes it actionable
+    /// is the program's own stderr — a missing shared library, a wrapper
+    /// script refusing, a binary for the wrong architecture. Losing that
+    /// text leaves "tmux -V failed" and nothing to act on, so the exit
+    /// status and the stderr are both pinned.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failing_version_probe_surfaces_its_status_and_stderr() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let broken = dir.path().join("broken-tmux");
+        write_executable(
+            &broken,
+            "#!/bin/sh\necho 'libevent.so.2: cannot open shared object file' >&2\nexit 1\n",
+        );
+
+        let driver =
+            TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), broken.clone());
+        let error = driver
+            .ensure_server()
+            .await
+            .expect_err("a nonzero -V cannot be treated as a version");
+        let message = format!("{error:#}");
+        assert!(message.contains(&broken.display().to_string()), "{message}");
+        assert!(message.contains("exit status: 1"), "{message}");
+        assert!(
+            message.contains("libevent.so.2: cannot open shared object file"),
+            "{message}"
+        );
+        assert!(
+            !driver.config.exists(),
+            "a failed probe must not have written a server config"
+        );
+    }
+
+    /// The refusal names a resolvable path even when the program was a
+    /// bare name off PATH — which is the case that needs it most, since
+    /// "some tmux on PATH is too old" leaves the reader with nothing to
+    /// edit. A name that already carries a separator is reported as
+    /// written, and an unresolvable one falls back to the bare spelling
+    /// rather than inventing a path that does not exist.
+    ///
+    /// The shadow case is the one with teeth: `execvp` walks PAST a
+    /// non-executable `tmux` and runs a later entry, so a lookup that
+    /// stopped at the first file by name would print a path that never
+    /// ran. That mismatch turns the diagnostic from helpful into
+    /// actively misleading — the reader edits or deletes a file that had
+    /// nothing to do with the version they were refused for.
+    ///
+    /// Unix-only: the shadow it pins is an execute-bit distinction, which
+    /// [`is_executable_file`] cannot make on a platform without one.
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_program_name_is_reported_as_the_path_entry_it_resolves_to() {
+        use std::ffi::OsString;
+
+        let shadow = tempfile::tempdir().expect("tempdir");
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Same name, earlier on PATH, not executable: the OS skips it.
+        std::fs::write(shadow.path().join("tmux"), b"not a program\n")
+            .expect("write the non-executable shadow");
+        let binary = dir.path().join("tmux");
+        write_executable(&binary, "#!/bin/sh\n");
+        let path_var =
+            std::env::join_paths([shadow.path(), dir.path()]).expect("a joinable PATH fixture");
+
+        assert_eq!(
+            program_display_path(Path::new("tmux"), Some(&path_var)),
+            binary,
+            "a non-executable shadow must not be reported as the tmux that answered"
+        );
+        assert_eq!(
+            program_display_path(Path::new("/opt/homebrew/bin/tmux"), Some(&path_var)),
+            PathBuf::from("/opt/homebrew/bin/tmux")
+        );
+        assert_eq!(
+            program_display_path(Path::new("absent-tmux"), Some(&path_var)),
+            PathBuf::from("absent-tmux")
+        );
+        assert_eq!(
+            program_display_path(Path::new("tmux"), None),
+            PathBuf::from("tmux")
+        );
+        // A PATH holding only the shadow resolves to nothing, and the
+        // bare spelling is a better answer than a path that was skipped.
+        let shadow_only = OsString::from(shadow.path());
+        assert_eq!(
+            program_display_path(Path::new("tmux"), Some(&shadow_only)),
+            PathBuf::from("tmux")
+        );
     }
 
     /// Pin every generated option and its table, while excluding the
@@ -3024,6 +3987,141 @@ mod tests {
                  setw -g remain-on-exit on\n"
             )
         );
+    }
+
+    /// Every executable `tmux` on `PATH`, paired with the version it
+    /// reports.
+    ///
+    /// The adoption regression below needs two REAL tmux binaries of
+    /// different versions, and it must stay CI-safe on a machine that has
+    /// only one. Discovering them from `PATH` rather than from an
+    /// environment variable or a hardcoded path is what makes that work
+    /// without the test process mutating its own environment: CI already
+    /// prepends the pinned build's directory to `PATH` while the distro's
+    /// below-floor tmux stays at `/usr/bin`, so both ends of the scenario
+    /// are present exactly where the suite already runs.
+    #[cfg(unix)]
+    fn tmux_binaries_on_path() -> Vec<(PathBuf, TmuxVersion)> {
+        let Some(path_var) = std::env::var_os("PATH") else {
+            return Vec::new();
+        };
+        let mut found: Vec<(PathBuf, TmuxVersion)> = Vec::new();
+        for candidate in std::env::split_paths(&path_var).map(|dir| dir.join("tmux")) {
+            if !is_executable_file(&candidate) || found.iter().any(|(seen, _)| seen == &candidate) {
+                continue;
+            }
+            let Ok(output) = std::process::Command::new(&candidate).arg("-V").output() else {
+                continue;
+            };
+            if !output.status.success() {
+                continue;
+            }
+            if let Ok(version) = parse_tmux_version(&String::from_utf8_lossy(&output.stdout)) {
+                found.push((candidate, version));
+            }
+        }
+        found
+    }
+
+    /// Upgrading the tmux BINARY does not upgrade the tmux SERVER, and
+    /// this is the test that keeps the floor honest about that.
+    ///
+    /// Farhelm drives a long-lived server through short-lived clients and
+    /// deliberately keeps that server across supervisor restarts so
+    /// sessions survive. `start-server` therefore ADOPTS whatever already
+    /// owns the private socket. Without a server-side check, the ordinary
+    /// upgrade path — install a floor-clearing tmux, restart the
+    /// supervisor — clears the client probe and then runs every command
+    /// against the old, crash-prone server it was supposed to replace.
+    ///
+    /// Three things are pinned, all of them regressions someone could
+    /// reintroduce independently: the refusal HAPPENS, it names BOTH
+    /// versions (the client's floor is meaningless without saying which
+    /// server failed it), and the below-floor server is STILL RUNNING
+    /// afterwards. The last one is not politeness — that server holds the
+    /// user's live sessions, and a version policy that reaps them is worse
+    /// than the problem it solves.
+    ///
+    /// Skips loudly, not silently, when `PATH` cannot supply one tmux on
+    /// each side of the floor: a green run that never exercised adoption
+    /// would be exactly the false assurance this test exists to remove.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_adopted_below_floor_server_is_refused_without_being_killed() {
+        let binaries = tmux_binaries_on_path();
+        let old = binaries
+            .iter()
+            .find(|(_, version)| *version < TMUX_FLOOR)
+            .cloned();
+        let new = binaries
+            .iter()
+            .find(|(_, version)| *version >= TMUX_FLOOR)
+            .cloned();
+        let (Some((old, old_version)), Some((new, _))) = (old, new) else {
+            println!(
+                "SKIPPED an_adopted_below_floor_server_is_refused_without_being_killed: PATH \
+                 needs both a tmux below {TMUX_FLOOR} and one at or above it; found {binaries:?}"
+            );
+            return;
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), new);
+        // The same config the driver would write, so the pre-existing
+        // server is the one `ensure_server` would have produced on this
+        // socket — including `exit-empty off`, without which a
+        // session-less server exits immediately and there is nothing to
+        // adopt.
+        std::fs::write(&driver.config, TmuxDriver::config_body()).expect("seed the server config");
+        let started = std::process::Command::new(&old)
+            .arg("-S")
+            .arg(&driver.socket)
+            .arg("-f")
+            .arg(&driver.config)
+            .arg("start-server")
+            .status()
+            .expect("spawn the below-floor tmux");
+        assert!(started.success(), "the below-floor server must start");
+
+        let error = driver
+            .ensure_server()
+            .await
+            .expect_err("adopting a below-floor server must refuse");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains(&old_version.to_string()),
+            "the refusal must name the server's version: {message}"
+        );
+        assert!(
+            message.contains(&TMUX_FLOOR.to_string()),
+            "the refusal must name the floor: {message}"
+        );
+        assert!(
+            message.contains(&driver.socket.display().to_string()),
+            "the refusal must name the socket to drain: {message}"
+        );
+
+        // Probed with the OLD binary: the point is that the server the
+        // user's sessions live on survived the refusal untouched.
+        let alive = std::process::Command::new(&old)
+            .arg("-S")
+            .arg(&driver.socket)
+            .arg("-f")
+            .arg(&driver.config)
+            .args(["display-message", "-p", "#{version}"])
+            .output()
+            .expect("probe the adopted server");
+        assert!(
+            alive.status.success(),
+            "the refused server must still be running: {}",
+            String::from_utf8_lossy(&alive.stderr)
+        );
+
+        let _ = std::process::Command::new(&old)
+            .arg("-S")
+            .arg(&driver.socket)
+            .arg("kill-server")
+            .status();
     }
 
     /// Item 8: the generated-config write must be injectable through its
