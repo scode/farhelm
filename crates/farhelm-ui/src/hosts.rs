@@ -943,12 +943,18 @@ pub(crate) fn HostsPanel(
                     for (host, local_setup) in list {
                         HostRow {
                             key: "{host.id}",
-                            busy: mutation_busy_hosts.read().contains(&host.id)
-                                || provisioning_busy_hosts.read().contains(&host.id)
-                                || busy,
-                            confirming_remove: *confirming_remove.read() == Some(host.id),
-                            editing: *editing.read() == Some(host.id),
-                            showing_profiles: *profiles_open.read() == Some(host.id),
+                            controls: HostRowControls {
+                                confirming_remove: *confirming_remove.read() == Some(host.id),
+                                editing: *editing.read() == Some(host.id),
+                                showing_profiles: *profiles_open.read() == Some(host.id),
+                            },
+                            activity: HostRowActivity {
+                                busy: mutation_busy_hosts.read().contains(&host.id)
+                                    || provisioning_busy_hosts.read().contains(&host.id)
+                                    || busy,
+                                error: errors.read().get(&host.id).cloned(),
+                                warning: warnings.read().get(&host.id).cloned(),
+                            },
                             on_profiles_toggle: move |id: HostId| {
                                 // Collapsing a section UNMOUNTS it, so this
                                 // must not act mid-request for the same
@@ -995,8 +1001,6 @@ pub(crate) fn HostsPanel(
                                     on_changed,
                                 }
                             },
-                            error: errors.read().get(&host.id).cloned(),
-                            warning: warnings.read().get(&host.id).cloned(),
                             destination_draft,
                             on_retry: on_retry.clone(),
                             on_adopt: on_adopt.clone(),
@@ -1032,6 +1036,95 @@ pub(crate) fn HostsPanel(
     }
 }
 
+// ---------------------------------------------------------------------
+// One host row
+// ---------------------------------------------------------------------
+
+/// Which of the host row's optional surfaces the user has opened.
+///
+/// Grouped because all three answer one question — what does this row offer
+/// beyond its ordinary control strip right now — and because `HostsPanel`
+/// narrows all three from at-most-one-row signals to a boolean here: its own
+/// `confirming_remove` and `editing`, and the `profiles_open` that `ListView`
+/// owns and hands it to coordinate the profiles surface. Not one enum, because
+/// they do not fully exclude each other: the removal prompt and the
+/// destination field do (the panel's own handlers close one to open the
+/// other), but an expanded profiles section survives both.
+///
+/// State only, like every group here — see [`HostRowActivity`] for why no
+/// group may ever carry a callback.
+#[derive(Clone, PartialEq, Eq)]
+struct HostRowControls {
+    /// Whether this row is showing the in-place forget-this-host prompt.
+    confirming_remove: bool,
+    /// Whether this row is showing its destination field instead of controls.
+    editing: bool,
+    /// Whether THIS row's profiles section is the expanded one. Inside the row
+    /// it picks the toggle's LABEL and nothing else, since the section itself
+    /// arrives as built markup — but the row needs the fact to write that
+    /// label, so the markup alone would not do.
+    showing_profiles: bool,
+}
+
+/// The operation-related presentation state of this row: whether its
+/// controls are currently disabled, and what the last ordinary mutation left
+/// behind.
+///
+/// Not one lifecycle, and the grouping does not claim one: `busy` is CURRENT
+/// disablement, raised by this host's own mutation or provisioning run or by
+/// any other row holding the page's operation token, while `error` and
+/// `warning` are RETAINED, mutually exclusive outcomes of the last ordinary
+/// mutation (transport and authentication failures land in `error` too, not
+/// only helm-authored refusals; a confirmed success clears both). They are
+/// grouped because they are what the row shows about operations, full stop.
+/// The row derives none of them — the panel owns the busy sets and the two
+/// per-host maps, and reduces them per row before rendering.
+///
+/// STATE ONLY. Every `EventHandler` stays a direct prop on [`HostRow`], and
+/// no struct here may ever gain one. A struct literal in
+/// `rsx!` is where an inline closure naturally gets written, and a handler
+/// built fresh each render never compares equal to the last one — so the
+/// props compare unequal on every parent render and every row repaints on
+/// every fleet refresh, with none of the in-place handler update Dioxus gives
+/// a direct `EventHandler` prop. The session list's `RowActions` was withdrawn
+/// mid-review for exactly this (lore/PLAN_M7.md item 5), leaving
+/// `list::shared::RowState` as the state-only half; this grouping copies the
+/// shape that survived. The rule and its real boundary are measured in
+/// `grouping_a_callback_is_safe_only_while_its_handle_is_stable` below.
+#[derive(Clone, PartialEq, Eq)]
+struct HostRowActivity {
+    /// Whether this row's controls are disabled because something is in
+    /// flight — this host's own mutation or provisioning run, or the page's
+    /// operation token held by any other row.
+    busy: bool,
+    /// The last verb's REFUSAL, as the helm wrote it, or `None` when the last
+    /// one succeeded or none has run yet.
+    error: Option<String>,
+    /// A verb that committed but whose reply this build could not decode.
+    /// Kept apart from `error` because it means the opposite thing: the
+    /// change HAPPENED and only its confirmation was unreadable.
+    warning: Option<String>,
+}
+
+#[cfg(test)]
+std::thread_local! {
+    // How often the real `HostRow` ran, per host id, for the memoization
+    // regressions in this module's tests. Per id rather than a single total
+    // because a total cannot say WHICH rows rendered — the invalidation test
+    // needs to prove the changed rows ran and the unchanged ones did not.
+    // Thread-local because each Dioxus virtual DOM is single-threaded while
+    // the Rust test harness runs tests concurrently — the session row's
+    // counter (`list::row`) is thread-local for the same reason.
+    static HOST_ROW_RENDERS: std::cell::RefCell<std::collections::BTreeMap<HostId, usize>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The per-host render counts as a vector in id order, for assertions.
+#[cfg(test)]
+fn host_row_renders() -> Vec<(HostId, usize)> {
+    HOST_ROW_RENDERS.with(|renders| renders.borrow().iter().map(|(id, n)| (*id, *n)).collect())
+}
+
 /// One host's row: name, state chip, the evidence, the remedy, and whichever
 /// controls that state actually offers.
 ///
@@ -1061,24 +1154,38 @@ pub(crate) fn HostsPanel(
 /// several props the section would otherwise need threaded through here. The
 /// row's job is to own the toggle and the place the section hangs; deciding
 /// what a catalog surface is and how it reads is the panel's, one level up.
+///
+/// ## Prop shape
+///
+/// Provisioning took this signature to twenty props, which fired the standing
+/// "regroup once props are actively growing" condition the session row was
+/// held to (lore/PLAN_M7.md item 5). The derived per-row STATE is therefore
+/// grouped into [`HostRowControls`] and [`HostRowActivity`] — split by what
+/// changes together, one for what the user has opened and one for what the
+/// helm is doing about it, so that a change to either says which.
+///
+/// Everything else stays a direct prop, each for its own reason. The nine
+/// event handlers must (see [`HostRowActivity`]) — four of them are host
+/// verbs, the rest move local UI state. The two `Element` sections are
+/// rendered markup rather than state, and the panel builds them. The draft is
+/// a `Signal` handle the destination form writes through, not a value to
+/// compare. And `local_setup` is a fact about the HOST — the one unreachable
+/// cause with an automatic remedy — derived by the panel because the
+/// provisioning section it also builds needs the same answer, so it belongs
+/// beside `host` rather than inside a group describing what the row is doing.
 #[component]
 fn HostRow(
     host: Host,
-    busy: bool,
-    confirming_remove: bool,
-    editing: bool,
-    /// Whether THIS row's profiles section is the expanded one — the toggle's
-    /// own label depends on it, so the row needs the fact and not just the
-    /// markup.
-    showing_profiles: bool,
-    /// The expanded section, or nothing. Built by the panel.
-    profiles_section: Element,
     /// Whether automatic local setup replaces the ordinary remedy slot.
     local_setup: bool,
+    /// Which control surface this row is showing (grouped state).
+    controls: HostRowControls,
+    /// What the management verbs are doing to this row (grouped state).
+    activity: HostRowActivity,
+    /// The expanded section, or nothing. Built by the panel.
+    profiles_section: Element,
     /// The feed-driven setup/update surface built by the panel.
     provisioning_section: Element,
-    error: Option<String>,
-    warning: Option<String>,
     destination_draft: Signal<String>,
     on_profiles_toggle: EventHandler<HostId>,
     on_retry: EventHandler<HostId>,
@@ -1090,6 +1197,18 @@ fn HostRow(
     on_remove_confirm: EventHandler<HostId>,
     on_remove_cancel: EventHandler<()>,
 ) -> Element {
+    let HostRowControls {
+        confirming_remove,
+        editing,
+        showing_profiles,
+    } = controls;
+    let HostRowActivity {
+        busy,
+        error,
+        warning,
+    } = activity;
+    #[cfg(test)]
+    HOST_ROW_RENDERS.with(|renders| *renders.borrow_mut().entry(host.id).or_insert(0) += 1);
     let id = host.id;
     // The local row is not management surface: SPEC.md has it always
     // present, never registered, never removed. An unrecognized kind is not
@@ -2092,5 +2211,316 @@ mod tests {
             refresh: RefreshHealth::Pending,
         }));
         assert!(pending.contains("still in flight"), "{pending}");
+    }
+
+    // -----------------------------------------------------------------
+    // Host-row prop memoization
+    // -----------------------------------------------------------------
+    //
+    // These tests exist because `HostRow`'s twenty props were regrouped into
+    // `HostRowControls` and `HostRowActivity`, and the way a grouping breaks
+    // — a prop that stops comparing equal when nothing about the row changed
+    // — is invisible to every other test in this crate. A rerender leaves no
+    // trace in the rendered DOM, so the only oracle is a count.
+    //
+    // The first two are the host row's copy of the session row's regressions
+    // (`list::row`) and drive the real `HostRow` from a parent that behaves:
+    // stable `use_callback` handles created outside the row loop, and the two
+    // `Element` sections held at `VNode::empty()`, whose backing `Rc` is one
+    // reused thread-local so it compares equal to itself. The third pins the
+    // half of the direct-prop rule that is about memoization — a nested
+    // callback compares equal only while its handle is stable — since that
+    // rule had never been executable anywhere; it does NOT exercise the
+    // in-place handler update Dioxus gives direct callback props, which is
+    // the other reason the handlers stay direct.
+    //
+    // NOTE on what these do NOT show. That parent is deliberately better
+    // behaved than `HostsPanel`, and no host row memoizes in production
+    // today. Measured 2026-08-23 against this same row, one build plus eight
+    // parent refreshes, so nine renders means no memoization at all:
+    // rebuilding either section with `rsx!` instead of holding it stable
+    // costs nine, and handing the host verbs to the row as inline closures
+    // costs nine. `HostsPanel` does both. Neither is something a state
+    // grouping can move — one is the panel's choice to hand the row built
+    // markup, the other its choice not to hold `use_callback` handles outside
+    // the row loop — so what these tests pin is the row's own end of the
+    // contract, which is the end this shape could break.
+
+    /// One host row as the render-count regressions need it: real enough for
+    /// `HostRow` to render its ordinary control strip, and stable so that
+    /// rebuilding it on every parent render compares equal and memoization
+    /// is the only thing the counts can be measuring.
+    fn row_specimen(id: HostId) -> Host {
+        Host {
+            id,
+            kind: HostKind::Ssh,
+            destination: Some("user@box".to_string()),
+            name: "user@box".to_string(),
+            identity: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state: HostPhase::Connected {
+                identity: Some("stable".to_string()),
+                build_version: "0.1.0".to_string(),
+                refresh: RefreshHealth::Ok { sessions: 0 },
+            },
+            incarnation: 1,
+        }
+    }
+
+    /// A host row whose state did not change must not rerender when its
+    /// parent does, however many times the parent does.
+    ///
+    /// This is the contract the whole prop shape is arranged around, and the
+    /// one a regrouping can lose outright: every prop `HostRow` takes has to
+    /// be able to compare equal to its own previous value, or the row repaints
+    /// on every fleet refresh. Sixty-four refreshes rather than one, because a
+    /// prop that compares equal by accident on the first pass — a recycled
+    /// allocation, say — will not keep doing it.
+    #[test]
+    fn repeated_parent_refreshes_do_not_rerender_an_unchanged_host_row() {
+        fn app() -> Element {
+            let destination_draft = use_signal(String::new);
+            let on_profiles_toggle = use_callback(|_: HostId| {});
+            let on_retry = use_callback(|_: HostId| {});
+            let on_adopt = use_callback(|_: (HostId, String)| {});
+            let on_edit_start = use_callback(|_: (HostId, String)| {});
+            let on_edit_submit = use_callback(|_: (HostId, String)| {});
+            let on_edit_cancel = use_callback(|_: ()| {});
+            let on_remove_start = use_callback(|_: HostId| {});
+            let on_remove_confirm = use_callback(|_: HostId| {});
+            let on_remove_cancel = use_callback(|_: ()| {});
+            rsx! {
+                HostRow {
+                    host: row_specimen(1),
+                    local_setup: false,
+                    controls: HostRowControls {
+                        confirming_remove: false,
+                        editing: false,
+                        showing_profiles: false,
+                    },
+                    activity: HostRowActivity {
+                        busy: false,
+                        error: None,
+                        warning: None,
+                    },
+                    profiles_section: dioxus::core::VNode::empty(),
+                    provisioning_section: dioxus::core::VNode::empty(),
+                    destination_draft,
+                    on_profiles_toggle,
+                    on_retry,
+                    on_adopt,
+                    on_edit_start,
+                    on_edit_submit,
+                    on_edit_cancel,
+                    on_remove_start,
+                    on_remove_confirm,
+                    on_remove_cancel,
+                }
+            }
+        }
+
+        HOST_ROW_RENDERS.with(|renders| renders.borrow_mut().clear());
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_to_vec();
+        for _ in 0..64 {
+            dom.mark_dirty(dioxus::core::ScopeId::APP);
+            dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        }
+        assert_eq!(
+            host_row_renders(),
+            vec![(1, 1)],
+            "an unchanged host row must stay memoized across fleet refreshes"
+        );
+    }
+
+    /// A change to one host's state rerenders exactly the rows it describes,
+    /// and leaves every other row memoized — proved with one representative
+    /// field from each of the two state groups.
+    ///
+    /// This is the cost model the grouping has to preserve. Both structs are
+    /// compared by value, so MOVING an open removal prompt is two row renders
+    /// (the row that loses it and the row that gains it) and a refusal
+    /// landing on one host is one — not a fleet-wide repaint. A field that
+    /// drops out of what memoization compares, or a group that starts
+    /// invalidating rows it does not describe, moves these per-row counts.
+    /// Exercising `HostRowControls` and `HostRowActivity` in the same virtual
+    /// DOM is what makes the test say which of the two broke.
+    #[test]
+    fn only_the_host_rows_whose_state_changed_rerender() {
+        // Both facts live OUTSIDE the virtual DOM — the test moves them
+        // between renders the way `HostsPanel`'s own signals move between
+        // its renders — and the app re-derives every row's state from them
+        // on each parent render, so memoization alone decides which rows
+        // actually run.
+        std::thread_local! {
+            static CONFIRMING: std::cell::Cell<HostId> = const { std::cell::Cell::new(1) };
+            static REFUSED: std::cell::Cell<Option<HostId>> =
+                const { std::cell::Cell::new(None) };
+        }
+
+        fn app() -> Element {
+            let destination_draft = use_signal(String::new);
+            let on_profiles_toggle = use_callback(|_: HostId| {});
+            let on_retry = use_callback(|_: HostId| {});
+            let on_adopt = use_callback(|_: (HostId, String)| {});
+            let on_edit_start = use_callback(|_: (HostId, String)| {});
+            let on_edit_submit = use_callback(|_: (HostId, String)| {});
+            let on_edit_cancel = use_callback(|_: ()| {});
+            let on_remove_start = use_callback(|_: HostId| {});
+            let on_remove_confirm = use_callback(|_: HostId| {});
+            let on_remove_cancel = use_callback(|_: ()| {});
+            let confirming = CONFIRMING.with(std::cell::Cell::get);
+            let refused = REFUSED.with(std::cell::Cell::get);
+            rsx! {
+                for id in [1_i64, 2, 3] {
+                    HostRow {
+                        key: "{id}",
+                        host: row_specimen(id),
+                        local_setup: false,
+                        controls: HostRowControls {
+                            confirming_remove: confirming == id,
+                            editing: false,
+                            showing_profiles: false,
+                        },
+                        activity: HostRowActivity {
+                            busy: false,
+                            error: (refused == Some(id))
+                                .then(|| "the helm refused this verb".to_string()),
+                            warning: None,
+                        },
+                        profiles_section: dioxus::core::VNode::empty(),
+                        provisioning_section: dioxus::core::VNode::empty(),
+                        destination_draft,
+                        on_profiles_toggle,
+                        on_retry,
+                        on_adopt,
+                        on_edit_start,
+                        on_edit_submit,
+                        on_edit_cancel,
+                        on_remove_start,
+                        on_remove_confirm,
+                        on_remove_cancel,
+                    }
+                }
+            }
+        }
+
+        CONFIRMING.with(|confirming| confirming.set(1));
+        REFUSED.with(|refused| refused.set(None));
+        HOST_ROW_RENDERS.with(|renders| renders.borrow_mut().clear());
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_to_vec();
+        assert_eq!(
+            host_row_renders(),
+            vec![(1, 1), (2, 1), (3, 1)],
+            "the initial build renders every row once"
+        );
+
+        // `HostRowControls`: the removal prompt is at most one row's at a
+        // time, so moving it touches the row that had it and the row that
+        // gets it — and only those.
+        CONFIRMING.with(|confirming| confirming.set(2));
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            host_row_renders(),
+            vec![(1, 2), (2, 2), (3, 1)],
+            "moving the removal prompt must rerender the row that lost it and the row that \
+             gained it, and nothing else"
+        );
+
+        // `HostRowActivity`: a refusal is per-host, so it costs exactly the
+        // one row that has to show it.
+        REFUSED.with(|refused| refused.set(Some(3)));
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            host_row_renders(),
+            vec![(1, 2), (2, 2), (3, 2)],
+            "a refusal landing on one host must rerender only that host's row"
+        );
+    }
+
+    /// Grouping a callback into a props struct keeps memoization only while
+    /// the handle behind it is stable; a freshly built one costs it outright.
+    ///
+    /// This is the memoization half of why [`HostRowControls`] and
+    /// [`HostRowActivity`] are state-only, and until now it existed only as
+    /// prose — lore/PLAN_M7.md item 5 records eleven reviewers concluding that
+    /// a callback props struct "does not survive contact with Dioxus", which
+    /// is true of the shape the session list tried and not true as a blanket
+    /// rule. What decides the outcome is whether the handler's box is the
+    /// same one as last render (within one parent scope, box identity is the
+    /// deciding variable; `Callback` equality also requires the same
+    /// originating scope), and a struct field is compared by exactly the
+    /// equality a direct prop is.
+    ///
+    /// What this test does NOT measure is the other half: a DIRECT
+    /// `EventHandler` prop additionally gets Dioxus's in-place handler update,
+    /// so a retained component sees a fresh closure's captured state; a
+    /// nested one does not. That freshness is the second reason every
+    /// handler stays direct, and it is not covered by a render count — so a
+    /// framework change that made fresh handlers memoize would NOT make
+    /// nesting them safe on its own. The trap the direct-prop rule removes is
+    /// that a struct literal in `rsx!` is where inline closures naturally get
+    /// written, each render minting a new box.
+    #[test]
+    fn grouping_a_callback_is_safe_only_while_its_handle_is_stable() {
+        std::thread_local! {
+            static PROBE_RENDERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        }
+
+        /// A minimal stand-in for the `HostRowActions` this row deliberately
+        /// does not have. Kept local to the test so nothing in the module can
+        /// grow a use for it.
+        #[derive(Clone, PartialEq)]
+        struct Actions {
+            on_verb: EventHandler<()>,
+        }
+
+        // The handler is never called; only whether the props compared equal
+        // is under test, and the render count is the only way to read that.
+        #[component]
+        fn Probe(actions: Actions) -> Element {
+            let _ = actions;
+            PROBE_RENDERS.with(|renders| renders.set(renders.get() + 1));
+            rsx! { div {} }
+        }
+
+        fn stable_handle() -> Element {
+            let on_verb = use_callback(|_: ()| {});
+            rsx! { Probe { actions: Actions { on_verb } } }
+        }
+
+        fn fresh_handler() -> Element {
+            rsx! {
+                Probe { actions: Actions { on_verb: EventHandler::new(|_: ()| {}) } }
+            }
+        }
+
+        fn renders_over_eight_refreshes(app: fn() -> Element) -> usize {
+            PROBE_RENDERS.with(|renders| renders.set(0));
+            let mut dom = VirtualDom::new(app);
+            dom.rebuild_to_vec();
+            for _ in 0..8 {
+                dom.mark_dirty(dioxus::core::ScopeId::APP);
+                dom.render_immediate(&mut dioxus::core::NoOpMutations);
+            }
+            PROBE_RENDERS.with(std::cell::Cell::get)
+        }
+
+        assert_eq!(
+            renders_over_eight_refreshes(stable_handle),
+            1,
+            "a `use_callback` handle inside a props struct still compares equal, \
+             so nesting one is not by itself what costs memoization"
+        );
+        assert_eq!(
+            renders_over_eight_refreshes(fresh_handler),
+            9,
+            "a handler built fresh each render never compares equal, so the child \
+             repaints on every parent render — one per refresh plus the build"
+        );
     }
 }
