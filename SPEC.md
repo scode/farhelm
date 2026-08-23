@@ -252,6 +252,13 @@ filtered. A filter someone typed or chose does, and the count then says how many
 A list the client could not read to the end says that in the same place, rather than presenting a partial list as the
 whole one.
 
+A row shows a session's title, its status, and its working directory. The host is named on its own line only for a
+session that is not on the helm's own machine — a fleet that is mostly local gains nothing from a host word repeated on
+every row, and the line returns the moment a session is remote. The working directory and the launch command are shown
+abbreviated, with their full, untouched values always available on the row (a tooltip on the web and desktop clients);
+an abbreviation is never the only place a value is recorded. Exactly how a row lays out its lines and pixels is an
+implementation choice, covered in SPEC_impl.md rather than here.
+
 Per-host connection state is always visible, as a compact per-host indicator naming each host with its current phase;
 the full hosts panel — retry, retargeting, removal, profiles — opens on demand rather than occupying the session list
 permanently. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm

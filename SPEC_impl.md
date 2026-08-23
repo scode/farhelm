@@ -106,6 +106,20 @@ closed, and — if it is the selected one — its pane torn down and replaced) a
 trust its prefix. A UI that tells the user its list is incomplete and then reasons as though it were complete would be
 disagreeing with the one line whose job is to be believed.
 
+What a sidebar row SHOWS was narrowed on 2026-08-23, reversing part of BUGS_BURNDOWN.md's "Decisions (interviewed
+2026-08-13)" list, which called for title, status badge, host, working directory and invocation on every row. Two of
+those turned out to cost a line of height each while saying nothing on the common fleet. The host line now renders only
+when the session is NOT on the helm's own machine — locality is decided by comparing the session's host id against the
+registry's `HostKind::Local` row, never by name. Every unknown (an old helm sending no host, a hosts read that has not
+landed) answers "not local": unknown locality never SUPPRESSES an available host label, it only ever leaves the row free
+to show one it already has. Legacy rows without a host name at all necessarily show none regardless — locality answers
+whether a name would be shown, not whether one exists to show. The invocation is rendered compactly: the profile's
+snapshotted name when the session was created from one, otherwise the program's basename plus a marker for an
+unattended-mode flag (`claude · skip-perms`). The working directory is tilde-folded against the `/home/<user>` and
+`/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of those
+abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
+truth stays one hover away.
+
 Styling is the single hand-written application stylesheet, `crates/farhelm-ui/assets/app.css`: plain CSS, with no
 preprocessing and no framework transformation, though Dioxus still registers it as a packaged asset and decides its
 served path the same way it does every other asset. xterm.js's own look is a separate vendored stylesheet

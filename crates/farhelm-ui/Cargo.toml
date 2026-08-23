@@ -11,6 +11,13 @@ dioxus.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Parses a launch command's argv the same way the supervisor does
+# (`farhelm-supervisor`'s own profile-invocation validation), so the row's
+# compact invocation badge (`list::row::compact_invocation`) derives its
+# program basename and marker candidates from real shell-word splitting
+# instead of a partial hand-rolled parser. Pure Rust with no OS glue, so it
+# compiles to wasm exactly as this crate's web target needs.
+shell-words.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `Performance` is added on top of the workspace features (which carry

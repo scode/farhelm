@@ -165,12 +165,6 @@ roadmap and carries no priorities unless an entry says so itself.
   fixed-width (a recorded decision; denser rows solve the same pain). Each sub-item is its own PR, and every one of them
   builds on the design-token layer app.css now has (its `:root` block) rather than on literals:
 
-  - Sidebar row hierarchy. Rows are four near-equal-weight lines (title, host, full cwd, full invocation), ~120px each.
-    Drop the host line entirely when the session is on the helm's own machine (show it only for remote hosts); tilde-
-    abbreviate the cwd and, if it still does not fit, hard-cut on the LEFT (right-most segments are the informative
-    ones) with the full path on hover; render the invocation compactly (profile name or `claude ·skip-perms` style
-    badge) rather than the full command line. Target roughly half the current row height.
-
   - Status as dot plus timestamp, not a word. Replace the `running`/`idle`/`exited` text with a color-coded dot beside
     the title (pulsing for running) and put a relative last-activity timestamp (`2m`, `1h`) where the word was — it
     makes the "recently active" sort visibly meaningful.

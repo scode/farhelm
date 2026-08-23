@@ -168,7 +168,18 @@ test("list renders the session row with title, cwd, invocation, and the status t
   await expect(row).toBeVisible();
   await expect(row.locator(".session-title")).toHaveText("e2e-session");
   await expect(row.locator(".session-cwd")).toHaveText(expected.cwd);
-  await expect(row.locator(".session-invocation")).toHaveText(expected.invocation);
+  // The row shows a COMPACT invocation now (TODO.md's UI refresh): the
+  // basename of argv[0], plus a marker for an unattended-mode flag when
+  // there is one — the fixture's quoted absolute path to the debug binary
+  // therefore reads `farhelm`, with no marker to add. The `title` is what
+  // still proves the row is showing THIS session's command line rather
+  // than a neighbour's, which is the property the old exact-text
+  // assertion was really protecting.
+  await expect(row.locator(".session-invocation")).toHaveText("farhelm");
+  await expect(row.locator(".session-invocation")).toHaveAttribute(
+    "title",
+    expected.invocation,
+  );
   // No extended timeout: the row being visible means this listing has
   // already rendered, and the status it carries settled before the
   // navigation. A wait longer than the default here would be waiting for
@@ -1986,9 +1997,17 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     // The marker invocation only ever appears once THIS route's synthetic
     // response has actually been fetched, decoded, and rendered — proof
     // the refresh's result reached the DOM, not just that a request fired.
+    //
+    // The marker is a single bare token with no path and no flags, so the
+    // row's compact rendering (TODO.md's UI refresh) leaves it exactly as
+    // it is — deliberately, so this test keeps naming the one string it
+    // armed. The `title` is asserted alongside it because that is the
+    // attribute carrying the invocation verbatim whatever the compaction
+    // rules become.
     await expect(row.locator(".session-invocation")).toHaveText(marker, {
       timeout: 10_000,
     });
+    await expect(row.locator(".session-invocation")).toHaveAttribute("title", marker);
 
     // Still confirming, still the same wording and title — a refresh must
     // not have cleared it (nor silently deleted anything: no DELETE was

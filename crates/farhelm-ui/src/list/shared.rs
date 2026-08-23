@@ -52,6 +52,50 @@ pub(super) struct RowState {
     /// which is what keeps a selection switch down to two row renders
     /// (see the render-count tests in `row::tests`).
     pub(super) selected: bool,
+    /// Whether this row's session runs on the helm's OWN machine, which is
+    /// what decides whether the row spends a line naming its host at all
+    /// (see [`session_is_local`] for why the row cannot answer this itself).
+    ///
+    /// Part of `RowState` rather than a prop of its own for the reason the
+    /// whole struct exists: it is derived display state, and the row's
+    /// memoization only compares what is in the compared props. A fleet
+    /// where every session is local therefore renders no host lines and
+    /// still re-renders exactly the rows a selection change touched.
+    pub(super) host_is_local: bool,
+}
+
+/// Whether a session sits on the helm's own machine, given the registry's
+/// local row id.
+///
+/// The row itself cannot answer this: a `Session` carries a host id and the
+/// helm's rendering of that host's NAME, but nothing that says which kind of
+/// registry row it is — `HostKind::Local` lives on the `Host`, which only
+/// `ListView` reads.
+///
+/// Comparing ids rather than names is deliberate. The name is a DISPLAY
+/// string the helm derives for humans (`host_display_name`: the words "this
+/// machine" for the local row, the ssh destination otherwise), so matching
+/// on it would tie a structural decision to a wording choice — a reworded
+/// local row, or an ssh destination that happened to render the same
+/// string, would silently drop the host line off sessions on another
+/// machine. The id has no such failure mode.
+///
+/// Both absences answer FALSE, which is the honest direction rather than
+/// the pretty one. A session with no `host` came from a helm too old to
+/// send one, and a `None` local id means the hosts read has not landed yet
+/// (or failed) — in neither case is there evidence the session is local.
+/// Put precisely: unknown locality never SUPPRESSES an available host
+/// label — this function only ever pushes the row toward showing a host
+/// name it already has, never away from it. Whether a name actually
+/// appears is a separate question the row answers on its own: a legacy row
+/// with no `host_name` at all necessarily shows none, this function's
+/// verdict notwithstanding. The visible cost, for a row that does carry a
+/// name, is a host line that disappears on a fresh page load once
+/// `/api/hosts` answers; the alternative is a row that silently claims a
+/// remote session is local while the registry is still unknown, and that
+/// one is a lie rather than a flicker.
+pub(super) fn session_is_local(session_host: Option<HostId>, local_host: Option<HostId>) -> bool {
+    session_host.is_some() && session_host == local_host
 }
 
 /// One entry in the create dialog's host selector: everything that decides
@@ -651,6 +695,103 @@ pub(super) mod tests {
         assert_eq!(
             option(3, "user@\u{202E}box", false).label(),
             "user@<U+202E>box"
+        );
+    }
+
+    /// One registry row as `host_options` sees it: only `id` and `kind`
+    /// matter for deriving `HostOption::local`, and every other field is
+    /// filler kept out of the test below.
+    fn registry_row(id: HostId, kind: HostKind) -> Host {
+        Host {
+            id,
+            kind,
+            destination: (kind == HostKind::Ssh).then(|| format!("user@box-{id}")),
+            name: format!("host-{id}"),
+            identity: Some(format!("install-{id}")),
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state: crate::HostPhase::Connected {
+                identity: Some(format!("install-{id}")),
+                build_version: "test".to_string(),
+                refresh: crate::RefreshHealth::Pending,
+            },
+            incarnation: 1,
+        }
+    }
+
+    /// The local option is found by KIND, not by position or by name.
+    ///
+    /// `ListView` used to rescan the raw registry a second time with a
+    /// dedicated `local_host_id` helper to answer this; that helper is
+    /// retired and the render site now derives the same id from
+    /// `host_options` — the ONE reduction of the registry it already
+    /// computes — so this test carries the guarantee `local_host_id`'s own
+    /// test used to pin, aimed at `HostOption::local` instead.
+    ///
+    /// The registry's ordering is the helm's to choose and the local row's
+    /// name is prose the helm writes for humans, so either shortcut would
+    /// hand the session rows the wrong id — and the row that got it would
+    /// then hide the host line for every session on some other machine.
+    #[test]
+    fn the_local_option_is_identified_by_kind_not_position_or_name() {
+        let registry = vec![
+            registry_row(4, HostKind::Ssh),
+            registry_row(9, HostKind::Local),
+            registry_row(11, HostKind::Ssh),
+        ];
+        let options = host_options(&registry);
+        assert_eq!(
+            options
+                .iter()
+                .find(|option| option.local)
+                .map(|option| option.id),
+            Some(9),
+        );
+        assert!(
+            !options[0].local,
+            "the ssh row before the local one stays unmarked"
+        );
+        assert!(
+            !options[2].local,
+            "the ssh row after the local one stays unmarked"
+        );
+
+        assert_eq!(
+            host_options(&[])
+                .iter()
+                .find(|option| option.local)
+                .map(|option| option.id),
+            None,
+            "no registry in hand names no local row"
+        );
+        assert_eq!(
+            host_options(&[registry_row(4, HostKind::Ssh)])
+                .iter()
+                .find(|option| option.local)
+                .map(|option| option.id),
+            None,
+            "a fleet of ssh rows has no local row for a session to match"
+        );
+    }
+
+    /// A session is local only when its host id IS the registry's local
+    /// row; every absence answers "not local" and leaves the host line on.
+    ///
+    /// The absences are the half worth pinning. A helm too old to send
+    /// `host`, and a hosts read that has not landed, both leave the UI with
+    /// no evidence either way — and the row must name its host rather than
+    /// assume the session is on the machine the user is already looking at.
+    #[test]
+    fn locality_needs_both_ids_and_never_guesses() {
+        assert!(session_is_local(Some(9), Some(9)));
+        assert!(!session_is_local(Some(4), Some(9)));
+        assert!(
+            !session_is_local(None, Some(9)),
+            "a session naming no host is not evidence of being local"
+        );
+        assert!(
+            !session_is_local(Some(9), None),
+            "no registry yet is not evidence of being local either"
         );
     }
 }

@@ -89,6 +89,211 @@ fn menu_label(title: &str) -> String {
     }
 }
 
+// ===== Compacting the row's two long fields ==========================
+//
+// Both helpers below shorten what the row DISPLAYS and nothing else. The
+// untouched original always rides along in a `title` attribute (see the
+// rsx), because every abbreviation here is lossy in a way a user may need
+// to undo: `~` hides which account's home a path is under, and the compact
+// invocation hides every argument that is not one of the markers.
+
+/// Fold a leading home directory into `~`, or return the path unchanged.
+///
+/// The rule is deliberately narrow: `/home/<user>` and `/Users/<user>`,
+/// followed by at least one more segment, become `~` plus that remainder.
+/// `/home/alice/src/api` reads `~/src/api`; `/home/`, `/home//x`, and
+/// `/homework/x` are left alone because none of them names an account, and
+/// three further shapes are excluded below.
+///
+/// ## What this does NOT do, and why
+///
+/// It does not know the session's real home. `SessionInfo` carries no home
+/// directory (the supervisor expands `~` at create time and stores the
+/// result), so the only thing available on this side of the wire is the
+/// SHAPE of the path — hence a pattern match rather than a lookup. That
+/// makes the `~` a claim about the path's SHAPE, not a verified claim
+/// about whose home it is: a session running as `bob` with a cwd under
+/// `/home/alice` still renders `~`, and the `title` attribute — always the
+/// untouched original — is where the truth stays one hover away. A future
+/// wire change that put a per-host home directory on `SessionInfo` would
+/// let this become an exact lookup instead of a shape guess; nothing about
+/// today's rendering depends on that never happening.
+///
+/// `/root` is deliberately not folded. It is already shorter than most
+/// path segments, so abbreviating it would buy four characters in exchange
+/// for erasing the one home directory whose owner the path actually names.
+///
+/// No case folding: macOS volumes are usually case-insensitive, but the
+/// cwd is whatever the supervisor recorded, and a lowercase `/users/bob`
+/// is rare enough not to be worth guessing about.
+///
+/// ## Three shapes that look right but are not, excluded on purpose
+///
+/// - **A dot segment anywhere after the prefix.** `/home/../etc` does not
+///   resolve under any home at all, and `/home/alice/../bob` does not
+///   resolve under alice's — folding either would assert something the
+///   path itself contradicts.
+/// - **`/Users/Shared`.** macOS's shared folder is not a personal home, so
+///   `~` there would falsely claim the path belongs to whichever account
+///   happens to be reading the row.
+/// - **No segment after the account.** `/home/alice` bare (or with only a
+///   trailing slash) has nothing for `~` to stand in for — folding it would
+///   erase the one thing the path says rather than shorten it, so it stays
+///   absolute.
+fn abbreviate_home(cwd: &str) -> String {
+    for prefix in ["/home/", "/Users/"] {
+        let Some(rest) = cwd.strip_prefix(prefix) else {
+            continue;
+        };
+        if rest
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+        {
+            continue;
+        }
+        let Some(slash) = rest.find('/') else {
+            continue;
+        };
+        let (user, remainder) = rest.split_at(slash);
+        // A zero-length user segment means `/home/` or `/home//…`: no
+        // account is named, so there is no home to fold away. A
+        // one-byte remainder is just the trailing `/` with nothing past
+        // it — the bare-account case above, spelled with a slash.
+        if user.is_empty() || remainder.len() <= 1 {
+            continue;
+        }
+        if prefix == "/Users/" && user == "Shared" {
+            continue;
+        }
+        return format!("~{remainder}");
+    }
+    cwd.to_string()
+}
+
+/// Vendor-recognized executables and the unattended-mode flags worth naming
+/// for each, most consequential first within a program's own list.
+///
+/// Keyed by the program's BASENAME rather than a flat flag table: `--yolo`
+/// belongs to Codex, and matching it against ANY program's argv would badge
+/// `echo --yolo` or a future tool that happens to share a flag spelling with
+/// a vendor it has nothing to do with. A basename absent from this table
+/// earns no marker no matter what its arguments look like — the row does
+/// not guess at a command it does not recognize.
+///
+/// These flags share one property: they change what the agent is ALLOWED to
+/// do without asking, which is the one fact about a command line worth four
+/// characters of a sidebar row. Everything else — model pins, prompts,
+/// working-directory overrides — is argument noise at this size and stays
+/// in the `title` attribute with the rest of the line. Within one program's
+/// list, order is precedence: an invocation carrying two of that vendor's
+/// flags renders the first one listed.
+const INVOCATION_MARKERS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "claude",
+        &[
+            // Claude Code: skips every permission prompt.
+            ("--dangerously-skip-permissions", "skip-perms"),
+        ],
+    ),
+    (
+        "codex",
+        &[
+            // The unabbreviated flag: bypasses approvals AND the sandbox.
+            ("--dangerously-bypass-approvals-and-sandbox", "no-sandbox"),
+            // `--yolo` is Codex's own alias for the flag directly above —
+            // same bypass of approvals AND sandbox, shorter to type. It is
+            // NOT the sandboxed auto mode; see `--full-auto` below for that
+            // one, and do not conflate the two in future edits here.
+            ("--yolo", "yolo"),
+            // Full auto-approval, but SANDBOXED: prompts are skipped, the
+            // sandbox stays enforced. Strictly less permissive than the two
+            // flags above, which is exactly why it earns a marker of its
+            // own rather than collapsing into "yolo".
+            ("--full-auto", "full-auto"),
+        ],
+    ),
+];
+
+/// The row's parsed view of a launch command: the program's basename to
+/// show, plus an optional marker for a recognized unattended-mode flag.
+///
+/// Two fields rather than one formatted string, because the row renders
+/// each into its own bidi-isolated span (see `SessionRow`'s rsx and
+/// `crate::peer` for why): joining them here and handing the row one
+/// interpolated string would let a directional override inside the
+/// basename — itself text from the invocation, not this UI's own words —
+/// reorder the marker that follows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CompactInvocation {
+    pub(super) basename: String,
+    pub(super) marker: Option<&'static str>,
+}
+
+/// The row's one-glance parse of a launch command: the program's basename,
+/// plus a marker for a recognized unattended-mode flag when its vendor's
+/// program is the one being run.
+///
+/// `claude --dangerously-skip-permissions --model opus` parses to
+/// `claude` + `skip-perms`; `/usr/bin/codex --yolo` to `codex` + `yolo`;
+/// `sleep 300` to `sleep` + no marker. See [`INVOCATION_MARKERS`] for the
+/// flags that earn a marker, which programs they are tied to, and why the
+/// rest are dropped.
+///
+/// Argv is real shell-word splitting (`shell_words::split`), the same
+/// parser `farhelm-supervisor` uses to turn a profile's invocation string
+/// into the argv it execs — this is a DISPLAY helper reusing that logic,
+/// not a second, divergent implementation of it. Scanning for a marker
+/// STOPS at a bare `--`: everything after it is positional argument data by
+/// shell convention, not a flag this program is reading, so `codex --
+/// --yolo` shows no marker even though the literal text is present.
+///
+/// ## Fallback
+///
+/// A string `shell_words` cannot parse at all (an unbalanced quote, a
+/// trailing unescaped backslash) — which the supervisor will not create,
+/// but a route stub or a future wire change could deliver — renders as the
+/// trimmed input with no marker, exactly as an invocation with no
+/// non-whitespace characters at all does. Guessing further than the parser
+/// itself could resolve would be inventing structure for text that has
+/// none; the neutral fallback says only what was actually sent.
+///
+/// A program token that ends in `/` (`/usr/bin/`, which is not a program)
+/// has no basename to take, so the whole token stands.
+fn compact_invocation(invocation: &str) -> CompactInvocation {
+    let trimmed = invocation.trim();
+    let fallback = || CompactInvocation {
+        basename: trimmed.to_string(),
+        marker: None,
+    };
+    let Ok(argv) = shell_words::split(invocation) else {
+        return fallback();
+    };
+    let Some(program) = argv.first() else {
+        return fallback();
+    };
+    let basename = match program.rsplit('/').next() {
+        Some(name) if !name.is_empty() => name.to_string(),
+        _ => program.clone(),
+    };
+    // Only the arguments BEFORE a bare `--` are candidates: past it, shell
+    // convention says everything is positional data, not a flag this
+    // program parses as its own.
+    let leading_args: Vec<&str> = argv[1..]
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .map(String::as_str)
+        .collect();
+    let marker = INVOCATION_MARKERS
+        .iter()
+        .find(|(vendor, _)| *vendor == basename)
+        .and_then(|(_, flags)| {
+            flags
+                .iter()
+                .find_map(|(flag, marker)| leading_args.contains(flag).then_some(*marker))
+        });
+    CompactInvocation { basename, marker }
+}
+
 #[cfg(test)]
 std::thread_local! {
     // How often the real row component ran in the callback-memoization
@@ -99,7 +304,7 @@ std::thread_local! {
 
 /// One row, in two layers. The row itself is a plain `<div>` wrapper
 /// around two real `<button>`s — the open button (the session's stacked
-/// title/host/cwd/invocation lines) and the small "⋯" actions-menu
+/// identity lines, see "Host and staleness" below) and the small "⋯" actions-menu
 /// toggle beside it. Everything else — rename, stop, archive, delete,
 /// and their confirm prompts — mounts inside the floating panel the
 /// toggle anchors, and only while that panel is open. Real buttons
@@ -121,9 +326,24 @@ std::thread_local! {
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
-/// The row stacks its fields: the title line leads (with the stale/
-/// archived/status badges beside it), then the host, directory, and
-/// invocation lines, each ellipsizing alone in the fixed-width sidebar.
+/// The row is at most three lines: the title (with the stale/archived/
+/// status badges beside it), the host — only when the session is NOT on
+/// the helm's own machine — and a meta line carrying the abbreviated cwd
+/// beside a compact invocation badge. Each field ellipsizes alone in the
+/// fixed-width sidebar.
+///
+/// The shape is a density decision (2026-08-23, the UI refresh), and it
+/// reverses the interviewed row contents recorded in BUGS_BURNDOWN.md's
+/// "Decisions (interviewed 2026-08-13)", which called for the host and the
+/// full invocation on every row. In a fleet that is mostly local, the host
+/// line said "this machine" over and over, and the full invocation line
+/// was usually an absolute path plus flags that ellipsized into
+/// indistinguishability — two lines of row height for near-zero
+/// information. Both are still reachable: the host line returns the moment
+/// a session IS remote, and the full cwd and invocation are on the
+/// respective elements' `title` attributes. See `abbreviate_home` and
+/// `compact_invocation` for what each abbreviation costs.
+///
 /// A row the helm marked stale
 /// — its host is in some non-connected state — is dimmed and badged rather
 /// than hidden, per SPEC.md's "stay in the list … clearly marked". Its
@@ -268,9 +488,23 @@ pub(super) fn SessionRow(
         nav_disabled,
         menu_open,
         selected,
+        host_is_local,
     } = state;
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
+    // The two abbreviations the dense row runs on, computed once per
+    // render beside the full strings they stand in for. Both `title`
+    // attributes carry the original: an abbreviation the user cannot undo
+    // would make the sidebar's own claim about a session unverifiable.
+    let cwd_shown = abbreviate_home(&session.cwd);
+    // Only for a session NOT created from a profile: the branch below that
+    // renders `source_profile`'s snapshotted name never reads this value at
+    // all, so parsing argv and scanning for a marker on every render of a
+    // profile-backed row would be pure waste.
+    let invocation_compact = session
+        .source_profile
+        .is_none()
+        .then(|| compact_invocation(&session.invocation));
     // `None` for a status nothing has classified yet, and the row then
     // renders no badge ELEMENT at all rather than an empty one — see
     // `status_badge`'s own docs for why an empty badge box would be the
@@ -390,8 +624,9 @@ pub(super) fn SessionRow(
                     // everything-on-one-line layout, whose min-width floors
                     // produced the MT-8 overflow class the moment space ran
                     // short. The title line leads with identity and its
-                    // qualifiers; host, cwd, and invocation each get a line
-                    // they can ellipsize alone.
+                    // qualifiers; the host (when it is not the helm's own
+                    // machine) and the directory/invocation pair follow on
+                    // lines of their own, each field ellipsizing alone.
                     // `span` wrappers, not `div`: this all sits inside the
                     // native `.session-row-open` <button>, whose content
                     // model only permits phrasing content — a flow-content
@@ -416,41 +651,107 @@ pub(super) fn SessionRow(
                             span { class: "status-badge {badge_class}", "{badge_text}" }
                         }
                     }
-                    // The host gets the second line: with more than one
-                    // machine in play it is what disambiguates two otherwise
-                    // identical sessions. The name is the helm's own
-                    // rendering (`host_name`), denormalized onto the row so
-                    // the list needs no second request — a row from a helm
-                    // that sends none simply shows nothing here rather than
-                    // inventing a label. Escaped and direction-isolated like
-                    // every other rendering of a destination: this one names
-                    // the machine a row's stop and delete will reach, so a
-                    // name able to reorder the line around it could make one
-                    // host's session read as another's.
-                    if let Some(host_name) = &session.host_name {
+                    // The host gets a line of its own, but ONLY for a
+                    // session that is not on the helm's own machine: with
+                    // more than one machine in play the name is what
+                    // disambiguates two otherwise identical sessions, and
+                    // with only one it is the same word on every row,
+                    // costing a quarter of the row's height to say nothing.
+                    // `host_is_local` is `ListView`'s answer, not this
+                    // row's — see `shared::session_is_local` for why the
+                    // row cannot decide it and why every unknown answers
+                    // "not local" (the line shows, rather than a local
+                    // claim being invented).
+                    //
+                    // The name is the helm's own rendering (`host_name`),
+                    // denormalized onto the row so the list needs no second
+                    // request — a row from a helm that sends none simply
+                    // shows nothing here rather than inventing a label.
+                    // Escaped and direction-isolated like every other
+                    // rendering of a destination: this one names the machine
+                    // a row's stop and delete will reach, so a name able to
+                    // reorder the line around it could make one host's
+                    // session read as another's.
+                    if let Some(host_name) = session.host_name.as_ref().filter(|_| !host_is_local) {
                         span { class: "session-row-line",
                             span { class: "session-host peer-value", dir: "ltr",
                                 "{display_peer(host_name)}"
                             }
                         }
                     }
-                    span { class: "session-row-line",
+                    // Directory and invocation SHARE the last line: both are
+                    // compact enough now to fit beside each other (a
+                    // tilde-folded path and a one-word invocation badge),
+                    // and pairing them is what gets the row to roughly half
+                    // its old height. The cwd flexes and the badge does not
+                    // (see `.session-row-meta` in app.css), so pressure
+                    // eats the path's leading segments rather than the
+                    // shorter, denser field.
+                    span { class: "session-row-line session-row-meta",
                         // Two spans, not one: `.session-cwd` is the rtl
                         // clipping container that puts the ellipsis on the
                         // LEFT, and the inner `dir="ltr"` child is the bidi
                         // isolate that keeps the path's characters in
                         // logical order under it — rtl applied directly to
                         // the text would move a leading "/" to the visual
-                        // right (see `.session-cwd` in app.css).
-                        span { class: "session-cwd",
-                            span { class: "session-cwd-text", dir: "ltr", "{session.cwd}" }
+                        // right (see `.session-cwd` in app.css). The
+                        // `title` carries the UNABBREVIATED path, which is
+                        // what makes the `~` safe: see `abbreviate_home`
+                        // for whose home it does and does not know about.
+                        span { class: "session-cwd", title: "{session.cwd}",
+                            span { class: "session-cwd-text", dir: "ltr", "{cwd_shown}" }
                         }
-                    }
-                    // No profile chip on the line (the interviewed row
-                    // contents): the source-profile surface lives in the
-                    // actions menu panel below.
-                    span { class: "session-row-line",
-                        span { class: "session-invocation", "{session.invocation}" }
+                        // The invocation slot answers "what is this?" in as
+                        // few characters as the question allows. A session
+                        // created FROM a profile answers with the profile's
+                        // snapshotted name, which is what the user actually
+                        // chose; everything else answers with the derived
+                        // badge (`compact_invocation`). Either way the full
+                        // command line is on the `title`.
+                        //
+                        // The profile case keeps the qualifier that the
+                        // panel's chip carries — in the tooltip and in
+                        // `data-profile-existence`, which is what the
+                        // color and the browser suite key off — because a
+                        // bare snapshotted name on a row would read as a
+                        // claim about the catalog as it stands today, and
+                        // SPEC.md's snapshot rule says it is not one.
+                        if let Some(source) = &session.source_profile {
+                            span {
+                                class: "session-invocation peer-value",
+                                dir: "ltr",
+                                "data-profile-existence": "{existence_word(source.existence)}",
+                                title: "{source_profile_label(source)} — {session.invocation}",
+                                "{display_peer(&source.name)}"
+                            }
+                        } else if let Some(compact) = &invocation_compact {
+                            // Basename and marker are TWO isolated spans,
+                            // not one interpolated string: the basename is
+                            // raw text from the invocation, so a
+                            // directional override inside it must not be
+                            // able to reorder the marker that follows (see
+                            // `CompactInvocation`'s own doc, and
+                            // `crate::peer` for why `dir="ltr"` plus
+                            // `unicode-bidi: isolate` together bound
+                            // resolution to one element). The marker itself
+                            // is trusted — it comes only from this build's
+                            // own `INVOCATION_MARKERS` table — but still
+                            // gets its own isolated span so the basename's
+                            // bidi context can never reach past its edge.
+                            span {
+                                class: "session-invocation",
+                                title: "{session.invocation}",
+                                span {
+                                    class: "peer-value",
+                                    dir: "ltr",
+                                    "{display_peer(&compact.basename)}"
+                                }
+                                if let Some(marker) = compact.marker {
+                                    " · "
+                                    span { class: "peer-value", dir: "ltr", "{marker}" }
+                                }
+                            }
+                        }
                     }
                 }
                 // The actions menu: one small toggle beside the open
@@ -792,6 +1093,7 @@ mod tests {
                         nav_disabled: false,
                         menu_open: false,
                         selected: false,
+                        host_is_local: false,
                     },
                     rename_draft,
                     on_open,
@@ -875,6 +1177,7 @@ mod tests {
                             nav_disabled: false,
                             menu_open: false,
                             selected: selected == id,
+                            host_is_local: false,
                         },
                         rename_draft,
                         on_open,
@@ -926,5 +1229,263 @@ mod tests {
         assert_eq!(row_class(true, false), "session-row stale");
         assert_eq!(row_class(false, true), "session-row selected");
         assert_eq!(row_class(true, true), "session-row stale selected");
+    }
+
+    /// A home directory folds to `~` only where the path actually names an
+    /// account, and every other path survives untouched.
+    ///
+    /// The negative cases are the point. This runs against a string, not
+    /// against a real filesystem — no home directory is on the wire (see
+    /// `abbreviate_home`) — so the only thing keeping it from mangling
+    /// unrelated paths is the shape of the match, and `/homework`,
+    /// `/home/` and `/home//x` are exactly the shapes a looser prefix
+    /// check would eat. `/home/alice` bare is here too, not among the
+    /// folded cases — see the exclusions test below for why.
+    #[test]
+    fn a_home_prefix_folds_only_when_it_names_an_account() {
+        assert_eq!(abbreviate_home("/home/alice/src/api"), "~/src/api");
+        assert_eq!(abbreviate_home("/Users/alice/src/api"), "~/src/api");
+
+        for untouched in [
+            "/home",
+            "/home/",
+            "/home//nested",
+            "/homework/notes",
+            "/var/lib/thing",
+            "/root",
+            "relative/path",
+            "",
+        ] {
+            assert_eq!(
+                abbreviate_home(untouched),
+                untouched,
+                "{untouched} names no home directory and must be left alone"
+            );
+        }
+    }
+
+    /// Three shapes that match the `<prefix><account>/…` pattern
+    /// syntactically but must not fold anyway, each for its own reason
+    /// (see `abbreviate_home`'s doc for the full argument behind each
+    /// one).
+    ///
+    /// These are the exclusions a 2026-08-23 review added on top of the
+    /// original shape match: a dot segment breaks the assumption that the
+    /// string resolves under a home at all, `/Users/Shared` is not a
+    /// personal home no matter whose account is reading the row, and a
+    /// bare account with nothing after it has nothing for `~` to stand in
+    /// for.
+    #[test]
+    fn a_home_prefix_declines_three_shapes_that_look_right_but_are_not() {
+        for dotted in [
+            "/home/../etc/passwd",
+            "/home/alice/../bob/src",
+            "/Users/alice/./src",
+        ] {
+            assert_eq!(
+                abbreviate_home(dotted),
+                dotted,
+                "{dotted} does not resolve under the home the shape match would claim"
+            );
+        }
+        assert_eq!(
+            abbreviate_home("/Users/Shared/notes"),
+            "/Users/Shared/notes"
+        );
+        assert_eq!(abbreviate_home("/home/alice"), "/home/alice");
+        assert_eq!(abbreviate_home("/home/alice/"), "/home/alice/");
+    }
+
+    /// Build a [`CompactInvocation`] the way `compact_invocation` would, for
+    /// terser assertions below.
+    fn badge(basename: &str, marker: Option<&'static str>) -> CompactInvocation {
+        CompactInvocation {
+            basename: basename.to_string(),
+            marker,
+        }
+    }
+
+    /// The invocation badge is the program's basename plus, at most, one
+    /// unattended-mode marker — and the marker table's ORDER decides which
+    /// one when several apply.
+    ///
+    /// Worth pinning because the badge is all the row shows of a command
+    /// line the user may have spent real thought on: a regression that
+    /// dropped the marker would make an agent running with every
+    /// permission prompt skipped look identical to one that asks.
+    #[test]
+    fn the_invocation_badge_is_a_basename_plus_at_most_one_marker() {
+        assert_eq!(compact_invocation("sleep 300"), badge("sleep", None));
+        assert_eq!(
+            compact_invocation("/usr/bin/codex --yolo"),
+            badge("codex", Some("yolo"))
+        );
+        assert_eq!(
+            compact_invocation("claude --dangerously-skip-permissions --model opus"),
+            badge("claude", Some("skip-perms"))
+        );
+        assert_eq!(
+            compact_invocation("codex --full-auto --yolo"),
+            badge("codex", Some("yolo")),
+            "the table's order, not the command line's, picks the marker"
+        );
+        // A flag is only a marker as a whole token: substring matching
+        // would badge an unrelated argument that merely contains one.
+        assert_eq!(
+            compact_invocation("claude --model=yolo-9"),
+            badge("claude", None)
+        );
+    }
+
+    /// Codex's two OTHER markers, each pinned on its own: the table test
+    /// above only ever exercises `--yolo` directly, and a regression that
+    /// broke either of these while leaving `--yolo` intact would pass every
+    /// other test in this file.
+    #[test]
+    fn the_no_sandbox_flag_earns_its_own_marker() {
+        assert_eq!(
+            compact_invocation("codex --dangerously-bypass-approvals-and-sandbox"),
+            badge("codex", Some("no-sandbox"))
+        );
+    }
+
+    #[test]
+    fn the_full_auto_flag_earns_its_own_marker() {
+        assert_eq!(
+            compact_invocation("codex --full-auto"),
+            badge("codex", Some("full-auto"))
+        );
+    }
+
+    /// A marker applies only to the VENDOR it belongs to, and never past a
+    /// bare `--` — the table is a claim about specific recognized
+    /// programs' own flags, not a scan of every argv for a string that
+    /// happens to match one.
+    #[test]
+    fn markers_are_tied_to_the_recognized_programs_own_flags() {
+        // An unrecognized program earns no marker even though the flag
+        // text is right there in its argv.
+        assert_eq!(compact_invocation("echo --yolo"), badge("echo", None));
+        // Codex's own flag, but past a bare `--`: shell convention says
+        // everything from there on is positional data, not a flag this
+        // program reads as its own.
+        assert_eq!(compact_invocation("codex -- --yolo"), badge("codex", None));
+        // Claude Code's binary, but Codex's flag — the wrong vendor's flag
+        // is not a marker.
+        assert_eq!(compact_invocation("claude --yolo"), badge("claude", None));
+    }
+
+    /// A bidi override character in the PROGRAM's basename rides through
+    /// `compact_invocation` raw and unmangled — the same discipline
+    /// `crate::peer::DetailPart::Peer` follows for every relayed value:
+    /// escaping is deferred to RENDER time (`display_peer`, covered by
+    /// `peer::tests::directional_and_invisible_characters_are_escaped_
+    /// rather_than_rendered`), which is what lets the row put the basename
+    /// in its own bidi-isolated span rather than a pre-sanitized one that
+    /// could not be told apart from ordinary text.
+    ///
+    /// A corrupted basename can never accidentally ACQUIRE a marker it does
+    /// not legitimately have, either: [`INVOCATION_MARKERS`] matches by
+    /// EXACT string equality against the basename, so `\u{202E}codex` is
+    /// simply not `codex` and earns no marker — one more reason the row's
+    /// two-span rendering (basename, marker) is a real structural split and
+    /// not an escaping trick alone: there is no path by which an overridden
+    /// basename could smuggle a false marker onto the row for the isolation
+    /// to then have to defend against.
+    #[test]
+    fn a_bidi_override_in_the_basename_survives_unmangled_and_earns_no_false_marker() {
+        assert_eq!(
+            compact_invocation("/opt/bin/\u{202E}codex --yolo"),
+            CompactInvocation {
+                basename: "\u{202E}codex".to_string(),
+                marker: None,
+            },
+            "the override character rides along in the basename field untouched, and the \
+             corrupted name simply fails the exact match against the recognized `codex` vendor"
+        );
+    }
+
+    /// Real shell-word splitting (`shell_words::split`, the same parser
+    /// `farhelm-supervisor` uses on a profile's invocation), pinned against
+    /// the specific quoting shapes a hand-rolled partial parser gets wrong.
+    #[test]
+    fn the_basename_survives_every_shell_quoting_shape() {
+        // A backslash-escaped space in an otherwise unquoted path.
+        assert_eq!(
+            compact_invocation("/opt/with\\ space/bin/claude --dangerously-skip-permissions"),
+            badge("claude", Some("skip-perms"))
+        );
+        // Adjacent quoted and unquoted fragments glue into ONE argv[0] —
+        // the shape `shell_words::quote` itself produces for a path with
+        // spaces when only part of it needs quoting. The space sits in the
+        // segment BEFORE the basename on purpose: a naive split that broke
+        // on it would still (by coincidence) recover the right basename
+        // from the wrong first token, so this fixture only passes if the
+        // space was actually consumed as part of the same argv[0].
+        assert_eq!(
+            compact_invocation("\"/opt/with space\"/bin/codex --yolo"),
+            badge("codex", Some("yolo"))
+        );
+        // The whole path quoted, once with double quotes and once with
+        // single — deliberately DISCRIMINATING fixtures, unlike the
+        // earlier one this replaced (`"/opt/farhelm test/farhelm"`, whose
+        // pre-space and post-space segments happened to share a basename,
+        // so a regression to naive whitespace splitting would have passed
+        // it too). Here the segment before the space ("with") differs from
+        // the true basename ("farhelm"), so only a parse that actually
+        // consumed the space as part of argv[0] recovers the right answer.
+        assert_eq!(
+            compact_invocation("\"/opt/with space/bin/farhelm\" internal fake-agent"),
+            badge("farhelm", None)
+        );
+        assert_eq!(
+            compact_invocation("'/opt/with space/bin/farhelm' internal fake-agent"),
+            badge("farhelm", None)
+        );
+        // A quoted flag: the parser strips the quotes, and the flag still
+        // matches the marker table as a whole token.
+        assert_eq!(
+            compact_invocation("codex \"--yolo\""),
+            badge("codex", Some("yolo"))
+        );
+        // `#` starts a real POSIX comment at a word boundary — this parser
+        // is not a hand-rolled stand-in, it is the genuine article — so
+        // everything from it to the end of the string vanishes from argv
+        // entirely rather than surviving as a literal trailing token.
+        assert_eq!(
+            compact_invocation("sleep 300 #not-a-comment"),
+            badge("sleep", None)
+        );
+        // Single quotes behave exactly like double quotes for this parser.
+        assert_eq!(
+            compact_invocation("'codex' --full-auto"),
+            badge("codex", Some("full-auto"))
+        );
+    }
+
+    /// Degenerate invocations render something rather than panicking or
+    /// inventing a word.
+    ///
+    /// None of these can come out of the supervisor, which refuses a
+    /// create it cannot split into argv — they come from route stubs in
+    /// the browser suite and from whatever a future wire change allows.
+    /// The contract is that the element still renders and says only what
+    /// it was given, with no marker.
+    #[test]
+    fn a_degenerate_invocation_falls_back_to_what_it_was_given() {
+        assert_eq!(compact_invocation(""), badge("", None));
+        assert_eq!(compact_invocation("   "), badge("", None));
+        assert_eq!(
+            compact_invocation("/usr/bin/"),
+            badge("/usr/bin/", None),
+            "a token with no basename to take stands as it is"
+        );
+        assert_eq!(
+            compact_invocation("\"unbalanced --yolo"),
+            badge("\"unbalanced --yolo", None),
+            "an unclosed quote is something shell_words itself cannot resolve, so this falls \
+             back to the trimmed raw text with no marker rather than guessing at structure that \
+             was never there"
+        );
     }
 }

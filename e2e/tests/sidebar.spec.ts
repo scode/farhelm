@@ -23,12 +23,16 @@
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import {
+  cleanupProfile,
   cleanupSession,
+  createProfile,
   createSession,
+  localHostId,
   openFilterBar,
   openHostsPanel,
   openRowMenu,
   pinAutoSelect,
+  SESSION_LISTING,
   stubFeed,
 } from "./helpers/fleet";
 
@@ -275,14 +279,23 @@ test("switching sessions directly tears the old view down and mounts the new one
 
 /**
  * A row with hostile content — an unbroken multi-hundred-character title,
- * cwd, and invocation — stays INSIDE the fixed sidebar column, with its
- * fields stacked in the agreed order (title, cwd, invocation).
+ * cwd, and invocation — stays INSIDE the fixed sidebar column, with the
+ * title above a meta line that pairs the directory with the invocation
+ * badge.
  *
  * The stacked layout's whole reason to exist is that the old single-line
  * row overflowed the 340px column under exactly this content (the MT-8
  * class); a wrapper or flex regression that restored horizontal packing
  * or let a line force the row wide would pass every text-content
- * assertion and fail only here.
+ * assertion and fail only here. The geometry asserted below is the
+ * density pass's layout (TODO.md's UI refresh): directory and invocation
+ * deliberately SHARE a line now, so the check is that they overlap
+ * vertically and sit side by side, not that one is under the other.
+ *
+ * Two further properties ride along because this is the cheapest local
+ * session in the suite to assert them on: a session on the helm's own
+ * machine renders no host line at all, and the whole row fits in a height
+ * that the four-line layout could not have.
  */
 test("a row with unbroken oversized fields stays contained and stacked in the sidebar", async ({
   page,
@@ -321,11 +334,90 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
         `the ${name} field must ellipsize inside the sidebar, not force the row wide`,
       ).toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
     }
-    // Stacked, in order — a horizontal regression puts these on one line.
+    // The title still leads on a line of its own — a regression that
+    // packed it in beside the metadata would land here.
     expect(title.y).toBeLessThan(cwd.y);
-    expect(cwd.y).toBeLessThan(invocation.y);
+    // Directory and invocation share the meta line: overlapping vertical
+    // extents, badge to the right of the path. Asserted as an overlap
+    // rather than as equal `y` because the two have different font sizes
+    // and sit on a shared baseline, so their boxes start at different
+    // offsets by design.
+    expect(invocation.y).toBeLessThan(cwd.y + cwd.height);
+    expect(cwd.y).toBeLessThan(invocation.y + invocation.height);
+    expect(
+      invocation.x,
+      "the invocation badge follows the directory on the same line",
+    ).toBeGreaterThanOrEqual(cwd.x + cwd.width - 1);
+
+    // This session is on the helm's own machine, so naming its host would
+    // be a line spent on a word every row would carry.
+    await expect(target.locator(".session-host")).toHaveCount(0);
+
+    // A deliberately loose ceiling: the point is the density decision (a
+    // row roughly half the four-line layout's ~90px), not a pixel-exact
+    // layout, and Chromium and WebKit disagree about font metrics by a
+    // few pixels either way.
+    expect(
+      rowBox.height,
+      "the dense row must not drift back toward the four-line layout's height",
+    ).toBeLessThan(64);
   } finally {
     await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A long PROFILE-backed invocation badge clips inside the row, and the cwd
+ * beside it keeps a usable share of the shared meta line.
+ *
+ * The 300-char raw invocation above no longer exercises the badge's own
+ * overflow handling: TODO.md's UI refresh compacts any RAW command line to
+ * one short word (the program's basename, plus at most a short marker —
+ * `list::row::compact_invocation`), so a long raw invocation can no longer
+ * widen the badge. A profile-backed session answers differently — the
+ * badge shows the profile's own snapshotted NAME
+ * (`source_profile_label`/`display_peer` in row.rs), which carries no such
+ * compaction and can legitimately run long — so this is the fixture that
+ * still proves the badge clips rather than pushing the row wide.
+ */
+test("a long profile-backed invocation badge clips inside the row", async ({ page, request }) => {
+  const local = await localHostId(request);
+  const name = `contained-profile-${"p".repeat(280)}`;
+  const profile = await createProfile(request, local, { name });
+  const session = await createSession(request, {
+    title: `contained-profile-session-${Date.now()}`,
+    cwd: "/tmp",
+    profile_id: profile.id,
+    host: local,
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+
+    const sideBox = (await page.locator(".app-sidebar").boundingBox())!;
+    const badge = target.locator(".session-invocation");
+    const cwd = target.locator(".session-cwd");
+    const badgeBox = (await badge.boundingBox())!;
+    const cwdBox = (await cwd.boundingBox())!;
+
+    // The badge never forces the row wide...
+    expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
+    // ...and it really is being clipped, not merely short enough to fit —
+    // proving the ellipsis rule did the constraining rather than a
+    // conveniently narrow fixture.
+    expect(await badge.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    // The directory keeps a USABLE share of the line: `.session-row-meta`'s
+    // split caps the badge at 55% (app.css) precisely so an unbounded
+    // profile name cannot squeeze the path down to nothing.
+    expect(
+      cwdBox.width,
+      "the directory must keep a usable share of the shared line, not be squeezed to nothing " +
+        "by an unbounded badge",
+    ).toBeGreaterThan(20);
+  } finally {
+    await cleanupSession(request, session.id);
+    await cleanupProfile(request, local, profile.id);
   }
 });
 
@@ -903,6 +995,59 @@ test("the compact strip names every host with its own phase and clips long names
 });
 
 /**
+ * A LOCAL session's host line is PROVISIONAL, not a settled fact, until the
+ * registry actually answers — it shows the moment the listing renders, and
+ * disappears the instant `/api/hosts` confirms this session's host id IS
+ * the local row.
+ *
+ * `shared::session_is_local` answers "not local" for every unknown
+ * (including "the hosts read has not landed yet"), and unknown locality
+ * never SUPPRESSES an available host label (SPEC_impl.md) — so a session
+ * that is in fact local still names its host for as long as the registry
+ * has not confirmed otherwise. The route hold makes that window
+ * deterministic instead of racing a fast helm: without it, `/api/hosts`
+ * ordinarily answers before the first paint and the provisional state is
+ * never actually observed.
+ */
+test("a local session's host line is provisional until the registry confirms it", async ({
+  page,
+  request,
+}) => {
+  const session = await createSession(request, {
+    title: `provisional-host-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let releaseHosts: () => void = () => {};
+  const hostsHeld = new Promise<void>((resolve) => {
+    releaseHosts = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === "/api/hosts",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await hostsHeld;
+      await route.continue();
+    },
+  );
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await expect(target.locator(".session-host")).toBeVisible();
+    await expect(target.locator(".session-host")).toContainText("this machine");
+
+    releaseHosts();
+    await expect(target.locator(".session-host")).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
  * Closing the hosts panel takes its open profiles section with it: on
  * reopen the section starts closed rather than silently reading a
  * catalog behind a collapsed surface.
@@ -1123,6 +1268,112 @@ test("the empty-fleet placeholder appears only when proven and yields to auto-se
   await expect(page.locator(".titlebar .title")).toHaveText("placeholder-cycle", {
     timeout: 20_000,
   });
+});
+
+/**
+ * A `/home/<user>` cwd shows the FOLDED `~` form while the row's `title`
+ * carries the exact, unabbreviated path — the untouched value is one
+ * hover away no matter how the visible text was shortened
+ * (`row::abbreviate_home`).
+ *
+ * Route-controlled rather than a real create: SPEC.md refuses a create
+ * whose cwd does not exist on the target host, and `/home/alice` need not
+ * exist on whatever machine runs this suite, so the shape-based fold can
+ * only be proven here against a fabricated reply.
+ */
+test("a /home/<user> cwd shows the folded form with the exact path on title", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  const cwd = "/home/alice/src/api";
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+      json: {
+        sessions: [
+          {
+            id: "tilde-fold-session",
+            title: "tilde-fold",
+            cwd,
+            invocation: "sleep 300",
+          },
+        ],
+        total: 1,
+        matching: 1,
+        truncated: false,
+      },
+    });
+  });
+  await page.goto("/");
+  const target = row(page, "tilde-fold-session");
+  await expect(target).toBeVisible({ timeout: 20_000 });
+  await expect(target.locator(".session-cwd-text")).toHaveText("~/src/api");
+  await expect(target.locator(".session-cwd")).toHaveAttribute("title", cwd);
+});
+
+/**
+ * A directional override (U+202E) inside a program name renders as a
+ * visible escape, isolated in its own element — the same two-layer defence
+ * every other peer-supplied value on this page gets (`crate::peer`), now
+ * pinned specifically for the invocation badge's basename span.
+ *
+ * `display_peer` (a Rust unit test) already proves the escaping half; what
+ * only a real browser can prove is the isolation half — that the override
+ * cannot reach past its own span and reorder a sibling. There is no marker
+ * to reorder here (the corrupted basename cannot match a recognized vendor
+ * — see `row::tests::a_bidi_override_in_the_basename_survives_unmangled_
+ * and_earns_no_false_marker`), so what this asserts is the computed
+ * direction staying `ltr` under the isolate, exactly as the cwd's own bidi
+ * regression above does for the same construction.
+ */
+test("a bidi override in the invocation basename renders escaped and isolated", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  // Built from its code point, not the literal glyph, so the override
+  // cannot silently reorder this SOURCE FILE'S own text around it.
+  const rlo = String.fromCharCode(0x202e);
+  const invocation = `/opt/bin/${rlo}evil-agent --some-flag`;
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+      json: {
+        sessions: [
+          {
+            id: "bidi-invocation-session",
+            title: "bidi-invocation",
+            cwd: "/tmp",
+            invocation,
+          },
+        ],
+        total: 1,
+        matching: 1,
+        truncated: false,
+      },
+    });
+  });
+  await page.goto("/");
+  const target = row(page, "bidi-invocation-session");
+  await expect(target).toBeVisible({ timeout: 20_000 });
+  const basename = target.locator(".session-invocation .peer-value");
+  // Escaped to a visible `<U+202E>` form rather than an invisible control
+  // character (`display_peer`), and the raw override still rides along on
+  // `title` unmangled — the full truth is a hover away, never on screen.
+  await expect(basename).toHaveText("<U+202E>evil-agent");
+  await expect(target.locator(".session-invocation")).toHaveAttribute("title", invocation);
+  expect(await basename.evaluate((el) => getComputedStyle(el).direction)).toBe("ltr");
 });
 
 /**
