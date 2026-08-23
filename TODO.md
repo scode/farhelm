@@ -47,6 +47,58 @@ roadmap and carries no priorities unless an entry says so itself.
   timeouts on the hot list. The e2e harness already has `wait_for_agent_ready` (harness.rs), whose failure text shows
   the same pane text for a test's own diagnosis; that is the non-durable shape to start from.
 
+- Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` on four-thread CI. One occurrence,
+  2026-08-23, on the `test` job of a commit that changed only the tmux source pin (CI run 32610561516, PR #225): "timed
+  out waiting for FLOOD-000000; 13231534 bytes seen, last records: [799999, 799998, 799997]" at
+  terminal_backpressure.rs:166 — the flood's final records had arrived and the marker the test waits for never did
+  within its window. Passed on the eight CI runs of the same stack before it and on a same-SHA re-run. Unreproduced in
+  15 runs on a four-core box under concurrent Playwright load with tmux 3.7c. Candidate mechanism, unverified: the
+  marker is written after the flood completes and its wait is a flat deadline that a loaded runner can exhaust while the
+  13 MB drain is still in flight; first steps: keep the per-record progress as the rearm signal (the test already sees
+  record numbers advance) and make the marker wait fail by name only when progress stops, not when a flat budget expires
+  — the same shape `provisioning::tests::wait_real_run` was given.
+
+- Deflake `session_lifecycle::input_bytes_survive_verbatim_through_hexecho` on four-thread CI with the pinned tmux 3.7c
+  first on PATH. One occurrence, 2026-08-23, `test` job of PR #228: "control bytes must arrive verbatim; transcript:
+  FAKE-AGENT READY" followed by blank rows — the typed bytes never echoed at all, rather than arriving mangled. Passed
+  on a same-SHA re-run and 15/15 on a four-core box under load with 3.7c. Candidate mechanism, unverified: the same
+  fixture race `reattach_replays_history_and_modes` had — input sent on the strength of the READY text before the
+  fixture is reading stdin — except the hexecho script may not print a prompt to wait for; first steps: check what
+  `hexecho` writes after READY and give the test a post-READY barrier the fixture actually emits (add a prompt to the
+  script if it has none), per the `wait_for_after` pattern in session_lifecycle.rs.
+
+- Deflake `restart_with_resume::an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal` on
+  four-thread CI. One occurrence, 2026-08-23, `test` job of PR #228: "the resume ran the TEMPLATE, not the launch
+  invocation: …/codex internal fake-agent --script codex-rec" at restart_with_resume.rs:759 — the restarted launch used
+  the profile template's invocation instead of the recorded one. Passed on a same-SHA re-run and 15/15 on a four-core
+  box under load with 3.7c. Candidate mechanism, unverified: the restart was issued before the conversation record (or
+  the launch row's recorded invocation) had been committed, so the resume path found nothing to resume and fell back to
+  the template; first steps: find what the resume reads to choose between recorded invocation and template, and have the
+  test wait for that record to be durable (a named setup wait) before interrupting, instead of relying on the fake
+  agent's output having landed.
+
+- Fix `terminal-keys.spec.ts`'s four Shift+Enter tests (lines 212, 243, 269, 381: "Shift+Enter sends ESC then CR",
+  "plain Enter sends bare CR", "Ctrl+Shift+Enter does not trigger this fix's own ESC injection", "a plain Enter after
+  the chord stays bare"). They fail deterministically — every run, Chromium and WebKit alike — with the same transcript:
+  the raw-mode fixture prints `RAWREADY` and the bytes the test types never reach the pane (`waiting for " 7a"` against
+  a transcript that ends at the marker). Observed 2026-08-23 on a four-core Ubuntu 26.04 box with Playwright's own
+  browsers, on the stack tip with tmux 3.7c, on a pre-floor tree with both 3.7b and 3.7c, and on a near-main tree (main
+  plus two test-only commits) with 3.7b, so neither the tmux floor stack nor the tmux version is the cause; the browser
+  end-to- end suite does not run in CI, so when this started is unrecorded. Every other test in the file passes,
+  including the ones that type into the same fixture, so the first step is to diff what these four do before typing (the
+  chord arming, the focus dance) against a passing sibling, and to check whether Playwright's keyboard delivers
+  Shift+Enter the way the fix expects in current browser builds — a changed key event shape would explain all four at
+  once.
+
+- Deflake `sort.spec.ts`'s `an incomplete non-created walk resolves the newest session with the helm` in FULL suite
+  runs. On 2026-08-23 it failed on both engines in a complete two-engine run (the titlebar resolved `e2e-session` where
+  `sortfallback-zzz` was expected) and then passed 28/28 when its spec ran alone on the same tree. Every Playwright
+  project shares the one helm stack `start-stack.sh` boots, so "the newest session" depends on what other specs have
+  created by the time this test runs — another spec's `beforeAll` recreates `e2e-session`, and the resolution picks
+  whichever is newer at that instant. First steps: have the test pin "newest" to a session it creates inside the test (a
+  fresh title, created after any shared fixture) instead of assuming nothing else is being created, or mark the shared
+  `e2e-session` so the walk excludes it.
+
 - Review the two security-relevant resolutions made during the M7 run, and record a dated verdict (a note in
   SPEC_impl.md or a review comment on PR #117). (a) A product-spec/impl-spec conflict over where the web token is stored
   was resolved in the product spec's favor, with the impl spec amended in #117 — confirm the amendment says what the
