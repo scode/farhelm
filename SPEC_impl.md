@@ -117,9 +117,20 @@ tokens are named for the role a value plays — surface levels (`--bg-*`), foreg
 family, `--ok`/`--warn`/`--danger` with their fill and border variants, `--radius-*`, `--font-ui`/`--font-mono` — rather
 than for the color it happens to be, so a restyle is an edit to one block instead of to every rule that mentioned the
 same hex. The palette is dark-only today; a light theme lands as a second `:root` block redefining the same names, which
-is the arrangement the no-literals rule exists to protect. A few tokens carry an `-alt` suffix: they are near-duplicate
-values the sheet accumulated before it had tokens, kept exactly as they were because introducing the token layer was
-required to change nothing on screen.
+is the arrangement the no-literals rule exists to protect.
+
+Two of those roles are design constraints and not merely names. The first is the surface ladder: exactly three levels
+are in use — the ground (the page, which is pure black because that is what xterm.js paints and the terminal is not ours
+to restyle), the chrome one step above it (sidebar, main header, tab strip), and the floating level one step above that
+(menus, dialogs, forms, bands that interrupt a pane). Which level an element sits on is recorded in the `:root`
+comments; a `--control-hover-bg` and a `--chip-bg` token fill a bordered control's hover state and a small chip
+respectively, named for that specific role rather than folded into the `--bg-*` surface family, so neither one reads as
+a fourth and fifth level to lay something out on. The second is that there is ONE accent, spent today on selection and
+`:focus-visible` and RESERVED — not yet spent — for a filled primary control the "Two-tier buttons" item still open in
+TODO.md's UI refresh will add; SPEC.md requires the sidebar to mark the selected session's row readably at a glance, and
+an accent spread across decoration before that control exists would have nothing left to make that true. Both
+constraints have a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA
+against the brightest surface it lands on, which is what caps how light the selected row's fill may go.
 
 `--font-ui` and `--font-mono` name the same vendored face — JetBrains Mono Nerd Font, described below in the xterm.js
 island section — rather than two different ones. The chrome (`--font-ui`) and the terminal (`--font-mono`, the stack
