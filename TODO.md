@@ -89,16 +89,6 @@ roadmap and carries no priorities unless an entry says so itself.
   middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
   section as amended in #117.
 
-- Deflake `terminal.spec.ts`'s `list renders the session row with title, cwd, invocation, and a running badge`. During
-  the Design 1 split it failed once in a focused Chromium run and once under WebKit in the full two-engine suite: the
-  shared session row was present with the expected metadata, but its badge stayed `idle` through the 10-second assertion
-  instead of becoming `running`. The same unchanged test passed in the full suite's Chromium half, and the split changed
-  neither the test body nor the runtime that computes session status. This establishes intermittency without deciding
-  whether the listing missed an invalidation or the supervisor was late to classify the already-running session. First
-  steps: retain timestamped `/api/sessions` replies and feed invalidations from page load through the assertion, then
-  correlate them with the supervisor's status observations. Fix the missing transition or notification once its boundary
-  is known; do not merely lengthen the assertion timeout.
-
 - Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
   only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real
   tag was required). Not before a real release exists: rc.1 currently carries the only published Linux artifact, so
