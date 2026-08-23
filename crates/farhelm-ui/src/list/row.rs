@@ -648,7 +648,16 @@ pub(super) fn SessionRow(
                             span { class: "archived-badge", "archived" }
                         }
                         if let Some((badge_class, badge_text)) = badge {
-                            span { class: "status-badge {badge_class}", "{badge_text}" }
+                            // `title` because `.status-badge` caps at 32ch
+                            // and ellipsizes (`app.css`) — the shim's own
+                            // `error` detail rides straight into this text
+                            // and can run long, so the tooltip is the only
+                            // way back to a badge that has visibly clipped.
+                            span {
+                                class: "status-badge {badge_class}",
+                                title: "{badge_text}",
+                                "{badge_text}"
+                            }
                         }
                     }
                     // The host gets a line of its own, but ONLY for a

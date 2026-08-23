@@ -169,11 +169,6 @@ roadmap and carries no priorities unless an entry says so itself.
     the title (pulsing for running) and put a relative last-activity timestamp (`2m`, `1h`) where the word was — it
     makes the "recently active" sort visibly meaningful.
 
-  - Consolidate the main-pane header. Title/cwd line, archive button, restart banner, and tab strip currently stack into
-    ~170px of chrome before the terminal. Fold title, cwd, status dot, and actions (archive, restart, overflow menu)
-    into one ~40px row with tabs beneath; the restart explanation becomes a tooltip or dismissible inline note rather
-    than a permanent band.
-
   - Two-tier buttons. Everything is an outlined gray box. Keep one filled primary (`new session`); everything else
     becomes ghost (no border, hover background). Per-row kebab menus reveal on hover/focus instead of sitting as eight
     identical boxes down the column.

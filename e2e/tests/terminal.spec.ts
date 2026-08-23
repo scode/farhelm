@@ -54,6 +54,7 @@ import {
   fulfillAsHelm,
   installTerminalSuiteHooks,
   LIVE_BADGE,
+  STOPPED_BADGE,
   LIVE_STATES,
   openTerminal,
   rowByTitle,
@@ -1322,7 +1323,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
       .click();
     await expect(
       rowByTitle(page, titleB).locator(".status-badge.exited"),
-    ).toHaveText(/^exited — stopped by user/, { timeout: 10_000 });
+    ).toHaveText(STOPPED_BADGE, { timeout: 10_000 });
 
     // Delete session B (now exited): no confirmation expected — pin that
     // the inline prompt never appears at all, not merely that it gets
@@ -2653,7 +2654,7 @@ test("a failed action's error is keyed to its own session, not shared across row
     // the exited badge (PLAN_M3.md item 4, SPEC.md's "'stopped' is not a
     // distinct status").
     await expect(rowB.locator(".status-badge")).toHaveText(
-      /^exited — stopped by user/,
+      STOPPED_BADGE,
       { timeout: 10_000 },
     );
 
@@ -2668,7 +2669,7 @@ test("a failed action's error is keyed to its own session, not shared across row
     await openRowMenu(rowA);
     await rowA.locator(".session-row-stop").click();
     await expect(rowA.locator(".status-badge")).toHaveText(
-      /^exited — stopped by user/,
+      STOPPED_BADGE,
       { timeout: 10_000 },
     );
     await expect(rowA.locator(".action-error")).toHaveCount(0);
@@ -2779,7 +2780,7 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
       .poll(() => rowA.locator(".status-badge").textContent(), {
         timeout: 10_000,
       })
-      .toMatch(/^exited — stopped by user/);
+      .toMatch(STOPPED_BADGE);
 
     // Everything is usable again once the operation completes, and only
     // ONE request ever reached the route — the second click was rejected
@@ -2899,7 +2900,7 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
     // The stop won; the queued delete click was refused, so no confirm
     // prompt ever appeared for B at all.
     await expect(rowB.locator(".status-badge")).toHaveText(
-      /^exited — stopped by user/,
+      STOPPED_BADGE,
       { timeout: 10_000 },
     );
     await expect(rowB.locator(".confirm-consequence")).toHaveCount(0);
@@ -3135,7 +3136,7 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
     // the exited badge rather than replacing it (SPEC.md: "'stopped' is
     // not a distinct status").
     await expect(row.locator(".status-badge.exited")).toHaveText(
-      /^exited — stopped by user/,
+      STOPPED_BADGE,
       { timeout: 10_000 },
     );
 

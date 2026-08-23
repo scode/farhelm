@@ -7,7 +7,10 @@
 //! strip's presentational `TabStripItem` — lives in `tabs`; see that
 //! module's own docs for why the split is drawn there. The restart affordance's own pure wording
 //! helpers (`restart_offer_text`, `restart_button_label`) stay local, since
-//! nothing outside this component calls them.
+//! nothing outside this component calls them, and so does
+//! `status_badge_destination` — the consolidated header's rule for where a
+//! status badge renders, which is a fact about THIS layout rather than
+//! about what a status means.
 
 use std::collections::{HashMap, HashSet};
 
@@ -25,7 +28,7 @@ use crate::ops::ReadGate;
 use crate::peer::PeerLine;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::reconnect::reconnect_policy;
-use crate::status::status_badge;
+use crate::status::{StatusBadge, status_badge};
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
     CLOSE_TAB_CONSEQUENCE, MAX_MOUNTED_TAB_ISLANDS, TAB_OPEN_ERROR_KEY, TabStripItem,
@@ -34,11 +37,69 @@ use crate::tabs::{
 };
 use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 
-/// One session: a titlebar (read-only title and metadata) over a tab
-/// strip over one terminal per open terminal — the sidebar beside this
+/// The DOM id of the element carrying the restart offer's explanation, which
+/// the restart button names through `aria-describedby`.
+///
+/// The explanation is visually hidden and duplicated into the button's
+/// `title`: `title` is the mouse tooltip and nothing more — it is unreachable
+/// by keyboard, absent on touch, and skipped by some screen readers — so the
+/// text a user is entitled to before restarting has to exist as a real
+/// element too. `aria-describedby` takes precedence over `title` as the
+/// accessible description, so the two do not double-announce.
+///
+/// A fixed id rather than a per-session one, for the reason every other
+/// element id in this view is fixed (see `tabs`): exactly one `SessionView`
+/// is mounted at a time.
+const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
+
+/// One session: a single header row (title, metadata, status, actions) over
+/// a tab strip over one terminal per open terminal — the sidebar beside this
 /// view owns navigation and rename. Each terminal div is handed to the JS island
 /// on mount; Dioxus never touches its children again — that boundary is
 /// the whole design.
+///
+/// ## The consolidated header (TODO.md's UI refresh)
+///
+/// Everything that identifies the session lives in ONE ~40px row: the
+/// title, the `{cwd} — {invocation}` metadata, the status badge, and the
+/// two session-level lifecycle actions (archive and restart — rename stays
+/// in the sidebar, which owns navigation; tabs stay in the strip below). It
+/// replaced a stack of four bands — titlebar, archive row, restart offer,
+/// tab strip — that cost ~170px of chrome before the terminal started, on a
+/// surface whose whole point is the terminal.
+///
+/// Three rules keep it at one row, and each of them is a decision rather
+/// than an implementation detail:
+///
+/// - **The confirmations are POPOVERS, anchored to the button that opened
+///   them.** They are still the confirm-in-place flow they always were —
+///   consequence sentence first, focus on cancel — but the consequence
+///   ("still running — restarting stops the agent and its whole process tree
+///   first") is a full sentence that would either wrap the header to two
+///   lines or be truncated to uselessness if it sat in flow. Neither is
+///   acceptable for the one sentence standing between a click and a killed
+///   agent, so it gets its own surface hanging under the trigger.
+/// - **The restart explanation is a TOOLTIP plus an accessible
+///   description**, not a band. SPEC.md's "restart says so and offers that
+///   same fallback or a fresh launch — it must never silently resume the
+///   wrong conversation" is carried by the button's own accessible name
+///   (`restart_button_label`, which names the offer rather than the
+///   action) — the VISIBLE glyph is the compact "restart" every action
+///   button uses, so the cluster fits the supported minimum width, and
+///   `aria-label`/`title` carry the full offer wording for whoever reads
+///   them. `restart_offer_text`'s elaboration — why the terminal is gone,
+///   what happens to the conversation — is a further hover tooltip and
+///   assistive-technology description, which is what had no business being
+///   permanent chrome on every session forever.
+/// - **A classified status renders in at most one place.** The header
+///   normally, the stale band for a stale session (whose notice already
+///   carries SPEC.md's "last-known status"), nowhere for `Unknown`
+///   (`status_badge_destination`).
+///
+/// There is deliberately no overflow `⋯` menu: this view has exactly two
+/// actions (archive and restart), which is what the row is sized for. A menu
+/// added before there is anything to put in it would be one more click in
+/// front of both.
 ///
 /// ## Tabs (PLAN_M4.md item 6)
 ///
@@ -1269,160 +1330,271 @@ pub(crate) fn SessionView(
         )
     });
     // SPEC.md's metadata triple for a stale session is "title, directory,
-    // last-known status", and the status is the one this view has nowhere
-    // else to put: the titlebar carries the title and the directory, while
-    // the restart offer describes what a relaunch would do rather than what
-    // the session last WAS. Rendered through the list's own badge so the two
-    // surfaces cannot describe one session differently.
-    // Flattened, not nested: a stale session whose last-known status was
-    // never classified has no badge to show (see `status_badge`'s
-    // no-badge-for-`Unknown` rule), which is the same absence as "not
-    // stale" as far as this render is concerned.
-    let stale_badge = shown
-        .stale
-        .then(|| status_badge(&shown.status, shown.annotation.as_deref()))
-        .flatten();
+    // last-known status", and this band is where the third one lands: the
+    // header above carries the title and the directory, and it deliberately
+    // drops its own badge while stale so the word is not printed twice.
+    // Rendered through the list's own badge so the two surfaces cannot
+    // describe one session differently. `status_badge` is called exactly
+    // once, inside `status_badge_destination`, so the stale/non-stale split
+    // below and `status_badge`'s own `Unknown`-suppresses-everything rule
+    // are the only two places a badge can ever go missing.
+    let (stale_badge, header_badge) = status_badge_destination(&shown);
+    // One string, built once, for both the visible metadata and its own
+    // `title`: the line is truncated with an ellipsis at whatever width the
+    // header has left, and the tooltip is the only way back to the full cwd
+    // and invocation. Two copies of the format would let the two drift.
+    let meta_line = format!("{} — {}", shown.cwd, shown.invocation);
+    // The restart offer's explanation, now the restart button's tooltip and
+    // accessible description rather than a permanent band (see this
+    // component's header docs).
+    let offer_explanation = restart_offer_text(&shown.status, shown.restart_offer);
+    // The restart control's full accessible name (`resume conversation`,
+    // `restart (fresh launch)`, ...): the button's own VISIBLE glyph is now
+    // the compact "restart" every header action uses (so the cluster fits
+    // the header's supported minimum width — see the `.titlebar-actions`
+    // CSS), so this is what actually carries SPEC.md's "restart says so"
+    // promise to `aria-label` and to the hover `title`, in front of the
+    // further elaboration `offer_explanation` provides.
+    let restart_label = restart_button_label(shown.restart_offer);
+    // The refusal a failed archive left behind, suppressed once a refresh
+    // reports the session archived — see `visible_archive_error`'s own
+    // docs for the race this is closing.
+    let shown_archive_error = visible_archive_error(shown.archived, archive_error.read().clone());
     rsx! {
         div { class: "layout",
+            // The one header row. Identity on the left, status in the
+            // middle, actions pinned right — see this component's docs for
+            // why everything that used to be its own band lives here.
             header { class: "titlebar",
-                span { class: "title", "{shown_title}" }
-                span { class: "meta", "{shown.cwd} — {shown.invocation}" }
-            }
-            if !shown.archived {
-                div { class: "archive-offer",
-                    if confirming_archive() {
-                        if let Some(archive_text) = archive_confirmation(&shown, tabs.len()) {
-                            span { class: "confirm-consequence", "{archive_text}:" }
-                        } else {
-                            span { class: "confirm-consequence", "archiving removes the terminal:" }
-                        }
-                        button {
-                            r#type: "button",
-                            class: "btn archive-confirm",
-                            disabled: archiving() || opening_tab(),
-                            onclick: move |_| {
-                                if confirming_archive() && !opening_tab() {
-                                    confirming_archive.set(false);
-                                    confirm_archive();
+                // Both of these carry their own text as `title` because both
+                // ellipsize: a title and a cwd share `CreateSession`'s 64 KiB
+                // field budget, so the hover tooltip is the only route back
+                // to a value the row cannot fit.
+                span { class: "title", title: "{shown_title}", "{shown_title}" }
+                span { class: "meta", title: "{meta_line}", "{meta_line}" }
+                if let Some((badge_class, badge_text)) = header_badge {
+                    // `title` because `.status-badge` caps at 32ch and
+                    // ellipsizes (`app.css`) — the shim's own `error`
+                    // detail can run past that cap, and the tooltip is the
+                    // only way back to a badge that has visibly clipped.
+                    span {
+                        class: "status-badge {badge_class}",
+                        title: "{badge_text}",
+                        "{badge_text}"
+                    }
+                }
+                div { class: "titlebar-actions",
+                    if !shown.archived {
+                        // The trigger stays mounted while its confirmation is
+                        // open — the gate it claimed on the first click is
+                        // what renders it disabled — so the row's width does
+                        // not jump under an open prompt. `aria-expanded` is
+                        // what says the popover below belongs to it.
+                        div { class: "archive-offer",
+                            button {
+                                r#type: "button",
+                                class: "btn archive-primary",
+                                "data-confirms": "{archive_requires_confirmation}",
+                                "aria-expanded": "{confirming_archive()}",
+                                // `archive` is already the button's full
+                                // wording (there is no longer form of this
+                                // action to compact away, unlike restart) —
+                                // `aria-label`/`title` are set anyway so
+                                // both header actions carry the accessible
+                                // name and hover tooltip the same way.
+                                "aria-label": "archive",
+                                title: "archive",
+                                "aria-controls": "archive-confirm-panel",
+                                disabled: lifecycle.busy() || opening_tab(),
+                                onclick: move |_| {
+                                    if opening_tab() {
+                                        return;
+                                    }
+                                    if !lifecycle.claim() {
+                                        return;
+                                    }
+                                    if archive_requires_confirmation {
+                                        confirming_archive.set(true);
+                                    } else {
+                                        direct_archive();
+                                    }
+                                },
+                                "archive"
+                            }
+                            if confirming_archive() {
+                                // Anchored under the trigger rather than laid
+                                // out in the header row: the consequence is a
+                                // whole sentence, and a header that wrapped
+                                // (or ellipsized it) would be trading away the
+                                // one line standing between a click and a
+                                // destroyed terminal to save 40px.
+                                //
+                                // `id` pairs with the trigger's
+                                // `aria-controls` above: `aria-expanded`
+                                // alone only records that SOME popover is
+                                // open, not which one — a sidebar row menu
+                                // open at the same time also sets it, so
+                                // the pairing is what actually ties this
+                                // panel to the button that owns it.
+                                div { id: "archive-confirm-panel", class: "header-confirm",
+                                    if let Some(archive_text) = archive_confirmation(&shown, tabs.len()) {
+                                        span { class: "confirm-consequence", "{archive_text}:" }
+                                    } else {
+                                        span { class: "confirm-consequence", "archiving removes the terminal:" }
+                                    }
+                                    button {
+                                        r#type: "button",
+                                        class: "btn archive-confirm",
+                                        disabled: archiving() || opening_tab(),
+                                        onclick: move |_| {
+                                            if confirming_archive() && !opening_tab() {
+                                                confirming_archive.set(false);
+                                                confirm_archive();
+                                            }
+                                        },
+                                        "confirm archive"
+                                    }
+                                    button {
+                                        r#type: "button",
+                                        class: "btn archive-cancel",
+                                        autofocus: true,
+                                        disabled: archiving(),
+                                        onclick: move |_| {
+                                            confirming_archive.set(false);
+                                            lifecycle.release();
+                                        },
+                                        "cancel"
+                                    }
                                 }
-                            },
-                            "confirm archive"
+                            }
                         }
+                    }
+                    // SPEC.md: "Opening an interrupted session offers
+                    // restart-with-resume" — which is why this is a
+                    // first-class control in the header rather than hidden
+                    // behind a menu, and why the LABEL names the offer rather
+                    // than the action. Declining is simply not clicking it:
+                    // there is no dismiss, and nothing about the session
+                    // changes. The same affordance serves every other state
+                    // too, since restart is the one relaunch mechanism there
+                    // is.
+                    div { class: "restart-offer",
                         button {
                             r#type: "button",
-                            class: "btn archive-cancel",
-                            autofocus: true,
-                            disabled: archiving(),
+                            class: "btn restart-primary",
+                            // Whether this click opens the confirmation rather
+                            // than restarting outright — the status-derived
+                            // decision, exposed so it is inspectable (the
+                            // browser suite waits on it) instead of only
+                            // observable after the fact by clicking.
+                            "data-confirms": "{alive}",
+                            "aria-expanded": "{confirming()}",
+                            "aria-controls": "restart-confirm-panel",
+                            // SPEC.md's "restart says so" (`restart_label`,
+                            // e.g. "resume conversation") is what this
+                            // control's accessible name carries now that the
+                            // VISIBLE glyph is the compact "restart" every
+                            // header action uses — the header's supported
+                            // minimum width has no room for the longest
+                            // offer's ~320px of text. `title` repeats it for
+                            // a mouse's hover, ahead of the further
+                            // elaboration `offer_explanation` provides
+                            // through `aria-describedby` below.
+                            "aria-label": "{restart_label}",
+                            title: "{restart_label} — {offer_explanation}",
+                            "aria-describedby": RESTART_OFFER_DESCRIPTION_ID,
+                            disabled: lifecycle.busy(),
                             onclick: move |_| {
-                                confirming_archive.set(false);
-                                lifecycle.release();
-                            },
-                            "cancel"
-                        }
-                    } else {
-                        button {
-                            r#type: "button",
-                            class: "btn archive-primary",
-                            "data-confirms": "{archive_requires_confirmation}",
-                            disabled: lifecycle.busy() || opening_tab(),
-                            onclick: move |_| {
-                                if opening_tab() {
-                                    return;
-                                }
                                 if !lifecycle.claim() {
                                     return;
                                 }
-                                if archive_requires_confirmation {
-                                    confirming_archive.set(true);
+                                if alive {
+                                    // Never a direct request for a live agent:
+                                    // restarting one kills it, so the click
+                                    // only opens the confirmation.
+                                    confirming.set(true);
                                 } else {
-                                    direct_archive();
+                                    fresh_restart(false);
                                 }
                             },
-                            "archive"
+                            "restart"
                         }
-                    }
-                    if let Some(err) = archive_error.read().clone() {
-                        div { class: "archive-error", "{err}" }
+                        // Visually hidden, never absent: this is the offer
+                        // explanation as an actual element, which is what
+                        // makes it reachable without a pointer (see
+                        // `RESTART_OFFER_DESCRIPTION_ID`). No `restart-offer-text`
+                        // class here — nothing in app.css keys off it, only
+                        // `visually-hidden` does anything, and `id` is
+                        // already how the button and this span find each
+                        // other.
+                        span {
+                            id: RESTART_OFFER_DESCRIPTION_ID,
+                            class: "visually-hidden",
+                            "{offer_explanation}"
+                        }
+                        if confirming() {
+                            // The same in-page confirmation delete uses, for
+                            // the same reason (SPEC.md: restart on a running
+                            // agent confirms, stops, then relaunches) and with
+                            // the same safety defaults — consequence text
+                            // first, focus on cancel.
+                            //
+                            // `id` pairs with the trigger's `aria-controls`
+                            // above — see the archive panel's own comment for
+                            // why that pairing exists alongside `aria-expanded`.
+                            div { id: "restart-confirm-panel", class: "header-confirm",
+                                span { class: "confirm-consequence",
+                                    "still running — restarting stops the agent and its whole process tree first:"
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn restart-confirm",
+                                    disabled: restarting() || archiving(),
+                                    onclick: move |_| {
+                                        if !confirming() {
+                                            return;
+                                        }
+                                        confirming.set(false);
+                                        // The only place `stop_if_running` is
+                                        // ever true: it carries THIS click's
+                                        // consent onto the wire, which the
+                                        // supervisor then checks against
+                                        // liveness it rechecks itself.
+                                        confirm_restart(true);
+                                    },
+                                    "confirm restart"
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn restart-cancel",
+                                    autofocus: true,
+                                    onclick: move |_| {
+                                        confirming.set(false);
+                                        lifecycle.release();
+                                    },
+                                    "cancel"
+                                }
+                            }
+                        }
                     }
                 }
             }
-            // SPEC.md: "Opening an interrupted session offers
-            // restart-with-resume" — which is why this leads the view
-            // rather than hiding behind a menu, and why its wording states
-            // what restarting would do to the CONVERSATION rather than
-            // just naming the action. Declining is simply not clicking it:
-            // there is no dismiss, and nothing about the session changes.
-            // The same affordance serves every other state too, since
-            // restart is the one relaunch mechanism there is.
-            div { class: "restart-offer",
-                span { class: "restart-offer-text",
-                    "{restart_offer_text(&shown.status, shown.restart_offer)}"
-                }
-                if confirming() {
-                    // The inline confirm delete already uses, for the same
-                    // reason (SPEC.md: restart on a running agent confirms,
-                    // stops, then relaunches) and with the same safety
-                    // defaults — consequence text first, focus on cancel.
-                    span { class: "confirm-consequence",
-                        "still running — restarting stops the agent and its whole process tree first:"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn restart-confirm",
-                        disabled: restarting() || archiving(),
-                        onclick: move |_| {
-                            if !confirming() {
-                                return;
-                            }
-                            confirming.set(false);
-                            // The only place `stop_if_running` is ever
-                            // true: it carries THIS click's consent onto
-                            // the wire, which the supervisor then checks
-                            // against liveness it rechecks itself.
-                            confirm_restart(true);
-                        },
-                        "confirm restart"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn restart-cancel",
-                        autofocus: true,
-                        onclick: move |_| {
-                            confirming.set(false);
-                            lifecycle.release();
-                        },
-                        "cancel"
-                    }
-                } else {
-                    button {
-                        r#type: "button",
-                        class: "btn restart-primary",
-                        // Whether this click opens the confirmation rather
-                        // than restarting outright — the status-derived
-                        // decision, exposed so it is inspectable (the
-                        // browser suite waits on it) instead of only
-                        // observable after the fact by clicking.
-                        "data-confirms": "{alive}",
-                        disabled: lifecycle.busy(),
-                        onclick: move |_| {
-                            if !lifecycle.claim() {
-                                return;
-                            }
-                            if alive {
-                                // Never a direct request for a live agent:
-                                // restarting one kills it, so the click
-                                // only opens the confirmation.
-                                confirming.set(true);
-                            } else {
-                                fresh_restart(false);
-                            }
-                        },
-                        "{restart_button_label(shown.restart_offer)}"
-                    }
-                }
-                if let Some(err) = restart_error.read().clone() {
-                    div { class: "restart-error", "{err}" }
-                }
+            // Both failures are full-width lines under the header rather than
+            // members of it: they are the helm's own prose (a refused restart
+            // names what the offer is NOW), so truncating them would hide the
+            // one sentence that says what to do next. Conditional, so they
+            // cost the steady state nothing.
+            //
+            // The archive error is filtered through `visible_archive_error`
+            // rather than read directly: a refusal this client received can
+            // be overtaken by another client's SUCCESSFUL archive of the
+            // same session, and once a refresh reports that, the refusal is
+            // stale — see that function's own docs.
+            if let Some(err) = shown_archive_error {
+                div { class: "archive-error", "{err}" }
+            }
+            if let Some(err) = restart_error.read().clone() {
+                div { class: "restart-error", "{err}" }
             }
             // Worded to state the FACT (the helm stopped listing this
             // session) and the CONSEQUENCE (what is shown may be stale),
@@ -1650,11 +1822,68 @@ pub(crate) fn SessionView(
     }
 }
 
+/// Whether a previously reported archive failure should still be shown
+/// beside the header, given the session's CURRENT `archived` reading.
+///
+/// The refusal answers one specific call, and that call can be overtaken by
+/// another client's SUCCESSFUL archive of the same session: the two raced,
+/// and this client lost the race for the write but a later refresh still
+/// reports the session archived. Continuing to display the refusal past
+/// that point is not a delayed truth about this client's own click — it is
+/// a stale complaint sitting beside an `.archived-notice` that says the
+/// opposite, which is what actually happened when the error moved out of
+/// the `!shown.archived` branch during the header consolidation without
+/// carrying this suppression with it.
+///
+/// A pure predicate over the two facts that decide it, rather than a
+/// signal read inline at the call site, so the race it closes can be
+/// pinned without standing up a `SessionView` and driving an HTTP round
+/// trip through it.
+fn visible_archive_error(archived: bool, error: Option<String>) -> Option<String> {
+    if archived { None } else { error }
+}
+
+/// Where this session's status badge belongs on the consolidated header
+/// surface, computed from exactly ONE call to `status_badge` and split into
+/// the two destinations a caller can render: `(stale band, header)`.
+///
+/// A classified status renders in at most one place: the header normally,
+/// the `.stale-metadata` band under the host-unreachable notice for a stale
+/// session (where SPEC.md's metadata triple — "title, directory,
+/// last-known status" — is assembled as one statement), and nowhere at all
+/// for `Unknown` (`status_badge`'s own no-badge-until-classified rule).
+/// Calling `status_badge` once and branching on `session.stale` is what
+/// makes "at most one" true by construction rather than by two independent
+/// call sites happening to agree — the OLD shape called it twice, once per
+/// destination, and nothing but code review kept their conditions from
+/// drifting apart.
+///
+/// Returns the PAIR rather than picking a winner internally so a test can
+/// assert the pair's own invariant (never both `Some`) directly, instead of
+/// only ever observing one destination at a time and trusting the other.
+fn status_badge_destination(session: &Session) -> (StatusBadge, StatusBadge) {
+    let badge = status_badge(&session.status, session.annotation.as_deref());
+    if session.stale {
+        (badge, None)
+    } else {
+        (None, badge)
+    }
+}
+
 /// What restarting this session would do to its conversation, in the
 /// user's own terms — SPEC.md's "restart says so and offers the fallback
 /// or a fresh launch — it must never silently resume the wrong
 /// conversation", which is a promise about what the user is TOLD, not only
 /// about what runs.
+///
+/// Since the header consolidation this text is part of the restart
+/// button's hover tooltip and accessible description rather than a band
+/// above the terminal. `restart_button_label` carries the offer itself
+/// into the button's ACCESSIBLE name (`aria-label`, and the front half of
+/// `title`) — the visible glyph is the compact "restart" every header
+/// action uses, which the row's supported minimum width has no room to
+/// grow past. This function adds the reason and the elaboration behind
+/// that name, which is what did not deserve permanent chrome.
 ///
 /// The status leads for `Interrupted` because that is the one state where
 /// the user needs to know why their terminal is gone before they are asked
@@ -1681,10 +1910,12 @@ fn restart_offer_text(status: &SessionStatus, offer: RestartOffer) -> String {
     }
 }
 
-/// The restart control's label, which names the OFFER rather than the
-/// action: "restart" alone would leave a user guessing whether their
-/// conversation survives, which is the exact question SPEC.md requires an
-/// honest answer to before they click.
+/// The restart control's accessible name (`aria-label`, and the front half
+/// of its hover `title`) — names the OFFER rather than the action, because
+/// "restart" alone (the control's compact VISIBLE glyph, since the header
+/// consolidation) would leave a user guessing whether their conversation
+/// survives, which is the exact question SPEC.md requires an honest answer
+/// to before they click.
 fn restart_button_label(offer: RestartOffer) -> &'static str {
     match offer {
         RestartOffer::Resume => "resume conversation",
@@ -1910,6 +2141,95 @@ mod tests {
         assert!(
             error.contains("never started"),
             "an errored session's own reason leads instead: {error}"
+        );
+    }
+
+    /// `status_badge_destination` routes a session's badge to AT MOST ONE
+    /// of its two destinations — never both, and for `Unknown` neither.
+    ///
+    /// Pins exactly that pairing, not "the header shows status exactly
+    /// once" (an ordinary, non-stale, classified session is the only case
+    /// where that phrasing would even be accurate — `Unknown` shows it
+    /// nowhere, and a stale session shows it in the band instead). The
+    /// stale case asserts BOTH halves of the pair on the same value, which
+    /// is what a single-destination assertion cannot: the header member
+    /// being `None` is only the correct behavior because the stale member
+    /// is simultaneously `Some` — a regression that dropped both would
+    /// lose a SPEC-required clause while still passing a test that only
+    /// ever looked at one side.
+    #[test]
+    fn status_badge_destination_never_targets_both_surfaces_at_once() {
+        fn session(status: SessionStatus, stale: bool) -> Session {
+            Session {
+                id: "sess".to_string(),
+                title: "sess".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status,
+                annotation: None,
+                restart_offer: RestartOffer::FreshOnly,
+                created_at: 0,
+                archived: false,
+                tabs: Vec::new(),
+                host: None,
+                host_identity: None,
+                host_name: None,
+                stale,
+                source_profile: None,
+            }
+        }
+
+        let running_badge = Some(("running", "running".to_string()));
+
+        let live = session(SessionStatus::Running, false);
+        assert_eq!(
+            status_badge_destination(&live),
+            (None, running_badge.clone()),
+            "an ordinary session's status is header chrome now, not a band"
+        );
+
+        let stale = session(SessionStatus::Running, true);
+        assert_eq!(
+            status_badge_destination(&stale),
+            (running_badge, None),
+            "the stale notice's own metadata band carries the last-known status, \
+             and the header yields rather than printing it a second time"
+        );
+
+        assert_eq!(
+            status_badge_destination(&session(SessionStatus::Unknown, false)),
+            (None, None),
+            "an unclassified session gets no verdict on any surface"
+        );
+    }
+
+    /// A refused archive must not linger once another client's archive of
+    /// the SAME session is confirmed by a later refresh — the exact race
+    /// that used to reach the screen: `archive_error` rendered outside the
+    /// `!shown.archived` branch, so nothing suppressed a stale refusal once
+    /// `shown.archived` flipped true underneath it.
+    ///
+    /// The two assertions are one scenario read at two points in time, not
+    /// two independent cases: the SAME `error` value is honest before the
+    /// refresh lands (this client genuinely does not yet know the session
+    /// archived) and stale after it (a refresh has since said otherwise) —
+    /// pinning that the truth value alone, not any change to the error
+    /// text, is what flips the outcome.
+    #[test]
+    fn an_archive_refusal_is_hidden_once_a_refresh_reports_the_session_archived() {
+        let refusal =
+            Some("archive refused: a lifecycle operation is already in flight".to_string());
+
+        assert_eq!(
+            visible_archive_error(false, refusal.clone()),
+            refusal,
+            "before any refresh lands, the refusal is still the honest state"
+        );
+        assert_eq!(
+            visible_archive_error(true, refusal),
+            None,
+            "once a refresh reports the session archived, the earlier refusal \
+             must not keep rendering beside the archived-notice that contradicts it"
         );
     }
 

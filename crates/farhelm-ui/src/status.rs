@@ -10,12 +10,13 @@
 //!
 //! ## Why the wording is not left to each call site
 //!
-//! Two surfaces render a session's status: the list's rows, and the session
-//! view's own header — which shows the same badge behind a stale session's
-//! notice (SPEC.md's "title, directory, last-known status"). A second copy of
-//! the mapping would let one surface describe a session differently from the
-//! other, and the difference would be invisible until a user compared the two
-//! screens for the same session.
+//! Two surfaces render a session's status: the list's rows, and the open
+//! session's consolidated header — where it sits beside the title, or, while
+//! the session is stale, in the metadata band under the host-unreachable
+//! notice that carries SPEC.md's "title, directory, last-known status". A
+//! second copy of the mapping would let one surface describe a session
+//! differently from the other, and the difference would be invisible until a
+//! user compared the two screens for the same session.
 //!
 //! The confirmation wording carries more than consistency: it is the one
 //! sentence standing between a click and an irreversible delete, and SPEC.md's
@@ -25,6 +26,13 @@
 //! the tests at the bottom exist for.
 
 use crate::SessionStatus;
+
+/// A rendered badge's CSS modifier class paired with its display text, or
+/// `None` for a status that must not be badged at all — named so every
+/// call site (and `session_view`'s destination-routing helper, which
+/// juggles TWO of these at once) spells one type rather than repeating the
+/// tuple shape.
+pub(crate) type StatusBadge = Option<(&'static str, String)>;
 
 /// Map a status — and, for an ended session, its annotation — to the
 /// badge's CSS modifier class and display text, or `None` for a status
@@ -55,21 +63,23 @@ use crate::SessionStatus;
 ///
 /// The annotation is a QUALIFIER on the exited status, never a
 /// replacement for it: SPEC.md is explicit that "stopped" is not a
-/// distinct status, so a user-stopped session reads "exited — stopped by
-/// user (code 0)". An earlier version rendered the annotation alone, which
-/// read as a fourth status word and quietly dropped the one fact every
-/// row's badge is supposed to state. The annotation is ignored for every
-/// other status — it describes how a run ENDED, and a live session has
-/// not.
+/// distinct status, so a user-stopped session reads "exited (code 0) —
+/// stopped by user". The code leads rather than trails the annotation
+/// because the badge is capped at 32 monospace characters (`app.css`'s
+/// `.status-badge`) and the older code-last ordering let a long annotation
+/// push the code past that cap, hiding the one fact a badge exists to
+/// state; leading with it means it survives truncation regardless of how
+/// long the supervisor's own prose runs. An earlier version rendered the
+/// annotation alone, which read as a fourth status word and quietly
+/// dropped the code entirely. The annotation is ignored for every other
+/// status — it describes how a run ENDED, and a live session has not.
 ///
-/// `pub(crate)`, not private: the session view renders the same badge behind
-/// a stale session's notice (SPEC.md's "title, directory, last-known
-/// status"), and two copies of this mapping would let one surface describe a
-/// session differently from the other.
-pub(crate) fn status_badge(
-    status: &SessionStatus,
-    annotation: Option<&str>,
-) -> Option<(&'static str, String)> {
+/// `pub(crate)`, not private: the session view renders the same badge in its
+/// header — and, for a stale session, in the metadata band under the
+/// host-unreachable notice (SPEC.md's "title, directory, last-known status")
+/// — and two copies of this mapping would let one surface describe a session
+/// differently from the other.
+pub(crate) fn status_badge(status: &SessionStatus, annotation: Option<&str>) -> StatusBadge {
     Some(match status {
         // The three live statuses get three words and three CSS modifiers,
         // because the whole point of the split is that a user can tell them
@@ -80,13 +90,20 @@ pub(crate) fn status_badge(
         SessionStatus::Waiting => ("waiting", "waiting".to_string()),
         SessionStatus::Idle => ("idle", "idle".to_string()),
         SessionStatus::Exited { exit_code } => {
+            // The exit code leads the annotation, not the other way
+            // around: the badge is capped at 32 monospace characters
+            // (`app.css`'s `.status-badge`), and "exited — stopped by user
+            // (code 0)" ran past that cap, ellipsizing away the one datum
+            // — the code — this whole match arm exists to report. Putting
+            // it first means it survives truncation regardless of how long
+            // the supervisor's own annotation prose runs.
             let mut text = "exited".to_string();
+            if let Some(code) = exit_code {
+                text.push_str(&format!(" (code {code})"));
+            }
             if let Some(annotation) = annotation {
                 text.push_str(" — ");
                 text.push_str(annotation);
-            }
-            if let Some(code) = exit_code {
-                text.push_str(&format!(" (code {code})"));
             }
             ("exited", text)
         }
@@ -260,11 +277,16 @@ mod tests {
     /// SPEC.md: "'stopped' is not a distinct status" — a user-stopped
     /// session is an EXITED session carrying a qualifier, so the badge
     /// must still SAY exited and add the supervisor's own wording after
-    /// it, with the exit code still visible when there is one. Rendering
-    /// the annotation alone (an earlier shape of this) reads as a fourth
-    /// status word and drops the one fact the badge exists to state. The
-    /// `exited` CSS class is asserted alongside the text for the same
-    /// reason: a stopped session must still LOOK like an ended one.
+    /// it, with the exit code still visible when there is one — and
+    /// leading, not trailing, so it survives the badge's 32-character cap
+    /// (`app.css`'s `.status-badge`) regardless of how long the annotation
+    /// runs (the regression this pins: "exited — stopped by user (code
+    /// 0)" put the code last, where a longer annotation would ellipsize it
+    /// away). Rendering the annotation alone (an earlier shape of this)
+    /// reads as a fourth status word and drops the one fact the badge
+    /// exists to state. The `exited` CSS class is asserted alongside the
+    /// text for the same reason: a stopped session must still LOOK like an
+    /// ended one.
     ///
     /// The live-session case is the one a naive implementation gets
     /// wrong: an annotation describes how a run ENDED, so it must never
@@ -284,7 +306,8 @@ mod tests {
                 &SessionStatus::Exited { exit_code: Some(0) },
                 Some("stopped by user")
             ),
-            Some(("exited", "exited — stopped by user (code 0)".to_string()))
+            Some(("exited", "exited (code 0) — stopped by user".to_string())),
+            "the code leads so it survives the badge's character cap ahead of a long annotation"
         );
         assert_eq!(
             status_badge(&SessionStatus::Running, Some("stopped by user")),

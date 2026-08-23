@@ -71,15 +71,38 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await page.goto("/");
   await rowByTitle(page, title).locator(".session-row-open").click();
 
-  // The offer leads with WHY the terminal is gone and what restarting
+  // The offer still states WHY the terminal is gone and what restarting
   // would do to the conversation — both, because the user is being asked
-  // to act on something they did not do.
-  const offer = page.locator(".restart-offer-text");
-  await expect(offer).toBeVisible();
+  // to act on something they did not do. Since the header consolidation it
+  // says so on the restart control itself rather than in a permanent band:
+  // `title` as a mouse's hover tooltip, and an `aria-describedby` target as
+  // assistive technology's accessible description. Both are asserted,
+  // because either alone leaves one of those two channels unable to read
+  // it.
+  const restart = page.locator(".restart-primary");
+  await expect(restart).toHaveAttribute(
+    "title",
+    /interrupted by a host reboot.*resumes this session's own conversation/,
+  );
+  const described = await restart.getAttribute("aria-describedby");
+  expect(described, "the explanation must exist as a real element, not only as a tooltip").toBe(
+    "restart-offer-description",
+  );
+  const offer = page.locator(`#${described}`);
   await expect(offer).toContainText("interrupted by a host reboot");
   await expect(offer).toContainText("resumes this session's own conversation");
-  // The action names the offer, not the mechanism.
-  await expect(page.locator(".restart-primary")).toHaveText("resume conversation");
+  // The VISIBLE glyph is the compact "restart" every header action uses —
+  // the header's supported minimum width has no room for the longest
+  // offer's ~320px of wording on the button's face. SPEC.md's "restart says
+  // so" instead reaches the accessible name: `aria-label` names the offer,
+  // not the mechanism, which is what a screen reader announces regardless
+  // of hover.
+  await expect(restart).toHaveText("restart");
+  await expect(restart).toHaveAttribute("aria-label", "resume conversation");
+  // And the header states the session's last-known status beside the
+  // title, which is where the reason a user is being offered a restart now
+  // lives (the offer prose used to carry it in a band of its own).
+  await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
   // An interrupted session has nothing running, so there is no confirm
   // step in front of it.
   await expect(page.locator(".restart-confirm")).toHaveCount(0);
@@ -205,6 +228,10 @@ test("restarting a live session confirms first, and only then sends the request 
     await expect(restartButton).toHaveAttribute("data-confirms", "true", {
       timeout: 15_000,
     });
+    // Closed before the first click — the popover this button controls
+    // does not exist yet, and `aria-expanded` must say so rather than
+    // defaulting to open.
+    await expect(restartButton).toHaveAttribute("aria-expanded", "false");
 
     // The first click only opens the prompt: nothing is sent, and the
     // consequence text says what restarting would do to the running agent.
@@ -213,6 +240,11 @@ test("restarting a live session confirms first, and only then sends the request 
       "still running",
     );
     expect(bodies).toHaveLength(0);
+    // Open now — this is the state a sidebar row menu opened at the same
+    // time could visually cover (see app.css's `.header-confirm` z-index
+    // comment), so the trigger's own record of it matters independently of
+    // the popover being on screen.
+    await expect(restartButton).toHaveAttribute("aria-expanded", "true");
 
     // Cancel returns the view to its normal state, still having sent
     // nothing — the same "cancel is the only way back" rule the delete
@@ -220,8 +252,10 @@ test("restarting a live session confirms first, and only then sends the request 
     await page.locator(".restart-cancel").click();
     await expect(page.locator(".restart-primary")).toBeVisible();
     expect(bodies).toHaveLength(0);
+    await expect(restartButton).toHaveAttribute("aria-expanded", "false");
 
     await restartButton.click();
+    await expect(restartButton).toHaveAttribute("aria-expanded", "true");
     await page.locator(".restart-confirm").click();
     await expect.poll(() => bodies.length).toBe(1);
     expect(bodies[0].stop_if_running).toBe(true);

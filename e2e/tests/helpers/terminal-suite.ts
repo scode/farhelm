@@ -31,6 +31,17 @@ import { waitForTermText } from "./term";
 // terminal.spec.ts).
 export const LIVE_BADGE = /^(running|waiting|idle)$/;
 
+// The exit code is optional in the pattern because a stopped session may or
+// may not have one — a signal death tmux cannot reduce to a code leaves the
+// badge at plain `exited`, and a shell that ran its EXIT trap first reports
+// a real code — and no test can predict which it gets. It is not optional in
+// ORDER: the code leads the annotation ("exited (code 7) — stopped by
+// user"), because the badge is capped at 32ch and the older code-last
+// wording let a long annotation ellipsize away the one datum the badge
+// exists to report (`status.rs`'s `Exited` arm). Anchored at both ends so a
+// regression back to code-last fails here rather than passing on a prefix.
+export const STOPPED_BADGE = /^exited( \(code \d+\))? — stopped by user$/;
+
 // The same set as `LIVE_BADGE`, for the API-level assertions that read a
 // status out of `/api/sessions` rather than off the DOM.
 export const LIVE_STATES = ["running", "waiting", "idle"];

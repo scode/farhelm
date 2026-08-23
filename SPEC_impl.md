@@ -155,6 +155,25 @@ monospace one. That extra load is a WOFF2 fetch rather than the vendored TTF's �
 of the TTF's size — and once either surface has fetched it, the browser serves the other from cache rather than fetching
 it a second time.
 
+The open session's chrome is ONE header row — title, `{cwd} — {invocation}`, status badge, archive and restart — sized
+at about 40px, with the tab strip beneath it and nothing else in the steady state. It used to be four stacked bands
+costing roughly 170px before the terminal started, on a surface whose entire point is the terminal. Two of those bands
+had to go somewhere rather than merely shrink. The restart offer's explanation became the restart button's tooltip and
+its `aria-describedby` target: SPEC.md's "restart says so and offers that same fallback or a fresh launch" is carried by
+the button's accessible name (`aria-label` and, alongside the further elaboration, `title`) — naming the offer
+(`resume conversation`, `restart (fresh launch)`, `restart with the configured resume command`) rather than the action —
+because the VISIBLE glyph is the compact "restart" every header action uses. The row's supported minimum width (~320px,
+the main pane's own floor) has no room for the longest offer's ~320px of text on the button's face, so "says so" now
+reaches a user through the accessible name and the hover tooltip rather than through the glyph itself. The archive and
+restart confirmations became popovers anchored under the button that opened them, still confirm-in-place with focus on
+cancel; the consequence sentence they lead with is the one line standing between a click and a killed process tree, and
+a header that kept it in flow would have to either wrap or truncate it. Everything conditional — a refused restart's
+prose, the archived notice, the host-unreachable notice and its last-known-status band, the "helm stopped listing this
+session" line — is still a full-width band, because a band that only appears when it has something to say costs the
+steady state nothing. A classified status renders in at most one place: the header normally, the stale notice's own
+metadata band for a stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere
+at all for a session nothing has classified yet.
+
 Known risks, accepted deliberately:
 
 - API churn between Dioxus 0.x releases. Mitigation: pin, avoid internals, budget for migrations.
