@@ -165,12 +165,6 @@ roadmap and carries no priorities unless an entry says so itself.
   fixed-width (a recorded decision; denser rows solve the same pain). Each sub-item is its own PR, and every one of them
   builds on the design-token layer app.css now has (its `:root` block) rather than on literals:
 
-  - Finish the JetBrains Mono conversion. The chrome font is still `system-ui` (app.css's html/body rule) and the
-    vendored face is applied only through xterm's `fontFamily`; app.css's own header says nothing else uses it. The
-    earlier intent was everything in JetBrains Mono. Use the already-vendored Nerd Font face for chrome too (its Latin
-    glyphs are identical to upstream JetBrains Mono, and the browser has already fetched it for the terminal); do NOT
-    vendor a second non-Nerd copy. If UI-size line spacing looks off, that is a `line-height` fix, not a font-file one.
-
   - Sidebar row hierarchy. Rows are four near-equal-weight lines (title, host, full cwd, full invocation), ~120px each.
     Drop the host line entirely when the session is on the helm's own machine (show it only for remote hosts); tilde-
     abbreviate the cwd and, if it still does not fit, hard-cut on the LEFT (right-most segments are the informative

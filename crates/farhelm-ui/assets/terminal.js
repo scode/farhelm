@@ -303,9 +303,15 @@
 // The settling machinery (`ensureFontSettling`, `pollFontWeight`, and the
 // module-scope state they share — all just above `mountWhenReady`) is
 // kicked from the FIRST `mountWhenReady` attempt, not from script
-// evaluation: a page that never opens a terminal at all — the token
-// prompt, a bare session list — must not pay for ~5.1 MB of font fetches
-// it will never render with.
+// evaluation. That scoping controls only THIS file's own work — the
+// explicit `document.fonts.load()` polling below — not whether the font
+// bytes get fetched at all: `app.css`'s `--font-ui` token now applies the
+// same vendored face to chrome typography, so the ~2 MB WOFF2 pair (see
+// lib.rs's asset registration) loads on every page the CSS reaches,
+// terminal or not. What staying script-evaluation-inert still buys is
+// narrower than it used to be: a page that never attempts a terminal mount
+// never runs this polling loop or holds its module-scope state, even
+// though the browser may already be fetching the same files for chrome.
 //
 // `fontSettled` is deliberately NOT the same kind of gate condition as
 // `window.Terminal`/`window.FitAddon` and the rest of `mountWhenReady`'s
@@ -535,14 +541,18 @@
    * Start settling the font — exactly once no matter how many times this
    * is called (every `mountWhenReady` attempt calls it unconditionally;
    * only the first actually does anything), which is what lets a page
-   * that never opens a terminal never pay for it.
+   * that never opens a terminal never run this file's own
+   * `document.fonts.load()` polling.
    *
-   * Deliberately NOT run at script evaluation, unlike an earlier version
-   * of this fix: kicking the load the moment this script parses fetches
-   * ~5.1 MB of font data on EVERY page this script reaches — the token
-   * prompt, a bare session list — never opening a terminal at all. Kicking
-   * from the first mount ATTEMPT instead means only a page that actually
-   * wants one pays for it.
+   * Deliberately NOT run at script evaluation, unlike an earlier version of
+   * this fix: kicking it the moment this script parses would start that
+   * polling on EVERY page this script reaches — the token prompt, a bare
+   * session list — never opening a terminal at all. Kicking from the first
+   * mount ATTEMPT instead means only a page that actually wants a terminal
+   * pays for the polling. This says nothing about whether the underlying
+   * WOFF2 files get FETCHED on those chrome-only pages regardless — since
+   * `app.css`'s `--font-ui` token, that fetch is outside this function's
+   * control (see the "## Font settling before mount" header above).
    */
   function ensureFontSettling() {
     if (fontKickStarted) return;
@@ -2547,8 +2557,13 @@
      * terminal that never mounts at all. This function's own FIRST call is
      * also what STARTS the font settling in the first place
      * (`ensureFontSettling()`, below) — kicked from here rather than at
-     * script evaluation so a page that never attempts a mount never fetches
-     * font data it will never use.
+     * script evaluation so a page that never attempts a mount never runs
+     * this file's own `document.fonts.load()` polling. That is narrower
+     * than "never fetches the font": `app.css`'s `--font-ui` token applies
+     * the same vendored face to chrome, so a page with no terminal at all
+     * may already have triggered the WOFF2 fetch through ordinary CSS
+     * before this function is ever called — this gate has no say over
+     * that, only over how long a terminal WAITS on the outcome.
      *
      * The term-bytes check belongs here for the same reason session_view.rs
      * documents for `window.farhelmTerm` itself (see its "sync-generation
