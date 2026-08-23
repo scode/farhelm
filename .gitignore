@@ -24,7 +24,7 @@ e2e/.stack-info.json
 # Minted by Playwright's global auth setup and removed with the stack.
 e2e/.auth/storage-state.json
 
-# Local cache and build environment for the pinned tmux 3.7b regression gate.
+# Local cache and build environment for the pinned tmux regression gate.
 .ci-tmux/
 .ci-tmux-python/
 

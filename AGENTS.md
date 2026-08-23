@@ -34,9 +34,10 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   skip themselves where no systemd user manager exists, and libtest hides a passing test's output otherwise. CI adds
   `--test-threads=4` to match its 4-vCPU runners and keep the process-heavy tmux integration suite's aggregate load
   predictable; a beefier local machine does not need the cap.
-- `scripts/test-tmux-3.7b-shutdown.sh` — builds the exact checksummed 3.7b release on cache miss, then runs every
-  focused output-client teardown regression in its own test process. CI uses the same script separately from the distro
-  tmux used by the full suite because silently substituting another version loses the affected-version coverage.
+- `scripts/test-tmux-pinned-shutdown.sh` — builds the exact checksummed release named by
+  `.github/release/source-pins.env` on cache miss, then runs every focused output-client teardown regression in its own
+  test process. CI uses the same script separately from the distro tmux used by the full suite because silently
+  substituting another version loses the affected-version coverage.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`

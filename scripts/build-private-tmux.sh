@@ -54,6 +54,10 @@ case "$target" in
     test "$(uname -s)" = Darwin
     test "$(uname -m)" = arm64
     export CC=cc AR=ar RANLIB=ranlib
+    # tmux 3.7c's darwin configure refuses to guess about jemalloc (as it
+    # already does about utf8proc): an explicit choice is required, and
+    # the private build links nothing but its own prefix.
+    tmux_configure=(--disable-jemalloc)
     # A case-insensitive APFS volume cannot represent every upstream terminfo
     # key. macOS owns the runtime database, so install only the private
     # archives and compile the system lookup path into ncurses instead.
