@@ -901,6 +901,15 @@ test.describe("agent profiles", () => {
     await expect(label).toContainText(before);
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
 
+    // The row's OWN meta-line badge (`.session-invocation`, always in the
+    // DOM regardless of the panel) carries the same snapshotted name — it
+    // is a second surface the panel chip's assertions above never touch,
+    // and the row.rs source this checks against is a different render
+    // branch than the panel chip's.
+    const badge = row(page, session.id).locator(".session-invocation");
+    await expect(badge).toHaveText(before);
+    await expect(badge).toHaveAttribute("title", `profile: ${before} — ${FAKE_AGENT}`);
+
     await updateProfile(request, local, profile.id, { name: after });
     await settleExistence(request, title, "renamed");
     feed.notify(2);
@@ -912,6 +921,16 @@ test.describe("agent profiles", () => {
         "what the session was created from",
     ).toContainText(before);
     await expect(label).not.toContainText(after);
+
+    // The meta-line badge keeps the same snapshot, with its `title`
+    // qualified the same way `source_profile_label` qualifies the panel
+    // chip's tooltip.
+    await expect(badge).toHaveText(before);
+    await expect(badge).not.toHaveText(after);
+    await expect(badge).toHaveAttribute(
+      "title",
+      `profile: ${before} (renamed since) — ${FAKE_AGENT}`,
+    );
 
     // The catalog, meanwhile, says the new name — the two surfaces disagree
     // on purpose.
@@ -986,6 +1005,13 @@ test.describe("agent profiles", () => {
     const label = row(page, session.id).locator(".session-profile");
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
 
+    // The row's own meta-line badge, same present-state snapshot as the
+    // panel chip — see the rename test above for why this is a second
+    // surface worth its own assertion.
+    const badge = row(page, session.id).locator(".session-invocation");
+    await expect(badge).toHaveText(name);
+    await expect(badge).toHaveAttribute("title", `profile: ${name} — ${FAKE_AGENT}`);
+
     await cleanupProfile(request, local, profile.id);
     await settleExistence(request, title, "deleted");
     feed.notify(2);
@@ -997,6 +1023,13 @@ test.describe("agent profiles", () => {
       "a session outlives the profile it was created from; removing the row would destroy the " +
         "record of what it launched",
     ).toBeVisible();
+
+    // The badge keeps the same snapshot too, qualified as deleted.
+    await expect(badge).toHaveText(name);
+    await expect(badge).toHaveAttribute(
+      "title",
+      `profile: ${name} (deleted since) — ${FAKE_AGENT}`,
+    );
   });
 
   /**

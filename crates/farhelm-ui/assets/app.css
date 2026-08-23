@@ -304,8 +304,9 @@ samp {
 /* The two-pane shell (BUGS_BURNDOWN.md issue 5): a fixed-width sidebar
  * holding the session list, and a main pane holding the selected session.
  * The sidebar width is FIXED by decision (no drag handle, no persistence);
- * wider than the bare minimum because rows carry title, status, host, cwd,
- * and invocation. Every ancestor of .terminal-panes must keep a definite
+ * wider than the bare minimum because rows carry title, status, directory
+ * and invocation (plus a host line when the session is not on the helm's
+ * own machine). Every ancestor of .terminal-panes must keep a definite
  * height, which is why the chain here is all height:100%/flex — a
  * height:auto link would collapse the terminal to zero rows. */
 .app-shell {
@@ -665,7 +666,10 @@ samp {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding-bottom: 6px;
+  /* No padding of its own: the open button's own bottom padding closes
+     the row, and a second gap under it was a quarter of the height the
+     density pass (TODO.md's UI refresh) was trying to reclaim. The error
+     line below still gets its separation from `.action-error`. */
 }
 
 .session-row-open {
@@ -679,13 +683,21 @@ samp {
      space ran short; stacked lines each ellipsize alone instead.
      `flex: 1` + `min-width: 0` share the row with the toggle: the
      button takes everything the fixed-size toggle leaves, and shrinks
-     (ellipsizing its lines) rather than pushing the toggle out. */
+     (ellipsizing its lines) rather than pushing the toggle out.
+
+     The padding is symmetric and tight: it and the line gap are the two
+     numbers the density pass (TODO.md's UI refresh) had to spend on this
+     button's own box model. Most of the row's height came out of dropping
+     lines rather than shrinking type — the one exception is
+     `.session-title` itself, stepped down from the inherited 16px to 14px
+     below; see that rule's own comment for why that one pixel budget was
+     spent while the fields under it were held to their floor. */
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
   gap: 2px;
-  padding: 8px 12px 4px;
+  padding: 6px 12px;
   border: none;
   background: none;
   color: inherit;
@@ -708,12 +720,27 @@ samp {
   min-width: 0;
 }
 
+/* The row's last line pairs the directory with the invocation badge (see
+   SessionRow's doc for why they share one). The two are NOT equal
+   claimants on the width: the path keeps the `flex: 1 1 auto` every row
+   field gets below and left-truncates under pressure (its rightmost
+   segments are the informative ones), while the badge gives up its share
+   of the growth and is capped at half the line. Without that cap, a long
+   profile name would push the path down to its ellipsis and the row would
+   say which agent it is without saying where. */
+.session-row-meta > .session-invocation {
+  flex: 0 1 auto;
+  max-width: 55%;
+}
+
 /* The row's actions-menu toggle: deliberately small — the row IS the open
-   affordance, and this is the one square that is not. */
+   affordance, and this is the one square that is not. Its top margin
+   tracks the open button's top padding so the toggle sits on the title
+   line rather than floating above or below it. */
 .session-row-menu {
   flex: 0 0 auto;
   align-self: flex-start;
-  margin: 8px 8px 0 0;
+  margin: 4px 8px 0 0;
   padding: 0 8px;
   font-size: 14px;
   line-height: 1.4;
@@ -1057,10 +1084,18 @@ samp {
    strings with no length limit the UI enforces (a title can legally run
    tens of KB) — every one needs its own overflow/ellipsis handling. The
    stacked sidebar rows (BUGS_BURNDOWN.md issue 5) retired the old
-   basis-and-floor space-splitting: each field owns (most of) a line of
-   its own now, so `min-width: 0` and ellipsis are the whole story, and
-   the floors that once re-entered the MT-8 overflow regime are gone. */
+   basis-and-floor space-splitting: `min-width: 0` and ellipsis are the
+   whole story now, and the floors that once re-entered the MT-8 overflow
+   regime are gone. The density pass then put the directory and the
+   invocation back on ONE line — see `.session-row-meta` above for the
+   split that keeps that from reintroducing a space fight. */
 .session-title {
+  /* 14px rather than the inherited 16: this is a dense list of rows, and
+     the standard list-item size is what the density pass spends here. It
+     is a deliberate floor — the rest of the row's height came out of
+     dropping lines, and going below this would trade legibility for
+     pixels, which is the one trade the pass was not allowed to make. */
+  font-size: 14px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1091,6 +1126,32 @@ samp {
      visual right and reorder mixed-direction names. */
   direction: rtl;
   text-align: left;
+}
+
+/* The invocation badge: what the session IS, in as few characters as the
+   question allows (see `compact_invocation` and the profile branch in
+   `row.rs`). A filled chip rather than another line of plain metadata,
+   because it now shares a line with the directory and the two would
+   otherwise read as one run-on string — `--chip-bg` is the palette's
+   small-filled-badge surface, which is exactly this. Horizontal padding
+   only: vertical padding here would grow every row by two pixels for no
+   legibility gain. */
+.session-invocation {
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--chip-bg);
+}
+
+/* A profile-named badge that is NOT KNOWN to be present under that name
+   carries the same amber the panel's chip does, for the same reason: the
+   name is a SNAPSHOT, and the catalog may have moved under it. Kept in
+   step with `.session-profile`'s rule below rather than folded into it,
+   because the two live on different surfaces (a row line and a menu
+   panel) and only the color is shared. */
+.session-invocation[data-profile-existence="renamed"],
+.session-invocation[data-profile-existence="deleted"],
+.session-invocation[data-profile-existence="unrecognized"] {
+  color: var(--warn);
 }
 
 /* The profile a session was created FROM, as it snapshotted the name

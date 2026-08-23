@@ -28,6 +28,7 @@ use super::create_form::CreateSessionForm;
 use super::row::SessionRow;
 use super::shared::{
     DeleteTarget, HostOption, OpenHost, RowState, effective_create_host, host_options,
+    session_is_local,
 };
 
 /// The client's remembered selection, for auto-select on load.
@@ -2035,6 +2036,20 @@ pub(crate) fn ListView(
     // failure the helm explains in its own words, which is a better answer
     // than an option the user cannot even select to find out.
     let host_options: Vec<HostOption> = host_options(hosts.read().hosts().unwrap_or_default());
+    // Which registry row is the helm's own machine, derived once for the
+    // whole render: it is what lets each row decide whether naming its
+    // host tells the user anything (see `shared::session_is_local`, and
+    // `SessionRow`'s doc for the density argument). Taken from the
+    // ALREADY-NORMALIZED `host_options` above rather than a second scan of
+    // the raw registry — `HostOption::local` is the same
+    // `HostKind::Local` comparison a dedicated rescan would make, so a
+    // second helper computing it a second way was a second place for that
+    // rule to drift. No new subscription either: this reads the `Vec` this
+    // render already built, not `hosts` again.
+    let local_host = host_options
+        .iter()
+        .find(|host| host.local)
+        .map(|host| host.id);
 
     // Two questions about the same applied filter, and they part exactly
     // where the archive switch is concerned. Both read the APPLIED filter
@@ -2570,6 +2585,7 @@ pub(crate) fn ListView(
                                         == Some(session.id.as_str()),
                                     selected: selected.read().as_deref()
                                         == Some(session.id.as_str()),
+                                    host_is_local: session_is_local(session.host, local_host),
                                 },
                                 rename_draft,
                                 on_open: guarded_open,
