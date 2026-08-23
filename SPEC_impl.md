@@ -228,16 +228,52 @@ identified by its durable pane record first, with the marker as the recovery aid
 tabs have no durable record at all and are rediscovered from their markers alone, because a pane's own processes inherit
 `TMUX` and can conjure windows a positional scan would adopt. The user's own tmux usage and config are untouched.
 
-Farhelm requires tmux ≥ 3.3 (dependable control mode) to operate at all. One capability sits higher: restoring bracketed
-paste on reattach reads the `bracket_paste_flag` format, which tmux only gained in 3.7 — below that the supervisor warns
-once at first attach (a startup probe cannot tell "old tmux" from "no pane to inspect yet") and loses that one mode,
-everything else working normally. A second, smaller accepted degradation below 3.4 (found during M2.5's 3.3a validation,
-2026-07-29): `capture-pane -N` on 3.3a does not preserve trailing styled padding, so a stop snapshot's dead-pane frame
-can lose the styling of trailing padding cells — cosmetic fidelity only, accepted rather than complicating the capture
-path for the floor's last dot release; CI pins the full behavior on 3.4+. This matters in practice because Ubuntu 24.04
-ships tmux 3.4. Releases bundle a private tmux build per platform, used whenever the host's tmux is missing or below the
-floor — the Mac app bundles one too, since macOS ships no tmux at all. A host tmux at or above the floor is acceptable;
-version is checked, not just presence.
+Farhelm requires tmux at or above a version FLOOR that is, by policy, the exact release the output-client teardown
+regression suite (`scripts/test-tmux-pinned-shutdown.sh`) runs against — 3.7c as of this writing, pinned in
+`.github/release/source-pins.env`, with the supervisor's floor constant tested to equal that pin so the two cannot
+drift. This replaced the original "any tmux ≥ 3.3" policy on 2026-08-22 (the decision record lived in TODO.md until the
+floor shipped). The original policy treated versions above 3.3 as interchangeable, and experience said otherwise: the
+supervisor's driver is full of behavior audited per version (3.3a, 3.4, and 3.7b each differ in ways that shaped real
+code), a production distro 3.4 server died in BUGS.md's `fatal()` abort shape on 2026-08-19, and BUGS.md records the
+same abort class reproduced on distro 3.6. The floor is therefore DESIGNED to exclude many current distro packages
+(Ubuntu 24.04 ships 3.4, 26.04 about 3.6, Debian 13 3.5a; some Fedora releases already ship 3.7c): on Linux this is
+close to always-bundled in practice. Always bundling was considered and rejected all the same: it loses distro security
+patching of tmux and libevent (where the 2026-08-16 3.7b segfault lived), concentrates a bad build's blast radius on
+every host at once, needs a static build per platform (the darwin one has never completed), and a from-source install
+has no bundle anyway — so the version check is the policy and the bundle is one way of meeting it. Versions above the
+floor are accepted in tmux's own release spelling (`major.minor` plus at most one patch letter); a version newer than
+the pinned one earns a one-time warning that it is unaudited, never a refusal. Anything the parser cannot read exactly —
+`next-3.8`, release candidates, distro-decorated strings — is refused rather than guessed about: a version Farhelm
+cannot name is one nobody audited it against.
+
+How the binary is chosen: the supervisor selects its tmux program once at startup — `--tmux <path>` on
+`farhelm
+supervisor run`, else `FARHELM_TMUX` from its environment, else the bare name `tmux` — and every invocation
+goes through that one value. A bare name is resolved against `PATH` by the operating system at each spawn, as it always
+was; only the spelling is fixed, and the refusal message reports the `PATH` entry it would resolve to. Whatever was
+chosen is version-checked and refused by name (binary path, version found, floor) when too old. The check is applied
+TWICE, because a tmux server outlives the supervisor by design: once to the client executable before any server is
+started, and once more to the server the supervisor adopts on a socket that already has one — the server is the
+component that holds sessions and the component that has crashed, so a 3.7c client driving a pre-floor server left over
+from before an upgrade is exactly the case the floor exists for. A below-floor adopted server is refused without being
+killed: the message names the socket, both versions, and the floor, and the operator drains or kills that server
+deliberately. The override is "you own the substrate": a way to run something newer or differently built, not a
+supported configuration. Linux releases bundle a private musl tmux build per architecture, which provisioning installs
+only when the host has nothing acceptable (Linuxbrew's tmux is the documented alternative); either way the unit
+provisioning writes names the accepted binary through `FARHELM_TMUX`, so a private build left behind by an earlier
+installation cannot shadow a host tmux that was accepted later. The Mac app bundles none: the desktop app takes an
+ambient `FARHELM_TMUX` as given, otherwise probes `/opt/homebrew/bin`, `/usr/local/bin` (Homebrew on the two
+architectures) and `/opt/local/bin` (MacPorts) in that order — because GUI apps do not inherit the shell `PATH` — and
+hands a hit to its managed supervisor through `FARHELM_TMUX`; with no hit it sets nothing and the supervisor's ordinary
+`PATH` lookup applies. Homebrew's tmux is the recommended way to meet the floor on a Mac, not the only one the code
+accepts.
+
+Historical note on what the floor made moot: below 3.7 the supervisor warned once at first attach and lost bracketed
+paste restoration (`bracket_paste_flag` arrived in 3.7), and on 3.3a `capture-pane -N` dropped trailing styled padding
+from a stop snapshot's dead-pane frame (found 2026-07-29 during M2.5's 3.3a validation). The first is a fallback the
+driver still carries (a missing `bracket_paste_flag` format) that the floor makes unreachable; the second was old tmux's
+own behavior under the same `capture-pane -N` the driver issues today, not a Farhelm code path. Both are recorded here
+so nobody rediscovers them as bugs.
 
 tmux is a headless PTY holder and history store. The supervisor's only client is a non-rendering control-mode client
 (`tmux -C`, the interface iTerm2's tmux integration is built on; `pipe-pane` is the fallback shape). Sizing (audited on

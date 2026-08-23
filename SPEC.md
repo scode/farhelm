@@ -44,7 +44,10 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
 One control plane, two ways to face it:
 
 1. **Native Mac app**: the helm packaged as a Mac app, together with a local supervisor so the Mac itself is a host.
-   This is the setup when the Mac is your main machine.
+   This is the setup when the Mac is your main machine. The app bundles no tmux: it requires Homebrew's (at or above the
+   version floor SPEC_impl.md's terminal-substrate section defines), finds it in the Homebrew prefixes itself because
+   GUI apps do not inherit the shell `PATH`, and refuses to start — naming the binary, the version found, and the floor
+   — when none acceptable exists; `FARHELM_TMUX` overrides the choice.
 2. **Web interface**: the helm — wherever it runs — always serves a browser UI with the same capabilities, so a helm
    running on a Linux host is fully usable with nothing installed on the client machine. The native app's embedded helm
    serves the web UI too.
