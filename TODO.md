@@ -77,6 +77,34 @@ roadmap and carries no priorities unless an entry says so itself.
   test wait for that record to be durable (a named setup wait) before interrupting, instead of relying on the fake
   agent's output having landed.
 
+- Deflake `session_lifecycle::stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding` in four-thread
+  full-suite runs. One occurrence, 2026-08-23, full battery (`--test-threads=4`, pinned tmux 3.7c) on a four-vCPU Ubuntu
+  26.04 box, on PR #233's CSS-only tree: the SETUP assertion "test setup: the child must NOT carry the marker — that is
+  the point" failed — `marked_pids(&session.id)` (harness.rs) contained the pid read from `unmarked-child.pid`. 299/300
+  otherwise; passed 3/3 isolated reruns on the same code under concurrent load. Candidate mechanism, unverified but
+  visible in the fixture: `spawner_reparent` (fake_agent.rs) backgrounds `env -u FARHELM_SESSION_ID sh -c "sleep 120"`
+  and the daemon shell writes `$!` to `unmarked-child.pid` immediately — but between the fork and `env`'s exec,
+  `/proc/<pid>/environ` still shows the daemon shell's image, which DOES carry the marker, so a scan racing that window
+  sees the "unmarked" child as marked (a loaded box widens the window; pid reuse is the less likely alternative). The
+  property under test is fine — this is setup racing the fixture. First steps: make the setup read tolerate the window —
+  poll `marked_pids` until the recorded pid drops out (bounded, with the offender's `/proc/<pid>/cmdline` in the failure
+  text so a real regression stays diagnosable) — before asserting; restructuring the fixture so the CHILD writes its own
+  pid post-exec would close the window outright, but the pid-file write would then need `$$` inside the third quoting
+  level, the exact trap the fixture's own comment documents choosing `$!` to avoid.
+
+- Deflake `service::ticker::tests::samples_accumulate_for_a_busy_pane_and_stay_quiet_for_a_still_one` on four-thread CI.
+  One occurrence, 2026-08-23, `test` job of PR #238 (job 97254597359): "a pane printing a new line every 50ms must have
+  changed at its most recent comparison; a streak here is change detection that never fires" at ticker.rs:1916 —
+  `busy.unchanged_streak` was 1, not 0. 519/520 otherwise; the identical supervisor code passed the full battery on a
+  four-vCPU box the same day. Candidate mechanism, unverified: the assertion couples the two panes' clocks — it reads
+  the busy pane's streak at whatever instant the still pane's streak reaches 3, and demands the busy pane's MOST RECENT
+  comparison saw a change; the busy pane is a real tmux pane driven by a `sleep 0.05` echo loop, so one loaded-runner
+  stall (or one capture landing twice on the same grid) across a single comparison window yields a streak of exactly 1
+  without change detection being broken at all. First steps: decouple the oracle from that instant — assert the streak
+  stays BELOW the classifier's quiet threshold rather than exactly 0, or wait (progress-rearmed, like the
+  `wait_real_run` shape) for the busy streak to return to 0 after the still pane qualifies, so a single stalled window
+  recovers instead of failing the run.
+
 - Fix `terminal-keys.spec.ts`'s four Shift+Enter tests (lines 212, 243, 269, 381: "Shift+Enter sends ESC then CR",
   "plain Enter sends bare CR", "Ctrl+Shift+Enter does not trigger this fix's own ESC injection", "a plain Enter after
   the chord stays bare"). They fail deterministically — every run, Chromium and WebKit alike — with the same transcript:
