@@ -1978,3 +1978,84 @@ test("a tab list past the island cap is listed in full but only partly attached"
     if (id) await cleanupSession(request, id);
   }
 });
+
+/**
+ * Resolves a `:root` custom property to the RGB string a browser would
+ * compute for any real element that used it, via a live probe element's
+ * `getComputedStyle`. Duplicated from chrome.spec.ts's identical helper
+ * rather than shared: the two files have no other coupling, and a shared
+ * helper module would exist for this one function alone.
+ */
+async function resolveToken(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement("div");
+    probe.style.color = `var(${name})`;
+    document.body.appendChild(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  }, token);
+}
+
+/**
+ * A specificity regression: `.btn:focus-visible:not(:disabled)` and
+ * `.tab.selected` are both one-class-plus-two-pseudo-classes selectors, so
+ * without an explicit `.tab.selected:focus-visible` override the rule that
+ * happens to come LATER in app.css wins by source order alone — which was
+ * `.btn`'s neutral hover/focus fill, silently erasing the selected tab's
+ * accent the instant a keyboard user tabbed onto it (a mouse hover was
+ * already covered by the sibling `.tab.selected:hover` rule; only the
+ * keyboard path was missing).
+ *
+ * `.focus()` on the target rather than a full `Tab` key crawl to it, same
+ * reasoning as chrome.spec.ts's own focus-visible test: a script `.focus()`
+ * call is treated as keyboard arrival by the `:focus-visible` heuristic
+ * without having to crawl the page's whole tab order to land on this one
+ * element. Unlike that test, though, a single throwaway `Tab` press has to
+ * come FIRST here — `openSessionWithTabs` above ends in a real row click,
+ * which leaves the browser's input modality on "pointer", and a `.focus()`
+ * called right after a click ANYWHERE on the page does not read as
+ * keyboard arrival (confirmed empirically while writing this test: with
+ * the fix below reverted and no `Tab` press, this test still passed,
+ * because `:focus-visible` never matched at all). The `Tab` press only
+ * needs to shift the modality back to keyboard; where it actually sends
+ * focus does not matter; the explicit `.focus()` that follows is what
+ * lands it on the tab under test.
+ */
+test("a keyboard-focused selected tab keeps its accent fill instead of the neutral hover tint", async ({
+  page,
+  request,
+}) => {
+  const title = `tab-selected-focus-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    const session = await openSessionWithTabs(page, request, title, 0);
+    id = session.id;
+    const agentTab = page.locator('.tab-strip [data-terminal="agent"]');
+    await expect(agentTab).toHaveClass(/selected/);
+
+    const accentFill = await resolveToken(page, "--accent-fill");
+    const controlHoverBg = await resolveToken(page, "--control-hover-bg");
+    // A sanity check on the fixture itself: if these two tokens ever
+    // collided, the assertion below would pass whether or not the fix
+    // held, and this test would stop meaning anything.
+    expect(accentFill).not.toBe(controlHoverBg);
+
+    // A bare `.focus()` here is not enough: the row-open click above
+    // (inside `openSessionWithTabs`) leaves the browser's own input
+    // modality set to "pointer", and Chromium's `:focus-visible`
+    // heuristic keys off that modality rather than merely off HOW this
+    // element itself gained focus — a `.focus()` called right after a
+    // click anywhere on the page does not show a focus ring (confirmed
+    // empirically while writing this test). A throwaway `Tab` press first
+    // shifts the modality back to "keyboard" — it does not matter what it
+    // focuses — so the following `.focus()` on the tab reads as keyboard
+    // arrival the way chrome.spec.ts's own focus-visible test does when
+    // nothing but page load preceded it.
+    await page.keyboard.press("Tab");
+    await agentTab.focus();
+    await expect(agentTab).toHaveCSS("background-color", accentFill);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});

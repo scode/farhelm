@@ -133,7 +133,7 @@ pub(crate) fn RenameForm(
             }
             button {
                 r#type: "submit",
-                class: "btn rename-submit",
+                class: "btn btn-primary rename-submit",
                 disabled: busy,
                 "save"
             }

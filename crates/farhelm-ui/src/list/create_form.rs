@@ -940,7 +940,7 @@ pub(super) fn CreateSessionForm(
             }
             button {
                 r#type: "submit",
-                class: "btn create-session-submit",
+                class: "btn btn-primary create-session-submit",
                 // `blocked` as well as this form's own flag: a create must
                 // not overlap a host mutation (see `ListView`'s operation
                 // gate), and a control that is inert for that window says so

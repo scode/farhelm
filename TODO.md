@@ -169,14 +169,9 @@ roadmap and carries no priorities unless an entry says so itself.
     the title (pulsing for running) and put a relative last-activity timestamp (`2m`, `1h`) where the word was — it
     makes the "recently active" sort visibly meaningful.
 
-  - Two-tier buttons. Everything is an outlined gray box. Keep one filled primary (`new session`); everything else
-    becomes ghost (no border, hover background). Per-row kebab menus reveal on hover/focus instead of sitting as eight
-    identical boxes down the column.
-
-  - Row overflow menus look like a stack of outlined buttons, floating centered over the row with no tie to the `⋯` that
-    opened them; with several `⋯` in view there is no way to tell which one is open. Make it an actual menu: one raised
-    surface (1px border, soft shadow) anchored to the opening button's corner, full-width left-aligned rows that
-    highlight on hover with no per-item borders, a divider before the destructive `delete` (red text, no red box), and
-    the `profile: …` line demoted to a small muted footer under its own divider. The opening `⋯` stays in a visible
-    pressed/active state and its row gets a subtle highlight for as long as the menu is up. Check that Escape and
-    arrow-key navigation work while at it.
+  - Row overflow menus float centered over the row with no tie to the `⋯` that opened them; with several `⋯` in view
+    there is no way to tell which one is open. Make it an actual menu: one raised surface (1px border, soft shadow)
+    anchored to the opening button's corner, full-width left-aligned rows, a divider before the destructive `delete`
+    (red text, no red box), and the `profile: …` line demoted to a small muted footer under its own divider. The opening
+    `⋯` stays in a visible pressed/active state and its row gets a subtle highlight for as long as the menu is up. Check
+    that Escape and arrow-key navigation work while at it.

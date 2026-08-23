@@ -139,12 +139,17 @@ to restyle), the chrome one step above it (sidebar, main header, tab strip), and
 (menus, dialogs, forms, bands that interrupt a pane). Which level an element sits on is recorded in the `:root`
 comments; a `--control-hover-bg` and a `--chip-bg` token fill a bordered control's hover state and a small chip
 respectively, named for that specific role rather than folded into the `--bg-*` surface family, so neither one reads as
-a fourth and fifth level to lay something out on. The second is that there is ONE accent, spent today on selection and
-`:focus-visible` and RESERVED — not yet spent — for a filled primary control the "Two-tier buttons" item still open in
-TODO.md's UI refresh will add; SPEC.md requires the sidebar to mark the selected session's row readably at a glance, and
-an accent spread across decoration before that control exists would have nothing left to make that true. Both
-constraints have a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA
-against the brightest surface it lands on, which is what caps how light the selected row's fill may go.
+a fourth and fifth level to lay something out on. The second is that there is ONE accent, spent on selection,
+`:focus-visible`, and the filled-primary button tier (`.btn-primary`) TODO.md's UI refresh added. That third use is
+scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and
+each dialog that floats over it — create session, add a host, rename — supplies its own submit as THAT dialog's one
+primary, since a dialog is read as its own surface rather than counted against the sidebar's. Everything else, on any
+surface, stays ghost, including destructive actions, which mark themselves with red text rather than a red fill — the
+per-surface discipline is what keeps "filled" still meaning "the affirmative default action here" instead of becoming
+one more colored box among equals. SPEC.md requires the sidebar to mark the selected session's row readably at a glance,
+and an accent spent any more freely than this would have nothing distinct left to make that true. Both constraints have
+a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest
+surface it lands on, which is what caps how light the selected row's fill may go.
 
 `--font-ui` and `--font-mono` name the same vendored face — JetBrains Mono Nerd Font, described below in the xterm.js
 island section — rather than two different ones. The chrome (`--font-ui`) and the terminal (`--font-mono`, the stack

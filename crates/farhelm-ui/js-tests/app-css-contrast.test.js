@@ -121,6 +121,14 @@ const REQUIRED_BINDINGS = [
   ["--fg-2", "--bg-0", 4.5],
   ...ROW_SURFACES.map((bg) => ["--danger-strong", bg, 4.5]),
   ["--accent", "--bg-1", 3],
+  // `.btn`'s own text sits directly on this fill while hovered or
+  // keyboard-focused (app.css's `.btn:hover:not(:disabled),
+  // .btn:focus-visible:not(:disabled)` rule) — a pairing the palette's own
+  // `--control-hover-bg` comment now promises 4.5:1 on, and one the
+  // ROW_SURFACES list above cannot stand in for: it is a control-chrome
+  // fill, not a row surface, and shipped under the floor once already
+  // (4.405:1) with nothing here to catch it.
+  ["--fg-1", "--control-hover-bg", 4.5],
 ];
 
 /**
