@@ -857,8 +857,11 @@ const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
 // JetBrains Mono Nerd Font, embedded for the same self-contained reason
 // xterm.js itself is vendored (SPEC_impl.md, "Terminal widget: xterm.js
 // island" — no CDN, no reliance on whatever happens to be installed on the
-// host). `terminal.js` sets it as xterm.js's `fontFamily`; nothing else on
-// the page references it, so it never touches sidebar/app typography.
+// host). Two consumers reference these bytes: `terminal.js` sets the family
+// as xterm.js's `fontFamily`, and `app.css`'s `--font-ui` token applies the
+// same family to the rest of the chrome (sidebar, titlebar, forms) — so
+// this is no longer a terminal-only asset, and both surfaces share the one
+// cached download.
 //
 // These two are declared differently from every other `Asset` constant in
 // this file: `app.css`'s `@font-face` `url()` needs a path it can write as
@@ -871,8 +874,8 @@ const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
 // basename alone regardless of source subdirectory, so the served path
 // drops the `fonts/` segment. `app.css` hardcodes that served form
 // (verified against `dx build --platform web --release`'s actual output,
-// not assumed): `/assets/JetBrainsMonoNerdFont-Regular.ttf` and
-// `/assets/JetBrainsMonoNerdFont-Bold.ttf`. The cost of the fixed,
+// not assumed): `/assets/JetBrainsMonoNerdFont-Regular.woff2` and
+// `/assets/JetBrainsMonoNerdFont-Bold.woff2`. The cost of the fixed,
 // unhashed path is losing cache-busting for these two files specifically;
 // acceptable, since font bytes only change when someone deliberately
 // re-vendors them, unlike the app's own generated CSS/JS. `#[used]` is
@@ -881,16 +884,19 @@ const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
 // could drop before the CLI's asset manifest scan ever sees them.
 //
 // Provenance: JetBrains Mono Nerd Font, from the nerd-fonts project's
-// `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed. Full
-// license text alongside the font files at `assets/fonts/OFL.txt`.
+// `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed, re-encoded
+// as WOFF2 from the project's vendored TTF (fontTools, lossless — every
+// glyph survives) since chrome now fetches this file on pages that never
+// open a terminal at all. Full license text alongside the font files at
+// `assets/fonts/OFL.txt`.
 #[used]
 static FONT_JETBRAINS_MONO_REGULAR: Asset = asset!(
-    "/assets/fonts/JetBrainsMonoNerdFont-Regular.ttf",
+    "/assets/fonts/JetBrainsMonoNerdFont-Regular.woff2",
     AssetOptions::builder().with_hash_suffix(false)
 );
 #[used]
 static FONT_JETBRAINS_MONO_BOLD: Asset = asset!(
-    "/assets/fonts/JetBrainsMonoNerdFont-Bold.ttf",
+    "/assets/fonts/JetBrainsMonoNerdFont-Bold.woff2",
     AssetOptions::builder().with_hash_suffix(false)
 );
 const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");

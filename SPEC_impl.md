@@ -121,6 +121,15 @@ is the arrangement the no-literals rule exists to protect. A few tokens carry an
 values the sheet accumulated before it had tokens, kept exactly as they were because introducing the token layer was
 required to change nothing on screen.
 
+`--font-ui` and `--font-mono` name the same vendored face — JetBrains Mono Nerd Font, described below in the xterm.js
+island section — rather than two different ones. The chrome (`--font-ui`) and the terminal (`--font-mono`, the stack
+terminal.js hands xterm.js) used to differ, chrome sitting on the platform's `system-ui` face; unifying them means
+chrome-only pages that never open a terminal (the auth screen, an empty session list) now load the face too, and chrome
+text reads as the same typeface as whatever the agent prints instead of pairing a generic UI font against a distinctive
+monospace one. That extra load is a WOFF2 fetch rather than the vendored TTF's — a lossless re-encoding at roughly 40%
+of the TTF's size — and once either surface has fetched it, the browser serves the other from cache rather than fetching
+it a second time.
+
 Known risks, accepted deliberately:
 
 - API churn between Dioxus 0.x releases. Mitigation: pin, avoid internals, budget for migrations.
@@ -147,6 +156,12 @@ The terminal is xterm.js, vendored as a static asset (no CDN — the UI must be 
 SPEC.md's no-public-relay, no-third-party-services posture and the loopback deployment), mounted as a JS island inside
 the Dioxus tree. PTY bytes flow WebSocket → `term.write()` directly, bypassing Dioxus state entirely. Dioxus owns
 everything around the terminal (tabs, status, dialogs), not the terminal's content path.
+
+JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js sets it as
+xterm's `fontFamily` — but it is no longer terminal-only: `app.css`'s `--font-ui` token (see the design-tokens paragraph
+above) applies the identical vendored face to the rest of the chrome, so the whole app reads as one typeface. Chrome and
+terminal share the same two cached `.woff2` files rather than each vendoring its own copy; whichever surface asks first
+pays the fetch, and the other reads it back from the browser's cache.
 
 Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and full escape-sequence fidelity is a
 SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so

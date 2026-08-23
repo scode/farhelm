@@ -226,8 +226,74 @@ test("var(--menu-top) is accepted though never declared in :root", () => {
 });
 
 test("a clean stylesheet with only var() use sites passes", () => {
-  const css = `:root {\n  --bg-0: #14161a;\n  --font-ui: system-ui, sans-serif;\n}\n` +
+  // `--font-ui` here deliberately mirrors the shipped shape (the vendored
+  // face, not a generic platform stack) — see the "shipped app.css applies
+  // the vendored face" tests below for why a `system-ui` value would now
+  // read as stale rather than merely a simplified example.
+  const css = `:root {\n  --bg-0: #14161a;\n  --font-ui: "JetBrains Mono", ui-monospace, monospace;\n}\n` +
     `.thing {\n  color: var(--bg-0);\n  font-family: var(--font-ui);\n}`;
   const result = checkAppCss(css);
   assert.deepEqual(result.errors, []);
+});
+
+// ---- Chrome-font regression coverage (review fixup for PR #233: "set the
+// chrome in the vendored JetBrains Mono face") ----
+//
+// `checkAppCss` above only proves every font stack is a token reference; it
+// says nothing about WHICH face that token names or WHICH rule actually
+// consumes it. Both are exactly the two ways a future edit could quietly
+// undo the chrome-unification this PR did: reverting `--font-ui`'s value to
+// a platform stack, or having the shell rule fall back to a literal/
+// unrelated var(). Neither would trip `checkAppCss`'s literal-vs-token
+// scan, so these two tests exist as narrower, targeted assertions on top of
+// it — read directly from the shipped file rather than a synthetic
+// snippet, so they fail the moment either regression actually ships.
+
+/** Extracts the value assigned to `--font-ui` inside the FIRST `:root`
+ * block of `css` (comments already stripped) — the shipped dark palette,
+ * not a hypothetical future light-theme override. `null` if the token is
+ * not declared there at all. */
+function firstRootFontUiValue(strippedCss) {
+  const [firstRoot] = findBlocks(strippedCss, ":root");
+  if (!firstRoot) return null;
+  const body = strippedCss.slice(firstRoot.bodyStart, firstRoot.bodyEnd);
+  const match = body.match(/--font-ui:\s*([^;]+);/);
+  return match ? match[1].trim() : null;
+}
+
+/** Extracts the `font-family` declaration's raw value from the `html,
+ * body, #main` shell rule in `css` (comments already stripped), or `null`
+ * if that rule or the declaration inside it is missing. A regex over the
+ * whole file rather than `findBlocks`, since this rule's header is a
+ * plain selector list, not one of the at-rule/`:root` keywords that helper
+ * matches on. */
+function shellFontFamilyValue(strippedCss) {
+  const ruleMatch = strippedCss.match(/html,\s*body,\s*#main\s*\{([^}]*)\}/);
+  if (!ruleMatch) return null;
+  const declMatch = ruleMatch[1].match(/font-family:\s*([^;]+);/);
+  return declMatch ? declMatch[1].trim() : null;
+}
+
+test("the shipped --font-ui names the vendored JetBrains Mono face, not a platform stack", () => {
+  const stripped = stripComments(fs.readFileSync(APP_CSS_PATH, "utf8"));
+  const value = firstRootFontUiValue(stripped);
+  assert.ok(value, "expected --font-ui to be declared in the shipped file's first :root block");
+  // Anchored to the start, not just "contains": a stack that led with
+  // `system-ui` (the pre-fixup default) or a misspelled `"JetBrains Mon"`
+  // both still CONTAIN a substring match against a looser check, and both
+  // are exactly the regressions this test exists to catch.
+  assert.ok(
+    value.startsWith('"JetBrains Mono"'),
+    `--font-ui should start with "JetBrains Mono", got: ${value}`,
+  );
+});
+
+test("the shell rule (html, body, #main) pulls its typeface from --font-ui, not a literal or a different token", () => {
+  const stripped = stripComments(fs.readFileSync(APP_CSS_PATH, "utf8"));
+  const value = shellFontFamilyValue(stripped);
+  // Exact match, not "contains var(--font-ui)": this is the one place a
+  // disconnected token — one declared correctly in :root but never
+  // actually wired into the rule that is supposed to consume it — would
+  // otherwise slip past every other check in this file.
+  assert.equal(value, "var(--font-ui)");
 });

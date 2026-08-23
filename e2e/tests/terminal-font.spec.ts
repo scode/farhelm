@@ -38,7 +38,7 @@
 // cover, so terminal.js ended up calling the REAL implementation regardless
 // of what this file had just installed. Rather than chase that engine
 // quirk, this file blocks the actual font FILE REQUESTS instead
-// (`page.route` against the two `.ttf` URLs `app.css`'s `@font-face` rules
+// (`page.route` against the two `.woff2` URLs `app.css`'s `@font-face` rules
 // name) — `route.abort()` for the reject leg, an intercepted route that is
 // simply never resolved for the hang leg. That is both more portable (pure
 // HTTP-layer interception, nothing engine-specific to trust) and more
@@ -90,7 +90,7 @@ import { attachSession, termText, waitForTermText } from "./helpers/term";
  * approach that monkey-patched `document.fonts.load` instead.
  */
 async function interceptFontRequests(page: Page, mode: "reject" | "hang"): Promise<void> {
-  await page.route("**/assets/JetBrainsMonoNerdFont-*.ttf", async (route) => {
+  await page.route("**/assets/JetBrainsMonoNerdFont-*.woff2", async (route) => {
     if (mode === "reject") {
       await route.abort("failed");
     }

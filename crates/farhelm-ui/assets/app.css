@@ -27,9 +27,14 @@
 /* JetBrains Mono Nerd Font, vendored under assets/fonts/ (OFL.txt there
  * carries the full license) for the same self-contained reason xterm.js
  * itself is vendored — see SPEC_impl.md's "Terminal widget: xterm.js
- * island". terminal.js is the only consumer (its xterm.js `fontFamily`);
- * nothing here applies "JetBrains Mono" to any other element, so this stays
- * scoped to the terminal rather than becoming the app's chrome font.
+ * island". Two consumers share this one vendored face: terminal.js sets it
+ * as xterm's `fontFamily`, and the `--font-ui` token below applies the same
+ * family to the rest of the chrome (see that token's own comment). One face
+ * for both is deliberate, not incidental — its Latin glyphs are identical to
+ * upstream JetBrains Mono, so chrome and terminal text read as the same
+ * typeface family with zero extra bytes fetched: the browser already has to
+ * pull this file for the terminal, and a second, non-Nerd copy just for
+ * chrome would be a redundant download of glyphs this file already has.
  *
  * The `url()` paths are literal strings, not run through Rust's normal
  * `{ASSET}` asset-hash interpolation, because this file is served as
@@ -37,31 +42,41 @@
  * `with_hash_suffix(false)` specifically so the served path is this exact,
  * predictable string — see the constants' own doc comment for why that
  * trade (no cache-busting on these two files) is acceptable. Note the
- * paths below are FLAT (`/assets/JetBrains...ttf`, no `fonts/` segment):
+ * paths below are FLAT (`/assets/JetBrains...woff2`, no `fonts/` segment):
  * the bundler names every asset from its basename alone, regardless of
  * which subdirectory it started in under `assets/`, so `assets/fonts/`
- * is a source-tree organization only and never appears in a served path. */
+ * is a source-tree organization only and never appears in a served path.
+ *
+ * Shipped as WOFF2, not the vendored TTF directly: WOFF2 is a lossless
+ * container around the exact same glyph data (every Nerd Font glyph
+ * survives re-encoding), and chrome now fetches this file on pages that
+ * open no terminal at all, so the ~60% smaller transfer is not a terminal-
+ * only nicety anymore. Re-run through `fontTools.ttLib.TTFont` with
+ * `flavor = "woff2"` if the vendored face is ever updated; there is
+ * deliberately no second copy of the source TTF kept in the tree. */
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("/assets/JetBrainsMonoNerdFont-Regular.ttf") format("truetype");
+  src: url("/assets/JetBrainsMonoNerdFont-Regular.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
-  /* `swap` matters less here than it would for prose: terminal.js settles
-   * this font BEFORE it ever constructs a terminal (see its own "## Font
-   * settling before mount" header and `mountWhenReady`'s gate), so in the
-   * common case xterm already has the real family in hand by the time
-   * anything renders, and nothing on this page ever sits in an invisible
-   * placeholder waiting on this face. Set anyway, for the rare paths where
-   * settling gives up before this face has registered (a slow fetch past
-   * the settle deadline, or app.css itself not parsed yet when terminal.js
-   * first asked) and for the same standard hygiene reason as any vendored
-   * web font besides. */
+  /* `swap` serves two different consumers of this one face. For chrome
+   * (the `--font-ui` token below), it is the standard hygiene reason any
+   * vendored web font sets it: text stays visible in the fallback stack
+   * during the fetch instead of sitting invisible until this face lands.
+   * For the terminal, it matters less — terminal.js settles this font
+   * BEFORE it ever constructs a terminal (see its own "## Font settling
+   * before mount" header and `mountWhenReady`'s gate) specifically so
+   * xterm's character-cell metrics are stable at construction time, not
+   * because anything here would otherwise render invisibly. Set anyway,
+   * for the rare paths where settling gives up before this face has
+   * registered (a slow fetch past the settle deadline, or app.css itself
+   * not parsed yet when terminal.js first asked). */
   font-display: swap;
 }
 
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("/assets/JetBrainsMonoNerdFont-Bold.ttf") format("truetype");
+  src: url("/assets/JetBrainsMonoNerdFont-Bold.woff2") format("woff2");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -171,20 +186,23 @@
   --radius-md: 4px; /* panels and cards */
   --radius-lg: 8px; /* pill-ish badges */
 
-  /* Font stacks. --font-ui is still the platform UI face; converting the
-     chrome to the vendored JetBrains Mono is its own TODO.md item, and
-     this token is the seam that change edits. --font-mono mirrors the
-     stack terminal.js hands xterm.js; nothing in this sheet asks for it
-     yet, and it is declared so that chrome which has to line up with
+  /* Font stacks. --font-ui carries the vendored JetBrains Mono Nerd Font
+     (the `@font-face` blocks above) into the chrome, the same face
+     terminal.js hands xterm.js — one download, one typeface, chrome and
+     terminal text agree. `ui-monospace` sits before the generic
+     `monospace` keyword as the fallback for the (uncommon) case where the
+     vendored face has not loaded yet: it is not a named platform font but
+     a CSS generic-family keyword, which asks the ENGINE to resolve its own
+     UI-monospace pick (macOS's San Francisco Mono, Windows' Consolas, and
+     so on) rather than falling straight to the coarser `monospace`
+     keyword's guess — a fallback that leans on the platform's own idea of
+     an interface monospace face, nothing claimed about its metrics or
+     whether it happens to already be installed. --font-mono mirrors the
+     exact stack terminal.js hands xterm.js; nothing in this sheet asks for
+     it yet, and it stays declared so any rule that has to line up with
      terminal content names the same stack rather than a second copy. */
-  --font-ui: system-ui, sans-serif;
+  --font-ui: "JetBrains Mono", ui-monospace, monospace;
   --font-mono: "JetBrains Mono", monospace;
-  /* Deliberately NOT --font-mono: the auth token input wants whatever
-     monospace face the platform ships, not the vendored JetBrains Mono —
-     a bootstrap credential field has no reason to pull in the terminal's
-     font, and `ui-monospace` is the standard way to ask for the system's
-     own pick. */
-  --font-mono-system: ui-monospace, monospace;
 }
 
 /* ===== Shell and layout =========================================== */
@@ -197,6 +215,24 @@ body,
   margin: 0;
   background: var(--bg-0);
   color: var(--fg-0);
+  font-family: var(--font-ui);
+}
+
+/* Every browser ships its OWN default `monospace` mapping for `code`,
+ * `pre`, `kbd`, and `samp` (its user-agent stylesheet, not this file), so
+ * without this rule those elements silently opt back out of `--font-ui`
+ * and render in whatever platform monospace face the engine picked —
+ * exactly the per-platform inconsistency unifying chrome onto the vendored
+ * face was meant to end (the auth command in `code { }` (auth.rs) and the
+ * clipboard/provisioning-plan `pre` blocks are the sites this actually
+ * bites). `font-family` only: each element's own `white-space` handling —
+ * the clipboard-facts and peer-authored `<pre>` blocks keep whatever wrap
+ * behavior their own class rule sets — is untouched by this reset and must
+ * stay that way. */
+code,
+pre,
+kbd,
+samp {
   font-family: var(--font-ui);
 }
 
@@ -2082,7 +2118,7 @@ body,
   border-radius: var(--radius-sm);
   background: var(--bg-0);
   color: var(--fg-0);
-  font: 14px var(--font-mono-system);
+  font: 14px var(--font-ui);
 }
 
 .auth-submit {
