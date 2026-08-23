@@ -107,11 +107,6 @@ roadmap and carries no priorities unless an entry says so itself.
   state, all "not run"). Blocked on the macOS release bundle above and a human with a real Mac. Not covered by any CI:
   Playwright's WebKit is not WKWebView.
 
-- Reassess the host row's component-prop shape: the earlier "regroup when props are actively growing" condition has
-  fired (provisioning grew it to 20 props). Only with a memoization-preserving grouping — state-only structs, never
-  callback structs (the framework's callback-prop memoization does not survive struct nesting; the session row learned
-  this) — and with a host-row render-count regression test like the session row's.
-
 - UI refresh (brainstormed 2026-08-22 from screenshots of the web UI): a set of chrome tweaks to make the shell read as
   modern rather than as the "minimal M1 chrome, nothing decorative" placeholder app.css still declares itself to be. The
   terminal itself is off-limits throughout — fidelity to the agent's real TUI is the product — and the sidebar stays
