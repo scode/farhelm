@@ -1066,6 +1066,12 @@ test.describe("multi-host", () => {
       // the helm knew is that it was alive. Rendered with the list's own
       // badge, so the two surfaces cannot describe one session differently.
       await expect(badge).toHaveText(LIVE_BADGE);
+      // The one-badge rule's other half, asserted on the real browser
+      // rather than only in `status_badge_destination`'s unit test: a
+      // stale session's status appears in EXACTLY the stale band and
+      // NOWHERE in the header, never both.
+      await expect(page.locator(".titlebar .status-badge")).toHaveCount(0);
+      await expect(page.locator(".stale-metadata .status-badge")).toHaveCount(1);
 
       const notice = page.locator(".host-stale-notice");
       await expect(notice).toBeVisible();

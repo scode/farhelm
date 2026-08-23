@@ -140,10 +140,11 @@
                       the main pane's titlebar, the tab strip, and the quiet
                       bands (stale notice, stale metadata) */
   --bg-2: #252a35; /* FLOATING: surfaces that sit above chrome — the row
-                      actions menu, the auth card, the create form, the bands
-                      that interrupt a pane (restart offer, tab confirm,
-                      count banner, attach status) — and the tint a session
-                      row takes while hovered or holding focus */
+                       actions menu, the header's confirmation popover, the
+                       auth card, the create form, the bands that interrupt a
+                       pane (tab confirm, count banner, attach status) — and
+                       the tint a session row takes while hovered or holding
+                       focus */
   --control-hover-bg: #2e333f; /* the hover fill of a bordered control, which
                                    has to read on --bg-2 as well as on --bg-1 */
   --chip-bg: #394252; /* the default-profile badge's small filled chip */
@@ -460,13 +461,42 @@ samp {
   height: 100%;
 }
 
+/* The consolidated header (TODO.md's UI refresh): title, metadata, status,
+   and both lifecycle actions on ONE row, where four stacked bands used to
+   cost ~170px before the terminal began. Everything that made that stack —
+   the restart explanation, the confirmations, the failure lines — moved to
+   a tooltip, to anchored popovers, and to conditional bands respectively;
+   see `SessionView`'s own docs for the reasoning behind each.
+
+   `min-height` rather than a fixed height, and that is deliberate: 40px is
+   the target, but a browser whose default UI metrics make the controls
+   taller must grow the bar rather than clip a button. `flex-shrink: 0`
+   keeps the terminal below from squeezing the header away in a short
+   window — the terminal is the flexible member here, this is not.
+
+   MINIMUM SUPPORTED WIDTH is the main pane's own floor, ~320px (the
+   sidebar is a fixed 340px and the smallest window this app supports is
+   narrower than a phone screen would ever be). The give order below is
+   what makes the row survive down there without clipping a control:
+   `.meta` shrinks first (`flex-shrink: 3`), `.title` shrinks second
+   (`flex-shrink: 1`, the flex default), and the badge and
+   `.titlebar-actions` never shrink at all — a badge or a button that
+   ellipsizes is one a user cannot read before acting on it. The actions
+   cluster itself is sized to fit that floor: both buttons carry compact
+   glyphs (`archive`, `restart`) rather than the full offer wording — the
+   longest of which ran to ~320px on its own, wider than the whole
+   supported minimum — leaving the rest of the row's ~320px for identity
+   and status to fight over instead of losing to a single control. */
 .titlebar {
-  padding: 6px 10px;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 4px 10px;
   background: var(--bg-1);
   font-size: 13px;
   display: flex;
-  gap: 12px;
-  align-items: baseline;
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 /* `min-width: 0` overrides a flex item's automatic minimum, which for
@@ -485,15 +515,183 @@ samp {
 
 /* No `min-width: 0` here, deliberately: `overflow: hidden` alone already
    makes `.meta` a scroll container, which per the flexbox spec zeroes
-   its automatic minimum on its own. (The titlebar's rename form and back
-   button are gone with the sidebar redesign, so the title and this line
-   are the only members competing for the header's width.) */
+   its automatic minimum on its own.
+
+   `flex-shrink: 3` names the give order for the whole row rather than
+   leaving it to flex's defaults: the header now holds four members
+   competing for one line, and the cwd/invocation pair is the one whose
+   ellipsis costs least — the title identifies the session, the badge is
+   already capped at 32ch, and the actions must stay full-size and
+   clickable at every width. Both truncated members carry the full string
+   as `title`, so nothing here is unrecoverable. */
 .titlebar .meta {
   color: var(--fg-1);
   font-size: 12px;
+  flex-shrink: 3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The session's status, in the header rather than in a band of its own —
+   the same badge the sidebar's rows draw, so one session cannot be
+   described two ways on two surfaces. A stale session's copy lives under
+   its host-unreachable notice instead (see `.stale-metadata` and
+   `status_badge_destination`), which is why this never doubles up.
+
+   `flex-shrink: 0`: a badge is one word, and ellipsizing a one-word badge
+   would not save meaningful space while making the word itself unreadable
+   — unlike `.meta` and `.title`, which have somewhere useful to give. */
+.titlebar .status-badge {
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+/* The actions cluster, pinned to the trailing edge by `margin-left: auto`
+   so the identity half of the row can grow into whatever is left. It never
+   shrinks: a control that ellipsizes is a control someone cannot read
+   before clicking. */
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Each action is its own positioning context, because its confirmation
+   hangs off it (see `.header-confirm`). `inline-flex` rather than `block`
+   keeps the wrapper exactly as wide as the button inside it, so the
+   anchor and the trigger are the same rectangle. */
+.archive-offer,
+.restart-offer {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Header controls are secondary chrome beside the terminal, so they take
+   the small size the sidebar's row actions use rather than the body size
+   the old full-width bands could afford. */
+.titlebar-actions .btn {
+  font-size: 12px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* A trigger whose confirmation is open reads as PRESSED, not merely
+   disabled. It is disabled — claiming the cross-pane lifecycle gate is
+   what disables it — and `.btn:disabled`'s 0.5 opacity alone would say
+   "unavailable" about the one control the open popover belongs to. */
+.titlebar-actions .btn[aria-expanded="true"] {
+  opacity: 1;
+  background: var(--accent-fill);
+  border-color: var(--accent-edge);
+  color: var(--fg-bright);
+}
+
+/* The archive/restart confirmation, anchored under the button that opened
+   it instead of laid out in the header row.
+
+   The reason is the consequence sentence, not the pixels: "still running —
+   restarting stops the agent and its whole process tree first" is the one
+   line standing between a click and a killed process tree, and a header
+   that kept it in flow would have to either wrap to two lines (undoing the
+   consolidation) or ellipsize it (undoing the safety). Hanging it under the
+   trigger keeps both.
+
+   `z-index` because `.terminal-panes` below is positioned and comes later
+   in the DOM, so it would paint over an un-layered popover — and ABOVE the
+   sidebar's row-menu panel, not merely clear of it: a row menu can be open
+   on the sidebar at the same moment this popover is open in the main pane
+   (they are independent overlays, nothing closes one when the other
+   opens), and a row menu winning that stack would cover this panel's
+   safety-critical consequence text with an unrelated context menu.
+
+   THE Z-INDEX LADDER, documented here once rather than per rule — check
+   this list before adding a new value anywhere in the sheet:
+     1  `.terminal-connecting` — a terminal pane's own attach/reconnect
+        placeholder, scoped to that pane and never contesting the two below
+     2  `.attach-status` — the same pane's upload indicator, same scope
+     20 `.session-row-menu-panel` — a sidebar row's action menu
+     30 `.header-confirm` (this rule) — must outrank the row menu above
+   Right-aligned to the anchor, which is at the row's trailing edge, so the
+   panel opens inward rather than off the window. */
+.header-confirm {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  /* The consequence claims a full line of its own (below); the buttons
+     trail after it and wrap as space permits. That is two rows at any
+     width roomy enough for both buttons to share the second one, and a
+     third if the panel is squeezed narrower than that — grouping the
+     buttons more tightly could buy back some of that margin, but nothing
+     here promises exactly two. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  /* Hug short prompts, cap long ones. The longest archive consequence runs
+     ~140 characters — laid out on one line it would be wider than the
+     whole main pane, so a cap plus wrapping is what keeps the panel a
+     panel. `80vw` is the CAP that actually binds once the window is
+     narrow — the smaller of `min()`'s two operands there — and letting it
+     bind means the panel may reach back over the sidebar, which is a
+     readable prompt in front of chrome rather than a sentence cut in
+     half. */
+  width: max-content;
+  max-width: min(30rem, 80vw);
+  /* The floating level, with a border to say it is in front rather than
+     part of the chrome it hangs from. */
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* The consequence takes a line to itself and WRAPS. The shared rule's
+   `flex-shrink: 0` was written for a single-line row where the neighboring
+   title was the thing allowed to give; here nothing else is on the line, so
+   the sentence renders in full at any width — which is the promise, since
+   this is the text standing between a click and a stopped process tree. */
+.header-confirm .confirm-consequence {
+  flex: 1 1 100%;
+  margin-right: 0;
+  white-space: normal;
+}
+
+/* Of the four buttons this panel ever renders (`archive-confirm`,
+   `archive-cancel`, `restart-confirm`, `restart-cancel`), only
+   `.archive-cancel` is actually in "Row actions and confirmations"'s
+   shared selector list below and picks up its `margin-right: 10px` — the
+   other three were never in it and have no margin of their own to reset.
+   This rule exists for that one button: the panel's own `gap` already
+   spaces every button correctly, so `.archive-cancel`'s borrowed margin is
+   pure double-spacing here and has to be zeroed. */
+.header-confirm .btn {
+  margin-right: 0;
+}
+
+/* Present to assistive technology and to nobody's eyes: the clip-rect
+   idiom rather than `display: none` or `visibility: hidden`, both of which
+   remove an element from the accessibility tree entirely — which for an
+   `aria-describedby` target means the description silently does not exist.
+   Used for the restart offer's explanation, which reaches a user through
+   two channels: the button's `title` as a mouse's hover tooltip, and this
+   element — via `aria-describedby` — as assistive technology's accessible
+   description. Those are the two channels this class actually serves, not
+   a claim about every user without a pointer. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ===== Shared button look ========================================= */
@@ -852,7 +1050,9 @@ samp {
      measured placement sets `right` but a class-level `left` stayed in
      force, and a fixed box with BOTH insets and `width: auto` stretches
      between them — every measured panel ballooned from the sidebar's
-     left edge to the toggle. Position must come from exactly one place. */
+     left edge to the toggle. Position must come from exactly one place.
+     See `.header-confirm`'s own comment for the sheet's full z-index
+     ladder — this must stay below that rule's 30. */
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -1826,20 +2026,28 @@ samp {
    no terminal). It takes the terminal's place in the layout rather than
    floating over it, which is why it can wrap freely and does not need the
    overlay discipline `.banner` has. Amber for the same reason the stale
-   badge is: the host is being re-probed and nothing has failed. */
+   badge is: the host is being re-probed and nothing has failed.
+
+   Compact (12px, tight padding) since the header consolidation, but NOT
+   truncated: this is a conditional band explaining why there is no
+   terminal, and a sentence naming the host's actual phase is the whole
+   point of it. It costs the steady state nothing because it only exists
+   while the host is gone. */
 .host-stale-notice {
-  padding: 10px 14px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 12px;
   color: var(--warn);
   background: var(--bg-1);
 }
 
-/* The rest of SPEC.md's metadata triple for a stale session: the titlebar
+/* The rest of SPEC.md's metadata triple for a stale session: the header
    above already carries the title and the directory, and this carries the
    LAST-KNOWN status, drawn with the list's own badge so one session cannot
-   be described two ways on two surfaces. */
+   be described two ways on two surfaces. The header deliberately drops its
+   own badge while this band is up (`status_badge_destination`), so the two
+   never print the same word twice. */
 .stale-metadata {
-  padding: 4px 14px 8px;
+  padding: 0 10px 6px;
   background: var(--bg-1);
 }
 
@@ -2004,37 +2212,25 @@ samp {
 
 /* ===== Session view: restart, archive, banners ==================== */
 
-/* The session view's restart affordance (PLAN_M3.md item 9). A plain
-   flex row under the titlebar rather than anything modal: SPEC.md says
-   opening an interrupted session OFFERS restart-with-resume, and
-   declining is simply not clicking — so it has to be visible without
-   covering the terminal, and dismissible by ignoring it.
+/* The restart affordance (PLAN_M3.md item 9) and the archive one are both
+   header controls now — their box model lives with the header, under
+   "Main pane titlebar". What is left here is the conditional prose each of
+   them can produce, plus the session view's other notices.
 
-   `flex-wrap` is what keeps the offer text and the buttons on one line
-   when there is room and stacks them when there is not; the text is the
-   only item allowed to shrink (`min-width: 0`), so the controls never get
-   pushed off the edge by a long explanation. */
-.restart-offer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 10px;
-  background: var(--bg-2);
-  font-size: 12px;
-}
+   All of these are BANDS, and all of them are conditional: the header's
+   ~40px steady state is the promise this section must not quietly break,
+   so nothing below may render when it has nothing to say. */
 
-.archive-offer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-}
-
+/* The archived state's own hue rather than the danger family: archiving is
+   a deliberate, reversible act, and a red band would report a successful
+   operation as a failure. `.archive-error` shares it because a refused
+   archive is still about the archive path — the sentence itself carries
+   whether it worked. */
 .archive-error,
 .archived-notice {
   color: var(--archive);
-  padding: 8px 14px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .archived-badge {
@@ -2043,18 +2239,12 @@ samp {
   text-transform: uppercase;
 }
 
-.restart-offer-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--fg-dim);
-}
-
-/* Full-width beneath the controls (`flex-basis: 100%`) rather than
-   squeezed in beside them: a restart refusal is the supervisor's own
-   prose — a stale-offer conflict names what the offer is now — and
-   truncating it would hide the one sentence that says what to do next. */
+/* A restart refusal is the supervisor's own prose — a stale-offer conflict
+   names what the offer is NOW — so it gets a full-width line that wraps
+   rather than a slot in the header that would truncate the one sentence
+   saying what to do next. */
 .restart-error {
-  flex: 1 1 100%;
+  padding: 4px 10px;
   font-size: 12px;
   color: var(--danger);
 }
@@ -2078,8 +2268,8 @@ samp {
    that did not finish. */
 .banner.session-count {
   display: block;
-  /* The band level the other interrupting notices use (`.restart-offer`,
-     `.tab-confirm`), not the sidebar's own: this line sits inside the
+  /* The band level the other interrupting notices use (`.tab-confirm`,
+     `.header-confirm`), not the sidebar's own: this line sits inside the
      sidebar, so --bg-1 would paint it onto the surface it is trying to
      stand out from. */
   background: var(--bg-2);
@@ -2261,18 +2451,27 @@ samp {
 
 /* ===== Terminal tabs ============================================== */
 
-/* Terminal tabs (PLAN_M4.md item 6). A plain one-line strip under the
-   restart offer: the agent terminal first, then each open tab with its own
-   close affordance, then the add control. `flex-shrink: 0` on the strip
-   keeps it from being squeezed away by the terminal area below it, and
-   `overflow-x: auto` is what a long-lived session with many tabs degrades
-   into — scrolling the strip rather than shrinking tabs into unreadable
-   slivers. */
+/* Terminal tabs (PLAN_M4.md item 6). A plain one-line strip directly under
+   the consolidated header: the agent terminal first, then each open tab
+   with its own close affordance, then the add control. `flex-shrink: 0` on
+   the strip keeps it from being squeezed away by the terminal area below
+   it, and `overflow-x: auto` is what a long-lived session with many tabs
+   degrades into — scrolling the strip rather than shrinking tabs into
+   unreadable slivers.
+
+   The vertical padding is 3px rather than the 4px it carried as one band
+   among four: header plus strip is the whole budget between the window top
+   and the terminal ONLY in the steady state (~40px + ~30px) — an archive or
+   restart failure, or the "helm stopped listing this session" notice, is
+   still free to land between them as its own conditional band, so this is
+   a claim about the common case, not an invariant. The steady state is
+   common enough that the strip's own few pixels are still worth counting
+   for it. */
 .tab-strip {
   display: flex;
   align-items: stretch;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 3px 10px;
   background: var(--bg-1);
   flex-shrink: 0;
   overflow-x: auto;

@@ -354,10 +354,24 @@ test("cancelling a detail archive sends no request and leaves the terminal mount
 
     await page.locator(".archive-primary").click();
     await expect(page.locator(".archive-confirm")).toBeVisible();
+    // The prompt is a popover anchored to the trigger since the header
+    // consolidation, so the trigger does NOT vanish behind it — it stays on
+    // screen. `aria-expanded` records that SOMETHING owned by this button
+    // is open (it says nothing about which panel), so `aria-controls` is
+    // asserted alongside it — that is the attribute that actually ties this
+    // one panel to the button that opened it, explicit rather than implied
+    // by DOM proximity.
+    await expect(page.locator(".archive-primary")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".archive-primary")).toHaveAttribute(
+      "aria-controls",
+      "archive-confirm-panel",
+    );
+    await expect(page.locator("#archive-confirm-panel")).toBeVisible();
     await page.locator(".archive-cancel").click();
 
     expect(archiveRequests).toBe(0);
     await expect(page.locator(".archive-primary")).toBeVisible();
+    await expect(page.locator(".archive-primary")).toHaveAttribute("aria-expanded", "false");
     await expect(page.locator("#terminal")).toBeVisible();
     await expect(page.locator(".tab-strip .tab-agent")).toHaveCount(1);
   } finally {
