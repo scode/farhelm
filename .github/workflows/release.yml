@@ -177,17 +177,6 @@ jobs:
           path: release-inputs
       - name: Install Dioxus CLI
         run: cargo install --locked dioxus-cli --version 0.7.10
-      - name: Restore Apple arm64 tmux
-        id: tmux-cache
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: release-stage/tmux-aarch64-apple-darwin
-          key: tmux-macos-14-arm64-clang-${{ hashFiles('.github/release/source-pins.env', 'scripts/build-private-tmux.sh') }}-apple-arm64
-      - name: Build Apple arm64 tmux
-        if: steps.tmux-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p release-stage
-          scripts/build-private-tmux.sh aarch64-apple-darwin release-stage/tmux-aarch64-apple-darwin
       - name: Build bundled CLI and desktop app
         env:
           FARHELM_PAYLOAD_DIR: ${{ github.workspace }}/release-inputs/payloads
@@ -201,7 +190,6 @@ jobs:
           test -n "$app"
           mv "$app" release-stage/Farhelm.app
           cp target/aarch64-apple-darwin/release/farhelm release-stage/Farhelm.app/Contents/MacOS/farhelm
-          cp release-stage/tmux-aarch64-apple-darwin release-stage/Farhelm.app/Contents/MacOS/tmux
           mkdir -p release-stage/Farhelm.app/Contents/Resources/web
           cp -R release-inputs/web/. release-stage/Farhelm.app/Contents/Resources/web/
           ditto -c -k --sequesterRsrc --keepParent release-stage/Farhelm.app Farhelm-macos-aarch64.zip

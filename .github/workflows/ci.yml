@@ -191,7 +191,7 @@ jobs:
       - run: cargo test -p farhelm-ui --features desktop
 
   # The non-pixel phase boots the actual Dioxus desktop bundle under Xvfb and
-  # proves embedded-helm auth, the app-owned supervisor, bundle-local tmux,
+  # proves embedded-helm auth, the app-owned supervisor, the FARHELM_TMUX override reaching it,
   # hard-exit lifetime tethering, restart reuse, and rotation recovery. The
   # coordinate-driven terminal interaction remains an optional local leg.
   desktop-smoke:

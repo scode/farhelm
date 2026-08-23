@@ -51,8 +51,8 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 - `cargo test -p farhelm-ui --features desktop` — exercises the desktop-only persistence and IPC seams; needs the same
   webkit2gtk/gtk dev packages as the desktop compile check.
 - `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the non-pixel Xvfb integration gate for
-  the embedded helm, managed supervisor, desktop authentication, bundle-local tmux, hard-exit tether, and restart
-  persistence. The optional coordinate-driven leg is not part of CI.
+  the embedded helm, managed supervisor, desktop authentication, the tmux override reaching the managed supervisor,
+  hard-exit tether, and restart persistence. The optional coordinate-driven leg is not part of CI.
 - `dprint check`
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
