@@ -23,10 +23,11 @@ use std::sync::Arc;
 /// A supervisor whose launches all run `shell` — the seam that makes a
 /// tab's own launch drivable, since a tab has no invocation of its own.
 ///
-/// Used two ways: to give the agent terminal a plain shell so the
-/// conformance tests can drive BOTH terminals identically, and to give a
-/// tab a shell that fails immediately so the dead-at-open-reply refusal is
-/// reachable at all.
+/// Used to give the agent terminal a plain shell so the conformance tests
+/// can drive BOTH terminals identically. The dead-at-open-reply refusal
+/// needs this same seam pointed at a shell that exits immediately, but it
+/// must ALSO hold the settle boundary, so it assembles its seams itself
+/// rather than growing a second parameter here.
 async fn harness_with_shell(shell: &str) -> Harness {
     harness_with_seams(
         SupervisorTimeouts::default(),
@@ -38,13 +39,34 @@ async fn harness_with_shell(shell: &str) -> Harness {
     .await
 }
 
-/// Hold a forwarder's successful cleanup result behind a deterministic gate.
+/// The shape both pause hooks below share, spelled once so the constructor's
+/// signature stays readable; identical to the supervisor's own alias for
+/// these seams.
+type PauseHook =
+    Arc<dyn Fn() -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+
+/// One of the supervisor's pause hooks, plus the two notifications that
+/// drive it: `entered` fires when the supervisor reaches the boundary, and
+/// the hook returns once `release` is notified.
 ///
-/// The real deferred-publication interval is only a scheduler race. Tests use
-/// this gate to prove request finalization while the output client is already
-/// safe but its per-terminal barrier still reads as pending.
-fn gated_forwarder_cleanup() -> (
-    farhelm_supervisor::service::ForwarderCleanupGate,
+/// The two hooks this file installs share one shape — a zero-argument
+/// `Fn() -> BoxFuture<()>` (the supervisor's `ForwarderCleanupGate` and
+/// `TabSettleGate` are both that alias) — so one constructor serves both,
+/// and the seam FIELD a test installs it in is what names the boundary
+/// being held. The staged hooks (`ArchiveGate` takes a stage and answers
+/// with a `Result`) are a different shape and are not served here. The
+/// two boundaries in this file:
+/// a forwarder's cleanup publication (its deferred-publication interval is
+/// only a scheduler race, and finalization must be provable while the output
+/// client is already safe but its per-terminal barrier still reads as
+/// pending), and a tab open's dead-shell settle (see
+/// [`a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words`]).
+///
+/// `notify_one` before anyone waits still stores a permit, so a test that
+/// reaches its `notified()` after the supervisor has already entered the
+/// gate is not left waiting for a notification that has been and gone.
+fn notifying_gate() -> (
+    PauseHook,
     Arc<tokio::sync::Notify>,
     Arc<tokio::sync::Notify>,
 ) {
@@ -76,6 +98,18 @@ fn gated_forwarder_cleanup() -> (
 /// Retried rather than sent once: an interactive shell that has not
 /// finished starting discards input, and there is no observable moment at
 /// which it starts accepting it.
+///
+/// The two nested waits carry deliberately UNEQUAL budgets. `wait_for`
+/// panics at its own deadline, so whenever that deadline can arrive first
+/// it destroys the retry it was nested inside: the panic escapes the
+/// `timeout` that exists to turn a silent round into another send, and one
+/// slow first round fails the test with most of the budget unspent (seen
+/// 2026-08-18 as "timed out waiting for XREADYX" with an empty transcript,
+/// 27 of 30 seconds left). So each round's inner wait is given a deadline
+/// longer than the round — the whole budget, for lack of a better number —
+/// purely so its panic can never race the wrapper's `timeout`: the wrapper
+/// alone ends a round, and the explicit deadline assertion below alone
+/// ends the retries.
 pub(crate) async fn wait_for_shell(
     client: &SupervisorClient,
     channel: u32,
@@ -83,21 +117,36 @@ pub(crate) async fn wait_for_shell(
     seen: &mut Vec<u8>,
     marker: &str,
 ) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    // How long one send is given to produce an answer before the shell is
+    // assumed to have discarded it, and how long the retries as a whole
+    // get. Only the ratio matters: the round must be the shorter one.
+    const ROUND: Duration = Duration::from_secs(3);
+    const BUDGET: Duration = Duration::from_secs(30);
+
+    let started = tokio::time::Instant::now();
+    let deadline = started + BUDGET;
     let command = format!("printf 'X%sX\\n' {marker}\r");
     let expected = format!("X{marker}X");
+    let mut rounds = 0_u32;
     loop {
         client
             .send_input(channel, command.clone().into_bytes())
             .await;
+        rounds += 1;
         let waited =
-            tokio::time::timeout(Duration::from_secs(3), wait_for(rx, seen, &expected, 3)).await;
+            tokio::time::timeout(ROUND, wait_for(rx, seen, &expected, BUDGET.as_secs())).await;
         if waited.is_ok() {
             return;
         }
+        // Distinguishes a shell that never spoke from one that spoke but
+        // never answered: the first is a dead or never-started shell, the
+        // second is a genuinely overrun budget.
         assert!(
             tokio::time::Instant::now() < deadline,
-            "shell on channel {channel} never answered a round trip; transcript so far:\n{}",
+            "shell on channel {channel} never answered a round trip: {rounds} sends over {:?}, \
+             {} bytes received; transcript so far:\n{}",
+            started.elapsed(),
+            seen.len(),
             String::from_utf8_lossy(seen)
         );
     }
@@ -166,6 +215,65 @@ pub(crate) async fn tab_pane(h: &Harness, session_id: &str, tab_id: &str) -> Str
             (session == want_session && tab == tab_id).then(|| pane.to_string())
         })
         .unwrap_or_else(|| panic!("no pane carries tab {tab_id}; rows:\n{}", rows.join("\n")))
+}
+
+/// Block until tmux ITSELF reports a dead pane on a marked tab window of
+/// this session.
+///
+/// The barrier behind the dead-at-open-reply refusal test: `pane_dead` is
+/// the exact fact the supervisor's settle is polling for, so waiting on it
+/// here — from outside, while the open is held at the settle boundary —
+/// turns "the fixture shell dies before the settle gives up" from a bet the
+/// test places into a precondition it has already observed. Reading it from
+/// tmux rather than from the supervisor is deliberate for the same reason
+/// [`window_rows`] does: the tmux server is the authority, and the
+/// supervisor's view of it is the thing under test.
+///
+/// Polled rather than awaited because tmux offers no event for it, but the
+/// poll is not a sprint: nothing is asserted until the fact holds, and the
+/// budget exists only so a shell that never dies fails by name instead of
+/// hanging the suite.
+async fn wait_for_dead_tab_pane(h: &Harness, session_id: &str) {
+    let sock = h.state.path().join("tmux.sock");
+    let want_session = format!("fh-{session_id}");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let out = tmux_query(
+            &sock,
+            &[
+                "list-panes",
+                "-a",
+                "-F",
+                "#{session_name}|#{@farhelm-tab}|#{pane_dead}",
+            ],
+        )
+        .await;
+        assert!(
+            out.status.success(),
+            "listing panes failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let listing = String::from_utf8_lossy(&out.stdout);
+        let rows = listing.lines().collect::<Vec<&str>>();
+        let dead = rows.iter().any(|row| {
+            let mut fields = row.split('|');
+            matches!(
+                (fields.next(), fields.next(), fields.next()),
+                (Some(session), Some(tab), Some("1")) if session == want_session && !tab.is_empty()
+            )
+        });
+        if dead {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no marked tab pane of session {session_id} ever became dead; rows:\n{}",
+            rows.join("\n")
+        );
+        // 100ms like the suite's other dead-pane waits: each poll is a tmux
+        // process, and the gate means nothing is gained by noticing faster.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 /// The tab ids `list_sessions` currently reports for a session, in the
@@ -391,6 +499,19 @@ async fn opening_a_tab_without_a_tmux_session_says_to_restart_first() {
 /// its own, so the only way to drive its launch into failure is to choose
 /// the shell. The fixture prints a recognizable line and exits, which is
 /// exactly the shape a broken login shell has.
+///
+/// The settle gate is what makes it DETERMINISTIC, and it earns its keep:
+/// "dead by reply time" was previously a bet on the fixture shell dying
+/// inside the supervisor's bounded settle, and under load the shell can
+/// lose that race — with three e2e binaries pinned to this module on a
+/// four-core box (2026-08-18) the open returned a live tab in roughly half
+/// the runs. What the test means to pin has nothing to do with which of
+/// the two wins: it is what the supervisor does about a shell that IS
+/// already dead. So the open is held at the boundary just before the
+/// settle, the shell's death is observed in tmux first, and only then is
+/// the settle allowed to look. The bounded settle's own timing is left
+/// entirely alone — widening it would have hidden the race rather than
+/// removed it, and is production behavior besides.
 #[tokio::test]
 async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words() {
     let dying = farhelm_teststate::tempdir().unwrap();
@@ -403,7 +524,16 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
     )
     .expect("making the failing shell executable");
 
-    let h = harness_with_shell(&shell.to_string_lossy()).await;
+    let (settle_gate, settle_entered, settle_release) = notifying_gate();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some(shell.to_string_lossy().into_owned()),
+            tab_settle_gate: Some(settle_gate),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
     let work = farhelm_teststate::tempdir().unwrap();
     // The AGENT's own launch also runs through this shell, so it is given
     // a command it never reaches — this test is about the tab, and the
@@ -421,11 +551,21 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let err = h
-        .client
-        .open_tab(&session.id)
-        .await
-        .expect_err("a shell that is already dead must refuse the open");
+    // The open and its barrier run as one: `open_tab` parks on the gate
+    // once the window exists and is marked, the other half waits for tmux
+    // to report that window's pane dead, and only then is the open let
+    // through to its settle.
+    let (opened, ()) = tokio::join!(h.client.open_tab(&session.id), async {
+        // Bounded so that an open which fails BEFORE the gate — a broken
+        // fixture, a refused precondition — fails by name here instead of
+        // parking the test on a notification that is never coming.
+        tokio::time::timeout(Duration::from_secs(60), settle_entered.notified())
+            .await
+            .expect("the open never reached the dead-shell settle; it failed before the gate");
+        wait_for_dead_tab_pane(&h, &session.id).await;
+        settle_release.notify_one();
+    });
+    let err = opened.expect_err("a shell that is already dead must refuse the open");
     let rendered = format!("{err:#}");
     assert!(
         rendered.contains("SHELL-REFUSED-TO-START"),
@@ -577,7 +717,7 @@ async fn closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else() {
 /// while the runtime-owned barrier completes.
 #[tokio::test]
 async fn close_notifies_and_removes_a_tab_while_output_cleanup_is_pending() {
-    let (cleanup_gate, cleanup_entered, cleanup_release) = gated_forwarder_cleanup();
+    let (cleanup_gate, cleanup_entered, cleanup_release) = notifying_gate();
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
         SupervisorSeams {
@@ -1039,7 +1179,7 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
 /// launch until the supervisor itself restarts.
 #[tokio::test]
 async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
-    let (cleanup_gate, cleanup_entered, cleanup_release) = gated_forwarder_cleanup();
+    let (cleanup_gate, cleanup_entered, cleanup_release) = notifying_gate();
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
         SupervisorSeams {
