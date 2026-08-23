@@ -57,6 +57,23 @@ roadmap and carries no priorities unless an entry says so itself.
   remaining 157 minutes. Unblocks the manual Mac checklist (`docs/manual-mac-checklist.md`) and the README quickstart
   NOTE, both of which must also gain the Homebrew tmux step.
 
+- Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
+  supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
+  reached farhelm's exec shim, so something before it — the transient cgroup scope wrapper, or the login shell itself —
+  exited first", which names two suspects and separates neither. The wrapper's stderr is still sitting in the dead pane
+  under `remain-on-exit`, so a `capture-pane` at classification time could say which. A first attempt (2026-08-23)
+  appended the pane's last words to the durable `LastOutcome::Error` detail and was withdrawn in review for three
+  reasons any retry must design around: (1) SPEC.md's terminal-retention contract — terminal content lives only as long
+  as the host-side terminal, with no separate history store — which a durable excerpt of startup/rc output contradicts,
+  so either the quote must not be persisted (log it, or surface it only while the pane exists) or the spec must
+  authorize a bounded exception first; (2) the pane is reused across relaunches and keeps its scrollback, so a
+  generation N+1 that died before printing anything would quote generation N's conversation unless the capture is fenced
+  to text written after the wrapper started; (3) the ownership-and-deadness check and the capture are separate steps
+  with no lifecycle claim across them on the list path, so a same-pane restart in between would quote a live later
+  generation — revalidate atomically with the capture, and budget the capture so N never-started rows cannot cost N tmux
+  timeouts on the hot list. The e2e harness already has `wait_for_agent_ready` (harness.rs), whose failure text shows
+  the same pane text for a test's own diagnosis; that is the non-durable shape to start from.
+
 - Review the two security-relevant resolutions made during the M7 run, and record a dated verdict (a note in
   SPEC_impl.md or a review comment on PR #117). (a) A product-spec/impl-spec conflict over where the web token is stored
   was resolved in the product spec's favor, with the impl spec amended in #117 — confirm the amendment says what the
@@ -71,25 +88,6 @@ roadmap and carries no priorities unless an entry says so itself.
   existing device session and drops already-open feed/terminal sockets. Implementation surfaces: the helm's auth and
   middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
   section as amended in #117.
-
-- Deflake `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation` under local full-suite
-  load. One occurrence so far: 2026-08-18, full workspace suite at libtest's default thread count (one runnable test per
-  logical CPU — six on this devbox); passed in isolation immediately after, and has never failed on CI. The assertion at
-  boot_id_durable_outcome.rs:606 expected `Exited` and got
-  `Error { "the agent was never started: the launch never reached farhelm's exec shim, so
-  something before it — the transient cgroup scope wrapper, or the login shell itself — exited first" }`
-  — the launch-artifact classifier's never-started verdict (launch_artifacts.rs), meaning the failure is UPSTREAM of the
-  list-versus-stop behavior under test: the session's launch itself died before exec'ing the shim, so the stop recorded
-  an error rather than the annotated exit. Candidate mechanisms, unverified: under full-suite process-heavy load the
-  systemd user manager is slow or resource-starved enough that the transient scope wrapper or the login shell inside it
-  exits before reaching the shim (this box has a user manager, so launches take the scoped path; CI runners have none
-  and take the unscoped path, which would make this a local-only shape); or a concurrent test's scope sweep caught the
-  launch mid-flight. First steps: reproduce with a full-suite loop at the default thread count; make `basic_session`
-  (harness.rs) optionally wait until the fake agent's READY marker lands (a post-exec sentinel — a merely live pane is
-  NOT enough, since the scope wrapper or login shell keeps the pane alive before exec and can still die in exactly the
-  pre-shim way under investigation), so a launch that never started fails setup by name instead of corrupting the
-  assertion under test — every basic_session caller shares this exposure — and capture the scope wrapper's stderr on the
-  never-started path so the next occurrence says which of the two candidates it was.
 
 - Deflake `terminal.spec.ts`'s `list renders the session row with title, cwd, invocation, and a running badge`. During
   the Design 1 split it failed once in a focused Chromium run and once under WebKit in the full two-engine suite: the
