@@ -310,6 +310,33 @@ wait_for_client_log_marker() {
   echo "   client-log marker landed in $(basename "$log") after $(($(date +%s) - start))s"
 }
 
+# Wait for the app writing $1 to issue a session listing whose query is
+# exactly $2, as reported by the native `log_smoke_session_query` hook. The
+# hook prints a plain `desktop_smoke: session listing requested query=...`
+# line straight to stderr — NOT a tracing event — because tracing's ANSI
+# styling of field names in CI's log defeated a literal grep for
+# `query=sort=title` while the feature worked (CI run 32584494800 on PR
+# #210). The whole-line fixed-string match below is the other half of that
+# contract: whole-line, so `sort=title&title=x` cannot pass for `sort=title`.
+# Both launch legs use this one oracle so a broken hook fails the first-boot
+# leg by name instead of masquerading as a restore regression after relaunch.
+wait_for_listing_request() {
+  local log="$1" query="$2" line="desktop_smoke: session listing requested query=$2"
+  for _ in $(seq 1 30); do
+    grep -qxF "$line" "$log" 2>/dev/null && return 0
+    sleep 1
+  done
+  grep -qxF "$line" "$log" 2>/dev/null || fail \
+    "$(basename "$log") never recorded a session listing with query=$query (hook or oracle broken?)"
+}
+
+echo "== waiting for the first-boot listing request through the smoke hook"
+# Fresh state carries no sort preference, so the first launch must list with
+# the default order. The matching negative check — that nothing asked for
+# sort=title before the preference is seeded — runs right before the seed,
+# so it covers the whole unseeded launch rather than this first instant.
+wait_for_listing_request "$X/desktop.log" "sort=activity"
+
 echo "== waiting for the client-log marker: shim -> /api/client-log -> tracing"
 wait_for_client_log_marker "$X/desktop.log"
 
@@ -330,6 +357,11 @@ tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail
 # tmux's client ownership (the remembered, non-newest session gains the page's
 # output client). The state-file assertion remains as a check of the durable
 # input, not as a substitute for those behavioral observations.
+# The post-restart `sort=title` oracle proves nothing if the app already
+# asked for that order on its own, so the entire unseeded first launch — up
+# to this point, sessions created and all — must be free of such a request.
+grep -qxF 'desktop_smoke: session listing requested query=sort=title' "$X/desktop.log" \
+  && fail "first boot requested sort=title before any preference was seeded"
 LOCAL_IDENTITY=$(curl_auth -sf --max-time 5 "$API/api/hosts" | python3 -c '
 import json,sys
 hosts=json.load(sys.stdin)["hosts"]
@@ -434,15 +466,7 @@ RESTART_SORT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).g
 [ "$RESTART_SELECTION" = "$EXPECTED_SELECTION" ] || fail "restart changed the persisted desktop selection record"
 [ "$RESTART_SORT" = "title" ] || fail "restart dropped the persisted desktop sort"
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
-RESTORED_SORT_REQUEST=""
-for _ in $(seq 1 30); do
-  if grep -q 'desktop_smoke.*query=sort=title' "$X/desktop-restart.log"; then
-    RESTORED_SORT_REQUEST=1
-    break
-  fi
-  sleep 1
-done
-[ -n "$RESTORED_SORT_REQUEST" ] || fail "the relaunched page did not request sort=title"
+wait_for_listing_request "$X/desktop-restart.log" "sort=title"
 RESTORED_ATTACHMENT=""
 for _ in $(seq 1 30); do
   CLIENT_SESSIONS=$(tmux -S "$X/state/tmux.sock" list-clients -F '#{session_name}' 2>/dev/null)
