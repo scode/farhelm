@@ -2825,21 +2825,223 @@ mod tests {
         path.is_absolute().then_some(path)
     }
 
+    /// How long [`wait_real_run`] tolerates seeing the SAME step list
+    /// (no step's status changed) before declaring a run wedged.
+    ///
+    /// Bug history: this test used to poll under a single 60s
+    /// `tokio::time::timeout` covering the whole run, which conflated "no
+    /// progress" with "real work, summed across every step, took a while".
+    /// On 2026-08-18 the real ADD-or-UPDATE run lost that budget during a
+    /// heavily loaded full-suite run and passed in isolation right after;
+    /// the shape is consistent with a contention-slowed run that was still
+    /// advancing, though the original failure kept no progress trace to
+    /// prove it. Either way a flat per-run deadline cannot tell that apart
+    /// from an actually stuck run: it must be widened past whatever
+    /// contention needs (a moving target with no honest ceiling) or replaced
+    /// with a progress-rearmed one. This is that replacement, mirroring the
+    /// stall-timeout shape `uploads.rs`'s `CLIENT_UPLOAD_STALL_TIMEOUT`
+    /// already uses for the same reason.
+    ///
+    /// Sized to clear the LONGEST phase that legitimately holds one step at
+    /// `Running` with no externally visible change, with scheduling margin
+    /// on top. That phase is not `attach-supervisor`'s `ATTACH_TIMEOUT`
+    /// (30s, `provisioning/service.rs`) but an SSH payload install, whose
+    /// sub-operations each carry their own budget (`provisioning/backend.rs`:
+    /// inspect and remove under `COMMAND_TIMEOUT` 30s each, the transfer
+    /// under `TRANSFER_TIMEOUT` 60s, verify-and-install under
+    /// `COMMAND_TIMEOUT` 30s) and can sum to about 150s of silence while
+    /// every one of them is healthy. Both real-run tests share this wait —
+    /// the ssh-to-localhost one exercises exactly that path — so the window
+    /// must not mistake a slow install for a wedge.
+    const STEP_STALL_TIMEOUT: Duration = Duration::from_secs(240);
+
+    /// Absolute bound on how long [`wait_real_run`] keeps polling, on top
+    /// of the stall detector.
+    ///
+    /// This bounds the WAIT, not the run: it exists so a bug in the
+    /// progress bookkeeping (or a run whose steps keep flipping without
+    /// ever reaching a terminal status) cannot hang the suite, and it is
+    /// deliberately above the worst legitimate run. A full SSH update can
+    /// perform three compound installs plus reload, enable, restart, and
+    /// attach, whose per-operation budgets sum to roughly ten minutes
+    /// before preflight, payload staging, and contention are counted — so
+    /// the cap sits well past that rather than being tuned to typical
+    /// runs. Expiry is reported neutrally: it says the wait ran out, not
+    /// which side is at fault.
+    const OVERALL_RUN_DEADLINE: Duration = Duration::from_secs(1200);
+
+    /// One observation of a run's step list, as [`RunProgressWatch`] sees
+    /// it: each step's name paired with its status, in plan order.
+    type StepSnapshot = Vec<(String, StepStatus)>;
+
+    /// The stall-versus-slow decision behind [`wait_real_run`], kept apart
+    /// from the polling loop so it can be driven with chosen instants.
+    ///
+    /// The contract: a snapshot that differs from the previous one (any
+    /// step's status changed, or a step appeared) rearms the stall window;
+    /// an identical snapshot — including one that is merely an equal clone
+    /// — does not; the stall window and the overall bound are judged at the
+    /// instant the caller passes, never from a clock read inside. Terminal
+    /// statuses are the caller's business: this type only answers "is
+    /// waiting still justified at `now`", and the error it returns carries
+    /// the last snapshot so a timeout report is self-describing.
+    ///
+    /// Exists because the previous version of this logic lived inline in
+    /// the poll loop and had no deterministic test at all — its only
+    /// exercise was the real provisioning runs, which use the host clock
+    /// and cannot reach either timeout on purpose.
+    struct RunProgressWatch {
+        stall_window: Duration,
+        last_steps: Option<StepSnapshot>,
+        stall_deadline: tokio::time::Instant,
+        overall_deadline: tokio::time::Instant,
+    }
+
+    impl RunProgressWatch {
+        fn new(
+            started: tokio::time::Instant,
+            stall_window: Duration,
+            overall: Duration,
+        ) -> RunProgressWatch {
+            RunProgressWatch {
+                stall_window,
+                last_steps: None,
+                stall_deadline: started + stall_window,
+                overall_deadline: started + overall,
+            }
+        }
+
+        /// The earliest instant at which the next observation could fail,
+        /// which is what a caller should race its blocking reads against:
+        /// a read that outlives this instant has itself become the stall.
+        fn next_deadline(&self) -> tokio::time::Instant {
+            self.stall_deadline.min(self.overall_deadline)
+        }
+
+        /// Record `steps` as seen at `now`; `Err` means waiting is no longer
+        /// justified, with the reason and the last snapshot spelled out.
+        fn observe(
+            &mut self,
+            steps: StepSnapshot,
+            now: tokio::time::Instant,
+        ) -> Result<(), String> {
+            if self.last_steps.as_ref() != Some(&steps) {
+                self.last_steps = Some(steps);
+                self.stall_deadline = now + self.stall_window;
+            } else if now >= self.stall_deadline {
+                return Err(format!(
+                    "no step progress in {:?} (looks wedged, not merely slow); last observed steps: {:?}",
+                    self.stall_window, self.last_steps
+                ));
+            }
+            if now >= self.overall_deadline {
+                return Err(format!(
+                    "the overall wait bound elapsed while steps were still changing; last observed \
+                     steps: {:?}",
+                    self.last_steps
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    /// Poll a real (non-simulated) provisioning run to completion.
+    ///
+    /// Progress is judged from the step list [`ProvisioningView`] already
+    /// exposes, not from wall clock alone: every poll that observes a
+    /// step's status change rearms [`STEP_STALL_TIMEOUT`], so a run that is
+    /// merely slow under contention keeps getting fresh budget for as long
+    /// as it keeps moving, while one that truly wedges is caught within
+    /// that window regardless of how long the run has been alive overall.
+    /// [`OVERALL_RUN_DEADLINE`] bounds the wait as a whole.
+    ///
+    /// Each progress read is raced against the watch's next deadline, so a
+    /// `view` that blocks (it takes a semaphore, the store, and a mutex)
+    /// trips the timeout instead of silently suspending both bounds. A
+    /// terminal status is accepted whenever it is observed, even on a read
+    /// that completes after the overall bound — the bound limits waiting,
+    /// and an answer that arrived is not a wait.
     async fn wait_real_run(
         service: &ProvisioningService,
         host: HostId,
     ) -> anyhow::Result<ProvisioningView> {
-        tokio::time::timeout(Duration::from_secs(60), async {
-            loop {
-                let view = service.view(host).await?;
-                if matches!(view.status, RunStatus::Completed | RunStatus::Failed) {
-                    return Ok(view);
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut watch = RunProgressWatch::new(
+            tokio::time::Instant::now(),
+            STEP_STALL_TIMEOUT,
+            OVERALL_RUN_DEADLINE,
+        );
+        loop {
+            let view = tokio::time::timeout_at(watch.next_deadline(), service.view(host))
+                .await
+                .with_context(|| {
+                    format!(
+                        "real provisioning run did not finish: reading its progress blocked past the \
+                         wait's deadline; last observed steps: {:?}",
+                        watch.last_steps
+                    )
+                })??;
+            if matches!(view.status, RunStatus::Completed | RunStatus::Failed) {
+                return Ok(view);
             }
-        })
-        .await
-        .context("real provisioning run did not finish")?
+            let steps: StepSnapshot = view
+                .steps
+                .iter()
+                .map(|step| (step.step.clone(), step.status.clone()))
+                .collect();
+            if let Err(reason) = watch.observe(steps, tokio::time::Instant::now()) {
+                bail!("real provisioning run did not finish: {reason}");
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// The stall-versus-slow rules of [`RunProgressWatch`], pinned with
+    /// chosen instants rather than a ticking clock.
+    ///
+    /// Matters because the watch is the only thing standing between "a
+    /// loaded box" and a red suite: a rule that rearmed on an equal clone
+    /// would never time out, and one that judged silence from its own
+    /// clock reads could not be tested at all. What is pinned: equal
+    /// snapshots do not rearm; a status change rearms so silence shorter
+    /// than the window after each change is tolerated indefinitely;
+    /// silence of exactly the window fails; the overall bound fails even
+    /// while steps keep changing; the failure text carries the snapshot.
+    #[test]
+    fn run_progress_watch_rearms_only_on_real_change_and_bounds_the_whole_wait() {
+        let t0 = tokio::time::Instant::now();
+        let at = |secs: u64| t0 + Duration::from_secs(secs);
+        let snap = |status: StepStatus| vec![("install".to_string(), status)];
+        let stall = Duration::from_secs(10);
+        let overall = Duration::from_secs(35);
+
+        let mut watch = RunProgressWatch::new(t0, stall, overall);
+        assert!(watch.observe(snap(StepStatus::Running), at(1)).is_ok());
+        // A value-equal clone is not progress: the deadline set at t=1 holds.
+        assert!(watch.observe(snap(StepStatus::Running), at(10)).is_ok());
+        let err = watch
+            .observe(snap(StepStatus::Running), at(11))
+            .expect_err("silence of a full window must fail");
+        assert!(err.contains("no step progress in 10s"), "{err}");
+        assert!(
+            err.contains("install"),
+            "the snapshot must ride along: {err}"
+        );
+
+        // Each status change buys a fresh window, so a slow run that keeps
+        // moving never trips the stall rule...
+        let mut watch = RunProgressWatch::new(t0, stall, overall);
+        assert!(watch.observe(snap(StepStatus::Pending), at(0)).is_ok());
+        assert!(watch.observe(snap(StepStatus::Running), at(9)).is_ok());
+        assert!(watch.observe(snap(StepStatus::Running), at(18)).is_ok());
+        assert!(watch.observe(snap(StepStatus::Completed), at(27)).is_ok());
+        // ...until the overall bound, which holds even with fresh changes.
+        let mut flipped = snap(StepStatus::Completed);
+        flipped.push(("reload".to_string(), StepStatus::Running));
+        let err = watch
+            .observe(flipped, at(35))
+            .expect_err("the overall bound must hold despite continual change");
+        assert!(err.contains("overall wait bound"), "{err}");
+        assert_eq!(watch.next_deadline(), at(35).min(at(35 + 10)));
     }
 
     /// Wait through the manager's intentional disconnect/retry window until
