@@ -180,17 +180,21 @@ to restyle), the chrome one step above it (sidebar, main header, tab strip), and
 (menus, dialogs, forms, bands that interrupt a pane). Which level an element sits on is recorded in the `:root`
 comments; a `--control-hover-bg` and a `--chip-bg` token fill a bordered control's hover state and a small chip
 respectively, named for that specific role rather than folded into the `--bg-*` surface family, so neither one reads as
-a fourth and fifth level to lay something out on. The second is that there is ONE accent, spent on selection,
-`:focus-visible`, and the filled-primary button tier (`.btn-primary`) TODO.md's UI refresh added. That third use is
-scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and
-each dialog that floats over it — create session, add a host, rename — supplies its own submit as THAT dialog's one
-primary, since a dialog is read as its own surface rather than counted against the sidebar's. Everything else, on any
-surface, stays ghost, including destructive actions, which mark themselves with red text rather than a red fill — the
-per-surface discipline is what keeps "filled" still meaning "the affirmative default action here" instead of becoming
-one more colored box among equals. SPEC.md requires the sidebar to mark the selected session's row readably at a glance,
-and an accent spent any more freely than this would have nothing distinct left to make that true. Both constraints have
-a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest
-surface it lands on, which is what caps how light the selected row's fill may go.
+a fourth and fifth level to lay something out on. The second is that there is ONE accent, and what it may be spent on is
+a closed list rather than a palette to decorate with: selection, `:focus-visible`, the one filled primary control a
+surface is allowed, and any PRESSED disclosure control — a trigger wearing the accent for exactly as long as the thing
+it opened is showing. That last entry covers the session row's actions-menu toggle and the header's own archive and
+restart triggers alike; they are one category, not a rule plus exceptions, and the accent is what separates "this one is
+open" from the hover fill every ghost control already takes. The filled-primary entry is scoped per SURFACE, not per
+screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each dialog that floats
+over it — create session, add a host, rename — supplies its own submit as THAT dialog's one primary, since a dialog is
+read as its own surface rather than counted against the sidebar's. Everything else, on any surface, stays ghost,
+including destructive actions, which mark themselves with red text rather than a red fill. SPEC.md requires the sidebar
+to mark the selected session's row readably at a glance, so anything joining that list has to be a place where the
+accent means "this is where you are" — the same thing the other entries say — because an accent spread across ordinary
+decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under them: the
+quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is
+what caps how light the selected row's fill may go.
 
 `--font-ui` and `--font-mono` name the same vendored face — JetBrains Mono Nerd Font, described below in the xterm.js
 island section — rather than two different ones. The chrome (`--font-ui`) and the terminal (`--font-mono`, the stack
@@ -219,6 +223,27 @@ session" line — is still a full-width band, because a band that only appears w
 steady state nothing. A classified status renders in at most one place: the header normally, the stale notice's own
 metadata band for a stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere
 at all for a session nothing has classified yet.
+
+Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
+contract rather than styling. **Anchor:** the panel hangs below-LEFT of the toggle that opened it — its top-right corner
+at the toggle's bottom-left, clamped inside the viewport — so that the toggle COLUMN of every row below stays uncovered
+and clickable. The tidier flush-under-the-toggle placement was written and rejected: it puts the panel's `stop` and
+`delete` exactly where the neighbouring rows draw their own `⋯`, turning a click aimed at another session's menu into a
+destructive action on this one. Because the panel therefore floats over rows that look just like its own, ownership is
+carried by three cues instead of by proximity alone — the toggle holds a pressed accent state, its row holds a tint, and
+the panel is a raised surface with a shadow. **One at a time:** at most one row's menu is open, and it closes on any
+layout change that could have moved the row it was measured against (a sidebar scroll or resize, the hosts panel or
+filter bar opening, the create form, the row reordering under a refresh), because the panel's coordinates are a one-time
+snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown)
+lands focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is
+a single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
+that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body.
+An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather than
+going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the user
+would otherwise swallow every navigation key. **Confirm in place:** a destructive item swaps the panel's own contents
+for the consequence line and a confirm/cancel pair with focus on cancel, rather than opening a second surface; that
+sub-state is a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it
+deliberately does not answer Escape.
 
 Known risks, accepted deliberately:
 

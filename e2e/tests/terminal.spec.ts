@@ -169,7 +169,7 @@ test("list renders the session row with title, cwd, invocation, and the status t
   await expect(row).toBeVisible();
   await expect(row.locator(".session-title")).toHaveText("e2e-session");
   await expect(row.locator(".session-cwd")).toHaveText(expected.cwd);
-  // The row shows a COMPACT invocation now (TODO.md's UI refresh): the
+  // The row shows a COMPACT invocation now (the 2026-08 UI refresh): the
   // basename of argv[0], plus a marker for an unattended-mode flag when
   // there is one — the fixture's quoted absolute path to the debug binary
   // therefore reads `farhelm`, with no marker to add. The `title` is what
@@ -2009,7 +2009,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     // the refresh's result reached the DOM, not just that a request fired.
     //
     // The marker is a single bare token with no path and no flags, so the
-    // row's compact rendering (TODO.md's UI refresh) leaves it exactly as
+    // row's compact rendering (the 2026-08 UI refresh) leaves it exactly as
     // it is — deliberately, so this test keeps naming the one string it
     // armed. The `title` is asserted alongside it because that is the
     // attribute carrying the invocation verbatim whatever the compaction

@@ -59,7 +59,7 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 /// on mount; Dioxus never touches its children again — that boundary is
 /// the whole design.
 ///
-/// ## The consolidated header (TODO.md's UI refresh)
+/// ## The consolidated header (the 2026-08 UI refresh)
 ///
 /// Everything that identifies the session lives in ONE ~40px row: the
 /// title, the `{cwd} — {invocation}` metadata, the status badge beside how
