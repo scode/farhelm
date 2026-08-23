@@ -4,59 +4,23 @@
 # test process so a surviving client or server cannot contaminate the next
 # scenario.
 #
-# Which version is "pinned" comes from .github/release/source-pins.env, the
-# same file the release payload build reads, so bumping the pin there bumps
-# this suite with it. TODO.md's 2026-08-22 floor decision makes the
-# product's version floor and this regression-tested pin one value; that
-# floor lands in the supervisor in a later change of the same stack, and a
-# script that hardcoded its own copy of the version would let the two
-# drift apart silently once it has. The version assertion below is what
-# turns a stale cached binary into a loud failure instead of a green run
-# against the wrong tmux.
+# Which version is "pinned" comes from .github/release/source-pins.env via
+# scripts/build-pinned-tmux-ci.sh, the same pin the release payload build
+# reads, so bumping the pin there bumps this suite with it. TODO.md's
+# 2026-08-22 floor decision makes the product's version floor and this
+# regression-tested pin one value; that floor lands in the supervisor in a
+# later change of the same stack, and a script that hardcoded its own copy
+# of the version would let the two drift apart silently once it has.
 
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-binary="$repo/.ci-tmux/tmux"
-python_env="$repo/.ci-tmux-python"
 
-# Unset first so the guard below can only be satisfied by the pin file
-# itself, never by a TMUX_VERSION inherited from the caller's environment.
-unset TMUX_VERSION
-# shellcheck source-path=SCRIPTDIR
-# shellcheck source=../.github/release/source-pins.env
-. "$repo/.github/release/source-pins.env"
-test -n "${TMUX_VERSION:-}" || {
-  echo "source-pins.env did not define TMUX_VERSION" >&2
-  exit 2
-}
-
-if ! test -x "$binary"; then
-  case "$(uname -s)/$(uname -m)" in
-    Linux/x86_64) target=x86_64-unknown-linux-musl ;;
-    Linux/aarch64 | Linux/arm64) target=aarch64-unknown-linux-musl ;;
-    *)
-      echo "the pinned tmux shutdown tests support Linux x86_64 and arm64" >&2
-      exit 2
-      ;;
-  esac
-  python3 -m venv "$python_env"
-  "$python_env/bin/pip" install --require-hashes \
-    -r "$repo/.github/release/ziglang-requirements.txt"
-  zig=$("$python_env/bin/python" -c \
-    'import pathlib, ziglang; print(pathlib.Path(ziglang.__file__).parent / "zig")')
-  mkdir -p "$(dirname "$binary")"
-  ZIG="$zig" "$repo/scripts/build-private-tmux.sh" "$target" "$binary"
-fi
-
-version=$($binary -V)
-if test "$version" != "tmux $TMUX_VERSION"; then
-  echo "expected pinned tmux $TMUX_VERSION at $binary, found: $version" >&2
-  exit 1
-fi
+# The build (and the pinned-version assertion) lives in its own script so
+# the full suite and the desktop smoke can share it; see its header.
+binary_dir=$("$repo/scripts/build-pinned-tmux-ci.sh")
 
 cd "$repo"
-binary_dir=$(dirname "$binary")
 export PATH="$binary_dir:$PATH"
 
 cargo test -p farhelm-supervisor \

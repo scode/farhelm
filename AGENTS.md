@@ -30,10 +30,13 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
-- `cargo test -- --show-output` — `--show-output` is what makes a loudly-skipped test's reason visible; the cgroup tests
-  skip themselves where no systemd user manager exists, and libtest hides a passing test's output otherwise. CI adds
-  `--test-threads=4` to match its 4-vCPU runners and keep the process-heavy tmux integration suite's aggregate load
-  predictable; a beefier local machine does not need the cap.
+- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" cargo test -- --show-output` — the suite drives the pinned tmux from
+  `.github/release/source-pins.env`, which the build script makes available under `.ci-tmux/` (one-time build, then
+  cached); a run against whatever tmux is on your PATH exercises a different substrate than CI does. `--show-output` is
+  what makes a loudly-skipped test's reason visible; the cgroup tests skip themselves where no systemd user manager
+  exists, and libtest hides a passing test's output otherwise. CI adds `--test-threads=4` to match its 4-vCPU runners
+  and keep the process-heavy tmux integration suite's aggregate load predictable; a beefier local machine does not need
+  the cap.
 - `scripts/test-tmux-pinned-shutdown.sh` — builds the exact checksummed release named by
   `.github/release/source-pins.env` on cache miss, then runs every focused output-client teardown regression in its own
   test process. CI uses the same script separately from the distro tmux used by the full suite because silently
@@ -47,9 +50,9 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   dev packages (see the CI job for the apt list).
 - `cargo test -p farhelm-ui --features desktop` — exercises the desktop-only persistence and IPC seams; needs the same
   webkit2gtk/gtk dev packages as the desktop compile check.
-- `scripts/desktop-smoke.sh` — the non-pixel Xvfb integration gate for the embedded helm, managed supervisor, desktop
-  authentication, bundle-local tmux, hard-exit tether, and restart persistence. The optional coordinate-driven leg is
-  not part of CI.
+- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the non-pixel Xvfb integration gate for
+  the embedded helm, managed supervisor, desktop authentication, bundle-local tmux, hard-exit tether, and restart
+  persistence. The optional coordinate-driven leg is not part of CI.
 - `dprint check`
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
