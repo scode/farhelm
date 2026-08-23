@@ -1,3 +1,29 @@
+/* The single hand-written application stylesheet for the Farhelm
+ * web/desktop UI's own chrome: plain CSS, no preprocessing and no
+ * framework transformation, linked as a static `<link rel="stylesheet">`
+ * (lib.rs registers it as `APP_CSS` and decides the served path the same
+ * way it does every other asset — see the `url()` note below for the two
+ * fonts that need a hard-coded path). xterm.js's own look is a SEPARATE
+ * vendored stylesheet, `vendor/xterm.css`, linked alongside this one
+ * (also lib.rs) and out of scope here — nothing in this file targets the
+ * terminal's internal DOM.
+ *
+ * Every color, font stack, and NON-ZERO corner radius lives in the `:root`
+ * token block further down and nowhere else — use sites carry
+ * `var(--token)`, never a literal. A bare `0` is exempt where it is
+ * structural rather than a design choice — a corner that has to stay
+ * square because it joins a neighboring control (the joined tab corners
+ * below are the one case) has no role for a token to name. Tokens are
+ * named for the ROLE a value plays (surface level, foreground level,
+ * accent, ok/warn/danger) rather than for the color it happens to be, so
+ * a restyle edits one block instead of the ~150 declarations that used to
+ * hold hex codes directly.
+ *
+ * The dark palette is the only one today. A light theme is a decision
+ * already made, and it arrives as a SECOND `:root` block redefining the
+ * same names — which only stays a one-block change for as long as no use
+ * site holds a literal. */
+
 /* JetBrains Mono Nerd Font, vendored under assets/fonts/ (OFL.txt there
  * carries the full license) for the same self-contained reason xterm.js
  * itself is vendored — see SPEC_impl.md's "Terminal widget: xterm.js
@@ -41,15 +67,137 @@
   font-display: swap;
 }
 
+/* ===== Design tokens =================================================
+   The role model in one paragraph: `--bg-*` are surface levels ordered
+   from the page ground upward, `--fg-*` are text levels ordered from
+   loudest to faintest, the `--accent*` family is the single selection
+   and emphasis language, `--border*` are rules and control outlines, and
+   `--ok`/`--warn`/`--danger` are the semantic states with whatever fill,
+   border, and background variants the existing palette already used. A
+   rule picks the token whose ROLE it means, never the token whose hex
+   happens to match.
+
+   The rule that makes all of it work: USE SITES NEVER HOLD LITERALS. A
+   new color gets a token here first, and a value that turns out to want
+   a different meaning gets a new role rather than a second copy. The one
+   carve-out is a structural `0` (see the file header) — there is no
+   design value to name when a corner is square because it joins a
+   neighbor, so that literal stays a literal.
+
+   Several tokens carry an `-alt` suffix. Those are near-duplicates the
+   file had accumulated before tokens existed — a handful of units apart
+   and indistinguishable in practice. They are recorded as they were
+   instead of folded, because introducing this layer was meant to change
+   zero rendered pixels; folding them is the layering item in TODO.md's
+   UI refresh, where it can be a deliberate visual decision. */
+:root {
+  /* Surfaces, darkest first. --bg-0 is the page ground. */
+  --bg-0: #14161a; /* page and the recessed well of inputs, selects, code boxes */
+  --bg-1: #1d2026; /* raised chrome (titlebar, menus, forms, tabs), and the
+                      row hover/focus tint */
+  --bg-2: #232833; /* inline notice bands that interrupt a pane */
+  --bg-3: #262a31; /* button hover fill */
+  --bg-4: #2a2f37; /* the default-profile badge fill */
+
+  /* Foregrounds. --fg-0 through --fg-2 are one scale, loudest first.
+     --fg-bright sits outside that scale entirely: it is not a fifth,
+     even-louder step, but a separate high-contrast cue used only where
+     text sits on a filled/colored surface rather than the page ground. */
+  --fg-0: #d8dee9; /* primary text */
+  --fg-0-alt: #c5cad3; /* near-duplicate of --fg-0; candidate to fold in the layering PR */
+  --fg-dim: #b8c0cc; /* explanatory prose on a notice or placeholder surface */
+  --fg-dim-alt: #aeb4bf; /* near-duplicate of --fg-dim; candidate to fold in the layering PR */
+  --fg-dim-alt2: #aeb6c3; /* near-duplicate of --fg-dim; candidate to fold in the layering PR */
+  --fg-1: #8a919e; /* secondary/muted: labels, metadata lines, quiet status words */
+  --fg-2: #5b6270; /* faint: empty-state text nobody needs to read twice */
+  --fg-bright: #fff; /* high-contrast cue on a filled surface (selected row/tab, red banner); not part of the loudness scale above */
+
+  /* The one accent. It is a neutral rather than a hue today — the
+     selection indicator has to out-contrast both the fill under it and
+     the page, and the palette has no chromatic accent to spend. Same
+     value as --fg-1 by history, kept separate so a later PR can give
+     selection a real hue without touching every muted label. */
+  --accent: #8a919e; /* selection indicator (the selected row's inset bar) */
+  --accent-fill: #2f3641; /* the selected row's and selected tab's background */
+  --accent-fill-hover: #3a4250; /* hover/focus inside an already-selected row */
+  --accent-edge: #4d5666; /* the selected tab's border tint */
+
+  /* Rules and control outlines. */
+  --border: #3a3f47; /* the standard control outline: buttons, inputs, menu panel, auth card */
+  --border-bright: #4a505a; /* near-duplicate of --border; candidate to fold in the layering PR */
+  --border-dim: #2d3138; /* the quiet rule around an embedded detail box */
+  --border-sidebar-edge: #262a31; /* the sidebar's own edge against the main pane */
+  --border-row: #1d2026; /* hairline between stacked items: shared by the session row's bottom
+                             separator and the hosts panel's own bottom rule, which are the same
+                             role (a divider between stacked list entries/sections) wearing two
+                             class names */
+  --border-nested: #2a2f37; /* the rule marking an indented sub-section (host profile nesting);
+                                same hex as --bg-4 today but a distinct role from that badge fill */
+
+  /* Semantic states. `ok` is the healthy/live family, `warn` the
+     attention-but-not-broken family (see `.status-badge.interrupted` and
+     `.host-chip.unreachable` for why several things are amber rather
+     than red), `danger` the destructive-or-failed family. */
+  --ok: #7fd88f; /* running, connected, step completed */
+  --ok-dim: #5f8f6b; /* the same family, one notch quieter: live but idle */
+
+  --warn: #d8b45f; /* the amber label/badge tone */
+  --warn-bright: #e0d090; /* amber PROSE, which needs more lift than a badge does */
+  --warn-bright-alt: #e0c890; /* near-duplicate of --warn-bright; fold in the layering PR */
+  --warn-bg: #3a3520; /* the filled amber band (truncated-walk banner) */
+  --warn-bg-dim: #2a2620; /* the quieter amber band (build skew) */
+  --warn-border: #4a4230; /* rule under an amber band */
+  --warn-fill-hover: #6a5a34; /* hover on a control that sits on amber */
+
+  --danger: #e08080; /* the red text tone: errors and destructive actions */
+  --danger-strong: #e0685f; /* saturated red: a state that IS failure, not a risky button */
+  --danger-soft: #e0b0b0; /* pale red, for an outline that has to read against a red fill */
+  --danger-border: #5a3838; /* outline of a destructive confirmation */
+  --danger-bg: #7a3b3b; /* the filled red banner */
+  --danger-bg-dim: #3a2a2a; /* barely-there red hover behind a destructive icon button */
+  --danger-fill-hover: #964a4a; /* hover on a control that sits on the red banner */
+
+  /* State hues outside the ok/warn/danger triad, each carrying a meaning
+     the triad would misreport if it borrowed one of them. */
+  --info: #6fb8f0; /* waiting: live, but on a human rather than on work */
+  --archive: #d08770; /* archive notices and archive-path errors */
+  --archived-badge: #b48ead; /* the "archived" marker itself */
+
+  /* Overlay. */
+  --scrim: rgba(24, 27, 34, 0.82); /* dims a stale terminal while it reconnects */
+
+  /* Corner radii. */
+  --radius-sm: 3px; /* controls and inputs */
+  --radius-md: 4px; /* panels and cards */
+  --radius-lg: 8px; /* pill-ish badges */
+
+  /* Font stacks. --font-ui is still the platform UI face; converting the
+     chrome to the vendored JetBrains Mono is its own TODO.md item, and
+     this token is the seam that change edits. --font-mono mirrors the
+     stack terminal.js hands xterm.js; nothing in this sheet asks for it
+     yet, and it is declared so that chrome which has to line up with
+     terminal content names the same stack rather than a second copy. */
+  --font-ui: system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  /* Deliberately NOT --font-mono: the auth token input wants whatever
+     monospace face the platform ships, not the vendored JetBrains Mono —
+     a bootstrap credential field has no reason to pull in the terminal's
+     font, and `ui-monospace` is the standard way to ask for the system's
+     own pick. */
+  --font-mono-system: ui-monospace, monospace;
+}
+
+/* ===== Shell and layout =========================================== */
+
 /* Minimal M1 chrome: dark, terminal-first, nothing decorative. */
 html,
 body,
 #main {
   height: 100%;
   margin: 0;
-  background: #14161a;
-  color: #d8dee9;
-  font-family: system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font-family: var(--font-ui);
 }
 
 /* The two-pane shell (BUGS_BURNDOWN.md issue 5): a fixed-width sidebar
@@ -78,7 +226,7 @@ body,
    * this column while open; the clip is what keeps their overflow from
    * widening the page. Still required, not redesign debt. */
   overflow: hidden auto;
-  border-right: 1px solid #262a31;
+  border-right: 1px solid var(--border-sidebar-edge);
 }
 
 .app-main {
@@ -96,8 +244,10 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #5b6270;
+  color: var(--fg-2);
 }
+
+/* ===== Sidebar chrome ============================================= */
 
 /* The sidebar's resting chrome (BUGS_BURNDOWN.md issue 5): two on-demand
    toggles for the hosts panel and the filter bar, so the column's
@@ -118,7 +268,7 @@ body,
 }
 
 .filter-active-note {
-  color: #d8b45f;
+  color: var(--warn);
   font-size: 12px;
 }
 
@@ -133,7 +283,7 @@ body,
   align-items: center;
   gap: 4px;
   margin-left: auto;
-  color: #8a919e;
+  color: var(--fg-1);
   font-size: 12px;
 }
 
@@ -141,10 +291,10 @@ body,
    labels are short and known, so the control can be sized to its content
    without the filter fields' max-width guard against long typed values. */
 .sidebar-sort .sort-select {
-  background: #14161a;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   /* `font: inherit` alone, and it is doing real work: a form control does
      not inherit type styling by default, so this is what pulls the 12px
      from `.sidebar-sort` above rather than a second declaration of it. */
@@ -187,6 +337,8 @@ body,
   min-width: 0;
 }
 
+/* ===== Main pane titlebar ========================================= */
+
 .layout {
   display: flex;
   flex-direction: column;
@@ -195,7 +347,7 @@ body,
 
 .titlebar {
   padding: 6px 10px;
-  background: #1d2026;
+  background: var(--bg-1);
   font-size: 13px;
   display: flex;
   gap: 12px;
@@ -222,12 +374,14 @@ body,
    button are gone with the sidebar redesign, so the title and this line
    are the only members competing for the header's width.) */
 .titlebar .meta {
-  color: #8a919e;
+  color: var(--fg-1);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ===== Shared button look ========================================= */
 
 /* Shared secondary-button look: `.new-session-button`,
    the create form's submit button, and the per-row stop/delete buttons
@@ -238,21 +392,23 @@ body,
    color, alignment). */
 .btn {
   background: none;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   font: inherit;
   cursor: pointer;
 }
 
 .btn:hover:not(:disabled) {
-  background: #262a31;
+  background: var(--bg-3);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ===== Session list and rows ====================================== */
 
 /* List view (PLAN_M2.md step 7): a flat, sorted list of session rows —
    deliberately plain, matching the rest of M1's undecorated chrome. */
@@ -272,7 +428,7 @@ body,
   display: flex;
   flex-direction: column;
   width: 100%;
-  border-bottom: 1px solid #1d2026;
+  border-bottom: 1px solid var(--border-row);
   /* No `position: relative` here: the actions-menu panel below used to
      anchor to this row with `position: absolute`, which meant every
      scrolling/clipping ancestor — `.session-list`'s `overflow-y: auto`,
@@ -286,7 +442,7 @@ body,
 }
 
 .session-row:focus-within {
-  background: #1d2026;
+  background: var(--bg-1);
 }
 
 /* The selected row is the session the right pane currently shows. Same
@@ -294,35 +450,35 @@ body,
    accent bar), and for the same stated reason: selection has to be
    readable at a glance from across the whole sidebar, not inferable from
    the titlebar. The fill is deliberately a step brighter than the
-   #1d2026 hover/focus tint so the two states cannot be confused, the
+   `--bg-1` hover/focus tint so the two states cannot be confused, the
    accent bar is the brightest neutral in the palette (the accent is a
    state indicator, so it needs real contrast against both the fill and
-   the page, which the strip's #4d5666 border tint does not reach), and
-   the title goes full white below — three cues, so no single one has to
-   carry a low-vision reader alone. `box-shadow: inset` for the accent
+   the page, which the strip's `--accent-edge` border tint does not
+   reach), and the title goes full white below — three cues, so no single
+   one has to carry a low-vision reader alone. `box-shadow: inset` for the accent
    bar simply because it needs no extra element and no positioning rule —
    a left border would shift the row's content by its own width. NOT
    opacity-based: stale rows and disabled open buttons already speak
    through opacity, and a background fill composes with both instead of
    multiplying against them. */
 .session-row.selected {
-  background: #2f3641;
-  box-shadow: inset 3px 0 0 #8a919e;
+  background: var(--accent-fill);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .session-row.selected .session-title {
-  color: #fff;
+  color: var(--fg-bright);
 }
 
 /* Without these, the open button's own hover/focus rule (below) paints
-   its #1d2026 tint over nearly the whole row — and since clicking a row
+   its `--bg-1` tint over nearly the whole row — and since clicking a row
    is exactly what selects it, the highlight would be at its weakest the
    moment it appears, under the still-focused, still-hovered button. A
    brighter tint keeps hover/focus feedback on a selected row without
    letting it swallow the selection. */
 .session-row.selected .session-row-open:hover:not(:disabled),
 .session-row.selected .session-row-open:focus {
-  background: #3a4250;
+  background: var(--accent-fill-hover);
 }
 
 .session-row-main {
@@ -388,6 +544,8 @@ body,
   font-size: 14px;
   line-height: 1.4;
 }
+
+/* ===== Row actions menu =========================================== */
 
 /* The floating panel the toggle anchors: rename/stop/archive/delete, and
    the in-menu confirm that replaces them for a destructive action. Floats
@@ -499,9 +657,9 @@ body,
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  background: #1d2026;
-  border: 1px solid #3a3f47;
-  border-radius: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   max-width: 288px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
@@ -526,7 +684,7 @@ body,
 
 .session-row-open:hover:not(:disabled),
 .session-row-open:focus {
-  background: #1d2026;
+  background: var(--bg-1);
   outline: none;
 }
 
@@ -542,6 +700,8 @@ body,
   opacity: 0.5;
   cursor: default;
 }
+
+/* ===== Row actions and confirmations ============================== */
 
 /* Lifecycle actions and confirmations: small, secondary-looking
    controls that stay out of the open button's way — plain text buttons
@@ -580,8 +740,8 @@ body,
    visual class as the other irreversible actions, not a gentler one. */
 .session-row-delete,
 .confirm-delete {
-  color: #e08080;
-  border-color: #5a3838;
+  color: var(--danger);
+  border-color: var(--danger-border);
 }
 
 /* Inline delete confirmation (replaces the old native `window.confirm()`
@@ -608,7 +768,7 @@ body,
 .confirm-consequence {
   flex-shrink: 0;
   font-size: 12px;
-  color: #e0d090;
+  color: var(--warn-bright);
   margin-right: 6px;
 }
 
@@ -619,9 +779,11 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: #e0d090;
+  color: var(--warn-bright);
   margin-right: 6px;
 }
+
+/* ===== Inline rename ============================================== */
 
 /* The inline rename field (PLAN_M5.md item 6), used in a row's actions
    panel and in the session view's titlebar — two hosts on two AXES. The
@@ -659,10 +821,10 @@ body,
 .rename-input {
   flex: 1 1 0;
   min-width: 0;
-  background: #14161a;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   font: inherit;
   font-size: 13px;
   padding: 2px 8px;
@@ -687,7 +849,7 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 /* Full-width under the titlebar rather than inside it, for the reason
@@ -697,8 +859,10 @@ body,
 .rename-error {
   padding: 4px 10px;
   font-size: 12px;
-  color: #e08080;
+  color: var(--danger);
 }
+
+/* ===== Session row fields ========================================= */
 
 /* Titles, cwds, and invocations are all attacker- or user-controlled
    strings with no length limit the UI enforces (a title can legally run
@@ -719,7 +883,7 @@ body,
 .session-cwd,
 .session-invocation,
 .session-host {
-  color: #8a919e;
+  color: var(--fg-1);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -747,7 +911,7 @@ body,
    zero flex-basis HEIGHT, which collapsed the chip to an invisible
    zero-height span. It ellipsizes against the panel's max-width instead. */
 .session-profile {
-  color: #8a919e;
+  color: var(--fg-1);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -768,8 +932,10 @@ body,
 .session-profile[data-profile-existence="renamed"],
 .session-profile[data-profile-existence="deleted"],
 .session-profile[data-profile-existence="unrecognized"] {
-  color: #d8b45f;
+  color: var(--warn);
 }
+
+/* ===== Status badges ============================================== */
 
 /* Status styling is deliberately minimal and honest (PLAN_M2.md): a
    color signals the coarse category, never a guess about what the
@@ -777,7 +943,7 @@ body,
 .status-badge {
   font-size: 12px;
   padding: 2px 8px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
   /* Every OTHER badge word is short and fixed ("running", "exited (code
      N)", ...), but `error`'s text embeds the shim's own detail — argv-
@@ -804,11 +970,11 @@ body,
    list of healthy sessions therefore reads as one calm colour, which is
    what makes the third stand out at all. */
 .status-badge.running {
-  color: #7fd88f;
+  color: var(--ok);
 }
 
 .status-badge.idle {
-  color: #5f8f6b;
+  color: var(--ok-dim);
 }
 
 /* Waiting deliberately leaves the green family. It is the one live status
@@ -819,11 +985,11 @@ body,
    amber here would compete with `error` and `interrupted`, which report
    actual failures. */
 .status-badge.waiting {
-  color: #6fb8f0;
+  color: var(--info);
 }
 
 .status-badge.exited {
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 /* There is deliberately no `.status-badge.unknown` rule: an unclassified
@@ -838,7 +1004,7 @@ body,
    the two must not read as the same outcome at a glance. Deliberately not
    red — nothing failed, and this is not an error. */
 .status-badge.interrupted {
-  color: #d8b45f;
+  color: var(--warn);
 }
 
 /* Error (PLAN_M3.md item 3) IS the red-family case `interrupted`'s comment
@@ -846,7 +1012,7 @@ body,
    agent never started at all, a genuine failure distinct from `exited`'s
    "it ran and finished" or `interrupted`'s "the host took it away". */
 .status-badge.error {
-  color: #e0685f;
+  color: var(--danger-strong);
 }
 
 /* A stale row (SPEC.md: sessions on an unreachable host "stay in the list
@@ -868,14 +1034,16 @@ body,
 .host-chip {
   font-size: 12px;
   padding: 2px 8px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .stale-badge {
-  color: #d8b45f;
+  color: var(--warn);
 }
+
+/* ===== Hosts panel ================================================ */
 
 /* The hosts panel (PLAN_M6.md item 6): the on-demand evidence and
    management surface behind the sidebar's "hosts" toggle. SPEC.md's
@@ -884,7 +1052,7 @@ body,
    the actions (add/retry/retarget/remove/adopt/profiles). Mounted
    permanently but collapsed while closed — see .hosts-panel-holder. */
 .hosts-panel {
-  border-bottom: 1px solid #1d2026;
+  border-bottom: 1px solid var(--border-row);
   padding: 8px 14px;
 }
 
@@ -896,7 +1064,7 @@ body,
 
 .hosts-panel-title {
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -961,11 +1129,11 @@ body,
    is. Shape is shared with `.stale-badge` above. */
 
 .host-chip.connected {
-  color: #7fd88f;
+  color: var(--ok);
 }
 
 .host-chip.connecting {
-  color: #8a919e;
+  color: var(--fg-1);
   font-style: italic;
 }
 
@@ -973,7 +1141,7 @@ body,
    recovers on its own, so it is something to know about rather than
    something that failed. */
 .host-chip.unreachable {
-  color: #d8b45f;
+  color: var(--warn);
 }
 
 /* The red-family case, and the only one that is: skew, both identity
@@ -983,7 +1151,7 @@ body,
    identities, edit or remove an entry, press retry — which is why the chip
    groups them by "needs attention" while the words beside it say which. */
 .host-chip.needs-attention {
-  color: #e0685f;
+  color: var(--danger-strong);
 }
 
 /* A hosts read that failed while a snapshot is still held. Its own line
@@ -1003,7 +1171,7 @@ body,
    opposite of what occurred. */
 .host-warning {
   font-size: 12px;
-  color: #d8b45f;
+  color: var(--warn);
   padding: 2px 0 0;
 }
 
@@ -1014,12 +1182,12 @@ body,
 .host-detail,
 .host-remedy {
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
   padding: 1px 0 0;
 }
 
 .host-remedy {
-  color: #d8dee9;
+  color: var(--fg-0);
 }
 
 .host-error {
@@ -1035,10 +1203,10 @@ body,
 }
 
 .host-destination-input {
-  background: #14161a;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   font: inherit;
   font-size: 13px;
   padding: 2px 6px;
@@ -1058,7 +1226,7 @@ body,
 }
 
 .host-remove {
-  color: #e08080;
+  color: var(--danger);
 }
 
 /* The add-host form reuses the create dialog's box entirely — same inline,
@@ -1076,14 +1244,14 @@ body,
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 .add-host-form input {
-  background: #14161a;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   font: inherit;
   font-size: 13px;
   padding: 4px 8px;
@@ -1095,12 +1263,14 @@ body,
   padding: 4px 10px;
 }
 
+/* ===== Host provisioning ========================================== */
+
 /* Provisioning stays inside its host row because execution state and progress
    reads are host-scoped. Acceptance also refreshes the global registry. A
    left rule makes the long action list subordinate to the row without making
    it look page-blocking — it is not; OpLock ends at acceptance. */
 .provisioning-panel {
-  border-left: 2px solid #2d3138;
+  border-left: 2px solid var(--border-dim);
   margin: 5px 0 1px 10px;
   padding: 3px 0 3px 10px;
 }
@@ -1125,10 +1295,10 @@ body,
    Preserve its line boundaries and whitespace; wrapping long paths is the
    only layout intervention, and does not change the text copied or read. */
 .provisioning-plan {
-  background: #14161a;
-  border: 1px solid #2d3138;
-  border-radius: 3px;
-  color: #c5cad3;
+  background: var(--bg-0);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0-alt);
   font: inherit;
   font-size: 12px;
   line-height: 1.45;
@@ -1140,19 +1310,19 @@ body,
 }
 
 .provisioning-title {
-  color: #d8dee9;
+  color: var(--fg-0);
   font-size: 12px;
   font-weight: 600;
 }
 
 .provisioning-status,
 .provisioning-planning {
-  color: #8a919e;
+  color: var(--fg-1);
   font-size: 12px;
 }
 
 .provisioning-steps {
-  color: #aeb4bf;
+  color: var(--fg-dim-alt);
   font-size: 12px;
   margin: 4px 0 2px;
   padding-left: 22px;
@@ -1163,26 +1333,26 @@ body,
 }
 
 .provisioning-step-name {
-  color: #d8dee9;
+  color: var(--fg-0);
   margin-right: 7px;
 }
 
 .provisioning-step-status {
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 .provisioning-step[data-status="completed"] .provisioning-step-status,
 .provisioning-step[data-status="skipped"] .provisioning-step-status {
-  color: #7fd88f;
+  color: var(--ok);
 }
 
 .provisioning-step[data-status="degraded"] .provisioning-step-status {
-  color: #d8b45f;
+  color: var(--warn);
 }
 
 .provisioning-step[data-status="failed"] .provisioning-step-status,
 .provisioning-run[data-provisioning-status="failed"] .provisioning-status {
-  color: #e0685f;
+  color: var(--danger-strong);
 }
 
 .provisioning-step-message,
@@ -1195,16 +1365,18 @@ body,
 
 .provisioning-step-message,
 .provisioning-run-message {
-  color: #aeb4bf;
+  color: var(--fg-dim-alt);
 }
 
 /* The manual command never disappears. It is quiet while automatic setup
    is available and returns to the ordinary remedy weight when the probe says
    the machine has no supported manager. */
 .provisioning-manual.secondary {
-  color: #8a919e;
+  color: var(--fg-1);
   margin-top: 4px;
 }
+
+/* ===== Host profiles ============================================== */
 
 /* One host's profiles, expanded inside its own row (PLAN_M6_75.md item 8).
 
@@ -1217,7 +1389,7 @@ body,
   gap: 6px;
   margin: 6px 0 8px 12px;
   padding-left: 10px;
-  border-left: 2px solid #2a2f37;
+  border-left: 2px solid var(--border-nested);
 }
 
 .profiles-header {
@@ -1228,7 +1400,7 @@ body,
 
 .profiles-title {
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -1245,7 +1417,7 @@ body,
 }
 
 .profile-delete {
-  color: #e08080;
+  color: var(--danger);
 }
 
 /* SPEC.md's snapshot rule, stated where profiles are edited. Quiet — it is
@@ -1254,7 +1426,7 @@ body,
 .profiles-snapshot-note,
 .profiles-empty {
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 .profile-row {
@@ -1285,7 +1457,7 @@ body,
 
 .profile-kind {
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
   flex-shrink: 0;
 }
 
@@ -1295,9 +1467,9 @@ body,
 .profile-default {
   font-size: 11px;
   padding: 1px 6px;
-  border-radius: 8px;
-  background: #2a2f37;
-  color: #d8dee9;
+  border-radius: var(--radius-lg);
+  background: var(--bg-4);
+  color: var(--fg-0);
   flex-shrink: 0;
 }
 
@@ -1305,7 +1477,7 @@ body,
   display: flex;
   gap: 10px;
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
   min-width: 0;
 }
 
@@ -1332,15 +1504,15 @@ body,
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 .profile-form input,
 .profile-kind-select {
-  background: #14161a;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   font: inherit;
   font-size: 13px;
   padding: 4px 8px;
@@ -1360,7 +1532,7 @@ body,
 .profiles-warning,
 .profiles-notice {
   font-size: 12px;
-  color: #d8b45f;
+  color: var(--warn);
 }
 
 /* A stale session's notice (SPEC.md: metadata behind a clear notice, and
@@ -1371,8 +1543,8 @@ body,
 .host-stale-notice {
   padding: 10px 14px;
   font-size: 13px;
-  color: #d8b45f;
-  background: #1d2026;
+  color: var(--warn);
+  background: var(--bg-1);
 }
 
 /* The rest of SPEC.md's metadata triple for a stale session: the titlebar
@@ -1381,8 +1553,10 @@ body,
    be described two ways on two surfaces. */
 .stale-metadata {
   padding: 4px 14px 8px;
-  background: #1d2026;
+  background: var(--bg-1);
 }
+
+/* ===== Filter and search ========================================== */
 
 /* Filter and search (PLAN_M6_75.md item 7). Mounted on demand behind the
    sidebar's "filter" toggle: the permanent "filtered" note beside the
@@ -1407,7 +1581,7 @@ body,
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 .session-filter .filter-archived {
@@ -1422,10 +1596,10 @@ body,
 
 .session-filter input,
 .session-filter select {
-  background: #14161a;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   font: inherit;
   font-size: 13px;
   padding: 4px 8px;
@@ -1444,8 +1618,10 @@ body,
    reads as a list that failed to load rather than as a search that found
    nothing, and the two call for opposite reactions. */
 .filter-empty {
-  color: #8a919e;
+  color: var(--fg-1);
 }
+
+/* ===== Create dialog ============================================== */
 
 /* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
    toolbar, not a modal library — see the design note in lib.rs's
@@ -1466,8 +1642,8 @@ body,
   gap: 8px;
   padding: 10px 14px;
   margin: 0 14px 10px;
-  background: #1d2026;
-  border-radius: 4px;
+  background: var(--bg-1);
+  border-radius: var(--radius-md);
 }
 
 .create-session-form label {
@@ -1475,16 +1651,16 @@ body,
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
-  color: #8a919e;
+  color: var(--fg-1);
 }
 
 .create-session-form input,
 .create-session-host,
 .create-session-profile {
-  background: #14161a;
-  border: 1px solid #3a3f47;
-  border-radius: 3px;
-  color: #d8dee9;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   font: inherit;
   font-size: 13px;
   padding: 4px 8px;
@@ -1515,7 +1691,7 @@ body,
 .create-session-profile-note,
 .create-session-profile-error {
   font-size: 12px;
-  color: #d8b45f;
+  color: var(--warn);
 }
 
 .create-session-submit {
@@ -1532,8 +1708,10 @@ body,
 .action-error {
   padding: 2px 14px 8px;
   font-size: 12px;
-  color: #e08080;
+  color: var(--danger);
 }
+
+/* ===== Session view: restart, archive, banners ==================== */
 
 /* The session view's restart affordance (PLAN_M3.md item 9). A plain
    flex row under the titlebar rather than anything modal: SPEC.md says
@@ -1551,7 +1729,7 @@ body,
   align-items: baseline;
   gap: 8px;
   padding: 6px 10px;
-  background: #232833;
+  background: var(--bg-2);
   font-size: 12px;
 }
 
@@ -1564,12 +1742,12 @@ body,
 
 .archive-error,
 .archived-notice {
-  color: #d08770;
+  color: var(--archive);
   padding: 8px 14px;
 }
 
 .archived-badge {
-  color: #b48ead;
+  color: var(--archived-badge);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -1577,7 +1755,7 @@ body,
 .restart-offer-text {
   flex: 1 1 auto;
   min-width: 0;
-  color: #b8c0cc;
+  color: var(--fg-dim);
 }
 
 /* Full-width beneath the controls (`flex-basis: 100%`) rather than
@@ -1587,7 +1765,7 @@ body,
 .restart-error {
   flex: 1 1 100%;
   font-size: 12px;
-  color: #e08080;
+  color: var(--danger);
 }
 
 /* Two classes, not one: `.banner`'s own `display: none` (below) must
@@ -1597,8 +1775,8 @@ body,
    flip which one wins on the next unrelated edit to this file. */
 .banner.truncation-banner {
   display: block;
-  background: #3a3520;
-  color: #e0d090;
+  background: var(--warn-bg);
+  color: var(--warn-bright);
 }
 
 /* The complete-list counterpart, and it always renders (see `ListView`): a
@@ -1609,18 +1787,20 @@ body,
    that did not finish. */
 .banner.session-count {
   display: block;
-  background: #1d2026;
-  color: #8a919e;
+  background: var(--bg-1);
+  color: var(--fg-1);
   font-size: 12px;
 }
 
 .banner {
   display: none;
-  background: #7a3b3b;
-  color: #fff;
+  background: var(--danger-bg);
+  color: var(--fg-bright);
   padding: 4px 10px;
   font-size: 13px;
 }
+
+/* ===== Terminal attachment and placeholders ======================= */
 
 /* One terminal's attachment status line (PLAN_M4.md item 7), written by
    terminal.js and hidden — like `.banner` — until it has something to
@@ -1661,11 +1841,11 @@ body,
   pointer-events: none;
   padding: 2px 10px;
   font-size: 12px;
-  background: #232833;
+  background: var(--bg-2);
 }
 
 .attach-busy {
-  color: #b8c0cc;
+  color: var(--fg-dim);
 }
 
 /* The connecting placeholder (PLAN_M5.md item 5): what stands in front of
@@ -1700,7 +1880,7 @@ body,
   pointer-events: none;
   padding: 2em;
   font-size: 14px;
-  color: #b8c0cc;
+  color: var(--fg-dim);
 }
 
 /* The reconnect surface (PLAN_M6.md item 7): the same placeholder element,
@@ -1718,8 +1898,8 @@ body,
    minutes, over a last screen that is now stale, and the fade is what
    keeps that frozen content from reading as live. */
 .terminal-connecting.terminal-reconnecting {
-  background: rgba(24, 27, 34, 0.82);
-  color: #e0c890;
+  background: var(--scrim);
+  color: var(--warn-bright-alt);
 }
 
 /* The manual control on that surface. Interactivity is restored for the
@@ -1731,16 +1911,16 @@ body,
   pointer-events: auto;
   font-size: 12px;
   padding: 1px 8px;
-  border-color: #e0c890;
-  color: #fff;
+  border-color: var(--warn-bright-alt);
+  color: var(--fg-bright);
 }
 
 .terminal-reconnect-now:hover:not(:disabled) {
-  background: #6a5a34;
+  background: var(--warn-fill-hover);
 }
 
 .attach-error {
-  color: #e08080;
+  color: var(--danger);
 }
 
 /* The "take control" button terminal.js paints into a detach banner when
@@ -1751,12 +1931,12 @@ body,
   margin-left: 10px;
   font-size: 12px;
   padding: 1px 8px;
-  border-color: #e0b0b0;
-  color: #fff;
+  border-color: var(--danger-soft);
+  color: var(--fg-bright);
 }
 
 .banner-reclaim:hover:not(:disabled) {
-  background: #964a4a;
+  background: var(--danger-fill-hover);
 }
 
 /* A tab past the mounted-island cap (`MAX_MOUNTED_TAB_ISLANDS` in
@@ -1766,8 +1946,10 @@ body,
 .terminal-not-mounted {
   padding: 2em;
   font-size: 14px;
-  color: #b8c0cc;
+  color: var(--fg-dim);
 }
+
+/* ===== Terminal tabs ============================================== */
 
 /* Terminal tabs (PLAN_M4.md item 6). A plain one-line strip under the
    restart offer: the agent terminal first, then each open tab with its own
@@ -1781,7 +1963,7 @@ body,
   align-items: stretch;
   gap: 4px;
   padding: 4px 10px;
-  background: #1d2026;
+  background: var(--bg-1);
   flex-shrink: 0;
   overflow-x: auto;
 }
@@ -1807,14 +1989,14 @@ body,
    two separate controls rather than one tab with an affordance on it. */
 .tab-slot .tab {
   border-right: none;
-  border-radius: 3px 0 0 3px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
 }
 
 .tab-close {
   background: none;
-  border: 1px solid #3a3f47;
-  border-radius: 0 3px 3px 0;
-  color: #8a919e;
+  border: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--fg-1);
   font: inherit;
   font-size: 12px;
   padding: 3px 7px;
@@ -1822,8 +2004,8 @@ body,
 }
 
 .tab-close:hover:not(:disabled) {
-  background: #3a2a2a;
-  color: #e08080;
+  background: var(--danger-bg-dim);
+  color: var(--danger);
 }
 
 .tab-close:disabled {
@@ -1835,9 +2017,9 @@ body,
    filled background rather than only a border tint: with several tabs the
    selection has to be readable at a glance from across the strip. */
 .tab.selected {
-  background: #2f3641;
-  color: #fff;
-  border-color: #4d5666;
+  background: var(--accent-fill);
+  color: var(--fg-bright);
+  border-color: var(--accent-edge);
 }
 
 /* The close confirmation and the tab-operation error line both sit on
@@ -1850,15 +2032,17 @@ body,
   align-items: baseline;
   gap: 6px;
   padding: 4px 10px;
-  background: #232833;
+  background: var(--bg-2);
 }
 
 .tab-error,
 .lease-error {
   padding: 4px 10px;
   font-size: 12px;
-  color: #e08080;
+  color: var(--danger);
 }
+
+/* ===== Device authentication ====================================== */
 
 /* Device authentication replaces the application rather than floating over
    it. Every underlying reader has already received 401, so leaving its stale
@@ -1877,9 +2061,9 @@ body,
   display: grid;
   gap: 12px;
   padding: 24px;
-  border: 1px solid #3a3f47;
-  border-radius: 4px;
-  background: #1d2026;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
 }
 
 .auth-card h1,
@@ -1889,16 +2073,16 @@ body,
 
 .auth-card label {
   font-size: 13px;
-  color: #aeb6c3;
+  color: var(--fg-dim-alt2);
 }
 
 .auth-token-input {
   padding: 8px 10px;
-  border: 1px solid #4a505a;
-  border-radius: 3px;
-  background: #14161a;
-  color: #d8dee9;
-  font: 14px ui-monospace, monospace;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font: 14px var(--font-mono-system);
 }
 
 .auth-submit {
@@ -1907,9 +2091,11 @@ body,
 }
 
 .auth-error {
-  color: #e08080;
+  color: var(--danger);
   font-size: 13px;
 }
+
+/* ===== Build skew and staleness notices =========================== */
 
 /* The client↔helm build mismatch (PLAN_M6.md item 6): one line above the
    whole app, on its own band so it reads as a statement about the PAGE
@@ -1922,9 +2108,9 @@ body,
 .build-skew {
   padding: 6px 10px;
   font-size: 12px;
-  color: #e0d090;
-  background: #2a2620;
-  border-bottom: 1px solid #4a4230;
+  color: var(--warn-bright);
+  background: var(--warn-bg-dim);
+  border-bottom: 1px solid var(--warn-border);
 }
 
 /* Amber, not red: the detail poll no longer finding this session is a
@@ -1934,8 +2120,10 @@ body,
 .refresh-stale {
   padding: 4px 10px;
   font-size: 12px;
-  color: #e0d090;
+  color: var(--warn-bright);
 }
+
+/* ===== Terminal panes ============================================= */
 
 /* Every terminal is mounted at once and stacked in one positioned box;
    only the selected pane is visible (PLAN_M4.md item 6: switching tabs is
@@ -1981,7 +2169,7 @@ body,
 }
 
 .status.error {
-  color: #e08080;
+  color: var(--danger);
 }
 .clipboard-facts {
   margin-top: 0.4rem;
