@@ -51,6 +51,9 @@ Linux" below instead.
   starters for Claude Code and Codex. The working directory starts at `~`, which expands once against that host's home
   at creation; any other directory must be an existing absolute path on that host — plain relative paths are rejected,
   and `~user` forms and variables never expand. Submitting drops you straight into the agent's terminal.
+- If you start agents through a launcher that wants the directory as an argument (`my-wrapper run <dir> claude`), write
+  `{cwd}` where the directory goes and set the profile's agent kind — see
+  [docs/agent-wrappers.md](docs/agent-wrappers.md).
 
 To use an ordinary browser instead of (or alongside) the app window, open `http://127.0.0.1:7433/` and paste the token
 printed by `Farhelm.app/Contents/MacOS/farhelm helm token show`. `Farhelm.app/Contents/MacOS/farhelm helm token rotate`

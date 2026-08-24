@@ -14,7 +14,17 @@
 //!    re-deriving later would consult a PATH, a filesystem, and a heuristic
 //!    that may all have changed since, so a session could silently become a
 //!    different kind between two restarts and resume through a template
-//!    that never matched the agent actually running.
+//!    that never matched the agent actually running. A RESUME TEMPLATE may
+//!    carry both placeholders; a launch invocation carries only
+//!    [`CWD_PLACEHOLDER`], because nothing ever substitutes
+//!    [`CONVERSATION_PLACEHOLDER`] into an invocation — written there it
+//!    survives as literal text on the agent's command line. The two obey
+//!    the same whole-element rule and are filled at different moments:
+//!    [`CONVERSATION_PLACEHOLDER`] when the resume argv is built
+//!    ([`IntegrationSnapshot::filled_resume_argv`]), and
+//!    [`CWD_PLACEHOLDER`] at spawn time in `Supervisor::spawn_agent`,
+//!    which is the only place the launch's working directory is known on
+//!    every path.
 //! 2. **Conversation-identity capture** (item 8). Both supported agents
 //!    write discoverable on-disk records; the supervisor reads them. For a
 //!    kind that supports one, identity is ALSO reported by the agent
