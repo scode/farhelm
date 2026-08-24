@@ -50,11 +50,26 @@
 //! the insert that creates the row and there is deliberately no update path
 //! for them, because re-deriving a kind later would consult a PATH and a
 //! filesystem that may since have changed (`crate::agent_kind`'s own docs).
-//! The two columns beside them are the mutable half and each has exactly
-//! one narrow writer: [`SessionStore::record_first_input`] and
-//! [`SessionStore::record_captured_conversation`], both write-once and both
+//! The columns beside them are the mutable half.
+//! [`SessionStore::record_first_input`] and
+//! [`SessionStore::record_captured_conversation`] are write-once and both
 //! conditioned on the column still being NULL, so neither can ever move
 //! backwards or overwrite what a concurrent observer already established.
+//! [`SessionStore::record_captured_conversation`] is not the only writer of
+//! the identity column, though: [`SessionStore::record_reported_conversation`]
+//! writes the same column from what the agent itself announced through its
+//! launch hook, and that one deliberately REPLACES. The two are not in
+//! tension — write-once is a rule about scan evidence, which can only ever
+//! confirm what an earlier scan found, whereas the agent is authoritative
+//! about its own conversation and is free to contradict what it said
+//! before. Most repeat reports do not contradict anything: the hook fires
+//! on `startup`, `resume`, and `compact` too, and those re-announce the id
+//! already stored, so the replace is an idempotent overwrite of a value
+//! with itself. The reports that matter are the ones carrying a DIFFERENT
+//! id — a `/clear` or `/new` inside the same process — and there the value
+//! being overwritten is precisely the one that must not be resumed. Both
+//! writers are fenced on `generation`, so neither can write across a
+//! relaunch.
 //!
 //! The profiles catalog (PLAN_M6_75.md item 4) is the one table here whose
 //! rows are not about a session at all: it holds the named, user-editable
@@ -109,7 +124,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 13;
+const SCHEMA_VERSION: i64 = 14;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -901,6 +916,30 @@ pub struct PriorRun {
 /// function's transaction.
 type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64, i64);
 
+/// The columns [`SessionStore::restart_pending_launch`] reads inside its
+/// transaction: the outcome state, the pane, `created_at`, the title, the
+/// session token, the creation sequence, `last_activity_at`, and
+/// `conversation_source` — in that positional order.
+///
+/// The first two and the last are the takeover's CONDITIONS (evidence that
+/// a launch happened); the rest are the values a takeover must carry across
+/// its delete-and-reinsert. They are read as one tuple in one statement
+/// deliberately, so the row the transaction refuses is provably the same row
+/// whose timestamps and title it would otherwise have preserved.
+///
+/// Named only because the tuple is wide enough that clippy (rightly) asks
+/// for it; it has exactly one producer and one consumer.
+type LaunchTakeoverColumns = (
+    String,
+    String,
+    i64,
+    String,
+    String,
+    i64,
+    i64,
+    Option<String>,
+);
+
 /// The new launch generation a restart claimed, and what it replaced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelaunchClaim {
@@ -1268,11 +1307,24 @@ pub struct StoredSession {
     /// `None` only for a row that predates this column, which can have no
     /// integration and therefore no correlation either.
     pub canonical_cwd: Option<String>,
-    /// The agent conversation this session was found to be running
-    /// (PLAN_M3.md item 8), or `None` while nothing has been claimed.
-    /// Written once by [`SessionStore::record_captured_conversation`], and
-    /// only ever from a COMPLETE post-horizon scan — see `service`'s
-    /// `capture_pass` for why a provisional match is never stored.
+    /// The agent conversation this session is running (PLAN_M3.md item 8),
+    /// or `None` while nothing has been claimed.
+    ///
+    /// Two writers, distinguished by
+    /// [`StoredSession::conversation_source`], and they follow different
+    /// rules on purpose. The record scan writes through
+    /// [`SessionStore::record_captured_conversation`], write-once and only
+    /// ever from a COMPLETE post-horizon scan — see `service`'s
+    /// `capture_pass` for why a provisional match is never stored. The
+    /// agent's own launch hook writes through
+    /// [`SessionStore::record_reported_conversation`], which REPLACES. A
+    /// repeat report usually carries the id already stored — the hook fires
+    /// on `startup`, `resume`, and `compact` as well, so the write lands the
+    /// same value twice and is idempotent. When the id DIFFERS, the agent is
+    /// saying it moved to another conversation inside the same process (a
+    /// `/clear` or `/new`), and the value being overwritten is precisely the
+    /// one that must not be resumed. Both writers are fenced on
+    /// `generation`, so "replaceable" never reaches across a relaunch.
     pub captured_conversation: Option<String>,
     /// Where the claimed conversation's record was when it was claimed.
     ///
@@ -1283,8 +1335,10 @@ pub struct StoredSession {
     /// simply fails re-verification, which retains the identity (see
     /// `service`'s `reverify_capture`).
     pub captured_record: Option<String>,
-    /// Whether correlation for this session was found AMBIGUOUS and no
-    /// identity will ever be claimed for this launch (PLAN_M3.md item 8).
+    /// Whether correlation for this session was found AMBIGUOUS, which bars
+    /// any SCAN-DERIVED claim for the rest of this launch (PLAN_M3.md item
+    /// 8). It does not bar an identity outright: an authoritative report
+    /// from the agent supersedes the verdict and clears it.
     ///
     /// Durable, and that is the point: the collision that produced it —
     /// a rival session sharing the working directory, a second record in
@@ -1292,10 +1346,16 @@ pub struct StoredSession {
     /// fresh supervisor that happened to see only one of the two
     /// candidates (because the rival's evidence has since been cleaned up)
     /// would otherwise claim an identity on strictly worse evidence than
-    /// the pass that bailed. Only a new LAUNCH clears it — a verdict is
-    /// about one run's correlation, not about the session forever — which
-    /// is what [`SessionStore::begin_relaunch`] does for a relaunch that
-    /// is not resuming a captured identity.
+    /// the pass that bailed. Nothing the SCAN can later discover clears it
+    /// — a verdict is about one run's correlation, and among scan evidence
+    /// the only honest direction is toward refusing. Two things do clear
+    /// it: a new LAUNCH, because the verdict was about one run and not
+    /// about the session forever ([`SessionStore::begin_relaunch`], for a
+    /// relaunch that is not resuming a captured identity), and a REPORT,
+    /// because the agent naming its own conversation is not one more piece
+    /// of evidence to weigh against the collision — it is the answer the
+    /// collision was standing in for
+    /// ([`SessionStore::record_reported_conversation`], plan D6).
     pub capture_ambiguous: bool,
     /// When this supervisor first confirmed delivery of input to the
     /// CURRENT launch, in seconds since the Unix epoch — the correlator
@@ -1352,6 +1412,30 @@ pub struct StoredSession {
     /// already collected costs nothing but a fall through to the sweep.
     /// `false` is never a degradation — it is exactly M2's stop.
     pub launch_scoped: bool,
+    /// Which writer last set [`StoredSession::captured_conversation`]:
+    /// `None` for the record-scan correlator (or nothing claimed yet —
+    /// the two cannot be told apart from this column alone, but nothing
+    /// needs to: a `None` `captured_conversation` makes the distinction
+    /// moot), `Some("hook")` for the agent's own `SessionStart` report.
+    ///
+    /// This is what lets a report FENCE OUT the scan rather than race it.
+    /// [`SessionStore::record_capture_ambiguous`] requires this column to
+    /// be `NULL` before it writes, because it CLEARS an identity and would
+    /// otherwise blank out a report;
+    /// [`SessionStore::record_captured_conversation`] needs no such
+    /// predicate, since its own write-once `captured_conversation IS NULL`
+    /// condition already excludes every reported row. Either way, once an
+    /// agent has reported its own identity no scan verdict can overwrite
+    /// or contradict it. Only [`SessionStore::record_reported_conversation`]
+    /// sets it (unconditionally, since a second report is a legitimate
+    /// replacement — see that method's docs), and only
+    /// [`SessionStore::begin_relaunch`]'s `reset_capture` clears it back to
+    /// `None`, in step with the rest of the captured columns it resets for
+    /// a fresh launch. It is also read as launch EVIDENCE outside the
+    /// capture path: only a process the supervisor launched can have caused
+    /// it to be written (`service`'s `reserved_launch_evidence` and
+    /// [`SessionStore::restart_pending_launch`]).
+    pub conversation_source: Option<String>,
     /// Which profile this session was CREATED from, or `None` for a
     /// raw-created session (PLAN_M6_75.md item 4).
     ///
@@ -1511,6 +1595,23 @@ pub struct SessionStore {
 ///   fallback where it belongs: a concession to OLDER senders, not
 ///   something every local read has to keep applying forever. See
 ///   [`StoredSession::last_activity_at`].
+/// - 14: `sessions.conversation_source` — which of the two writers last set
+///   `captured_conversation`: `NULL` for the record-scan correlator (or
+///   nothing claimed yet), `'hook'` for the agent's own `SessionStart`
+///   report. No `CHECK` constraint restricting it to those two values —
+///   and unlike version 8's snapshot pair, that is a CHOICE rather than a
+///   limitation. The pair's argument (`ALTER TABLE ADD COLUMN` cannot add
+///   a table-level `CHECK`, so one would make a migrated database diverge
+///   from a fresh one) does not carry over: this is a single column, and a
+///   column-level `CHECK` referring only to itself is legal in an `ADD
+///   COLUMN`. It is omitted anyway, to keep the invariant where every
+///   other cross-column invariant in this table lives — in the code that
+///   writes it, which is the only place that can also state WHY. Adding
+///   the constraint later would buy a redundant second statement of a rule
+///   [`SessionStore::record_reported_conversation`] is already the sole
+///   enforcer of. The column exists so a report can dominate and fence out
+///   the scan (see that method) without the two writers racing each other
+///   on disk.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1567,7 +1668,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  session_token         TEXT,
                  creation_seq          INTEGER,
                  archived              INTEGER NOT NULL DEFAULT 0,
-                 last_activity_at      INTEGER NOT NULL DEFAULT 0
+                 last_activity_at      INTEGER NOT NULL DEFAULT 0,
+                 conversation_source   TEXT
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1590,7 +1692,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  ON create_reservations (session_id) WHERE state = 'pending';
              {PROFILES_SCHEMA}
              {STARTER_PROFILES}
-             PRAGMA user_version = 13;
+             PRAGMA user_version = 14;
              COMMIT;"
         ))
         .context("creating schema")?;
@@ -1948,6 +2050,21 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 12 to 13")?;
         version = 13;
     }
+    if version == 13 {
+        // No backfill, unlike 12->13's `last_activity_at`: NULL already
+        // means exactly what an un-migrated row should say (`captured_
+        // conversation`, if any, came from the scan, never from a report
+        // this build predates), so the column default carries every
+        // existing row's correct meaning with no UPDATE needed.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN conversation_source TEXT;
+             PRAGMA user_version = 14;
+             COMMIT;",
+        )
+        .context("migrating schema from version 13 to 14")?;
+        version = 14;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2084,9 +2201,9 @@ fn insert_session_row(
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
           source_profile_id, source_profile_name, parent, session_token, archived, \
-          last_activity_at) \
+          last_activity_at, conversation_source) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2118,6 +2235,7 @@ fn insert_session_row(
             session_token,
             i64::from(row.archived),
             row.last_activity_at,
+            row.conversation_source,
         ],
     )
     .context("inserting session row")?;
@@ -2147,7 +2265,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                captured_conversation, captured_record, capture_ambiguous, \
                                first_input_at, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
-                               archived, last_activity_at";
+                               archived, last_activity_at, conversation_source";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2198,6 +2316,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             creation_seq: 0,
             source_profile: None,
             archived: r.get::<_, i64>(24)? != 0,
+            conversation_source: r.get(26)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -2790,10 +2909,11 @@ impl SessionStore {
             {
                 return Ok(RetryClaim::Resolved(Box::new(reservation)));
             }
-            let current: Option<(String, String, i64, String, String, i64, i64)> = tx
+            let current: Option<LaunchTakeoverColumns> = tx
                 .query_row(
                     "SELECT outcome_state, pane, created_at, title, session_token, \
-                     creation_seq, last_activity_at FROM sessions WHERE id = ?1",
+                     creation_seq, last_activity_at, conversation_source FROM sessions \
+                     WHERE id = ?1",
                     rusqlite::params![row.id],
                     |r| {
                         Ok((
@@ -2804,6 +2924,7 @@ impl SessionStore {
                             r.get(4)?,
                             r.get(5)?,
                             r.get(6)?,
+                            r.get(7)?,
                         ))
                     },
                 )
@@ -2819,6 +2940,18 @@ impl SessionStore {
             // its own. Anything showing evidence refuses the takeover, so
             // the caller replays instead of starting a second agent.
             //
+            // A non-NULL `conversation_source` is evidence of the same
+            // kind, arriving by a different road: only the launch hook
+            // writes it, and that hook runs INSIDE the agent process this
+            // reservation started. A report is therefore proof the launch
+            // happened even when the pane column has not been written yet
+            // — the agent reached the point of announcing its conversation
+            // before anything recorded where it lives. Rechecking it here,
+            // in the transaction, is what covers the report landing between
+            // the caller's evidence probe and this takeover; a takeover
+            // that ignored it would start a second agent against a session
+            // that already has a live one.
+            //
             // `created_at` rides along in the same read as a matched pair
             // with `outcome_state`/`pane`: whichever row this transaction
             // is about to act on (refuse, or replace) is also the row whose
@@ -2832,8 +2965,20 @@ impl SessionStore {
                 preserved_sequence,
                 preserved_last_activity_at,
             ) = match current {
-                Some((state, pane, created_at, title, token, sequence, last_activity_at)) => {
-                    if !pane.is_empty() || !matches!(state.as_str(), "launching" | "interrupted") {
+                Some((
+                    state,
+                    pane,
+                    created_at,
+                    title,
+                    token,
+                    sequence,
+                    last_activity_at,
+                    conversation_source,
+                )) => {
+                    if !pane.is_empty()
+                        || !matches!(state.as_str(), "launching" | "interrupted")
+                        || conversation_source.is_some()
+                    {
                         return Ok(RetryClaim::Launched);
                     }
                     (
@@ -2885,6 +3030,7 @@ impl SessionStore {
             // read from is what makes that atomic rather than a second
             // read racing the first.
             let mut row = StoredSession {
+                conversation_source: None,
                 created_at: preserved_created_at,
                 // Carried for `created_at`'s reason and with the same
                 // reach: the replaced row provably never launched (an
@@ -2965,14 +3111,34 @@ impl SessionStore {
     /// - the pane is emptied, because the relaunch has not confirmed one
     ///   yet.
     /// - `reset_capture` additionally clears `first_input_at`, the captured
-    ///   identity, its record locator, and the ambiguity verdict. Those are
-    ///   PER-LAUNCH correlation state: a fresh (or fallback-template) run
-    ///   starts a conversation of its own, and keeping the previous run's
-    ///   first-input anchor would point the correlator at a window that
-    ///   closed long ago — while keeping a stale ambiguity would deny the
-    ///   new run any capture at all. A `Resume` relaunch passes `false`,
-    ///   because reverifying the identity it is resuming is exactly what
-    ///   the capture pass must go on doing.
+    ///   identity, its record locator, its `conversation_source`, and the
+    ///   ambiguity verdict. Those are PER-LAUNCH correlation state: a fresh
+    ///   (or fallback-template) run starts a conversation of its own, and
+    ///   keeping the previous run's first-input anchor would point the
+    ///   correlator at a window that closed long ago — while keeping a
+    ///   stale `conversation_source = 'hook'` would fence the NEW launch's
+    ///   own scan out of a column it never wrote to, and keeping a stale
+    ///   ambiguity would deny the new run any capture at all. A `Resume`
+    ///   relaunch passes `false`, because the identity it is resuming is
+    ///   the identity the new run will be living in, and then NOTHING in
+    ///   that list is cleared: every `CASE WHEN` above collapses to the
+    ///   column's existing value, so the identity, its locator, its
+    ///   `conversation_source`, the ambiguity verdict, and the first-input
+    ///   anchor all cross the generation boundary untouched. That
+    ///   preservation is the whole mechanism, and it is the same for a
+    ///   scanned identity and a reported one.
+    ///
+    ///   What differs between the two writers is only what the NEW launch
+    ///   can do about the preserved value afterwards, and neither is load
+    ///   bearing for survival. A scan capture carries a `captured_record`
+    ///   locator the next capture pass re-verifies against (`service`'s
+    ///   `reverify_capture`). A reported identity has no locator at all —
+    ///   [`SessionStore::record_reported_conversation`] nulls it, because
+    ///   the agent named a conversation without anyone having found a file
+    ///   for it — so there is nothing on disk to re-verify. Separately, a
+    ///   hooked kind fires its hook again on the resumed launch and reports
+    ///   the same id; that write is an idempotent overwrite of the
+    ///   already-preserved value, not the thing that keeps it alive.
     /// - `launch_scoped` is re-decided from `scope_available`, because the
     ///   selection belongs to a launch and not to a session (PLAN_M3.md item
     ///   10): a host that lost its user manager between two launches must
@@ -3057,7 +3223,9 @@ impl SessionStore {
                  captured_conversation = \
                      CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
                  captured_record = CASE WHEN ?8 THEN NULL ELSE captured_record END, \
-                 capture_ambiguous = CASE WHEN ?8 THEN 0 ELSE capture_ambiguous END \
+                 capture_ambiguous = CASE WHEN ?8 THEN 0 ELSE capture_ambiguous END, \
+                 conversation_source = \
+                     CASE WHEN ?8 THEN NULL ELSE conversation_source END \
                  WHERE id = ?1",
                 rusqlite::params![
                     id,
@@ -3768,6 +3936,27 @@ impl SessionStore {
     /// resume SPEC.md forbids. A fenced-out claim reads back whatever the
     /// current generation holds, so the caller's mirror still follows the
     /// database.
+    ///
+    /// A REPORT is a different writer entirely, and it is NOT serialized
+    /// with capture passes at all: a pass takes the `CaptureCoordination`
+    /// lock, while the report handler takes NO lock a pass respects — not
+    /// that one, and deliberately not the session's lifecycle claim either
+    /// (see `service`'s `report_conversation` for why a hook cannot be
+    /// made to wait). So a scan verdict computed before a
+    /// report landed can still reach this statement after it. It loses
+    /// anyway, and with no fence of its own: a report always writes
+    /// `captured_conversation`, so the write-once predicate already above
+    /// — `captured_conversation IS NULL` — excludes every reported row. An
+    /// explicit `conversation_source IS NULL` here would be a second name
+    /// for the same condition, and a redundant predicate is a liability:
+    /// it reads as though the two could come apart. (The ambiguity write
+    /// in [`SessionStore::record_capture_ambiguous`] genuinely does need
+    /// that predicate, because it CLEARS an existing identity rather than
+    /// requiring its absence.) When a report has won, the read-back below
+    /// returns the REPORTED id rather than this call's own `conversation`
+    /// argument — exactly the "another writer won" case `commit_capture`
+    /// already handles, so no extra branch is needed here for the report
+    /// case specifically.
     pub async fn record_captured_conversation(
         &self,
         id: &str,
@@ -3806,22 +3995,116 @@ impl SessionStore {
         .context("capture record task panicked")?
     }
 
-    /// Record durably that this session's correlation was AMBIGUOUS, so no
-    /// identity will ever be claimed for this launch (PLAN_M3.md item 8).
+    /// Record the identity the agent itself reported through its
+    /// per-launch `SessionStart` hook.
     ///
-    /// Ambiguity DOMINATES, which is why this write has no precondition
-    /// beyond the row existing: it can never be wrong to refuse, and the
-    /// only monotonic direction is toward refusing. Its durability is what
-    /// keeps a restart from re-deciding on worse evidence — see
-    /// [`StoredSession::capture_ambiguous`].
+    /// Unlike [`SessionStore::record_captured_conversation`]'s write-once
+    /// claim, this OVERWRITES unconditionally (fenced only by `generation`,
+    /// never by an existing value in `captured_conversation` or
+    /// `conversation_source`). A second report from the same launch is not
+    /// by itself proof of a new conversation — the hook fires on several
+    /// vendor events, and `startup`, `resume` and `compact` all re-announce
+    /// the SAME id, which this write simply lands again with no effect
+    /// worth noticing. What the unconditional overwrite is for is the case
+    /// where the id DIFFERS: the agent opened a different conversation
+    /// inside its own process (`/clear`, `/new`), and the identity being
+    /// replaced is then exactly the one that must never be resumed again.
+    /// Making the write idempotent in the first case is what makes it
+    /// correct in the second, without this method having to know which
+    /// event it is serving. Also clears
+    /// `capture_ambiguous` — a report is not scan evidence being weighed
+    /// against other scan evidence, it is the agent's own answer, so it
+    /// dominates an ambiguity finding the same way it dominates a plain
+    /// scan claim. `captured_record` is cleared to `NULL`
+    /// alongside it because a reported id has no scan-discovered record
+    /// path to re-verify against — see [`StoredSession::captured_record`].
+    ///
+    /// The hook payload's `source` field (the vendor's own word for why it
+    /// fired — `startup`, `resume`, `clear`, `compact`, ...) is NOT
+    /// persisted here; it is logged by the caller for diagnostics only.
+    /// Keeping it out of this table keeps the schema to the one
+    /// `conversation_source` column, which only ever needs to answer "scan
+    /// or hook", never "which hook event". Generation-fenced like every
+    /// capture write, for the same reason `record_captured_conversation`
+    /// is: a report belonging to a launch this supervisor has already
+    /// relaunched past must not land on the row's current generation.
+    ///
+    /// Returns whether the row was actually updated: `true` means a row
+    /// with this id AND this generation took the write, `false` means it
+    /// did not — either the session row is gone (a concurrent delete) or
+    /// the generation moved on (the launch that reported has already been
+    /// relaunched past). The caller cannot tell those apart from the bool
+    /// alone and does not need to: in both cases the report describes a
+    /// launch that is no longer current, so it must not be mirrored into
+    /// memory either.
+    pub async fn record_reported_conversation(
+        &self,
+        id: &str,
+        generation: i64,
+        conversation: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let conversation = conversation.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let changed = conn
+                .execute(
+                    "UPDATE sessions SET captured_conversation = ?2, captured_record = NULL, \
+                     conversation_source = 'hook', capture_ambiguous = 0 \
+                     WHERE id = ?1 AND generation = ?3",
+                    rusqlite::params![id, conversation, generation],
+                )
+                .context("recording a reported conversation identity")?;
+            Ok(changed > 0)
+        })
+        .await
+        .context("reported-conversation record task panicked")?
+    }
+
+    /// Record durably that this session's correlation was AMBIGUOUS, so no
+    /// SCAN will ever claim an identity for this launch (PLAN_M3.md item
+    /// 8).
+    ///
+    /// Ambiguity DOMINATES every scan-derived state, which is why this
+    /// write carries no precondition against a PRIOR scan claim: it can
+    /// never be wrong to refuse a scan verdict, and the only monotonic
+    /// direction among scan evidence is toward refusing. Its durability is
+    /// what keeps a restart from re-deciding on worse evidence — see
+    /// [`StoredSession::capture_ambiguous`]. The one thing it does not
+    /// outrank is the agent's own report, which is not scan evidence at
+    /// all: [`SessionStore::record_reported_conversation`] clears the flag
+    /// as it writes, and the fence below keeps this statement from putting
+    /// it back.
     ///
     /// It also clears any identity a racing writer had just claimed. That
     /// looks like a violation of the write-once rule above and is in fact
     /// the same rule: `captured_conversation` is write-once against
     /// *later, poorer* evidence, and an ambiguity is never poorer — it is
-    /// the discovery that the claim should not have been made. In
-    /// practice the two cannot race (passes are serialized), so this is
-    /// the belt to that suspenders.
+    /// the discovery that the claim should not have been made. Among SCAN
+    /// writers the two cannot race (capture passes are serialized through
+    /// `CaptureCoordination`), so between them this is the belt to that
+    /// suspenders.
+    ///
+    /// A REPORT is a different writer entirely, and it is NOT serialized
+    /// with capture passes — the report handler takes neither the pass
+    /// coordination lock nor the session's lifecycle claim, so nothing
+    /// orders it against a pass at all (see `service`'s
+    /// `report_conversation` for why a hook cannot be made to wait on
+    /// either). So `AND conversation_source IS NULL` fences
+    /// this write against a report. It is needed HERE and nowhere else
+    /// among the capture writes, because this is the one that clears an
+    /// identity rather than requiring its absence:
+    /// [`SessionStore::record_captured_conversation`] is already excluded
+    /// from every reported row by its own `captured_conversation IS NULL`
+    /// predicate, whereas this statement would happily blank a reported id
+    /// out. Without the fence, a pass
+    /// that computed ambiguity before a report landed could still commit
+    /// that verdict afterward, silently erasing the agent's own answer on
+    /// disk while the in-memory state kept advertising `Resume` — and a
+    /// subsequent supervisor restart would then reload the session as
+    /// `Ambiguous`, contradicting what was actually offered a moment
+    /// earlier. A report therefore dominates an ambiguity finding.
     /// `generation` fences it like every other capture write: an ambiguity
     /// established about one run says nothing about the next one, and a
     /// relaunch that opened a fresh capture window has already cleared it.
@@ -3832,7 +4115,8 @@ impl SessionStore {
             let conn = conn.lock().expect("session db mutex poisoned");
             conn.execute(
                 "UPDATE sessions SET capture_ambiguous = 1, captured_conversation = NULL, \
-                 captured_record = NULL WHERE id = ?1 AND generation = ?2",
+                 captured_record = NULL WHERE id = ?1 AND conversation_source IS NULL \
+                 AND generation = ?2",
                 rusqlite::params![id, generation],
             )
             .context("recording an ambiguous conversation correlation")?;
@@ -4735,6 +5019,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -5631,6 +5916,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -5681,6 +5967,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
@@ -6285,6 +6572,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
                     archived: false,
@@ -6614,6 +6902,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -6672,6 +6961,7 @@ mod tests {
     /// A launching row in the shape `create_session` commits one.
     fn launching_row(id: &str) -> StoredSession {
         StoredSession {
+            conversation_source: None,
             canonical_cwd: None,
             captured_record: None,
             capture_ambiguous: false,
@@ -7390,6 +7680,50 @@ mod tests {
         );
     }
 
+    /// A hook report is launch evidence in its own right, and the takeover
+    /// must refuse on it exactly as it refuses on a recorded pane.
+    ///
+    /// The reason it is not covered by the pane check: only the launched
+    /// agent's own process can cause `conversation_source` to be written,
+    /// but it can do so BEFORE anything records where that process lives —
+    /// Claude's hook fires at startup, well ahead of the pane confirmation.
+    /// A takeover that read only the pane would therefore see a
+    /// never-launched row, delete it, and start a second agent beside one
+    /// that is demonstrably already running and already talking to us.
+    ///
+    /// That this recheck lives INSIDE the takeover transaction, rather than
+    /// only in the caller's `reserved_launch_evidence` probe, is what covers
+    /// the report landing in the gap between that probe and this call — the
+    /// window where the caller's evidence is already stale and its decision
+    /// to relaunch is already made.
+    #[tokio::test]
+    async fn the_relaunch_takeover_refuses_when_a_report_has_landed() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "reported", "fp").await;
+        assert!(
+            store
+                .record_reported_conversation("s1", 0, "conv-reported")
+                .await
+                .expect("report"),
+            "the seeded generation-0 row must accept the report this test is about"
+        );
+
+        assert_eq!(
+            store
+                .restart_pending_launch(launching_row("s1"), "reported")
+                .await
+                .expect("takeover"),
+            RetryClaim::Launched
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("conv-reported"),
+            "the refused takeover must leave the reported identity untouched"
+        );
+        assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+    }
+
     /// PLAN_M6.md's pagination promises a total order over STABLE columns
     /// (`PROTOCOL_VERSION`'s version-8 history), and `created_at` is the
     /// primary one — a retry that re-minted it would silently move a
@@ -7426,6 +7760,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
                     creation_seq: 0,
@@ -7443,6 +7778,7 @@ mod tests {
         let claim = store
             .restart_pending_launch(
                 StoredSession {
+                    conversation_source: None,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
                     creation_seq: 0,
@@ -7494,6 +7830,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     created_at: CREATED,
                     last_activity_at: CREATED,
                     ..launching_row("s1")
@@ -7609,6 +7946,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -7721,6 +8059,212 @@ mod tests {
             .record_first_input("s1", 0, 3_000)
             .await
             .expect("a vanished row is not a failure");
+    }
+
+    // -----------------------------------------------------------------
+    // Agent-reported conversation identity: a hook report is not scan
+    // evidence weighed against
+    // other scan evidence, it is the agent's own answer, so it overwrites
+    // and fences out the scan rather than losing to the write-once rule
+    // above.
+    // -----------------------------------------------------------------
+
+    /// A report must win over a claim the scan already made — the whole
+    /// point of the mechanism is to correct exactly this case (a `/clear`
+    /// or `/new` the scan cannot see coming). Unlike the scan's own
+    /// write-once rule, this is not a race being arbitrated; it is a
+    /// strictly better answer replacing a strictly weaker one.
+    #[tokio::test]
+    async fn a_report_overwrites_a_prior_scan_claim() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_captured_conversation("s1", 0, "conv-scanned", Path::new("/records/scanned"))
+            .await
+            .expect("scan capture");
+
+        assert!(
+            store
+                .record_reported_conversation("s1", 0, "conv-reported")
+                .await
+                .expect("report"),
+            "a report must change a row that currently holds a scan claim"
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.captured_conversation.as_deref(), Some("conv-reported"));
+        assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+        assert_eq!(
+            row.captured_record, None,
+            "a reported id has no scan-discovered record path to keep around"
+        );
+    }
+
+    /// A second report replaces the first. What makes that necessary is
+    /// the DIFFERING case this test exercises: the agent started a new
+    /// conversation inside the same process (`/clear`, `/new`), and the id
+    /// being replaced is exactly the one that must never be resumed again.
+    /// A second report is not by itself evidence of that — the hook also
+    /// fires on `startup`, `resume` and `compact`, all of which re-announce
+    /// the same id and land here as harmless idempotent rewrites. This
+    /// method deliberately does not try to tell the two apart, which is
+    /// what makes it a genuine overwrite rather than "write-once, but for
+    /// hooks".
+    #[tokio::test]
+    async fn a_report_overwrites_a_prior_report() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_reported_conversation("s1", 0, "conv-1")
+            .await
+            .expect("first report");
+
+        assert!(
+            store
+                .record_reported_conversation("s1", 0, "conv-2")
+                .await
+                .expect("second report"),
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.captured_conversation.as_deref(), Some("conv-2"));
+        assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+    }
+
+    /// Once a report has landed, a scan verdict computed before or after it
+    /// must be a complete no-op: the report handler is NOT serialized with
+    /// capture passes (the handler never queues behind a restart), so a pass that
+    /// started before the report can still reach `record_captured_
+    /// conversation` afterward. What stops that pass from clobbering the
+    /// agent's own answer is the write-once predicate the scan writer
+    /// already carries for its own reasons — a report always fills
+    /// `captured_conversation`, so `captured_conversation IS NULL` excludes
+    /// every reported row without the statement having to mention reports
+    /// at all. This test pins that, so a later reader does not conclude the
+    /// scan writer needs a `conversation_source` fence of its own (the
+    /// AMBIGUITY writer does, and has one — see the test below).
+    /// The read-back is what tells the caller: it returns the REPORTED id, not
+    /// `None` and not the scan's own candidate, which is exactly the
+    /// "another writer won" case `commit_capture` already knows how to
+    /// handle.
+    #[tokio::test]
+    async fn a_scan_write_after_a_report_is_a_no_op_and_the_read_back_shows_the_report() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_reported_conversation("s1", 0, "conv-reported")
+            .await
+            .expect("report");
+
+        let read_back = store
+            .record_captured_conversation("s1", 0, "conv-scanned", Path::new("/records/scanned"))
+            .await
+            .expect("fenced-out scan write");
+        assert_eq!(
+            read_back.as_deref(),
+            Some("conv-reported"),
+            "the read-back must show the reported id that actually won, not the scan's guess"
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("conv-reported"),
+            "the scan write must not have touched the row at all"
+        );
+        assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+    }
+
+    /// The same fence protects against the ambiguity writer: a pass that
+    /// computed ambiguity before a report landed must not erase the
+    /// report's identity when it commits afterward. Without the
+    /// `conversation_source IS NULL` predicate this would silently move the
+    /// row to `Ambiguous` on disk while the in-memory state still
+    /// advertised `Resume`, and a supervisor restart would then reload the
+    /// contradiction.
+    #[tokio::test]
+    async fn an_ambiguity_write_after_a_report_changes_nothing() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_reported_conversation("s1", 0, "conv-reported")
+            .await
+            .expect("report");
+
+        store
+            .record_capture_ambiguous("s1", 0)
+            .await
+            .expect("fenced-out ambiguity write");
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("conv-reported"),
+            "an ambiguity finding computed before the report must not erase it"
+        );
+        assert!(!row.capture_ambiguous);
+        assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+    }
+
+    /// A report clears a PRIOR ambiguity finding, the one place this design
+    /// deliberately weakens the "ambiguity dominates" guarantee: that
+    /// guarantee exists because scan evidence cannot be trusted over a
+    /// worse verdict, but a report is not scan evidence being compared
+    /// against other scan evidence — it is the agent's own answer, and it
+    /// dominates everything scan-derived, `Ambiguous` included.
+    #[tokio::test]
+    async fn a_report_clears_a_prior_ambiguity() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_capture_ambiguous("s1", 0)
+            .await
+            .expect("ambiguity");
+        assert!(
+            store
+                .session("s1")
+                .await
+                .expect("read")
+                .unwrap()
+                .capture_ambiguous,
+            "the ambiguity must actually be recorded before the report is expected to clear it"
+        );
+
+        store
+            .record_reported_conversation("s1", 0, "conv-reported")
+            .await
+            .expect("report");
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert!(
+            !row.capture_ambiguous,
+            "a report must clear an ambiguity finding from an earlier generation of evidence"
+        );
+        assert_eq!(row.captured_conversation.as_deref(), Some("conv-reported"));
+    }
+
+    /// Fenced by `generation` like every other capture write: a report
+    /// belonging to a launch this supervisor has already relaunched past
+    /// (a stale hook process the kill sweep somehow missed, or one racing
+    /// a restart) must not land on the row's CURRENT generation. Unlike
+    /// the scan writers this one has no OTHER precondition to check, so
+    /// the generation fence is the whole story for this test.
+    #[tokio::test]
+    async fn a_report_with_a_stale_generation_changes_nothing() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .await
+                .expect("begin relaunch"),
+        );
+
+        assert!(
+            !store
+                .record_reported_conversation("s1", 0, "conv-stale")
+                .await
+                .expect("stale report"),
+            "generation 0 no longer exists once the relaunch opened generation 1"
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.captured_conversation, None);
+        assert_eq!(row.conversation_source, None);
     }
 
     /// The title is the one metadata column a caller may overwrite, and
@@ -8025,6 +8569,7 @@ mod tests {
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN archived;
              ALTER TABLE sessions DROP COLUMN last_activity_at;
+             ALTER TABLE sessions DROP COLUMN conversation_source;
              PRAGMA user_version = 11;",
         )
         .expect("downgrade the fixture to the pre-archive schema");
@@ -8076,6 +8621,7 @@ mod tests {
             store
                 .insert_session(
                     StoredSession {
+                        conversation_source: None,
                         created_at: *created_at,
                         last_activity_at: *created_at,
                         ..launching_row(id)
@@ -8088,8 +8634,12 @@ mod tests {
         drop(store);
 
         let conn = Connection::open(&db_path).expect("open fixture");
+        // Same "every later column has to come off" requirement
+        // `schema_11_rows_migrate_as_unarchived` documents — `conversation_
+        // source` postdates this migration too.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN last_activity_at;
+             ALTER TABLE sessions DROP COLUMN conversation_source;
              PRAGMA user_version = 12;",
         )
         .expect("downgrade the fixture to the pre-activity schema");
@@ -8126,6 +8676,74 @@ mod tests {
                 "{id}'s backfilled value must be durable"
             );
         }
+    }
+
+    /// The v13-to-v14 migration adds `conversation_source` with no
+    /// backfill, unlike v12-to-v13's `last_activity_at` — and the absence
+    /// of a backfill step is itself the thing worth pinning. Every
+    /// preexisting row's `conversation_source` is already correctly `NULL`
+    /// under the schema's OWN meaning ("whatever `captured_conversation`
+    /// holds came from the scan, or nothing is claimed"): a row written by
+    /// a build that predates reports has, by construction, never been
+    /// reported to, so the column's bare `ADD COLUMN` default already says
+    /// the true thing with no `UPDATE` required.
+    ///
+    /// Scope, so nobody reads more into it: this test looks only at ROW
+    /// VALUES on the migrated side, and never at a fresh database. That the
+    /// migrated column and the freshly-created one agree on name, type and
+    /// declaration is `migrated_and_fresh_schemas_agree`'s job — it
+    /// compares the two schemas directly, and it is where a divergence
+    /// would be caught.
+    #[tokio::test]
+    async fn schema_13_rows_get_a_null_conversation_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("create current db");
+        insert_running(&store, "s1").await;
+        // A row that HAS a captured conversation, not only a bare one: the
+        // migration must not, say, mistake a populated `captured_
+        // conversation` for evidence that a report must have produced it.
+        store
+            .record_captured_conversation("s1", 0, "conv-a", Path::new("/records/a.jsonl"))
+            .await
+            .expect("pre-migration scan capture");
+        drop(store);
+
+        let conn = Connection::open(&db_path).expect("open fixture");
+        conn.execute_batch(
+            "ALTER TABLE sessions DROP COLUMN conversation_source;
+             PRAGMA user_version = 13;",
+        )
+        .expect("downgrade the fixture to the pre-report schema");
+        drop(conn);
+
+        let migrated = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v13");
+        let row = migrated.session("s1").await.unwrap().unwrap();
+        assert_eq!(row.conversation_source, None);
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("conv-a"),
+            "the migration must preserve a pre-existing scan claim untouched"
+        );
+
+        // Reopened, like the v12-to-v13 test: a migration step must be a
+        // committed one-time change, not something replayed on every open.
+        let reopened = SessionStore::open(&db_path, true)
+            .await
+            .expect("reopen the migrated db");
+        assert_eq!(
+            reopened
+                .session("s1")
+                .await
+                .unwrap()
+                .unwrap()
+                .conversation_source,
+            None
+        );
     }
 
     /// PLAN_M3.md items 4 and 9: a restart's new generation reopens a
@@ -8566,6 +9184,86 @@ mod tests {
         assert_eq!(row.first_input_at, Some(1_000));
     }
 
+    /// `conversation_source` follows the SAME `reset_capture` switch as the
+    /// rest of the capture columns it accompanies: a fresh (or
+    /// fallback-template) relaunch must clear it, because a stale `'hook'`
+    /// value would fence the new launch's own first scan out of a column
+    /// no writer for THIS launch has touched yet — silently disabling
+    /// capture until an agent that supports hooks happens to report again.
+    /// A `Resume` relaunch, symmetrically, must keep it: the identity being
+    /// resumed is still exactly what it was, hook-reported or not, and a
+    /// hooked kind's agent will simply report again on the resumed launch
+    /// rather than needing the column pre-cleared for it.
+    #[tokio::test]
+    async fn begin_relaunch_clears_conversation_source_only_when_resetting_capture() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_reported_conversation("s1", 0, "conv-1")
+            .await
+            .expect("report");
+        assert_eq!(
+            store
+                .session("s1")
+                .await
+                .unwrap()
+                .unwrap()
+                .conversation_source
+                .as_deref(),
+            Some("hook"),
+            "the report must actually land before begin_relaunch is expected to touch it"
+        );
+
+        // A fresh relaunch (`reset_capture = true`) clears it, along with
+        // the rest of the per-launch capture state.
+        claimed(
+            store
+                .begin_relaunch(
+                    "s1",
+                    OfferBasis {
+                        captured_conversation: Some("conv-1".to_string()),
+                        capture_ambiguous: false,
+                    },
+                    true,
+                    false,
+                )
+                .await
+                .expect("fresh relaunch"),
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.conversation_source, None);
+        assert_eq!(row.captured_conversation, None);
+
+        // Re-report against the new generation, then take a `Resume`
+        // relaunch (`reset_capture = false`): the column must survive.
+        let generation = row.generation;
+        store
+            .record_reported_conversation("s1", generation, "conv-2")
+            .await
+            .expect("report against the fresh generation");
+        claimed(
+            store
+                .begin_relaunch(
+                    "s1",
+                    OfferBasis {
+                        captured_conversation: Some("conv-2".to_string()),
+                        capture_ambiguous: false,
+                    },
+                    false,
+                    false,
+                )
+                .await
+                .expect("resuming relaunch"),
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(
+            row.conversation_source.as_deref(),
+            Some("hook"),
+            "a Resume relaunch must not disturb the source of the identity it is resuming"
+        );
+        assert_eq!(row.captured_conversation.as_deref(), Some("conv-2"));
+    }
+
     /// The offer condition, which is what makes "validate the mode, then
     /// relaunch" atomic rather than merely sequential: a capture that
     /// commits between the two turns the claim into a refusal instead of
@@ -8944,6 +9642,7 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -9158,6 +9857,7 @@ mod tests {
     async fn a_relaunch_takeover_preserves_a_rename_that_landed_between_the_attempts() {
         let (_dir, store) = fresh_store().await;
         let stranded = |title: &str| StoredSession {
+            conversation_source: None,
             id: "s1".to_string(),
             parent: None,
             archived: false,

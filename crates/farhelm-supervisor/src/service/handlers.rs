@@ -2995,6 +2995,7 @@ mod tests {
             .store
             .insert_session(
                 crate::store::StoredSession {
+                    conversation_source: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -3616,6 +3617,7 @@ mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -3859,6 +3861,7 @@ mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -5288,6 +5291,7 @@ mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    conversation_source: None,
                     id: "new-default-source".to_string(),
                     parent: None,
                     archived: false,
