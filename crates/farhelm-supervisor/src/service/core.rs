@@ -4822,7 +4822,7 @@ impl Supervisor {
     /// running, which is the exact duplicate SPEC.md forbids and which
     /// nothing downstream can detect.
     ///
-    /// Three independent sources, any one of which is enough to say a
+    /// Four independent sources, any one of which is enough to say a
     /// launch happened:
     ///
     /// - **The durable row.** A recorded pane means something once saw this
@@ -4832,7 +4832,13 @@ impl Supervisor {
     ///   `Launching` rows too — so an interrupted row with no pane is a
     ///   create that may never have launched at all, and treating the
     ///   status alone as provenance would replay a session that never
-    ///   existed.
+    ///   existed. A non-NULL `conversation_source` on the same row is a
+    ///   third, independent reading of it: only the launch hook writes that
+    ///   column, and the hook runs inside the agent process this
+    ///   reservation started, so a report is the agent testifying to its
+    ///   own existence. It can arrive before the pane is recorded, which is
+    ///   the whole reason it is checked rather than being assumed to imply
+    ///   one of the others.
     /// - **The launch sentinel.** The shim wrote it, so the shim ran, so
     ///   tmux started something — even when no pane was ever recorded.
     /// - **The launch's cgroup scope**, where this host has a user manager.
@@ -4857,6 +4863,7 @@ impl Supervisor {
                         row.outcome,
                         LastOutcome::Launching | LastOutcome::Interrupted
                     )
+                    || row.conversation_source.is_some()
                 {
                     return LaunchEvidence::Present;
                 }
@@ -5260,6 +5267,7 @@ impl Supervisor {
             // profile either way, since the fingerprint binds the profile
             // identity to the intent key.
             let row = StoredSession {
+                conversation_source: None,
                 id: id.clone(),
                 parent: parent.clone(),
                 archived: false,
@@ -5394,6 +5402,7 @@ impl Supervisor {
                 .store
                 .insert_session(
                     StoredSession {
+                        conversation_source: None,
                         id: id.clone(),
                         parent: parent.clone(),
                         archived: false,
@@ -9514,6 +9523,7 @@ pub(crate) mod tests {
             sup.store
                 .insert_session(
                     StoredSession {
+                        conversation_source: None,
                         id: id.to_string(),
                         parent: None,
                         archived: false,
@@ -9675,6 +9685,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: scoped_id.clone(),
                     parent: None,
                     archived: false,
@@ -9756,6 +9767,7 @@ pub(crate) mod tests {
             sup.store
                 .insert_session(
                     StoredSession {
+                        conversation_source: None,
                         id: id.to_string(),
                         parent: None,
                         archived: false,
@@ -9861,6 +9873,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -9951,6 +9964,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -10029,6 +10043,7 @@ pub(crate) mod tests {
         store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -10679,6 +10694,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -11028,6 +11044,7 @@ pub(crate) mod tests {
         const SEEDED_CREATED_AT: i64 = 1_700_000_000;
         let source =
             |id: &str, title: &str, profile: crate::store::ProfileSnapshot| StoredSession {
+                conversation_source: None,
                 id: id.to_string(),
                 parent: None,
                 archived: false,
@@ -11559,6 +11576,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -11643,6 +11661,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "ended".to_string(),
                     parent: None,
                     archived: false,
@@ -12148,6 +12167,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -12239,6 +12259,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -12613,6 +12634,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -12725,6 +12747,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -13113,6 +13136,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -13430,6 +13454,7 @@ pub(crate) mod tests {
             .expect("supervisor");
         let cwd = state.path().to_string_lossy().to_string();
         let stranded = StoredSession {
+            conversation_source: None,
             id: "stranded".to_string(),
             parent: None,
             archived: false,
@@ -13571,6 +13596,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -13791,6 +13817,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,

@@ -2229,6 +2229,7 @@ mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -3066,6 +3067,7 @@ mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    conversation_source: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
