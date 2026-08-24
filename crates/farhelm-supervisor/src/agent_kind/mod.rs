@@ -123,6 +123,24 @@ pub use capture::{
 /// never enters into it: a path with spaces survives as one element.
 pub const CONVERSATION_PLACEHOLDER: &str = "{conversation}";
 
+/// The one argv element an invocation or resume template may use to mean
+/// "substitute the session's working directory here" — the directory the
+/// launch hands tmux as the pane's cwd, spelled exactly as tmux gets it.
+///
+/// Exists for wrapper launchers shaped like `wrapper run <dir> <agent...>`,
+/// which need the directory as an ARGUMENT rather than as an ambient
+/// value. Without it, one profile could only ever launch into a single
+/// hardcoded directory — and a profile whose baked-in directory disagreed
+/// with the session's real cwd would silently break capture correlation,
+/// since the agent would report the wrapper's directory while capture
+/// matches against the session's own canonical cwd.
+///
+/// Same rules as [`CONVERSATION_PLACEHOLDER`], for the same reasons: EXACT
+/// whole-element equality (`--dir={cwd}` is literal text, not a match),
+/// substitution into the element's own slot so the path is never quoted
+/// or word-split, and never as `argv[0]` (see [`ensure_no_cwd_program`]).
+pub const CWD_PLACEHOLDER: &str = "{cwd}";
+
 /// How much of a record file is read while looking for its correlators.
 ///
 /// Both agents put the identifying fields in the record's first line, and
@@ -1277,10 +1295,23 @@ fn correlators_from(
 /// silently — but everything a legitimate identifier has no business
 /// containing is refused: whitespace, control characters, quotes,
 /// backslashes, and anything past a bounded length.
+///
+/// ## The placeholders themselves
+///
+/// An id equal to [`CWD_PLACEHOLDER`] (or, for symmetry,
+/// [`CONVERSATION_PLACEHOLDER`]) is refused even though it is graphic
+/// ASCII. Substitution runs in two passes — identity first, the working
+/// directory later in `spawn_agent` — and an id spelled `{cwd}` would be
+/// written into the template by the first pass and then rewritten into a
+/// directory by the second, so a record file (which any local process can
+/// write) could steer what the resume argv carries. Refusing the literal
+/// keeps the passes from reinterpreting each other's output.
 pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_CONVERSATION_ID_LEN
         && !id.starts_with('-')
+        && id != CWD_PLACEHOLDER
+        && id != CONVERSATION_PLACEHOLDER
         && id
             .chars()
             .all(|c| c.is_ascii_graphic() && c != '"' && c != '\'' && c != '\\')
@@ -1454,6 +1485,13 @@ impl IntegrationSnapshot {
     /// why [`is_plausible_conversation_id`] can afford to be a shape check
     /// rather than a sanitizer).
     ///
+    /// The substitution LOOP itself now lives in [`fill_slots`], shared
+    /// with [`fill_cwd`]'s `{cwd}` handling, so both placeholders have
+    /// exactly one implementation of the whole-element rule. `fill_slots`
+    /// skips slot 0 as a backstop only; the actual refusal of a
+    /// `{conversation}`-first template is [`ensure_resume_template`]'s job,
+    /// enforced long before a template can reach this method.
+    ///
     /// PLAN_M3.md item 9 is what RUNS this; it exists here so the capture
     /// tests can assert the end-to-end promise ("resume this exact
     /// conversation") rather than only the id in isolation.
@@ -1468,13 +1506,66 @@ impl IntegrationSnapshot {
             return None;
         }
         let mut filled = self.resume_template.clone()?;
-        for element in &mut filled {
-            if element == CONVERSATION_PLACEHOLDER {
-                *element = conversation.to_string();
-            }
-        }
+        fill_slots(&mut filled, CONVERSATION_PLACEHOLDER, conversation);
         Some(filled)
     }
+}
+
+/// Replace every argv element equal to `placeholder` with `value`, in
+/// place, leaving `argv[0]` alone. The shared body of both placeholder
+/// substitutions ([`CONVERSATION_PLACEHOLDER`], [`CWD_PLACEHOLDER`]), so
+/// the whole-element rule has exactly one implementation for either to
+/// drift away from.
+///
+/// Skipping slot 0 here is a backstop, not the rule: every boundary that
+/// accepts an unfilled vector already refuses a placeholder in the
+/// program slot ([`ensure_no_cwd_program`], and the `{conversation}` check
+/// in [`ensure_resume_template`]), so this function should never actually
+/// see one there in practice. If a vector somehow arrives with one anyway
+/// — a build with looser validation wrote the row and a decode check was
+/// bypassed — skipping it means the eventual exec fails loudly on a
+/// program literally named `{cwd}` or `{conversation}`, rather than
+/// quietly running a directory or a UUID.
+fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
+    for element in argv.iter_mut().skip(1) {
+        if element == placeholder {
+            *element = value.to_string();
+        }
+    }
+}
+
+/// Substitute the launch's working directory for every [`CWD_PLACEHOLDER`]
+/// element. Meant for exactly one caller, `Supervisor::spawn_agent` — the
+/// single seam where an argv becomes a process for create, retry, and
+/// every restart mode alike — as the first of the two transformations that
+/// seam applies, ahead of hook-flag injection, so the injected tail is
+/// never itself a substitution target. Filling anywhere else would need a
+/// second, subtly different copy of this substitution for whichever path
+/// was missed.
+///
+/// Caller precondition: `cwd` is the directory tmux is handed for this
+/// launch, so the wrapper and the pane end up agreeing on the same string,
+/// and it has already passed `ensure_cwd_usable` (service/core.rs). That
+/// precondition is why the filled vector is deliberately NOT re-validated
+/// here: `ensure_cwd_usable`'s `is_absolute()` check rules out an empty or
+/// dash-leading value, while its `tokio::fs::metadata(cwd)` call fails
+/// with `InvalidInput` on a path holding a NUL byte — the one property
+/// [`ensure_executable_argv`] would otherwise need to check. (A Rust
+/// `String` CAN hold a NUL — `shell_words` carries one through unmodified,
+/// which is exactly why `ensure_executable_argv` exists — so "it's just a
+/// `String`" is not why this is safe; `ensure_cwd_usable` having already
+/// rejected one is.)
+pub fn fill_cwd(mut argv: Vec<String>, cwd: &str) -> Vec<String> {
+    fill_slots(&mut argv, CWD_PLACEHOLDER, cwd);
+    argv
+}
+
+/// Whether `argv` carries [`CWD_PLACEHOLDER`] as a whole element anywhere.
+/// The one place that comparison is spelled out, so the log line in
+/// `spawn_agent` and this module's own tests cannot drift from the
+/// substitution rule itself.
+pub fn has_cwd_placeholder(argv: &[String]) -> bool {
+    argv.iter().any(|element| element == CWD_PLACEHOLDER)
 }
 
 /// Whether a resume template carries the placeholder as a whole element.
@@ -1542,7 +1633,37 @@ pub fn ensure_executable_argv(subject: &str, argv: &[String]) -> Result<(), Stri
     Ok(())
 }
 
-/// [`ensure_executable_argv`] plus the two rules that are about a RESUME
+/// Refuse a vector whose PROGRAM (`argv[0]`) is [`CWD_PLACEHOLDER`]:
+/// substituting there would make the session's working directory the
+/// thing this session tries to exec, rather than an argument passed to it.
+///
+/// `subject` follows [`ensure_executable_argv`]'s naming convention, and
+/// the `Err` text is user-facing verbatim for the same reason: callers
+/// wrap it in whichever `ErrorKind` their boundary uses rather than
+/// reformatting it.
+///
+/// Kept separate from [`ensure_executable_argv`] rather than folded into
+/// it: that rule is placeholder-agnostic (emptiness and NUL are wrong in
+/// any argv, filled or not) and its wording says nothing about
+/// placeholders, whereas this one only has meaning where a vector is
+/// accepted with its placeholders still unfilled. Folding them together
+/// would put placeholder wording into every executability refusal, and
+/// would tie a generic rule to a concept only some of its callers have.
+///
+/// An empty `argv` is `Ok` here — there is no program slot to refuse, and
+/// refusing emptiness itself is [`ensure_executable_argv`]'s job.
+pub fn ensure_no_cwd_program(subject: &str, argv: &[String]) -> Result<(), String> {
+    if argv.first().map(String::as_str) == Some(CWD_PLACEHOLDER) {
+        return Err(format!(
+            "{subject}'s first element is {CWD_PLACEHOLDER}, so substituting the working \
+             directory would make it the PROGRAM this session tries to run; the placeholder \
+             belongs in an argument slot"
+        ));
+    }
+    Ok(())
+}
+
+/// [`ensure_executable_argv`] plus the three rules that are about a RESUME
 /// template specifically.
 ///
 /// A present-but-empty template gets its own wording rather than the
@@ -1558,6 +1679,12 @@ pub fn ensure_executable_argv(subject: &str, argv: &[String]) -> Result<(), Stri
 /// (the vector is non-empty, `argv[0]` is non-empty, the placeholder is
 /// present so an integrated kind is satisfied), which is exactly why it
 /// needs naming here rather than being caught by accident.
+///
+/// The third rule is the same shape, for the other placeholder: delegated
+/// to [`ensure_no_cwd_program`] so a template starting with
+/// [`CWD_PLACEHOLDER`] gets the identical wording a wrapper invocation
+/// gets at every other boundary that checks it, rather than a
+/// resume-template-specific paraphrase of the same fact.
 pub fn ensure_resume_template(template: &[String]) -> Result<(), String> {
     if template.is_empty() {
         return Err(
@@ -1574,6 +1701,7 @@ pub fn ensure_resume_template(template: &[String]) -> Result<(), String> {
              the placeholder belongs in an argument slot"
         ));
     }
+    ensure_no_cwd_program("resume template", template)?;
     Ok(())
 }
 
@@ -1907,6 +2035,200 @@ mod tests {
                 "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31"
             ],
             "the program stays the program and the identity lands in its own slot"
+        );
+    }
+
+    /// `{cwd}` is meaningless unless EVERY occurrence in an argument slot
+    /// gets filled — a wrapper is free to take the directory twice as two
+    /// standalone arguments — while `--dir={cwd}` must stay untouched: the
+    /// whole-element rule (shared with `{conversation}`) is what keeps
+    /// substitution from splicing into the middle of an argument the user
+    /// wrote. Also pins that substitution never introduces quoting: a path
+    /// with a space survives as one element. `has_cwd_placeholder` is
+    /// asserted on the same vectors so a substring-matching or always-false
+    /// implementation would fail here rather than pass by accident.
+    #[test]
+    fn cwd_fills_every_matching_slot_and_only_whole_elements() {
+        let argv = vec![
+            "w".to_string(),
+            "run".to_string(),
+            CWD_PLACEHOLDER.to_string(),
+            "claude".to_string(),
+            "--dir={cwd}".to_string(),
+            CWD_PLACEHOLDER.to_string(),
+        ];
+        assert!(has_cwd_placeholder(&argv));
+        assert!(
+            !has_cwd_placeholder(&["claude".to_string(), "--dir={cwd}".to_string()]),
+            "an embedded {{cwd}} is not a placeholder occurrence"
+        );
+        let filled = fill_cwd(argv, "/a b/c");
+        assert!(
+            !has_cwd_placeholder(&filled),
+            "nothing is left to substitute once every whole-element match is filled"
+        );
+        assert_eq!(
+            filled,
+            ["w", "run", "/a b/c", "claude", "--dir={cwd}", "/a b/c"],
+            "slots 2 and 5 are whole-element matches and must be replaced; slot 4 is `{{cwd}}` \
+             embedded in a longer flag and must not be"
+        );
+    }
+
+    /// `{cwd}` may not be `argv[0]`: substitution would make the working
+    /// directory the PROGRAM this session execs. `fill_slots` skips slot 0
+    /// unconditionally as a backstop behind `ensure_no_cwd_program`, so a
+    /// vector that reaches the fill with the placeholder first comes out
+    /// unchanged rather than with a directory in the program name.
+    #[test]
+    fn cwd_never_fills_the_program_slot() {
+        let argv = vec![CWD_PLACEHOLDER.to_string(), "x".to_string()];
+        assert_eq!(fill_cwd(argv.clone(), "/tmp"), argv);
+    }
+
+    /// A template with no `{cwd}` at all is the common case (every profile
+    /// that does not use a wrapper), and it has to be a true no-op: no
+    /// spurious element added, no existing element rewritten. Paired with
+    /// `has_cwd_placeholder` returning `false`, since that predicate is
+    /// what a caller consults to decide whether a fill is worth logging.
+    #[test]
+    fn cwd_fill_is_a_no_op_without_a_placeholder() {
+        let argv = vec!["claude".to_string(), "--resume".to_string()];
+        assert_eq!(fill_cwd(argv.clone(), "/tmp"), argv);
+        assert!(!has_cwd_placeholder(&argv));
+    }
+
+    /// Pins the ORDER contract: identity is substituted when the restart
+    /// snapshot is built (`filled_resume_argv`, a per-restart call), `{cwd}`
+    /// is substituted at SPAWN time (`fill_cwd`, called only from
+    /// `Supervisor::spawn_agent`). A template that uses both
+    /// placeholders must let `filled_resume_argv` touch only
+    /// `{conversation}` and leave `{cwd}` for the later, separate call, and
+    /// the second call must then find exactly that element left to fill.
+    /// The test exercises the two pure substitution passes in that order;
+    /// it does not drive `spawn_agent` itself.
+    #[test]
+    fn conversation_and_cwd_placeholders_coexist_in_one_template() {
+        let snapshot = IntegrationSnapshot::resolve(
+            "w",
+            Some(AgentKind::Claude),
+            Some(vec![
+                "w".to_string(),
+                "run".to_string(),
+                CWD_PLACEHOLDER.to_string(),
+                "claude".to_string(),
+                "--resume".to_string(),
+                CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+        )
+        .expect("a template containing {conversation} satisfies an integrated kind");
+
+        let after_resume = snapshot
+            .filled_resume_argv("0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31")
+            .expect("a plausible id fills the template");
+        assert_eq!(
+            after_resume,
+            [
+                "w",
+                "run",
+                "{cwd}",
+                "claude",
+                "--resume",
+                "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31"
+            ],
+            "{{conversation}} is filled and {{cwd}} is left exactly as it was"
+        );
+
+        let after_spawn = fill_cwd(after_resume, "/work/dir");
+        assert_eq!(
+            after_spawn,
+            [
+                "w",
+                "run",
+                "/work/dir",
+                "claude",
+                "--resume",
+                "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31"
+            ],
+            "the later, separate spawn-time fill picks up exactly where the resume-time fill left off"
+        );
+    }
+
+    /// `{cwd}` in the program slot is refused by `ensure_no_cwd_program`
+    /// (the check invocation boundaries call) and by
+    /// `ensure_resume_template` (which folds it in alongside the
+    /// pre-existing `{conversation}`-first refusal so a resume template
+    /// gets both rules from one call). The accepted shapes are asserted
+    /// too, for both functions, so a rule that quietly started refusing
+    /// `{cwd}` anywhere in the vector — not just slot 0 — would fail here
+    /// instead of silently disabling every wrapper resume.
+    #[test]
+    fn a_cwd_placeholder_may_not_be_the_program() {
+        ensure_resume_template(&[
+            "w".to_string(),
+            "run".to_string(),
+            CWD_PLACEHOLDER.to_string(),
+            "claude".to_string(),
+            "--resume".to_string(),
+            CONVERSATION_PLACEHOLDER.to_string(),
+        ])
+        .expect(
+            "a wrapper template with {cwd} past the program slot is exactly the supported shape",
+        );
+        ensure_no_cwd_program("wrapper invocation", &[CWD_PLACEHOLDER.to_string()])
+            .expect_err("a bare {cwd} names no program other than a directory");
+        ensure_no_cwd_program(
+            "wrapper invocation",
+            &[CWD_PLACEHOLDER.to_string(), "claude".to_string()],
+        )
+        .expect_err("{cwd} first is still the program slot regardless of what follows");
+        ensure_no_cwd_program(
+            "wrapper invocation",
+            &["claude".to_string(), CWD_PLACEHOLDER.to_string()],
+        )
+        .expect("{cwd} in an argument slot is exactly what the placeholder is for");
+
+        let refused = ensure_resume_template(&[
+            CWD_PLACEHOLDER.to_string(),
+            "--resume".to_string(),
+            CONVERSATION_PLACEHOLDER.to_string(),
+        ])
+        .expect_err("a resume template whose program is {cwd} is unexecutable");
+        assert!(
+            refused.contains(CWD_PLACEHOLDER) && refused.contains("PROGRAM"),
+            "the refusal must name the placeholder and say what would go wrong: {refused}"
+        );
+    }
+
+    /// A conversation id spelled like a placeholder is refused, because the
+    /// two substitution passes run in sequence: an id of `{cwd}` would be
+    /// written into the template by `filled_resume_argv` and then rewritten
+    /// into the working directory by `fill_cwd`, letting a record file —
+    /// which any local process can write — steer the resume argv through
+    /// the second pass. Asserted end to end through `filled_resume_argv`,
+    /// not only on the shape check, so the property survives a refactor
+    /// that moves where plausibility is enforced.
+    #[test]
+    fn a_conversation_id_spelled_like_a_placeholder_is_refused() {
+        assert!(!is_plausible_conversation_id(CWD_PLACEHOLDER));
+        assert!(!is_plausible_conversation_id(CONVERSATION_PLACEHOLDER));
+        let snapshot = IntegrationSnapshot::resolve(
+            "w",
+            Some(AgentKind::Claude),
+            Some(vec![
+                "w".to_string(),
+                "run".to_string(),
+                CWD_PLACEHOLDER.to_string(),
+                "claude".to_string(),
+                "--resume".to_string(),
+                CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+        )
+        .expect("a template containing {conversation} satisfies an integrated kind");
+        assert_eq!(
+            snapshot.filled_resume_argv(CWD_PLACEHOLDER),
+            None,
+            "an id equal to {{cwd}} must not become a second {{cwd}} element for the spawn-time fill"
         );
     }
 
