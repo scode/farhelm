@@ -454,6 +454,25 @@ pub struct SupervisorSeams {
     /// consults the environment again and no two launch paths can disagree
     /// about which tmux this supervisor is driving.
     pub tmux_program: PathBuf,
+    /// Which agent kinds get the per-launch conversation hook appended to
+    /// their argv — the `FARHELM_AGENT_HOOKS` opt-out (plan D5). See
+    /// [`crate::agent_kind::AgentHooks`], and
+    /// [`Supervisor::with_hook_argv`] for the one place it is consulted.
+    ///
+    /// A production knob for the same reason `tmux_program` above is one,
+    /// and it obeys the same rule this struct's `Default` states: nothing
+    /// below this line ever consults the environment. The single
+    /// `std::env::var("FARHELM_AGENT_HOOKS")` read happens in `farhelm
+    /// supervisor run`'s CLI arm, beside the `--tmux` resolution, and the
+    /// PARSED value arrives here — so a test sets the policy by setting
+    /// this field and never by mutating its own process's environment,
+    /// which this repo forbids.
+    ///
+    /// [`crate::agent_kind::AgentHooks::All`] by default, unconditionally:
+    /// a supervisor constructed by anything other than the CLI arm hooks
+    /// every integrated kind, because the opt-out is an operator override
+    /// and not a value with a discoverable "real" setting.
+    pub agent_hooks: crate::agent_kind::AgentHooks,
     /// See [`CreateCrashSeam`]. `None` in production.
     pub create_crash: Option<CreateCrashSeam>,
     /// Where the agents' own record directories are rooted (PLAN_M3.md
@@ -637,6 +656,7 @@ impl Default for SupervisorSeams {
         SupervisorSeams {
             boot_id: Arc::new(read_host_boot_id),
             tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
+            agent_hooks: crate::agent_kind::AgentHooks::default(),
             create_crash: None,
             agent_home: None,
             user_home: None,
@@ -1694,6 +1714,176 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
     Arc::new(std::sync::atomic::AtomicBool::new(raised))
 }
 
+/// The decision half of [`Supervisor::with_hook_argv`], with every input
+/// it needs passed in rather than read off a `Supervisor` (plan §2.3).
+///
+/// Split out for testability, and the split is worth its keep: the
+/// interesting behaviour here is a list of REFUSALS — seven of them, five
+/// logged and two silent — and reaching them through a real supervisor would
+/// mean constructing one per case, tmux and SQLite included, to exercise a
+/// function that touches neither. Its only effect beyond its return value
+/// is tracing.
+///
+/// Returns the argv to launch and whether it was HOOKED, i.e. whether the
+/// tail was actually appended. The caller carries that bool to the
+/// [`SessionEntry::hooked`] tripwire; it is deliberately not recoverable
+/// by inspecting the returned argv, because "does this argv end in flags
+/// that look like ours" is exactly the kind of re-derivation that goes
+/// quietly wrong when a vendor's flags change.
+///
+/// ## Why the order of the checks is the order it is
+///
+/// A kind with no integration ([`AgentKind::Generic`]) returns SILENTLY
+/// and does so FIRST, before the opt-out is consulted at all: an
+/// un-integrated session is the ordinary case, not a skipped injection,
+/// and logging one line per generic launch would bury the skips that
+/// do mean something. Asking [`crate::agent_kind::AgentHooks::allows`]
+/// first would additionally start logging `disabled by FARHELM_AGENT_HOOKS`
+/// against every generic session the moment an operator narrows the
+/// opt-out, which describes nothing that operator did.
+///
+/// The other silent return is the same judgement one level down: an
+/// integration whose [`crate::agent_kind::AgentIntegration::hook_argv`]
+/// yields an EMPTY tail cannot be hooked at all, which is a fact about the
+/// kind rather than about this launch, so logging it would repeat the
+/// identical line on every launch of that kind forever.
+///
+/// The remaining five skips are all worth a line, because each is a case
+/// where identity capture silently degrades to the record scan and the
+/// only evidence is this log.
+fn with_hook_argv_using(
+    mut argv: Vec<String>,
+    snapshot: &IntegrationSnapshot,
+    hooks: &crate::agent_kind::AgentHooks,
+    exe: Option<&str>,
+    session: &str,
+) -> (Vec<String>, bool) {
+    let Some(integration) = snapshot.integration() else {
+        return (argv, false);
+    };
+    let skip = |reason: &'static str| {
+        info!(
+            session = %session,
+            kind = ?snapshot.kind,
+            reason,
+            "conversation hook flags not injected"
+        );
+    };
+    if !hooks.allows(snapshot.kind) {
+        skip("disabled by FARHELM_AGENT_HOOKS");
+        return (argv, false);
+    }
+    let Some(exe) = exe else {
+        skip("farhelm executable path is not utf-8");
+        return (argv, false);
+    };
+    // Plan D4: both vendors take a trailing positional prompt, and a bare
+    // `--` turns everything after it into that prompt's text. Appending
+    // past one would not configure a hook, it would type our flags at the
+    // agent.
+    if argv.iter().any(|element| element == "--") {
+        skip("invocation contains a bare --");
+        return (argv, false);
+    }
+    // Plan D3: Claude Code honours only the LAST `--settings`, so a second
+    // one appended after the user's would silently discard theirs —
+    // turning an identity improvement into a lost configuration. Only
+    // Claude's injection uses that flag, so only Claude has to yield here;
+    // a Codex invocation carrying `--settings` means something else
+    // entirely (or nothing) and is left alone.
+    if snapshot.kind == AgentKind::Claude
+        && argv
+            .iter()
+            .any(|element| element == "--settings" || element.starts_with("--settings="))
+    {
+        skip("invocation already passes --settings");
+        return (argv, false);
+    }
+    // The Codex counterpart, and it refuses for two reasons at once (see
+    // [`codex_invocation_configures_hooks`]): a second
+    // `--dangerously-bypass-hook-trust` risks being rejected outright by
+    // the vendor's own argument parser, which would turn an identity
+    // improvement into a FAILED LAUNCH rather than a degraded one, and an
+    // invocation already writing the `hooks.`/`features.hooks` tables owns
+    // that configuration — appending ours after it is a merge nobody asked
+    // for, over a table whose last-writer semantics we do not control.
+    // Like every other skip this falls back to the record scan, so the
+    // cost of being wrong here is an inferred identity, not a broken
+    // session.
+    if snapshot.kind == AgentKind::Codex && codex_invocation_configures_hooks(&argv) {
+        skip("invocation already configures codex hooks");
+        return (argv, false);
+    }
+    let tail = integration.hook_argv(exe);
+    // An integration that offers no tail cannot be hooked — the trait's
+    // default `hook_argv` returns exactly this, so a kind that grows a
+    // record layout before it grows a hook lands here. Silently, and
+    // WITHOUT the line below: claiming flags were injected when none were
+    // would arm the tripwire against a launch that never had a hook to
+    // begin with, and every reader of that log line would be chasing a
+    // vendor bug that does not exist.
+    if tail.is_empty() {
+        return (argv, false);
+    }
+    argv.extend(tail);
+    info!(
+        session = %session,
+        kind = ?snapshot.kind,
+        "conversation hook flags injected"
+    );
+    (argv, true)
+}
+
+/// Whether a Codex invocation is already steering Codex's hook
+/// configuration itself — the test behind the
+/// `invocation already configures codex hooks` skip.
+///
+/// True for either of the two shapes farhelm's own tail would collide
+/// with:
+///
+/// - `--dangerously-bypass-hook-trust`, the flag the injected tail leads
+///   with. Whether Codex tolerates the same flag twice is the vendor's
+///   business and unverified here; the downside of guessing wrong is a
+///   launch that fails to start, which is the one outcome injection is
+///   never allowed to cause.
+/// - a `-c` override whose value assigns into `hooks.` or
+///   `features.hooks`, which is precisely the namespace the tail writes.
+///
+/// Both `-c value` and `-cvalue` count, mirroring the two spellings the
+/// Claude `--settings` rule above accepts for the same reason: they are
+/// one flag to the vendor's parser, so a check that saw only one spelling
+/// would be trivially and silently bypassed by the other.
+///
+/// Deliberately NOT a general "does this argv touch config" test: an
+/// invocation carrying unrelated `-c` overrides (`-c model=...`) has no
+/// quarrel with the hook tables and stays hooked.
+fn codex_invocation_configures_hooks(argv: &[String]) -> bool {
+    /// The two config prefixes the injected tail assigns into.
+    fn steers_hook_tables(value: &str) -> bool {
+        value.starts_with("hooks.") || value.starts_with("features.hooks")
+    }
+
+    let mut elements = argv.iter().peekable();
+    while let Some(element) = elements.next() {
+        if element == "--dangerously-bypass-hook-trust" {
+            return true;
+        }
+        // The separated spelling PEEKS rather than consuming: the value
+        // element is examined again on the next turn, where it matches
+        // neither arm, which keeps this loop a plain scan rather than a
+        // half-implementation of the vendor's argument grammar.
+        let value = if element == "-c" {
+            elements.peek().map(|next| next.as_str())
+        } else {
+            element.strip_prefix("-c").filter(|value| !value.is_empty())
+        };
+        if value.is_some_and(steers_hook_tables) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Where one session's hook trace lives: `<state_dir>/hook-log/<id>.log`.
 ///
 /// The hook process is the ONLY place a hook-side failure is ever visible
@@ -2092,6 +2282,15 @@ struct Spawned {
     pane: String,
     spec_path: PathBuf,
     status_path: PathBuf,
+    /// Whether this launch's argv carried the conversation hook — see
+    /// [`Supervisor::with_hook_argv`], which decided it.
+    ///
+    /// Returned rather than left on the supervisor because the cell that
+    /// records it, [`SessionEntry::hooked`], belongs to the entry
+    /// PUBLISHED for this launch, and on the create path that entry does
+    /// not exist until the launch is confirmed. Both callers carry this
+    /// value forward to that publication; nothing else reads it.
+    hooked: bool,
 }
 
 /// Why a launch's side effects did not complete, split by what the caller
@@ -2342,6 +2541,19 @@ struct Relaunched {
     outcome: LastOutcome,
     /// Whether the new run starts conversation capture from scratch.
     reset_capture: bool,
+    /// Whether THIS relaunch's argv carried the conversation hook, as
+    /// [`Supervisor::with_hook_argv`] decided and [`Spawned::hooked`]
+    /// reported back.
+    ///
+    /// It travels with the publication rather than being applied to
+    /// `entry` because [`SessionEntry::hooked`] is per-LAUNCH: the entry
+    /// this relaunch was computed FROM describes the run that just ended,
+    /// and `relaunched_entry` mints the new generation's cell as `false`
+    /// unconditionally — including for a Resume, whose retained capture
+    /// state says nothing about whether the new argv was injected.
+    /// Raising it on the published entry is the only placement that
+    /// survives.
+    hooked: bool,
     /// The session's tabs as they were BEFORE the relaunch: restart
     /// touches the agent terminal alone, so these are still exactly the
     /// tabs it has. Captured early rather than rediscovered here — see
@@ -2499,7 +2711,7 @@ pub(crate) struct SessionEntry {
     /// same state the published entry is read from.
     pub(crate) capture: Arc<std::sync::Mutex<CaptureState>>,
     /// Whether THIS launch's argv carried the conversation-reporting hook
-    /// (`Supervisor::with_hook_argv`, a later step in the same plan).
+    /// ([`Supervisor::with_hook_argv`], which is what decides it).
     ///
     /// Diagnostics only: nothing about capture, restart, or the wire reply
     /// consults it, and nothing persists it. It describes what this
@@ -2508,30 +2720,63 @@ pub(crate) struct SessionEntry {
     /// restart — has nothing to say about it and correctly comes back with
     /// the flag clear.
     ///
-    /// Its one reader is [`crate::service::capture::capture_pass`]'s
-    /// liveness tripwire. A hooked launch that is still not
+    /// Its one reader is the liveness tripwire in
+    /// [`crate::service::capture`]. A hooked launch that is still not
     /// [`CaptureState::Reported`] well past its capture horizon means no
-    /// report was successfully ACCEPTED — which is broader than "the hook
-    /// never ran" and is worded that way on purpose. A hook that never
-    /// fired (a vendor that renamed its flag, a settings file the
-    /// injection declined to fight over, a wrapper script that swallowed
-    /// the tail) and a hook that fired and was REFUSED (a credential the
-    /// store would not validate, an implausible id, a supervisor that was
-    /// not recording) leave this state identical, and nothing the entry
-    /// holds can tell them apart. Separating them is the job of the
-    /// session's own hook trace file, which is where a diagnosis continues
-    /// after the tripwire names a session. Either failure is otherwise
-    /// INVISIBLE, because the scan fallback keeps working and the session
-    /// looks entirely ordinary; the tripwire is the only place it
-    /// surfaces.
+    /// report was successfully ACCEPTED — which is a broader statement
+    /// than "the hook never ran", and the tripwire's message says so.
+    /// A hook that ran and was refused (a credential the store could not
+    /// validate, an implausible id, a supervisor that was not recording)
+    /// leaves exactly the same silence here; the hook's own trace file is
+    /// what separates the cases, which is why the two are diagnosed
+    /// together rather than from this flag alone.
     ///
-    /// STRICTLY per-launch — a narrower scope than the capture window
-    /// beside it: [`relaunched_entry`] mints it `false` on EVERY relaunch,
-    /// including a Resume that keeps its capture state, because the
-    /// question it answers is "was THIS launch's argv injected", and no
-    /// previous launch can answer that. Whoever raises it must therefore
-    /// raise it on the entry PUBLISHED for the new generation, not on the
-    /// previous entry a relaunch was computed from.
+    /// Either way the failure is otherwise INVISIBLE, because the scan
+    /// fallback keeps working and the session looks entirely ordinary — a
+    /// vendor that renamed its flag, a wrapper script that swallowed the
+    /// tail, a hook that never got to run. For those the tripwire is the
+    /// only place anything surfaces.
+    ///
+    /// What it deliberately does NOT cover is the other half of the
+    /// picture: a launch that was REFUSED injection in the first place —
+    /// an invocation carrying its own `--settings`, a bare `--`, a kind
+    /// excluded by `FARHELM_AGENT_HOOKS`. Those are diagnosed at INJECTION
+    /// time, by [`with_hook_argv_using`]'s skip line, and they leave this
+    /// flag clear, so the tripwire never arms for them and its silence is
+    /// correct rather than a second failure. The two questions a reader
+    /// has to keep apart are "were the flags ever put on the command line"
+    /// (the skip line answers it, at launch) and "were they put on and
+    /// nothing came back" (this flag plus the tripwire, well after).
+    ///
+    /// STRICTLY per-launch — and note that this is a narrower scope than
+    /// the capture window beside it, which is the one thing about this
+    /// field most likely to be "tidied" wrong. [`relaunched_entry`] mints
+    /// it `false` on EVERY relaunch, including a Resume that keeps its
+    /// capture state, because the question it answers is "was THIS launch's
+    /// argv injected", and no previous launch can answer that. Injection
+    /// can genuinely differ between two launches of one session: a resume
+    /// template that already carries a `--` or a `--settings`, a kind newly
+    /// excluded, a `farhelm_exe` that stopped resolving. A carried-over
+    /// `true` would arm the tripwire for a launch that never had a hook and
+    /// warn about a report that was never going to come.
+    ///
+    /// Whoever raises it must therefore raise it on the entry PUBLISHED for
+    /// the new generation, not on the previous entry a relaunch was
+    /// computed from. The two writers honour that in the two shapes their
+    /// paths allow: a create builds its entry only after the launch is
+    /// confirmed and seeds the cell from [`Spawned::hooked`] directly,
+    /// while a restart's entry is minted by `relaunched_entry` inside
+    /// [`Supervisor::publish_relaunched`], which raises the flag there when
+    /// the new launch was injected. Nothing outside a launch ever writes
+    /// it.
+    ///
+    /// One accepted hole follows from that: a restart whose tmux command
+    /// failed AMBIGUOUSLY may in fact be running a hooked agent, and the
+    /// generic recovery republishes it through `relaunched_entry` with this
+    /// flag clear, because the failure path never learns what the spawn
+    /// decided. Reconstructing it is not worth it — the flag feeds nothing
+    /// but the tripwire, so the entire cost is one launch whose missing
+    /// report goes unwarned about.
     pub(crate) hooked: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the tripwire described above has already logged for this
     /// launch, so a hook that never reports costs one line per launch
@@ -2850,6 +3095,28 @@ pub struct Supervisor {
     pub(crate) pending_snapshots: Mutex<HashMap<String, Vec<u8>>>,
     /// This binary's own path: the launch shim is a subcommand of it.
     farhelm_exe: PathBuf,
+    /// [`Self::farhelm_exe`] as a `str`, or `None` when that path is not
+    /// UTF-8 — resolved ONCE at construction rather than per launch.
+    ///
+    /// It exists because of what the conversation hook has to do with the
+    /// path: every [`crate::agent_kind::AgentIntegration::hook_argv`]
+    /// implementation embeds it in a vendor's own quoting syntax through
+    /// `shell_words::quote`, which takes `&str` and nothing else. Doing
+    /// the fallible `Path`-to-`str` conversion here means the failure has
+    /// exactly one home, and the launch paths get to treat "hookable" as a
+    /// plain `Option`. Fallible rather than lossy is the whole reason this
+    /// field is an `Option`: `Path::to_str` refuses a non-UTF-8 path
+    /// outright instead of substituting replacement characters, so there
+    /// is no mangled-but-plausible path to accidentally hand a vendor.
+    ///
+    /// `None` is a real, if vanishing, state and not a should-never-happen:
+    /// a farhelm installed under a non-UTF-8 path simply never has hook
+    /// flags injected — [`Supervisor::with_hook_argv`] logs the skip and
+    /// every session falls back to the record scan. Nothing else about the
+    /// launch changes, because the shim itself is addressed by `PathBuf`
+    /// (see [`crate::launch::window_command`]) and has never needed the
+    /// path to be text.
+    farhelm_exe_str: Option<String>,
     /// Admission control for the slow handlers spawned by
     /// `handle_control` (`ListSessions`/`StopSession`/`DeleteSession` —
     /// see `HANDLER_ADMISSION_PERMITS`'s own docs). Deliberately
@@ -3007,26 +3274,64 @@ pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str
     )
 }
 
+/// Everything `farhelm supervisor run` resolves ONCE at process startup
+/// and hands to the supervisor it is about to build.
+///
+/// A struct rather than a growing parameter list, and every field is
+/// REQUIRED — there is deliberately no `Default` and no `..rest` escape.
+/// Each of these is an operator override read from the CLI or the
+/// environment exactly once, at exactly one place, and a caller allowed to
+/// omit one is a launch path that silently ignores it. Spelling them out
+/// is what keeps "resolved once, honoured everywhere" checkable by the
+/// compiler instead of by review.
+///
+/// The values themselves land in [`SupervisorSeams`], which is where every
+/// launch path reads them from; this type exists only to carry them across
+/// the one boundary between the CLI arm and the constructor. See that
+/// struct's `tmux_program` and `agent_hooks` fields for what each means and
+/// for the environment-hygiene rule they both obey.
+pub struct SupervisorStartup {
+    /// The resolved `--tmux` / `FARHELM_TMUX` override (see
+    /// [`crate::tmux::resolve_tmux_program_from_env`]). Callers with no
+    /// opinion pass [`crate::tmux::DEFAULT_TMUX_PROGRAM`].
+    pub tmux_program: PathBuf,
+    /// The parsed `FARHELM_AGENT_HOOKS` opt-out (see
+    /// [`crate::agent_kind::parse_agent_hooks`]). Callers with no opinion
+    /// pass [`crate::agent_kind::AgentHooks::default()`], which hooks every
+    /// integrated kind.
+    pub agent_hooks: crate::agent_kind::AgentHooks,
+}
+
 impl Supervisor {
     /// Production constructor: the launch shim is this very process's
     /// binary. Test harnesses must NOT use this — their `current_exe` is
     /// the libtest runner, not farhelm — and use `new_with_exe` instead.
     pub async fn new(state_dir: &Path) -> anyhow::Result<Arc<Supervisor>> {
-        Self::new_with_tmux(state_dir, PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM)).await
+        Self::new_for_startup(
+            state_dir,
+            SupervisorStartup {
+                tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
+                agent_hooks: crate::agent_kind::AgentHooks::default(),
+            },
+        )
+        .await
     }
 
-    /// [`Self::new`] with the tmux binary named explicitly — the resolved
-    /// `--tmux` / `FARHELM_TMUX` override (see
-    /// [`crate::tmux::resolve_tmux_program`]).
+    /// [`Self::new`] with the process-startup overrides named explicitly —
+    /// see [`SupervisorStartup`].
     ///
-    /// Its own constructor rather than a parameter on [`Self::new`]
-    /// because the override has exactly one caller — `farhelm supervisor
-    /// run`, which resolves it once at startup — while everything else
-    /// wants plain `tmux` off `PATH`.
-    pub async fn new_with_tmux(
+    /// Its own constructor rather than parameters on [`Self::new`] because
+    /// the overrides have exactly one caller — `farhelm supervisor run`,
+    /// which resolves them once at startup — while everything else wants
+    /// the plain defaults.
+    pub async fn new_for_startup(
         state_dir: &Path,
-        tmux_program: PathBuf,
+        startup: SupervisorStartup,
     ) -> anyhow::Result<Arc<Supervisor>> {
+        let SupervisorStartup {
+            tmux_program,
+            agent_hooks,
+        } = startup;
         let exe = std::env::current_exe().context("resolving own binary path")?;
         Self::new_with_seams(
             state_dir,
@@ -3034,6 +3339,7 @@ impl Supervisor {
             SupervisorTimeouts::default(),
             SupervisorSeams {
                 tmux_program,
+                agent_hooks,
                 ..SupervisorSeams::default()
             },
         )
@@ -3089,6 +3395,19 @@ impl Supervisor {
                 .context("reading the supervisor's working directory")?
                 .join(farhelm_exe)
         };
+        // Derived from the ABSOLUTE spelling above, never from the
+        // caller's, so the string the hook flags carry is the same path
+        // the shim is launched through. See `Supervisor::farhelm_exe_str`
+        // for why the conversion is done once here instead of at each
+        // launch, and why losing it is a degradation rather than an error.
+        let farhelm_exe_str = farhelm_exe.to_str().map(str::to_string);
+        if farhelm_exe_str.is_none() {
+            warn!(
+                exe = %farhelm_exe.display(),
+                "this farhelm executable's path is not valid UTF-8, so no launch can carry \
+                 conversation hook flags; every session falls back to the record scan"
+            );
+        }
         // Store one absolute spelling after creation. Every injected
         // socket path derives from this value, so a supervisor started
         // with a relative `--state-dir` cannot hand a tab or agent a path
@@ -3248,6 +3567,7 @@ impl Supervisor {
             next_transfer: AtomicU64::new(1),
             pending_snapshots: Mutex::new(HashMap::new()),
             farhelm_exe,
+            farhelm_exe_str,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
             sampling_admission: Arc::new(tokio::sync::Semaphore::new(SAMPLING_ADMISSION_PERMITS)),
             timeouts,
@@ -5605,6 +5925,11 @@ impl Supervisor {
                 0,
                 &tmux_name,
                 argv,
+                // The very snapshot the entry published below carries, so
+                // the kind that chose this launch's hook flags is the kind
+                // the session is durably recorded as. Re-deriving it here
+                // would be a second classifier for one decision.
+                &snapshot,
                 // The VERIFIED directory, not the caller's spelling: see
                 // [`LaunchRequest::launch_cwd`]. They differ only on the
                 // retry path, and only there because that path had an
@@ -5617,12 +5942,13 @@ impl Supervisor {
                 launch_scope.as_deref(),
             )
             .await;
-        let (pane, spec_path, status_file_path) = match spawned {
+        let (pane, spec_path, status_file_path, hooked) = match spawned {
             Ok(Spawned {
                 pane,
                 spec_path,
                 status_path,
-            }) => (pane, spec_path, status_path),
+                hooked,
+            }) => (pane, spec_path, status_path, hooked),
             Err(SpawnFailure::Spec(error)) => {
                 // Nothing external happened yet — the spec is the FIRST
                 // side effect and it did not land — so the launching row
@@ -5949,7 +6275,11 @@ impl Supervisor {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                hooked: hook_flag(false),
+                // What `spawn_agent` actually did to this launch's argv,
+                // recorded on the entry that describes that launch. A
+                // create publishes exactly once, so this is the only
+                // moment the flag can be set for generation 0.
+                hooked: hook_flag(hooked),
                 hook_warned: hook_flag(false),
                 // The agent has printed nothing this supervisor has looked
                 // at yet; the ticker's next sample establishes the baseline
@@ -6803,6 +7133,13 @@ impl Supervisor {
                 generation,
                 &tmux_name,
                 argv,
+                // The session's own immutable snapshot: a restart is a new
+                // generation of the SAME session, so the kind that decides
+                // the hook flags is the one the session was created with,
+                // never re-derived from this relaunch's argv (which for a
+                // resume is `claude --resume <id>`, not the original
+                // invocation at all).
+                &entry.snapshot,
                 // The path `restart_session` VERIFIED against this
                 // session's recorded identity, not `entry.info.cwd` — see
                 // `ensure_cwd_identity` for the check-then-repoint window
@@ -6840,7 +7177,10 @@ impl Supervisor {
             );
         }
         let Spawned {
-            pane, spec_path, ..
+            pane,
+            spec_path,
+            hooked,
+            ..
         } = match spawned {
             Ok(spawned) => spawned,
             Err(SpawnFailure::Spec(error)) => {
@@ -6899,6 +7239,7 @@ impl Supervisor {
                         scope: scope.clone(),
                         outcome: LastOutcome::Launching,
                         reset_capture,
+                        hooked,
                         tabs: tabs.clone(),
                     },
                 )
@@ -6991,6 +7332,7 @@ impl Supervisor {
                             scope,
                             outcome: other,
                             reset_capture,
+                            hooked,
                             tabs,
                         },
                     )
@@ -7009,6 +7351,7 @@ impl Supervisor {
                     scope,
                     outcome: LastOutcome::Running,
                     reset_capture,
+                    hooked,
                     tabs,
                 },
             )
@@ -7180,6 +7523,7 @@ impl Supervisor {
             scope,
             outcome,
             reset_capture,
+            hooked,
             tabs,
         } = result;
         let restart_offer = if reset_capture {
@@ -7257,6 +7601,18 @@ impl Supervisor {
             outcome,
             reset_capture,
         );
+        // Raised on the NEW entry, whose cell `relaunched_entry` has just
+        // minted `false` — this launch's own injection is the ONLY thing
+        // that may raise it, whatever the previous launch did. The
+        // conditional is therefore not a merge with an inherited value; it
+        // simply leaves an un-injected launch's cell alone. Raising it on
+        // `entry` instead would arm the tripwire on the abandoned
+        // generation, which nothing evaluates any more.
+        if hooked {
+            published
+                .hooked
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         self.sessions
             .lock()
             .await
@@ -8422,7 +8778,51 @@ impl Supervisor {
         true
     }
 
-    /// Publish one launch's spec and start its window command in tmux —
+    /// Append this launch's conversation-reporting hook flags to `argv`,
+    /// or explain in the log why they were left off (plan §2.3).
+    ///
+    /// The hook is what makes a session's conversation identity EXACT
+    /// rather than inferred: the agent itself reports the id it is
+    /// actually using, which is the only thing that survives a `/clear`.
+    /// Everything this function can refuse to do is a fallback to the
+    /// record scan, never a failed launch — the scan is the no-hook path
+    /// SPEC.md keeps promising, and a launch that cannot be hooked is
+    /// still a perfectly good launch.
+    ///
+    /// Returns the argv to spawn and whether it was hooked; see
+    /// [`with_hook_argv_using`] for the refusal list, the order it applies
+    /// in, and what the bool is for.
+    ///
+    /// ## Placement in the launch
+    ///
+    /// Called from [`Supervisor::spawn_agent`], which both launch paths
+    /// funnel through — so the create path and the restart path cannot
+    /// disagree about whether a launch is hooked, and a resumed launch
+    /// (`relaunch_argv`'s `claude --resume <id>` shape) is hooked exactly
+    /// like a fresh one.
+    ///
+    /// Deliberately AFTER each path's own argv validation (create's at
+    /// `validate_create`, restart's inside `relaunch_argv`), and the
+    /// appended tail is deliberately NOT re-validated: it is a fixed set
+    /// of non-empty literals this crate wrote from a path it resolved
+    /// itself. Re-running the user-input checks over it would be checking
+    /// this crate's own output for user mistakes, and the only outcomes
+    /// available would be a false refusal or a no-op.
+    fn with_hook_argv(
+        &self,
+        argv: Vec<String>,
+        snapshot: &IntegrationSnapshot,
+        session: &str,
+    ) -> (Vec<String>, bool) {
+        with_hook_argv_using(
+            argv,
+            snapshot,
+            &self.seams.agent_hooks,
+            self.farhelm_exe_str.as_deref(),
+            session,
+        )
+    }
+
     /// Publish one launch's spec and start its window command in tmux —
     /// the side-effecting half of a launch, shared by create (PLAN_M3.md
     /// items 2/6) and restart (item 9).
@@ -8440,6 +8840,15 @@ impl Supervisor {
     /// creates a fresh tmux session (create, and a restart whose terminal
     /// is gone), `Some(pane)` respawns into an existing pane so the prior
     /// run stays in scrollback (see [`TmuxDriver::relaunch_in_pane`]).
+    ///
+    /// `snapshot` is here for one reason: this is where argv becomes a
+    /// process, so it is where the conversation hook has to be appended
+    /// ([`Supervisor::with_hook_argv`]). Threading it in — rather than
+    /// injecting in each caller — is the same argument the rest of this
+    /// function rests on: two callers doing it themselves is two places
+    /// for the decision to drift. Whether the hook actually went on is
+    /// reported back through [`Spawned::hooked`], because the entry that
+    /// records it does not exist yet on the create path.
     ///
     /// `scope` is the cgroup unit this launch was ALREADY recorded as
     /// running in (PLAN_M3.md item 10) — the caller decides and commits it
@@ -8461,6 +8870,7 @@ impl Supervisor {
         generation: i64,
         tmux_name: &str,
         argv: Vec<String>,
+        snapshot: &IntegrationSnapshot,
         cwd: &str,
         cols: u16,
         rows: u16,
@@ -8468,6 +8878,11 @@ impl Supervisor {
         preamble: Option<Vec<u8>>,
         scope: Option<&str>,
     ) -> Result<Spawned, SpawnFailure> {
+        // The last thing done to the argv before it is written down: the
+        // spec on disk is what the shim execs, so the flags have to be in
+        // it, and putting the injection here is what lets the shim stay
+        // ignorant of hooks entirely.
+        let (argv, hooked) = self.with_hook_argv(argv, snapshot, id);
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
@@ -8606,6 +9021,7 @@ impl Supervisor {
                     pane,
                     spec_path,
                     status_path,
+                    hooked,
                 })
             }
             Err(error) => Err(SpawnFailure::Tmux { spec_path, error }),
@@ -9038,14 +9454,13 @@ fn tab_close_cleanup_result(
 /// and serve its socket until the process dies. Returns only on a fatal
 /// error — a successful supervisor never returns.
 ///
-/// `tmux_program` is the already-resolved override (see
-/// [`crate::tmux::resolve_tmux_program_from_env`]) and is a REQUIRED
-/// parameter rather than an optional one: this is the whole supervisor
-/// entry point, so a caller that could omit it is a launch path that
-/// silently ignores `--tmux` and `FARHELM_TMUX`. Callers with no opinion
-/// pass [`crate::tmux::DEFAULT_TMUX_PROGRAM`].
-pub async fn run(state_dir: &Path, tmux_program: PathBuf) -> anyhow::Result<()> {
-    let sup = Supervisor::new_with_tmux(state_dir, tmux_program).await?;
+/// `startup` carries the already-resolved process-startup overrides (see
+/// [`SupervisorStartup`]), and every one of them is REQUIRED rather than
+/// optional: this is the whole supervisor entry point, so a caller that
+/// could omit one is a launch path that silently ignores `--tmux`,
+/// `FARHELM_TMUX`, or `FARHELM_AGENT_HOOKS`.
+pub async fn run(state_dir: &Path, startup: SupervisorStartup) -> anyhow::Result<()> {
+    let sup = Supervisor::new_for_startup(state_dir, startup).await?;
     sup.serve().await
 }
 
@@ -14803,5 +15218,464 @@ pub(crate) mod tests {
             Some(socket.to_string_lossy().as_ref())
         );
         assert!(socket.is_absolute());
+    }
+
+    // -----------------------------------------------------------------
+    // Conversation hook injection (plan §2.3).
+    //
+    // The decision function is pure, so the cases below drive
+    // `with_hook_argv_using` directly rather than standing a supervisor up
+    // per refusal. The last test in the section is the one that proves the
+    // wiring: that the decision actually reaches the launch spec on disk
+    // and the entry's tripwire flag.
+    // -----------------------------------------------------------------
+
+    /// A snapshot for `kind`, as the create path would have resolved one.
+    ///
+    /// Built through [`IntegrationSnapshot::resolve`] rather than by
+    /// struct literal so these tests exercise the same snapshot shape a
+    /// real session carries — including the derived resume template, whose
+    /// absence would be a different (and silently passing) fixture.
+    fn hook_snapshot(kind: AgentKind) -> IntegrationSnapshot {
+        let argv0 = match kind {
+            AgentKind::Claude => "claude",
+            AgentKind::Codex => "codex",
+            AgentKind::Generic => "agent",
+        };
+        IntegrationSnapshot::resolve(argv0, Some(kind), None).expect("a derived template resolves")
+    }
+
+    /// The exact tail each integrated kind expects for `exe`, straight
+    /// from the integration itself.
+    ///
+    /// Asserting against this rather than against a literal `--settings`
+    /// string is deliberate: this test is about WHETHER and WHERE the tail
+    /// is appended, and the tail's own content is pinned by
+    /// `agent_kind`'s quoting tests. A literal here would be a second
+    /// copy of the vendor's flag syntax to keep in sync.
+    fn expected_hook_tail(kind: AgentKind, exe: &str) -> Vec<String> {
+        crate::agent_kind::integration_for(kind)
+            .expect("an integrated kind")
+            .hook_argv(exe)
+    }
+
+    /// The injection appends each integrated kind's OWN hook flags after
+    /// the user's argv, and reports the launch as hooked.
+    ///
+    /// This is the whole mechanism plan §2.3 exists for: without the tail
+    /// on the command line the agent never reports its conversation id, and
+    /// `/clear` keeps silently breaking restart-resume. The two kinds are
+    /// asserted separately because they inject completely different flags
+    /// (Claude a `--settings` JSON, Codex a trust bypass plus two `-c`
+    /// TOML values), and a bug that appended one kind's tail for both would
+    /// otherwise pass.
+    ///
+    /// The user's own argv must survive UNCHANGED and in order: everything
+    /// downstream — including the shim's `exec` — treats the leading
+    /// elements as the invocation the operator asked for.
+    #[test]
+    fn with_hook_argv_appends_each_integrated_kinds_own_flags() {
+        for kind in [AgentKind::Claude, AgentKind::Codex] {
+            let argv = vec!["agent".to_string(), "--flag".to_string()];
+            let (hooked_argv, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(kind),
+                &crate::agent_kind::AgentHooks::All,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(hooked, "{kind:?}: an integrated kind must be hooked");
+            let tail = expected_hook_tail(kind, "/opt/farhelm");
+            assert_eq!(
+                hooked_argv,
+                [argv.clone(), tail].concat(),
+                "{kind:?}: the user's argv must be preserved verbatim with the kind's own \
+                 hook flags appended after it"
+            );
+        }
+    }
+
+    /// A `Generic` session is left alone, and SILENTLY.
+    ///
+    /// A kind with no integration has no hook to append — injecting vendor
+    /// flags into an unknown command line would corrupt the launch — and
+    /// un-integrated sessions are the ordinary case, so a log line per
+    /// launch would drown the skips that actually mean identity capture
+    /// degraded.
+    ///
+    /// Only the RETURN is asserted here; this suite captures no tracing
+    /// output, so the silence half of the contract is documented at
+    /// [`with_hook_argv_using`] rather than tested. The opt-out is
+    /// nonetheless set to `None` — the value that would log `disabled by
+    /// FARHELM_AGENT_HOOKS` if the policy check ran ahead of the
+    /// integration check — so the fixture at least matches the case the
+    /// ordering rule is about.
+    #[test]
+    fn with_hook_argv_leaves_a_generic_session_untouched() {
+        let argv = vec!["agent".to_string()];
+        let (result, hooked) = with_hook_argv_using(
+            argv.clone(),
+            &hook_snapshot(AgentKind::Generic),
+            &crate::agent_kind::AgentHooks::None,
+            Some("/opt/farhelm"),
+            "session-1",
+        );
+        assert!(!hooked);
+        assert_eq!(result, argv);
+    }
+
+    /// A bare `--` in the user's invocation suppresses injection (plan D4).
+    ///
+    /// Both vendors accept a trailing positional prompt, and `--` ends
+    /// option parsing: flags appended past one are not configuration at
+    /// all, they are prompt TEXT typed at the agent. Falling back to the
+    /// record scan is the only safe answer, and it is asserted for both
+    /// integrated kinds because the rule is about argv shape, not vendor.
+    #[test]
+    fn with_hook_argv_refuses_an_invocation_containing_a_bare_double_dash() {
+        for kind in [AgentKind::Claude, AgentKind::Codex] {
+            let argv = vec![
+                "agent".to_string(),
+                "--".to_string(),
+                "write me a haiku".to_string(),
+            ];
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(kind),
+                &crate::agent_kind::AgentHooks::All,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(!hooked, "{kind:?}: a bare -- must suppress injection");
+            assert_eq!(result, argv, "{kind:?}: the argv must be untouched");
+        }
+        // A `--`-looking element that is not the separator is not the
+        // separator: the check is equality, not a prefix match, or every
+        // ordinary long flag would disable hooking.
+        let argv = vec!["agent".to_string(), "--verbose".to_string()];
+        let (_, hooked) = with_hook_argv_using(
+            argv,
+            &hook_snapshot(AgentKind::Claude),
+            &crate::agent_kind::AgentHooks::All,
+            Some("/opt/farhelm"),
+            "session-1",
+        );
+        assert!(hooked, "an ordinary long flag must not read as a bare --");
+    }
+
+    /// A user's own `--settings` wins over ours, and ONLY on Claude
+    /// (plan D3).
+    ///
+    /// Claude Code honours the LAST `--settings` flag only, so appending
+    /// ours after the operator's would silently discard theirs — trading a
+    /// configuration they chose for an identity improvement they did not
+    /// ask for. Both spellings are refused, because `--settings x` and
+    /// `--settings=x` are the same flag to the vendor and a check that saw
+    /// only one would leak past the other.
+    ///
+    /// Codex is the control case and it matters: its injection uses no
+    /// `--settings` at all, so a check that skipped for every kind would
+    /// disable Codex hooking over a flag that cannot collide with
+    /// anything.
+    #[test]
+    fn with_hook_argv_yields_to_a_users_own_settings_flag_on_claude_only() {
+        for user_flag in [
+            vec!["--settings".to_string(), "/my/settings.json".to_string()],
+            vec!["--settings=/my/settings.json".to_string()],
+        ] {
+            let argv = [vec!["agent".to_string()], user_flag.clone()].concat();
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Claude),
+                &crate::agent_kind::AgentHooks::All,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(
+                !hooked,
+                "claude must not append a second --settings over {user_flag:?}"
+            );
+            assert_eq!(result, argv);
+
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Codex),
+                &crate::agent_kind::AgentHooks::All,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(
+                hooked,
+                "codex injects no --settings, so {user_flag:?} cannot collide with it"
+            );
+            assert_eq!(
+                result,
+                [argv, expected_hook_tail(AgentKind::Codex, "/opt/farhelm")].concat()
+            );
+        }
+    }
+
+    /// An invocation that already steers Codex's hook configuration is left
+    /// alone, in every spelling that steering comes in.
+    ///
+    /// Two distinct hazards share this one skip. Appending a SECOND
+    /// `--dangerously-bypass-hook-trust` puts a repeated flag in front of a
+    /// vendor parser whose tolerance for that is unverified, and a rejected
+    /// argument is not a degraded launch but a failed one — the single
+    /// outcome injection may never cause. A `-c` override writing the
+    /// `hooks.`/`features.hooks` tables, meanwhile, is a user configuring
+    /// the exact tables our tail writes; whose value survives the merge is
+    /// the vendor's business, and quietly appending ours makes farhelm a
+    /// participant in a configuration argument it has no stake in.
+    ///
+    /// Both `-c value` and `-cvalue` are checked because they are one flag
+    /// to the vendor, exactly as with Claude's two `--settings` spellings.
+    /// The control cases are the point of the second half: an unrelated
+    /// `-c` override still gets hooked (the rule is about the hook tables,
+    /// not about configuring anything at all), and the whole rule is
+    /// Codex-only — a Claude invocation carrying `-c hooks.…` means
+    /// something else entirely, since Claude's injection uses no `-c`.
+    #[test]
+    fn with_hook_argv_yields_to_an_invocation_that_already_configures_codex_hooks() {
+        for user_flags in [
+            vec!["--dangerously-bypass-hook-trust".to_string()],
+            vec!["-c".to_string(), "hooks.SessionStart=[]".to_string()],
+            vec!["-chooks.SessionStart=[]".to_string()],
+            vec!["-c".to_string(), "features.hooks=true".to_string()],
+            vec!["-cfeatures.hooks=true".to_string()],
+        ] {
+            let argv = [vec!["agent".to_string()], user_flags.clone()].concat();
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Codex),
+                &crate::agent_kind::AgentHooks::All,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(
+                !hooked,
+                "codex must not append its tail over {user_flags:?}"
+            );
+            assert_eq!(result, argv, "the argv must be untouched");
+
+            // Claude is the control: the same elements carry no meaning
+            // for its injection, so refusing there would cost hooking for
+            // no reason at all.
+            let (_, hooked) = with_hook_argv_using(
+                argv,
+                &hook_snapshot(AgentKind::Claude),
+                &crate::agent_kind::AgentHooks::All,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(
+                hooked,
+                "claude injects no -c and no bypass flag, so {user_flags:?} cannot collide"
+            );
+        }
+
+        // An override that configures something else entirely is not this
+        // rule's business — a check on `-c` alone would disable hooking for
+        // every Codex user who has ever pinned a model.
+        for unrelated in [
+            vec!["-c".to_string(), "model=\"gpt-5-codex\"".to_string()],
+            vec!["-cmodel=\"gpt-5-codex\"".to_string()],
+        ] {
+            let argv = [vec!["agent".to_string()], unrelated.clone()].concat();
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Codex),
+                &crate::agent_kind::AgentHooks::All,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(hooked, "{unrelated:?} does not touch the hook tables");
+            assert_eq!(
+                result,
+                [argv, expected_hook_tail(AgentKind::Codex, "/opt/farhelm")].concat()
+            );
+        }
+    }
+
+    /// The `FARHELM_AGENT_HOOKS` opt-out actually suppresses injection, in
+    /// both of its narrowing forms (plan D5).
+    ///
+    /// This is the escape hatch the plan promises an operator who does not
+    /// want the flags — Codex prints a trust-bypass warning on every launch
+    /// (D2), and this is how they turn that off — so a value that parsed
+    /// correctly but did not reach the launch would be a silent broken
+    /// promise. `Only` is checked in BOTH directions from one policy value,
+    /// because a bug that ignored the list entirely would still pass a test
+    /// that only asserted the allowed kind.
+    #[test]
+    fn with_hook_argv_honours_the_agent_hooks_opt_out() {
+        let argv = vec!["agent".to_string()];
+        for kind in [AgentKind::Claude, AgentKind::Codex] {
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(kind),
+                &crate::agent_kind::AgentHooks::None,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(!hooked, "{kind:?}: `none` must hook nothing");
+            assert_eq!(result, argv);
+        }
+
+        let codex_only = crate::agent_kind::AgentHooks::Only(vec![AgentKind::Codex]);
+        let (result, hooked) = with_hook_argv_using(
+            argv.clone(),
+            &hook_snapshot(AgentKind::Codex),
+            &codex_only,
+            Some("/opt/farhelm"),
+            "session-1",
+        );
+        assert!(hooked, "a listed kind must still be hooked");
+        assert_eq!(
+            result,
+            [
+                argv.clone(),
+                expected_hook_tail(AgentKind::Codex, "/opt/farhelm")
+            ]
+            .concat()
+        );
+        let (result, hooked) = with_hook_argv_using(
+            argv.clone(),
+            &hook_snapshot(AgentKind::Claude),
+            &codex_only,
+            Some("/opt/farhelm"),
+            "session-1",
+        );
+        assert!(!hooked, "a kind absent from the list must not be hooked");
+        assert_eq!(result, argv);
+    }
+
+    /// A farhelm binary whose path is not UTF-8 launches un-hooked rather
+    /// than failing the launch.
+    ///
+    /// The hook command has to be embedded in a vendor's shell-quoting
+    /// syntax, which is `&str`-only, so a path that cannot be text has no
+    /// hook to offer. The contract this pins is the DEGRADATION: capture
+    /// falls back to the record scan and everything else about the launch
+    /// is unchanged, because the shim itself is addressed by path and has
+    /// never needed the name to be text.
+    #[test]
+    fn with_hook_argv_cannot_hook_a_non_utf8_farhelm_path() {
+        let argv = vec!["agent".to_string()];
+        let (result, hooked) = with_hook_argv_using(
+            argv.clone(),
+            &hook_snapshot(AgentKind::Claude),
+            &crate::agent_kind::AgentHooks::All,
+            None,
+            "session-1",
+        );
+        assert!(!hooked);
+        assert_eq!(result, argv);
+    }
+
+    /// The opt-out a supervisor was STARTED with reaches the launch
+    /// decision — the one link `parse_agent_hooks`'s own tests cannot
+    /// cover.
+    ///
+    /// `farhelm supervisor run` reads `FARHELM_AGENT_HOOKS` once and hands
+    /// the parsed value to [`Supervisor::new_for_startup`]; everything
+    /// after that consults the seam. A value that parsed correctly and then
+    /// failed to land in [`SupervisorSeams`] would leave the escape hatch
+    /// silently inoperative — the operator sets the variable, restarts, and
+    /// Codex still prints its trust warning at every launch. Both
+    /// directions are asserted from the same fixture, because a bug that
+    /// dropped the field entirely would still pass the `None` half alone.
+    ///
+    /// It stops at [`Supervisor::with_hook_argv`] rather than driving a
+    /// real create: the decision is what the constructor is on the hook
+    /// for, and a create would drag tmux into a test about a struct field.
+    #[tokio::test]
+    async fn a_startup_opt_out_reaches_the_launch_decision() {
+        let state = StateDir::new();
+        let startup = |agent_hooks| SupervisorStartup {
+            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
+            agent_hooks,
+        };
+        let argv = vec!["claude".to_string()];
+
+        let opted_out =
+            Supervisor::new_for_startup(state.path(), startup(crate::agent_kind::AgentHooks::None))
+                .await
+                .expect("supervisor");
+        let (result, hooked) =
+            opted_out.with_hook_argv(argv.clone(), &hook_snapshot(AgentKind::Claude), "session-1");
+        assert!(
+            !hooked,
+            "a supervisor started with `none` must hook nothing"
+        );
+        assert_eq!(result, argv);
+
+        // The same construction with the default value, to prove the
+        // refusal above came from the startup value rather than from
+        // anything else this constructor happens to resolve — its own
+        // `current_exe`, for one, which is the libtest runner here.
+        let default = Supervisor::new_for_startup(
+            state.path(),
+            startup(crate::agent_kind::AgentHooks::default()),
+        )
+        .await
+        .expect("supervisor");
+        let (_, hooked) =
+            default.with_hook_argv(argv, &hook_snapshot(AgentKind::Claude), "session-1");
+        assert!(hooked, "the default startup value must still hook");
+    }
+
+    /// End to end through a real create: a Claude session's launch spec on
+    /// disk carries the hook flags, and its entry records the launch as
+    /// hooked.
+    ///
+    /// The pure tests above prove the DECISION; this one proves the
+    /// WIRING, which is the part with somewhere to go wrong — the snapshot
+    /// has to be threaded into `spawn_agent`, the injection has to happen
+    /// before the spec is serialized (the spec is what the shim execs, so
+    /// flags added afterwards would never reach the agent), and the
+    /// returned bool has to land on the entry the create publishes rather
+    /// than being dropped.
+    ///
+    /// It reads the spec off disk rather than trusting an in-memory value
+    /// for the same reason: the file IS the interface to the launch. The
+    /// spec survives to be read because this supervisor's shim path is
+    /// `dummy_exe`, so nothing ever consumes and unlinks it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_claude_create_carries_the_hook_flags_into_its_launch_spec() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let info = sup
+            .create_session_without_overrides("/", "claude", None, 80, 24, None)
+            .await
+            .expect("create");
+
+        let spec_path = crate::launch::spec_path_for_launch(&sup.state_dir, &info.id, 0);
+        let spec: LaunchSpec = serde_json::from_slice(
+            &std::fs::read(&spec_path).expect("the launch spec must still be on disk"),
+        )
+        .expect("the launch spec must parse");
+        let expected = expected_hook_tail(
+            AgentKind::Claude,
+            dummy_exe().to_str().expect("a UTF-8 dummy exe"),
+        );
+        assert_eq!(
+            spec.argv,
+            [vec!["claude".to_string()], expected].concat(),
+            "the spec the shim execs must be the user's invocation followed by the hook flags"
+        );
+
+        assert!(
+            sup.sessions
+                .lock()
+                .await
+                .get(&info.id)
+                .expect("the created session must be on the map")
+                .hooked
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "a hooked launch must raise the entry flag the liveness tripwire reads"
+        );
     }
 }

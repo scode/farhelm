@@ -250,7 +250,44 @@ fn main() -> anyhow::Result<()> {
             // startup, so a single resolution is what makes "every launch
             // path honors the override" true rather than aspirational.
             let tmux = farhelm_supervisor::tmux::resolve_tmux_program_from_env(tmux.as_deref());
-            runtime()?.block_on(run_supervisor(&dir, tmux, exit_on_stdin_close))
+            // The same rule, for the same reason, one line down: this is
+            // the ONLY read of `FARHELM_AGENT_HOOKS` in the codebase (plan
+            // D5). Everything downstream consults the parsed seam value, so
+            // no launch path can observe a variable that changed under a
+            // running supervisor, and no test ever has to mutate its own
+            // process's environment to exercise the opt-out. An unset
+            // variable is not an error — it is the default, "hook every
+            // integrated kind" — so `NotPresent` takes the default in
+            // silence.
+            //
+            // A value that is not UTF-8 is a different thing and gets a
+            // line: nobody types one on purpose, so it is a mistake worth
+            // naming, and `parse_agent_hooks` (a `&str` parser) cannot be
+            // shown it to complain on its own. The fallback direction is
+            // the same one an unrecognized token takes, and for the same
+            // reason: this variable is an opt-OUT, and a value nobody can
+            // read must not silently become "opt out of everything".
+            // `init_tracing()` has already run in this arm, so the warning
+            // actually reaches stderr.
+            let agent_hooks = match std::env::var("FARHELM_AGENT_HOOKS") {
+                Ok(value) => farhelm_supervisor::agent_kind::parse_agent_hooks(&value),
+                Err(std::env::VarError::NotPresent) => {
+                    farhelm_supervisor::agent_kind::AgentHooks::default()
+                }
+                Err(std::env::VarError::NotUnicode(_)) => {
+                    tracing::warn!(
+                        "FARHELM_AGENT_HOOKS is not valid UTF-8 and cannot be parsed; falling \
+                         back to the default (every kind hooked) rather than guessing what was \
+                         meant"
+                    );
+                    farhelm_supervisor::agent_kind::AgentHooks::default()
+                }
+            };
+            let startup = farhelm_supervisor::service::SupervisorStartup {
+                tmux_program: tmux,
+                agent_hooks,
+            };
+            runtime()?.block_on(run_supervisor(&dir, startup, exit_on_stdin_close))
         }
         Cmd::Internal { command } => match command {
             InternalCmd::Stdio { state_dir } => {
@@ -302,19 +339,20 @@ fn main() -> anyhow::Result<()> {
 /// thread, not Tokio's blocking pool: if the supervisor itself fails first,
 /// runtime shutdown cannot wait forever for an uncancellable stdin read.
 ///
-/// `tmux_program` arrives ALREADY resolved (`--tmux` over `FARHELM_TMUX`
-/// over `PATH`) and is passed straight through. Resolving it here instead
-/// would put the decision on both sides of the tether branch, which is one
-/// place too many for a value that must be identical on every launch path.
+/// `startup` arrives ALREADY resolved — the tmux program (`--tmux` over
+/// `FARHELM_TMUX` over `PATH`) and the `FARHELM_AGENT_HOOKS` opt-out — and
+/// is passed straight through. Resolving either here instead would put the
+/// decision on both sides of the tether branch, which is one place too many
+/// for values that must be identical on every launch path.
 async fn run_supervisor(
     state_dir: &std::path::Path,
-    tmux_program: PathBuf,
+    startup: farhelm_supervisor::service::SupervisorStartup,
     exit_on_stdin_close: bool,
 ) -> anyhow::Result<()> {
     use anyhow::Context as _;
 
     if !exit_on_stdin_close {
-        return farhelm_supervisor::service::run(state_dir, tmux_program).await;
+        return farhelm_supervisor::service::run(state_dir, startup).await;
     }
     let (stdin_closed_tx, stdin_closed) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
@@ -325,7 +363,7 @@ async fn run_supervisor(
         })
         .context("starting desktop supervisor stdin watcher")?;
     tokio::select! {
-        result = farhelm_supervisor::service::run(state_dir, tmux_program) => result,
+        result = farhelm_supervisor::service::run(state_dir, startup) => result,
         result = stdin_closed => {
             result.context("desktop supervisor stdin watcher stopped without reporting EOF")??;
             Ok(())
