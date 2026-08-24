@@ -43,6 +43,7 @@ mod launch_sentinel_error_status;
 
 mod conversation_identity_capture;
 mod create_idempotency;
+mod hook_identity;
 mod real_agent_capture;
 mod restart_under_concurrency;
 mod restart_with_resume;

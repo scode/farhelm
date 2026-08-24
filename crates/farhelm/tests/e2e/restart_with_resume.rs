@@ -822,6 +822,202 @@ async fn an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_termin
     interrupted_session_resumes_its_conversation("codex").await;
 }
 
+/// The same interrupted-then-resumed journey as
+/// [`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`],
+/// but for an identity the AGENT reported rather than one the scan found.
+///
+/// The two identity sources meet in exactly one place — the
+/// `captured_conversation` column — and everything downstream of it
+/// (offer, template substitution, relaunch) is supposed to be blind to
+/// which writer filled it. "Supposed to be" is why this test exists: a
+/// reported identity travels a different road to that column (a socket
+/// handler, no scan, its own provenance value, its own reload branch), and
+/// the reboot is where a difference would surface, because the successor
+/// rebuilds capture state from stored columns alone. A build that reloaded
+/// `conversation_source = 'hook'` into the wrong state, or that fenced the
+/// column so a resume could not read it, would pass every same-process test
+/// in `hook_identity` and fail here.
+///
+/// The reported id is deliberately one no record on disk carries. That is
+/// the whole point of the mechanism (`/clear` mints an id the scan can
+/// never correlate), and it also means nothing but the report could have
+/// put this value in the resume argv.
+///
+/// It also bounds what the relaunched fixture can be asked to prove. A
+/// real resume ADOPTS an existing record, and this conversation has none
+/// to adopt — so the fixture's honest answer is
+/// `RECORD-RESUME-MISSING:conv-h`, which is still the fixture naming the
+/// id it was told to resume, from inside the relaunched process. That,
+/// plus the substituted id in its echoed argv, is the whole proof
+/// available here: the resumed run cannot be shown to continue a
+/// conversation that never existed on disk.
+///
+/// The supervisor must genuinely `serve()` here, unlike its scan-driven
+/// siblings: the hook is a separate process whose only way in is the unix
+/// socket. See `hook_identity`'s module docs.
+#[tokio::test]
+async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
+    let home = farhelm_teststate::tempdir().expect("agent home");
+    let bin = farhelm_teststate::tempdir().expect("agent bin");
+    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join("claude"))
+        .expect("symlink the farhelm binary under the agent's own name");
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+
+    let seams = |boot: &str| SupervisorSeams {
+        boot_id: {
+            let boot = boot.to_string();
+            Arc::new(move || Ok(Some(boot.clone())))
+        },
+        agent_home: Some(home.path().to_path_buf()),
+        capture_window: test_capture_bounds(),
+        ..SupervisorSeams::default()
+    };
+    let claude = bin.path().join("claude");
+    let invocation = format!(
+        "{} internal fake-agent --script hook-report --record-home {}",
+        shell_words::quote(&claude.to_string_lossy()),
+        shell_words::quote(&home.path().to_string_lossy())
+    );
+    // A template that makes the substituted id do BOTH jobs, which
+    // neither of the two existing shapes does alone. `fixture_resume_template`
+    // moves the id into `FAKE_AGENT_RESUME_ENV` (so the fixture adopts it)
+    // but leaves it invisible in the argv; a bare `--resume <id>` argv
+    // shows it (the fixture's `extra` catch-all lets clap accept the flag)
+    // but the fixture never reads it. Here the id is the only evidence
+    // there is — no record exists for it — so it is passed both ways: the
+    // argv echo proves the supervisor substituted it, and the fixture's
+    // own resume marker proves the relaunched process took it as the
+    // conversation it was resuming.
+    let template = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        format!(
+            "{FAKE_AGENT_RESUME_ENV}=\"$3\" exec \"$0\" internal fake-agent --script hook-report \
+             --record-home \"$1\" \"$2\" \"$3\""
+        ),
+        claude.to_string_lossy().into_owned(),
+        home.path().to_string_lossy().into_owned(),
+        "--resume".to_string(),
+        farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+    ];
+
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = {
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            farhelm_bin().into(),
+            suite_timeouts(),
+            seams("boot-a"),
+        )
+        .await
+        .expect("first supervisor");
+        // The accept loop as a guard rather than a bare handle: the
+        // assertions below it would otherwise leak a running loop (and the
+        // `Arc<Supervisor>` it holds) on the way out of a panic, and this
+        // test's whole premise is that the predecessor is gone before the
+        // successor is built. See `hook_identity::ServeTask`.
+        let accepting = crate::hook_identity::ServeTask::spawn(&sup, state.path()).await;
+        let client = connect_client(&sup).await;
+        let session = client
+            .create_session_with_extras(
+                &work.path().to_string_lossy(),
+                &invocation,
+                None,
+                200,
+                24,
+                farhelm_helm::CreateExtras {
+                    resume_template: Some(template),
+                    ..farhelm_helm::CreateExtras::default()
+                },
+            )
+            .await
+            .expect("create the hook-reporting session");
+
+        let (chan, mut rx) = client.attach(&session.id, 200, 24).await.expect("attach");
+        let mut seen = Vec::new();
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+        client.send_input(chan, b"report conv-h\r".to_vec()).await;
+        wait_for(&mut rx, &mut seen, "HOOK-REPORTED:conv-h", 30).await;
+        assert_eq!(
+            sup.session_snapshot(&session.id)
+                .await
+                .expect("snapshot")
+                .expect("present")
+                .captured_conversation
+                .as_deref(),
+            Some("conv-h"),
+            "the report must be durable before the reboot, or this proves nothing about \
+             reload"
+        );
+
+        // Stop accepting BEFORE the drain: the accept loop holds a
+        // supervisor reference of its own, so a drain that only dropped the
+        // client would spin until its deadline.
+        accepting.stop().await;
+        drop(client);
+        let drain = tokio::time::Instant::now() + Duration::from_secs(10);
+        while Arc::strong_count(&sup) > 1 {
+            assert!(tokio::time::Instant::now() < drain, "connection drain");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        drop(sup);
+        session
+    };
+
+    // The reboot: tmux dies with the host, and the next supervisor reads a
+    // different boot id.
+    kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+        seams("boot-b"),
+    )
+    .await
+    .expect("post-reboot supervisor");
+    assert!(sup.owns_state_dir(), "the predecessor must be gone");
+    let client = connect_client(&sup).await;
+    let interrupted = listed(&client, &session.id).await;
+    assert_eq!(interrupted.status, SessionStatus::Interrupted);
+    assert_eq!(
+        interrupted.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "a reported identity survives the supervisor that recorded it, so opening this \
+         session offers a resume"
+    );
+
+    client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, false)
+        .await
+        .expect("an interrupted session has nothing running to consent about");
+    let (_chan, mut rx) = client
+        .attach(&session.id, 200, 24)
+        .await
+        .expect("the relaunch built a fresh terminal to attach to");
+    let mut seen = Vec::new();
+    // Anchored on the substituted id rather than on the argv marker: the
+    // relaunch is what has to produce it, and no earlier generation's
+    // output contains it.
+    wait_for(&mut rx, &mut seen, "--resume conv-h", 30).await;
+    // And the fixture's own verdict on the id it was handed. It cannot
+    // adopt a record for a conversation that only ever existed as a report
+    // (see this test's docs), so "missing" IS the expected answer — what
+    // matters is that it names conv-h, which only the relaunched process
+    // could have read out of its own environment.
+    wait_for(&mut rx, &mut seen, "RECORD-RESUME-MISSING:conv-h", 30).await;
+
+    // The permit goes back only once the successor and its tmux server are
+    // gone: `SLOTS` bounds concurrent tmux servers and supervisors, and
+    // releasing it here — before the implicit drops at the end of scope —
+    // would admit the next harness onto a machine still carrying this one.
+    drop(client);
+    drop(sup);
+    drop(_tmux);
+    drop(slot);
+}
+
 /// SPEC.md's verbatim fallback resume, which only an explicitly configured
 /// placeholder-free template can produce (PLAN_M3.md item 7): the session
 /// offers `FallbackTemplate`, and restarting it runs that template rather

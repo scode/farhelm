@@ -71,7 +71,7 @@ impl CaptureFixtures {
 /// A harness whose supervisor observes a private agent home, with the
 /// short capture window above.
 pub(crate) async fn capture_harness() -> (Harness, CaptureFixtures) {
-    capture_harness_with_fault(None).await
+    capture_harness_with_seams(|_| {}).await
 }
 
 /// [`capture_harness`] with a durable-write fault injected, for the
@@ -79,23 +79,43 @@ pub(crate) async fn capture_harness() -> (Harness, CaptureFixtures) {
 async fn capture_harness_with_fault(
     fault: Option<CaptureStoreFault>,
 ) -> (Harness, CaptureFixtures) {
+    capture_harness_with_seams(move |seams| seams.capture_store_fault = fault).await
+}
+
+/// [`capture_harness`] with one more seam adjusted by the caller.
+///
+/// A closure rather than a whole `SupervisorSeams` argument because two of
+/// the seams here are NOT the caller's to choose: `agent_home` has to point
+/// at the fixture tree this function creates (which does not exist yet when
+/// a caller would be building the struct), and `capture_window` is what
+/// makes every test in this file finish in seconds instead of minutes. A
+/// caller that could pass the struct wholesale would silently drop both by
+/// forgetting a field, and the failure would look like "capture stopped
+/// working" rather than "the harness was misconfigured".
+///
+/// Those two are therefore written AFTER `adjust` runs, and that ordering
+/// is the whole guarantee: a closure is free to build a whole fresh
+/// `SupervisorSeams` (or to clear a field by accident), and setting them
+/// first would leave the harness silently pointed at the real agent home
+/// with production-length windows — a configuration in which every test
+/// here would either hang for minutes or observe someone else's records.
+pub(crate) async fn capture_harness_with_seams(
+    adjust: impl FnOnce(&mut SupervisorSeams),
+) -> (Harness, CaptureFixtures) {
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
     for kind in ["claude", "codex"] {
         std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
             .expect("symlink the farhelm binary under an agent's own name");
     }
-    let h = harness_with_seams(
-        SupervisorTimeouts::default(),
-        SupervisorSeams {
-            agent_home: Some(home.path().to_path_buf()),
-            capture_window: test_capture_bounds(),
-            capture_store_fault: fault,
-            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
-            ..SupervisorSeams::default()
-        },
-    )
-    .await;
+    let mut seams = SupervisorSeams {
+        scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+        ..SupervisorSeams::default()
+    };
+    adjust(&mut seams);
+    seams.agent_home = Some(home.path().to_path_buf());
+    seams.capture_window = test_capture_bounds();
+    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
     (h, CaptureFixtures { home, bin })
 }
 
@@ -191,7 +211,7 @@ pub(crate) async fn snapshot_of(h: &Harness, session_id: &str) -> SessionSnapsho
 /// a 3.5-second sleep can produce a 3-second separation, which would
 /// silently break a disjointness premise a sleep-based test only *assumes*.
 /// Waiting on the recorded value lets the premise be asserted instead.
-async fn wait_for_first_input(h: &Harness, session_id: &str, secs: u64) -> i64 {
+pub(crate) async fn wait_for_first_input(h: &Harness, session_id: &str, secs: u64) -> i64 {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
     loop {
         if let Some(at) = snapshot_of(h, session_id).await.first_input_at {
@@ -212,7 +232,7 @@ async fn wait_for_first_input(h: &Harness, session_id: &str, secs: u64) -> i64 {
 /// `t1 + after + before` with a whole second of margin for the truncation
 /// on both readings. The caller still asserts the premise afterwards — this
 /// only makes the assertion likely to hold rather than assuming it does.
-async fn wait_until_window_disjoint_from(earlier: i64) {
+pub(crate) async fn wait_until_window_disjoint_from(earlier: i64) {
     let target =
         earlier + TEST_CAPTURE_AFTER.as_secs() as i64 + TEST_CAPTURE_BEFORE.as_secs() as i64 + 1;
     while farhelm_supervisor::agent_kind::now_unix() <= target {
@@ -227,7 +247,7 @@ async fn wait_until_window_disjoint_from(earlier: i64) {
 /// become vacuous the day a slow machine (or a second-boundary) shrank the
 /// separation below the window: both sessions would bail, and "each
 /// captured its own" would fail for a reason that looks like a capture bug.
-fn assert_windows_disjoint(first: i64, second: i64) {
+pub(crate) fn assert_windows_disjoint(first: i64, second: i64) {
     let bounds = test_capture_bounds();
     let a = CaptureWindow::around(first, bounds);
     let b = CaptureWindow::around(second, bounds);
@@ -240,7 +260,7 @@ fn assert_windows_disjoint(first: i64, second: i64) {
 /// Assert the opposite premise, for the ambiguity tests: the two windows
 /// really do overlap, so a bail is the correct answer rather than an
 /// accident of timing.
-fn assert_windows_overlap(first: i64, second: i64) {
+pub(crate) fn assert_windows_overlap(first: i64, second: i64) {
     let bounds = test_capture_bounds();
     let a = CaptureWindow::around(first, bounds);
     let b = CaptureWindow::around(second, bounds);
