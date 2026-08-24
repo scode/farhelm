@@ -3698,11 +3698,32 @@ impl Supervisor {
             // locator hint names rather than re-derived from the directory
             // — so an append confirms it and a fork's new id never
             // displaces it.
+            //
+            // `conversation_source` is what separates the two identity
+            // cases sharing the `captured_conversation` column: `'hook'`
+            // means the agent reported it from inside its own process, so
+            // the session comes back as `Reported` and this supervisor
+            // neither scans nor re-verifies for it. Anything else means the
+            // scan concluded it.
+            //
+            // Testing ambiguity FIRST is only correct because the store
+            // guarantees `capture_ambiguous = 1` and
+            // `conversation_source = 'hook'` never coexist on a row:
+            // `record_reported_conversation` clears the ambiguity flag as
+            // it writes, and `record_capture_ambiguous` is fenced on
+            // `conversation_source IS NULL` so it cannot set the flag on a
+            // reported row. Were that pair ever allowed to coexist, this
+            // branch order would silently downgrade an exact answer to a
+            // refusal across every restart.
             let capture = if row.capture_ambiguous {
                 CaptureState::Ambiguous { durable: true }
             } else {
-                match row.captured_conversation {
-                    Some(conversation) => CaptureState::Captured {
+                match (
+                    row.captured_conversation,
+                    row.conversation_source.as_deref(),
+                ) {
+                    (Some(conversation), Some("hook")) => CaptureState::Reported { conversation },
+                    (Some(conversation), _) => CaptureState::Captured {
                         conversation,
                         record: row.captured_record.map(PathBuf::from).unwrap_or_default(),
                         stamp: RecordStamp {
@@ -3710,7 +3731,7 @@ impl Supervisor {
                             mtime_unix: None,
                         },
                     },
-                    None => CaptureState::Unclaimed,
+                    (None, _) => CaptureState::Unclaimed,
                 }
             };
             let restart_offer = snapshot.restart_offer(capture.committed_conversation());
@@ -9422,6 +9443,131 @@ pub(crate) mod tests {
         );
     }
 
+    /// The other half of the same rule: a relaunch that OPENED a fresh
+    /// capture window discards whatever the previous run concluded, from
+    /// every state including [`CaptureState::Reported`].
+    ///
+    /// `Reported` is the state most tempting to special-case here, because
+    /// it is the only one the ladder treats as authoritative rather than
+    /// inferred — and special-casing it would be a bug. The authority is
+    /// over the RUN that reported it: a non-Resume relaunch starts a
+    /// different agent process, and the conversation the old process was in
+    /// says nothing about the new one. Carrying it over would leave the
+    /// session advertising a resume of a conversation the fresh launch is
+    /// not in, and — because nothing but another report may displace
+    /// `Reported` — the scan could never correct it either. The durable
+    /// half of the same decision is `begin_relaunch` clearing
+    /// `conversation_source` along with the captured columns.
+    ///
+    /// Asserted across every variant rather than just `Reported` so the
+    /// rule reads as "the reset is unconditional", which is the property
+    /// that has to survive the next variant somebody adds.
+    #[test]
+    fn a_relaunch_that_reopens_the_capture_window_discards_every_prior_verdict() {
+        for prior in [
+            CaptureState::Provisional {
+                conversation: "conv-prov".to_string(),
+            },
+            // The retry state, included because it is the one variant that
+            // carries an outstanding INTENTION rather than a conclusion: a
+            // relaunch that failed to reset it would leave the next pass
+            // trying to commit the previous run's identity onto the new
+            // generation, where the store's generation fence would refuse
+            // it silently and forever.
+            CaptureState::PendingCommit {
+                conversation: "conv-pending".to_string(),
+                record: PathBuf::from("/tmp/pending.jsonl"),
+                stamp: RecordStamp {
+                    len: 0,
+                    mtime_unix: None,
+                },
+            },
+            CaptureState::UncapturedFinal,
+            CaptureState::Captured {
+                conversation: "conv-scan".to_string(),
+                record: PathBuf::from("/tmp/record.jsonl"),
+                stamp: RecordStamp {
+                    len: 0,
+                    mtime_unix: None,
+                },
+            },
+            CaptureState::Ambiguous { durable: true },
+            CaptureState::Reported {
+                conversation: "conv-reported".to_string(),
+            },
+        ] {
+            let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+            old.first_input.lock().unwrap().at = Some(1_700_000_000);
+            *old.capture.lock().unwrap() = prior.clone();
+
+            let relaunched = relaunched_entry(
+                &old,
+                old.info.clone(),
+                old.terminal.clone(),
+                old.generation + 1,
+                None,
+                LastOutcome::Launching,
+                true,
+            );
+            assert!(
+                matches!(
+                    &*relaunched.capture.lock().unwrap(),
+                    CaptureState::Unclaimed
+                ),
+                "a reopened capture window must start from Unclaimed, whatever the previous \
+                 run concluded (was {prior:?})"
+            );
+            assert_eq!(
+                relaunched.first_input.lock().unwrap().at,
+                None,
+                "and the anchor the verdict was derived from goes with it"
+            );
+        }
+    }
+
+    /// A RESUME relaunch keeps a reported identity, which is the whole
+    /// point of resuming: the new process is asked to re-enter the very
+    /// conversation the previous one named.
+    ///
+    /// The complement of the test above, and worth its own assertion rather
+    /// than being read off the general "values carry over" rule, because
+    /// `Reported` is the state a reader is most likely to assume must be
+    /// re-earned. Dropping it here would not merely lose a diagnostic: the
+    /// entry's capture state is what `session_restart_offer` computes the
+    /// Resume offer from, so a session that had just been resumed would
+    /// immediately stop offering to resume — and, with no record locator to
+    /// re-verify from, the scan could not put it back either.
+    #[test]
+    fn a_resume_relaunch_keeps_the_identity_the_agent_reported() {
+        let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        old.first_input.lock().unwrap().at = Some(1_700_000_000);
+        *old.capture.lock().unwrap() = CaptureState::Reported {
+            conversation: "conv-reported".to_string(),
+        };
+
+        let relaunched = relaunched_entry(
+            &old,
+            old.info.clone(),
+            old.terminal.clone(),
+            old.generation + 1,
+            None,
+            LastOutcome::Launching,
+            false,
+        );
+        assert!(
+            matches!(
+                &*relaunched.capture.lock().unwrap(),
+                CaptureState::Reported { conversation } if conversation == "conv-reported"
+            ),
+            "a resume must carry the reported identity onto the launch that resumes it"
+        );
+        assert!(
+            !Arc::ptr_eq(&old.capture, &relaunched.capture),
+            "carried by VALUE, not by cell: a pass still holding the previous entry must \
+             not be able to write its late verdict onto this generation"
+        );
+    }
+
     /// The activity sample is the one cell a relaunch resets outright
     /// rather than carrying over, whatever the capture window decided.
     ///
@@ -9729,6 +9875,126 @@ pub(crate) mod tests {
             crate::scope::unit_name(&scoped_id, 0),
             "reload must re-derive the unit from the stored generation and \
              launch_scoped flag rather than leaving the entry unscoped"
+        );
+    }
+
+    /// Reload reads `conversation_source` as the discriminator between the
+    /// two writers that share the `captured_conversation` column, so an
+    /// identity the AGENT reported comes back as
+    /// [`CaptureState::Reported`] and one the SCAN concluded comes back as
+    /// `Captured`.
+    ///
+    /// The distinction survives a restart or it is not a distinction. A
+    /// reported session must not be re-scanned, must not be re-verified
+    /// against a record file, and must keep dominating any later ambiguity
+    /// the scan would otherwise reach for — all of which follow from the
+    /// state it reloads into and none of which follow from the id alone.
+    /// Reloading a reported row as `Captured` would put the session back
+    /// under scan authority and reopen exactly the `/clear` hole the report
+    /// exists to close.
+    ///
+    /// Both rows are asserted in one pass because the risk is a mapping
+    /// that ignores the new column entirely: a test that only planted a
+    /// hook row would still pass against code that returned `Reported` for
+    /// every captured id.
+    ///
+    /// Driven through the real `reload_sessions`, like its siblings above,
+    /// because the row-to-state mapping only exists inside that pass.
+    #[tokio::test]
+    async fn reload_distinguishes_a_reported_identity_from_a_scanned_one() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+
+        let reported_id = uuid::Uuid::new_v4().to_string();
+        let scanned_id = uuid::Uuid::new_v4().to_string();
+        for (id, source) in [
+            (&reported_id, Some("hook".to_string())),
+            (&scanned_id, None),
+        ] {
+            sup.store
+                .insert_session(
+                    StoredSession {
+                        conversation_source: source,
+                        id: id.clone(),
+                        parent: None,
+                        archived: false,
+                        title: "identity".to_string(),
+                        created_at: now_unix(),
+                        last_activity_at: now_unix(),
+                        creation_seq: 0,
+                        cwd: "/tmp".to_string(),
+                        invocation: "claude".to_string(),
+                        tmux_name: format!("fh-{id}"),
+                        pane: String::new(),
+                        outcome: LastOutcome::Exited {
+                            exit_code: Some(0),
+                            annotation: None,
+                        },
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        // Reload refuses an integrated kind whose template
+                        // carries no `{conversation}` element, so the row
+                        // has to be one a create would actually have
+                        // accepted.
+                        resume_template: Some(vec![
+                            "claude".to_string(),
+                            "--resume".to_string(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                        ]),
+                        canonical_cwd: Some("/tmp".to_string()),
+                        captured_conversation: Some(format!("conv-{id}")),
+                        captured_record: None,
+                        capture_ambiguous: false,
+                        first_input_at: Some(now_unix()),
+                        generation: 0,
+                        launch_scoped: false,
+                        source_profile: None,
+                    },
+                    None,
+                )
+                .await
+                .expect("insert a row carrying a captured identity");
+        }
+
+        let (sessions, _) = Supervisor::reload_sessions(
+            &sup.state_dir,
+            &sup.store,
+            &sup.tmux,
+            &SupervisorSeams::default(),
+            true,
+        )
+        .await
+        .expect("reload");
+
+        let reported = sessions[&reported_id].capture.lock().unwrap().clone();
+        assert!(
+            matches!(
+                &reported,
+                CaptureState::Reported { conversation } if *conversation == format!("conv-{reported_id}")
+            ),
+            "a row whose identity came from the agent's own hook must reload as Reported, \
+             not back under the scan's authority: {reported:?}"
+        );
+        let scanned = sessions[&scanned_id].capture.lock().unwrap().clone();
+        assert!(
+            matches!(
+                &scanned,
+                CaptureState::Captured { conversation, .. }
+                    if *conversation == format!("conv-{scanned_id}")
+            ),
+            "a row with no conversation source is still the scan's claim: {scanned:?}"
+        );
+
+        // Both are committed identities whatever produced them, so both
+        // owe the user a Resume offer after the restart.
+        assert_eq!(
+            reported.committed_conversation(),
+            Some(format!("conv-{reported_id}").as_str())
+        );
+        assert_eq!(
+            scanned.committed_conversation(),
+            Some(format!("conv-{scanned_id}").as_str())
         );
     }
 

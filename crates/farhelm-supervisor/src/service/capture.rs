@@ -9,10 +9,25 @@
 //! unambiguous scan. Pass scheduling keeps reply-producing callers fresh while allowing the
 //! periodic ticker to skip redundant work. Keeping the seams, ladder, scheduling, and
 //! scan-and-commit sequence together makes those two contracts reviewable as one unit.
+//!
+//! ## The scan is the fallback, not the authority
+//!
+//! The scan is no longer the only source of identity. Where an agent kind supports it, farhelm
+//! appends a per-launch command-line hook at spawn time and the agent reports its own
+//! conversation id from inside its own process, every time that id comes into being — including
+//! the ids that `/clear` and `/new` mint mid-run, which no amount of outside observation can
+//! attribute correctly. That report arrives as [`CaptureState::Reported`] and dominates every
+//! state the scan can produce.
+//!
+//! This does not make farhelm an agent-configuring integration: the hook rides one launch's argv
+//! and touches no user configuration or record directory, and a launch that carries no hook (an
+//! unsupported kind, an argv shape that forbids injection, hooks disabled) is served by the scan
+//! exactly as before. So the ordering to hold in mind is: identity is REPORTED where it can be,
+//! and inferred where it cannot — the scan is the fallback, never the override.
 
 use super::core::{SessionEntry, Supervisor};
 use crate::agent_kind::{CaptureVerdict, CaptureWindow, RecordStamp};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -101,10 +116,18 @@ pub(crate) struct FirstInput {
 /// 4. `UncapturedFinal` — the horizon closed on a complete scan with no
 ///    match. Terminal, so this session leaves the eligible set instead of
 ///    rescanning its directory forever.
-/// 5. `Captured` — committed and read back. This is the only state that
-///    advertises Resume.
-/// 6. `Ambiguous` — dominant over everything. Durable, so a restart cannot
-///    re-decide on evidence that has since gotten thinner.
+/// 5. `Captured` — committed and read back. Advertises Resume.
+/// 6. `Ambiguous` — dominant over every scan-derived state. Durable, so a
+///    restart cannot re-decide on evidence that has since gotten thinner.
+/// 7. `Reported` — the agent's own answer, delivered through the launch
+///    hook. Dominant over everything, including `Ambiguous`, because it is
+///    not evidence ABOUT which record is ours; it is the identity itself.
+///    Also advertises Resume.
+///
+/// Ranks 1-6 are all conclusions the SCAN drew from files on disk, and the
+/// ladder among them is a confidence ordering. Rank 7 is a different kind
+/// of thing altogether: it does not sit above `Ambiguous` because it is
+/// better evidence, but because it is not evidence at all.
 ///
 /// ## What is and is not persisted
 ///
@@ -159,6 +182,32 @@ pub(crate) enum CaptureState {
     /// records it; the write is retried on the polling cadence, and until
     /// it lands the refusal still holds for this process.
     Ambiguous { durable: bool },
+    /// The identity the agent itself reported through the launch hook.
+    ///
+    /// Dominates every scan-derived state, including `Ambiguous`, because
+    /// it is not evidence about which record is ours — it IS the agent's
+    /// own answer, produced inside the agent's process. The guarantee
+    /// `Ambiguous` weakens here existed because scan evidence could not be
+    /// trusted; a report is not scan evidence.
+    ///
+    /// Replaceable only by another `Reported`, and that replacement is the
+    /// whole reason this variant exists: `/clear` (Claude) and `/new`
+    /// (Codex) start a NEW conversation inside the same process, and the
+    /// old id is then precisely the one that must not be resumed any more.
+    ///
+    /// ## The contract with the durable write
+    ///
+    /// This state is only ever entered AFTER the store write recording the
+    /// same id has succeeded — never before, never speculatively. Modelled
+    /// on `commit_capture`: the durable write is what decides what is
+    /// claimed, and `committed_conversation` (hence
+    /// `farhelm_proto::RestartOffer::Resume`) promises a restart that there
+    /// is something stored for it to fill in. The reporting path
+    /// (`Supervisor::report_conversation`) owes this ordering; a write that
+    /// fails is logged and leaves memory alone, with no retry list — the
+    /// vendor will not re-fire the hook, and the scan is still running for
+    /// that session precisely because it never reached `Reported`.
+    Reported { conversation: String },
 }
 
 impl CaptureState {
@@ -169,9 +218,15 @@ impl CaptureState {
     /// offer is a promise that a stored identity exists for restart to fill
     /// in. A provisional match is not that promise, and a pending one is not
     /// yet.
+    ///
+    /// `Reported` qualifies for the same reason `Captured` does and not by
+    /// exception: it is only ever entered once its own durable write has
+    /// landed (see the variant's docs), so by the time it can be read here
+    /// the row already holds the id.
     pub(crate) fn committed_conversation(&self) -> Option<&str> {
         match self {
-            CaptureState::Captured { conversation, .. } => Some(conversation.as_str()),
+            CaptureState::Captured { conversation, .. }
+            | CaptureState::Reported { conversation } => Some(conversation.as_str()),
             _ => None,
         }
     }
@@ -185,16 +240,22 @@ impl CaptureState {
             CaptureState::UncapturedFinal => 3,
             CaptureState::Captured { .. } => 4,
             CaptureState::Ambiguous { .. } => 5,
+            CaptureState::Reported { .. } => 6,
         }
     }
 
     /// Whether this session still has anything to scan for.
+    ///
+    /// `Reported` is settled in the strongest sense available: nothing on
+    /// disk can improve on the agent's own answer, so the pass neither
+    /// scans for such a session nor re-verifies it.
     fn is_settled(&self) -> bool {
         matches!(
             self,
             CaptureState::UncapturedFinal
                 | CaptureState::Captured { .. }
                 | CaptureState::Ambiguous { .. }
+                | CaptureState::Reported { .. }
         )
     }
 
@@ -216,6 +277,17 @@ impl CaptureState {
     ///   with a different one is precisely the wrong-conversation move
     ///   this whole design excludes. An `Ambiguous` refresh is allowed so
     ///   the `durable` flag can be updated once its write lands.
+    ///
+    ///   `Reported` MAY be replaced by another `Reported`, and the reason
+    ///   is that it is not the same kind of claim as `Captured`. A
+    ///   `Captured` replacement would mean the scan changed its mind about
+    ///   which record was ours — a guess overwriting a guess. A `Reported`
+    ///   replacement means the agent told us its conversation id changed,
+    ///   which is what `/clear` and `/new` literally do inside a running
+    ///   process; refusing it would leave the session advertising a resume
+    ///   of a conversation the user has already discarded. That is the
+    ///   exact bug this state exists to fix, so the replacement is the
+    ///   feature rather than a hole in the ladder.
     fn advance(&mut self, next: CaptureState) -> bool {
         let allowed = match (self.rank(), next.rank()) {
             (current, incoming) if incoming > current => true,
@@ -224,6 +296,7 @@ impl CaptureState {
                 CaptureState::Provisional { .. }
                     | CaptureState::PendingCommit { .. }
                     | CaptureState::Ambiguous { .. }
+                    | CaptureState::Reported { .. }
             ),
             _ => false,
         };
@@ -548,6 +621,76 @@ async fn persist_first_input(sup: &Supervisor, entry: &SessionEntry, at: i64) {
     }
 }
 
+/// Every conversation id currently held as `Reported`, grouped the way
+/// correlation groups sessions: by agent kind and canonical working
+/// directory.
+///
+/// This is the one thing a report buys the RIVALS of the session that made
+/// it. A record whose id another session in the group has been TOLD is its
+/// own cannot also be this one's, so it drops out of the rival's candidate
+/// list before any verdict is computed — strictly more evidence, never
+/// less.
+///
+/// Deliberately independent of first input: Claude reports at process
+/// startup, so a session can hold `Reported` before this supervisor has
+/// confirmed a single keystroke for it. Such a session occupies no capture
+/// window at all, but its id is spoken for regardless and must not be
+/// claimable by anyone else.
+///
+/// A function rather than an inline walk because a pass reads it MANY
+/// times: once immediately before each pending claim's commit decision, and
+/// once at the top of each verdict-loop iteration. Both loops await store
+/// writes, so one snapshot per loop would answer about the moment the loop
+/// STARTED rather than the moment each decision is made. That is affordable
+/// only because this is a pure in-memory walk over `entries` — no lock is
+/// held across it and no I/O happens in it — and keeping the collection in
+/// one place is what keeps every one of those answers built the same way.
+///
+/// Keyed on the kind's stable column spelling rather than the wire enum
+/// only because `AgentKind` is not `Hash`; the mapping is injective, so the
+/// grouping is exactly the one `occupied` uses.
+fn reported_ids<'a>(
+    entries: &'a [Arc<SessionEntry>],
+) -> HashMap<(&'static str, &'a str), HashSet<String>> {
+    let mut ids: HashMap<(&'static str, &'a str), HashSet<String>> = HashMap::new();
+    for entry in entries {
+        let (Some(_), Some(cwd)) = (entry.snapshot.integration(), entry.canonical_cwd.as_deref())
+        else {
+            continue;
+        };
+        if let CaptureState::Reported { conversation } =
+            &*entry.capture.lock().expect("capture mutex poisoned")
+        {
+            ids.entry((crate::store::agent_kind_column(entry.snapshot.kind), cwd))
+                .or_default()
+                .insert(conversation.clone());
+        }
+    }
+    ids
+}
+
+/// Whether `conversation` is held as `Reported` by some session in
+/// `entry`'s correlation group.
+///
+/// Note what this does NOT exclude: a session that reported an id is itself
+/// in the set that named it. Every caller is asking about a SCAN verdict,
+/// and a `Reported` session never produces one — it is settled, so it never
+/// reaches the scanning set and never holds a pending claim. An entry with
+/// no integration or no canonical cwd belongs to no group and is therefore
+/// never spoken for.
+fn is_spoken_for(
+    reported: &HashMap<(&'static str, &str), HashSet<String>>,
+    entry: &SessionEntry,
+    conversation: &str,
+) -> bool {
+    let Some(cwd) = entry.canonical_cwd.as_deref() else {
+        return false;
+    };
+    reported
+        .get(&(crate::store::agent_kind_column(entry.snapshot.kind), cwd))
+        .is_some_and(|ids| ids.contains(conversation))
+}
+
 /// One conversation-capture rescan across every session this supervisor
 /// holds (PLAN_M3.md item 8).
 ///
@@ -633,6 +776,10 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
     let now = crate::agent_kind::now_unix();
 
     // Retry the durable writes that failed earlier, off the input path.
+    //
+    // A pending claim is re-checked against the reported set before it is
+    // committed, because the pass that produced it could not have seen a
+    // report that landed afterwards.
     for entry in entries {
         let pending_first_input = {
             let first = entry
@@ -654,8 +801,57 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                 conversation,
                 record,
                 stamp,
-            } if may_write => {
-                commit_capture(sup, entry, conversation, record, stamp).await;
+            } => {
+                // A rival in this session's group has since been TOLD that
+                // this conversation is its own, so this pending claim is
+                // now known to be about someone else's record. Committing
+                // it would be exactly the wrong-conversation claim the
+                // design exists to exclude.
+                //
+                // `UncapturedFinal` is not a consolation prize; it is the
+                // verdict the pass below would have reached had the report
+                // been visible when the claim was computed. A pending claim
+                // only exists past the horizon and off a COMPLETE scan, so
+                // "the one in-window candidate belongs to someone else"
+                // means this session's evidence is in and there is none of
+                // it — which is that state's definition. Filtering the
+                // candidate out in the verdict loop yields `NotYet` and
+                // lands on the same state by the same reasoning.
+                //
+                // Checked outside `may_write`, unlike the commit it
+                // replaces: refusing to claim someone else's identity is a
+                // decision, not a durable write, and a supervisor without a
+                // recording claim owes the same refusal.
+                //
+                // Collected HERE, per entry, rather than once before the
+                // loop: this loop awaits a store write for every session it
+                // commits, so a set gathered before the first iteration is
+                // already stale by the time the tenth session's decision is
+                // made — and the report that landed in between is exactly
+                // the one that would have stopped this commit.
+                // `reported_ids` is an in-memory walk over entries, so
+                // paying for it per pending claim is cheaper than the write
+                // it may avoid. The window it leaves is the pure compute
+                // between this read and this session's own commit below,
+                // and nothing wider.
+                let spoken_for_at_retry = reported_ids(entries);
+                if is_spoken_for(&spoken_for_at_retry, entry, &conversation) {
+                    let dropped = entry
+                        .capture
+                        .lock()
+                        .expect("capture mutex poisoned")
+                        .advance(CaptureState::UncapturedFinal);
+                    if dropped {
+                        info!(
+                            session = %entry.info.id, conversation = %conversation,
+                            "another session in this directory reported this conversation as \
+                             its own before the pending claim could be written; nothing is \
+                             claimed for this session"
+                        );
+                    }
+                } else if may_write {
+                    commit_capture(sup, entry, conversation, record, stamp).await;
+                }
             }
             CaptureState::Ambiguous { durable: false } if may_write => {
                 persist_ambiguity(sup, entry).await;
@@ -676,12 +872,21 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
     // only because `AgentKind` is not `Hash` (it is protocol vocabulary,
     // and this PR does not touch the protocol crate); the mapping is
     // injective, so the grouping is exactly the same.
+    //
+    // A session holding `Reported` is emphatically still in here even
+    // though nothing below will scan for it. Dropping it would be an
+    // outright regression: a rival with an overlapping window in the same
+    // directory would stop bailing, and if the rival's own record has not
+    // appeared yet, the reported session's record is the lone candidate
+    // and the rival commits somebody else's conversation — the
+    // wrong-conversation claim the whole design exists to exclude.
     let mut occupied: HashMap<(&'static str, &str), Vec<(&str, CaptureWindow)>> = HashMap::new();
     for entry in entries {
         let (Some(_), Some(cwd)) = (entry.snapshot.integration(), entry.canonical_cwd.as_deref())
         else {
             continue;
         };
+        let key = (crate::store::agent_kind_column(entry.snapshot.kind), cwd);
         let Some(at) = entry
             .first_input
             .lock()
@@ -691,7 +896,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
             continue;
         };
         occupied
-            .entry((crate::store::agent_kind_column(entry.snapshot.kind), cwd))
+            .entry(key)
             .or_default()
             .push((entry.info.id.as_str(), CaptureWindow::around(at, bounds)));
     }
@@ -744,9 +949,11 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                 .iter()
                 .find(|(id, other)| *id != entry.info.id && other.overlaps(&window))
         }) {
-            let reason = overlapping_windows_reason(&entry.info.id, rival.0, cwd);
-            warn!(session = %entry.info.id, rival = %rival.0, cwd = %cwd, "{reason}");
-            declare_ambiguous(sup, entry, may_write).await;
+            declare_ambiguous(sup, entry, may_write, || {
+                let reason = overlapping_windows_reason(&entry.info.id, rival.0, cwd);
+                warn!(session = %entry.info.id, rival = %rival.0, cwd = %cwd, "{reason}");
+            })
+            .await;
             continue;
         }
         scanning.push(Scanning {
@@ -784,16 +991,59 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
     }
 
     for scan in scanning {
+        // Read at the top of EVERY iteration, after the scan awaits have
+        // completed, and not back in the `occupied` walk where an earlier
+        // version gathered it. Two staleness sources motivate the
+        // placement. The scans are the long await in this function, so a
+        // set snapshotted before them misses every report that landed
+        // during them. And this loop itself awaits a store write for each
+        // session it commits, so even a set read once after the scans ages
+        // across the sessions that follow. Either way the verdict would
+        // hand a rival a conversation the supervisor had already been told
+        // belongs to somebody else. `reported_ids` is an in-memory walk, so
+        // re-collecting per session costs nothing worth saving.
+        //
+        // The residual race, stated honestly rather than papered over: this
+        // is a read, not a lock, so it is not atomic with this iteration's
+        // own commit. A report landing between this line and that write is
+        // caught by nothing on the rival's side — the store's
+        // `conversation_source` fences protect only the REPORTED session's
+        // own row, not a rival's. What remains open is exactly the pure
+        // compute between this read and this session's write, and nothing
+        // beyond it. It is also the same window that has always existed for
+        // records: a record file appearing after the scan read its
+        // directory is equally invisible to the verdict built from it.
+        // Reports did not introduce this class of race; closing it would
+        // mean serializing the report handler against capture passes, which
+        // the plan's timing note deliberately does not do.
+        let spoken_for_at_verdict = reported_ids(entries);
         let outcome = scanned
             .get(&scan.root)
             .expect("every scanning session's root was scanned");
         // The recorded cwd FIELD, not the directory the record was found
         // in: the munging is non-injective, and Codex does not partition
         // by directory at all.
+        //
+        // Then drop every record whose conversation id another session in
+        // this (kind, cwd) group has been TOLD is its own. Placed here,
+        // ahead of `choose`, because `choose` is where the lone-candidate
+        // decision is made: filtering afterwards could only reject a
+        // verdict, whereas filtering the input can turn a two-candidate
+        // bail into an honest single match on the one record that is still
+        // unspoken for. This session's own reported id can never appear in
+        // the list — a `Reported` session is settled and so never reaches
+        // the scanning set at all — so no self-exclusion is needed.
+        let spoken_for = spoken_for_at_verdict.get(&(
+            crate::store::agent_kind_column(scan.entry.snapshot.kind),
+            scan.cwd,
+        ));
         let mine: Vec<&crate::agent_kind::Candidate> = outcome
             .candidates
             .iter()
             .filter(|candidate| candidate.correlators.cwd == scan.cwd)
+            .filter(|candidate| {
+                !spoken_for.is_some_and(|ids| ids.contains(&candidate.correlators.conversation))
+            })
             .collect();
         // Past the horizon, this session's evidence is in: its window has
         // closed and anything written inside it has had the publication
@@ -801,8 +1051,10 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
         let settled = now >= bounds.horizon(scan.first_input_at);
         match crate::agent_kind::choose(&mine, scan.window) {
             CaptureVerdict::Ambiguous(why) => {
-                warn!(session = %scan.entry.info.id, cwd = %scan.cwd, "{why}");
-                declare_ambiguous(sup, scan.entry, may_write).await;
+                declare_ambiguous(sup, scan.entry, may_write, || {
+                    warn!(session = %scan.entry.info.id, cwd = %scan.cwd, "{why}");
+                })
+                .await;
             }
             CaptureVerdict::Captured(conversation) => {
                 if settled && outcome.complete {
@@ -861,9 +1113,12 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
         }
     }
 
-    // Re-verification last, and only for sessions holding a committed
-    // identity: an append is a confirmation signal, not a claim, so it
-    // neither needs nor may use the scan above.
+    // Re-verification last, and only for sessions holding a SCAN-derived
+    // committed identity: an append is a confirmation signal, not a claim,
+    // so it neither needs nor may use the scan above. `Reported` is
+    // excluded by construction — the match below names `Captured` only —
+    // because there is nothing for a file to confirm about an answer the
+    // agent gave directly, and re-reading a record could at best agree.
     for entry in entries {
         let Some(integration) = entry.snapshot.integration() else {
             continue;
@@ -964,17 +1219,49 @@ async fn commit_capture(
 /// Refuse to claim anything for this session, for the rest of this launch,
 /// and record that refusal durably.
 ///
-/// The in-memory state moves FIRST and unconditionally: ambiguity
-/// dominates, and a supervisor that cannot write (or whose write fails)
-/// must still refuse rather than keep hunting for a claim it has already
-/// decided it may not make. `durable` then tracks whether the refusal
-/// survived the process, and `capture_pass` retries until it has.
-async fn declare_ambiguous(sup: &Supervisor, entry: &Arc<SessionEntry>, may_write: bool) {
-    entry
+/// The in-memory state moves FIRST: ambiguity dominates every other
+/// scan-derived state, and a supervisor that cannot write (or whose write
+/// fails) must still refuse rather than keep hunting for a claim it has
+/// already decided it may not make. `durable` then tracks whether the
+/// refusal survived the process, and `capture_pass` retries until it has.
+///
+/// The one state that REFUSES the advance is `Reported`, and when it does,
+/// nothing is persisted either. There are two independent guards against a
+/// pass erasing a report — this skip, and `record_capture_ambiguous`'s
+/// `conversation_source IS NULL` fence in the store — and they are not
+/// redundant, because they protect different things. They have to be
+/// separate: the report handler is not serialized with capture passes
+/// (passes serialize among themselves through `CaptureCoordination`; a
+/// report takes only its session's lifecycle claim), so a pass can compute
+/// an ambiguity, have a report land underneath it, and then try to write.
+/// The SQL fence is what makes the durable row right in that race. This
+/// skip is what keeps the log honest: without it the supervisor would emit
+/// a "recorded an ambiguous correlation" line for a session it did not
+/// mark ambiguous and is still, correctly, advertising a resume for.
+///
+/// `explain` is the caller's own account of WHY the correlation is
+/// ambiguous — the log line SPEC.md owes the user for the fallback they are
+/// about to be offered. It is a callback rather than a message argument for
+/// one reason: it must run only once the advance has been ACCEPTED. The
+/// refusal above is exactly the case where the explanation would be a lie,
+/// and a caller that logged before calling here would emit "these windows
+/// overlap, so nothing is claimed" about a session that is at that moment
+/// happily advertising the resume its agent reported.
+async fn declare_ambiguous(
+    sup: &Supervisor,
+    entry: &Arc<SessionEntry>,
+    may_write: bool,
+    explain: impl FnOnce(),
+) {
+    let advanced = entry
         .capture
         .lock()
         .expect("capture mutex poisoned")
         .advance(CaptureState::Ambiguous { durable: false });
+    if !advanced {
+        return;
+    }
+    explain();
     if may_write {
         persist_ambiguity(sup, entry).await;
     }
@@ -1116,5 +1403,724 @@ async fn reverify_capture(
             "could not re-read this session's conversation record; keeping the identity \
              captured earlier"
         ),
+    }
+}
+
+/// The claim ladder and the pass's two report-aware behaviours: the
+/// candidate exclusion a report buys the session's rivals, and the refusal
+/// to record an ambiguity a report has already settled.
+///
+/// The ladder half is pure and needs no fixture. The pass half plants real
+/// record files under a temporary agent home and calls `capture_pass`
+/// directly with hand-built entries: the subject is what one pass concludes
+/// from a given arrangement of state and files, and going through
+/// `create_session` would add a launch, a tmux pane, and a scheduling
+/// decision to a test that is about none of those.
+#[cfg(test)]
+mod tests {
+    use super::super::core::tests::{StateDir, dummy_exe, entry_with};
+    use super::super::core::{SupervisorSeams, SupervisorTimeouts};
+    use super::*;
+    use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot};
+    use farhelm_proto::AgentKind;
+    use std::sync::Mutex as StdMutex;
+
+    /// A window short enough that a test never waits out a production
+    /// interval, with the horizon it implies (`after` + `grace`) sitting
+    /// only a couple of seconds past first input.
+    fn fast_bounds() -> CaptureWindowBounds {
+        CaptureWindowBounds::new(
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+    }
+
+    /// A Claude-kind entry carrying the correlators a capture pass reads,
+    /// and nothing else it needs.
+    ///
+    /// Built by hand rather than through `create_session` because
+    /// `capture_pass` takes entries directly: it never consults the
+    /// supervisor's session map, so a test can present exactly the
+    /// arrangement of states and windows it wants to reason about without
+    /// launching anything.
+    fn claude_entry(
+        id: &str,
+        cwd: &str,
+        first_input_at: Option<i64>,
+        capture: CaptureState,
+    ) -> Arc<SessionEntry> {
+        entry_of_kind(AgentKind::Claude, id, cwd, first_input_at, capture)
+    }
+
+    /// [`claude_entry`] for any integrated kind, which the group-isolation
+    /// tests need: correlation groups on `(kind, canonical cwd)`, and the
+    /// only way to show the kind half is load-bearing is to put a session of
+    /// a DIFFERENT kind in the same directory.
+    fn entry_of_kind(
+        kind: AgentKind,
+        id: &str,
+        cwd: &str,
+        first_input_at: Option<i64>,
+        capture: CaptureState,
+    ) -> Arc<SessionEntry> {
+        let mut entry = entry_with(None, crate::store::LastOutcome::Running);
+        entry.info.id = id.to_string();
+        entry.snapshot = IntegrationSnapshot {
+            kind,
+            resume_template: None,
+        };
+        entry.canonical_cwd = Some(cwd.to_string());
+        entry.first_input = Arc::new(std::sync::Mutex::new(FirstInput {
+            at: first_input_at,
+            durable: true,
+        }));
+        entry.capture = Arc::new(std::sync::Mutex::new(capture));
+        Arc::new(entry)
+    }
+
+    /// Plant the JSONL record Claude would have written for `conversation`
+    /// in `cwd`, timestamped `at`.
+    ///
+    /// One `user` line is all the correlator parse needs; the point of
+    /// planting rather than running an agent is that a capture pass reads
+    /// files, and the files are the whole input under test.
+    fn plant_claude_record(home: &Path, cwd: &str, conversation: &str, at: i64) {
+        let project = home
+            .join(".claude")
+            .join("projects")
+            .join(crate::agent_kind::munge_cwd(cwd));
+        std::fs::create_dir_all(&project).expect("record directory");
+        let line = serde_json::json!({
+            "type": "user",
+            "sessionId": conversation,
+            "cwd": cwd,
+            "timestamp": crate::agent_kind::format_rfc3339(at),
+        });
+        std::fs::write(
+            project.join(format!("{conversation}.jsonl")),
+            format!("{line}\n"),
+        )
+        .expect("plant the record");
+    }
+
+    /// A supervisor pointed at `home` for agent records, with the fast
+    /// window and whatever store fault the caller wants.
+    async fn supervisor_over(
+        state: &StateDir,
+        home: &Path,
+        fault: Option<CaptureStoreFault>,
+    ) -> Arc<Supervisor> {
+        Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                agent_home: Some(home.to_path_buf()),
+                capture_window: fast_bounds(),
+                capture_store_fault: fault,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor")
+    }
+
+    fn reported(conversation: &str) -> CaptureState {
+        CaptureState::Reported {
+            conversation: conversation.to_string(),
+        }
+    }
+
+    /// Every state the SCAN can reach, for the ladder tests that have to
+    /// assert over all of them rather than over a representative one.
+    fn scan_derived_states() -> Vec<CaptureState> {
+        vec![
+            CaptureState::Unclaimed,
+            CaptureState::Provisional {
+                conversation: "conv-prov".to_string(),
+            },
+            CaptureState::PendingCommit {
+                conversation: "conv-pending".to_string(),
+                record: PathBuf::from("/tmp/pending.jsonl"),
+                stamp: RecordStamp {
+                    len: 0,
+                    mtime_unix: None,
+                },
+            },
+            CaptureState::UncapturedFinal,
+            CaptureState::Captured {
+                conversation: "conv-scan".to_string(),
+                record: PathBuf::from("/tmp/scan.jsonl"),
+                stamp: RecordStamp {
+                    len: 0,
+                    mtime_unix: None,
+                },
+            },
+            CaptureState::Ambiguous { durable: false },
+            CaptureState::Ambiguous { durable: true },
+        ]
+    }
+
+    /// The one weakening this design makes to the existing ladder, pinned
+    /// across every state below it: a report displaces every scan-derived
+    /// verdict, including the `Ambiguous` that used to be dominant over
+    /// everything.
+    ///
+    /// That dominance existed because scan evidence could not be trusted —
+    /// a pass that saw only one of two candidates would claim on strictly
+    /// worse evidence than the pass that bailed. A report is not scan
+    /// evidence at all; it is the agent naming its own conversation.
+    /// Refusing it would leave a session permanently unresumable because
+    /// two agents once shared a directory, which is a worse answer than the
+    /// exact one now in hand.
+    ///
+    /// `durable: true` is in the list deliberately: that is the state a
+    /// RELOADED ambiguity comes back as, so a comparison that happened to
+    /// work only for the in-flight flag would leave every restarted session
+    /// unreportable.
+    #[test]
+    fn a_report_displaces_every_scan_derived_verdict() {
+        for scanned in scan_derived_states() {
+            let mut state = scanned.clone();
+            assert!(
+                state.advance(reported("conv-hook")),
+                "a report must land over {scanned:?}"
+            );
+            assert!(matches!(
+                &state,
+                CaptureState::Reported { conversation } if conversation == "conv-hook"
+            ));
+        }
+    }
+
+    /// `Reported` replaces `Reported`, and nothing else does.
+    ///
+    /// The same-rank replacement is the feature rather than a hole in the
+    /// ladder: `/clear` and `/new` mint a new conversation id inside a
+    /// running agent, and the previous id is then exactly the one that must
+    /// not be resumed. Refusing the second report would leave farhelm
+    /// offering to resume a conversation the user has already discarded —
+    /// the bug this state exists to fix.
+    ///
+    /// The other direction matters just as much, and is why every variant
+    /// is tried rather than a representative one: once the agent has
+    /// spoken, no amount of later scanning may talk the supervisor out of
+    /// it. A pass that found the old record, or two records, or none, must
+    /// leave the reported identity exactly where it is.
+    #[test]
+    fn only_another_report_may_replace_a_report() {
+        let mut state = reported("conv-first");
+        assert!(
+            state.advance(reported("conv-second")),
+            "a second report is a replacement, not a regression"
+        );
+        assert!(matches!(
+            &state,
+            CaptureState::Reported { conversation } if conversation == "conv-second"
+        ));
+
+        for scanned in scan_derived_states() {
+            let mut state = reported("conv-second");
+            assert!(
+                !state.advance(scanned.clone()),
+                "{scanned:?} must not displace a reported identity"
+            );
+            assert!(
+                matches!(
+                    &state,
+                    CaptureState::Reported { conversation } if conversation == "conv-second"
+                ),
+                "and the refusal must leave the reported identity untouched"
+            );
+        }
+    }
+
+    /// A reported identity is advertised to the user and takes the session
+    /// out of the eligible set.
+    ///
+    /// Both predicates are contracts other code reads rather than
+    /// conveniences. `committed_conversation` is what
+    /// `farhelm_proto::RestartOffer::Resume` is computed from, so a
+    /// `Reported` that answered `None` would have collected the exact id
+    /// the user wants and then offered them a fresh launch instead.
+    /// `is_settled` is what keeps the pass from scanning for a session
+    /// whose identity is already known — nothing on disk can improve on the
+    /// agent's own answer, and re-verification is excluded for the same
+    /// reason.
+    #[test]
+    fn a_reported_identity_is_advertised_and_settled() {
+        let state = reported("conv-hook");
+        assert_eq!(state.committed_conversation(), Some("conv-hook"));
+        assert!(state.is_settled());
+    }
+
+    /// A pass that computed an ambiguity for a session which has since been
+    /// reported writes NOTHING.
+    ///
+    /// The race is real rather than theoretical: capture passes serialize
+    /// among themselves through `CaptureCoordination`, but the report
+    /// handler does not join that queue, so a report can land between a
+    /// pass deciding "ambiguous" and the pass persisting it. The store's
+    /// `conversation_source IS NULL` fence is what makes the ROW right in
+    /// that race; this skip is what keeps the supervisor from announcing it
+    /// recorded a refusal for a session it is still, correctly, advertising
+    /// a resume for.
+    ///
+    /// Proven through the fault seam rather than by reading the row back,
+    /// because "no write was attempted" is the property — a test that
+    /// checked only the final row could not tell a skipped write from one
+    /// the SQL fence rejected, and that other half of the belt and braces
+    /// is pinned in `store.rs` instead.
+    ///
+    /// The "nor logged" half is checked by standing in for the log: the
+    /// explanation callback records that it ran, which is as close as a
+    /// unit test can get to asserting on a `tracing` line without a
+    /// subscriber. That the explanation is a callback at all exists for
+    /// exactly this case — a caller that logged before delegating here
+    /// would describe a refusal that never happened.
+    #[tokio::test]
+    async fn an_ambiguity_is_neither_recorded_nor_logged_for_a_reported_session() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let attempts: Arc<StdMutex<Vec<CaptureWrite>>> = Arc::new(StdMutex::new(Vec::new()));
+        let seen = Arc::clone(&attempts);
+        // Fails whatever it is asked about, so an attempted write is
+        // recorded here and never reaches the store either way.
+        let fault: CaptureStoreFault = Arc::new(move |write, _id| {
+            seen.lock().expect("fault log poisoned").push(write);
+            Err(anyhow::anyhow!("no write should have been attempted"))
+        });
+        let sup = supervisor_over(&state, home.path(), Some(fault)).await;
+
+        let entry = claude_entry("reported-session", "/tmp/work", None, reported("conv-hook"));
+        let explained = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ran = Arc::clone(&explained);
+        declare_ambiguous(&sup, &entry, true, || {
+            ran.store(true, std::sync::atomic::Ordering::Relaxed);
+        })
+        .await;
+
+        assert!(
+            attempts.lock().expect("fault log poisoned").is_empty(),
+            "a refused advance must not reach the durable ambiguity write"
+        );
+        assert!(
+            !explained.load(std::sync::atomic::Ordering::Relaxed),
+            "a refused advance must not emit the explanation either"
+        );
+        assert!(
+            matches!(
+                &*entry.capture.lock().expect("capture mutex poisoned"),
+                CaptureState::Reported { conversation } if conversation == "conv-hook"
+            ),
+            "and the reported identity must survive the attempt"
+        );
+    }
+
+    /// The same gating, reached the way production reaches it: through a
+    /// whole `capture_pass` whose verdict loop computes an ambiguity for a
+    /// session that became `Reported` after the pass had already committed
+    /// to scanning for it.
+    ///
+    /// Worth having ALONGSIDE the direct-call test above, not instead of
+    /// it. The direct test pins `declare_ambiguous`'s own contract; this one
+    /// pins that a real pass can still arrive at that call with a
+    /// `Reported` entry in hand. That is not obvious from the code — the
+    /// scanning set is built by skipping every settled state, so a reader
+    /// could reasonably conclude a reported session never reaches a verdict
+    /// at all and delete the guard as dead weight. It reaches one because
+    /// the set is decided BEFORE the scans, and the report handler is not
+    /// serialized against passes: the session was un-`Reported` when the
+    /// pass chose it and `Reported` by the time the verdict landed.
+    ///
+    /// The interleaving is produced through the store-fault seam rather
+    /// than by racing threads, so the test is deterministic. The seam fires
+    /// synchronously inside the FIRST session's ambiguity write, which is
+    /// precisely the mid-pass instant a real report can occupy, and the
+    /// callback flips the second session's state there.
+    ///
+    /// Two sessions are needed because the flip has to happen after the
+    /// scanning set is built and before the second verdict is reached, and
+    /// the first session's durable write is the only hook this pass offers
+    /// in that gap. Their windows deliberately do NOT overlap, so the
+    /// window-overlap bail is out of the picture and each ambiguity comes
+    /// from its own pair of in-window records.
+    #[tokio::test]
+    async fn a_pass_skips_the_ambiguity_write_for_a_session_reported_mid_pass() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = std::fs::canonicalize(work.path())
+            .expect("canonicalize")
+            .to_string_lossy()
+            .to_string();
+
+        let now = crate::agent_kind::now_unix();
+        // Ten seconds apart against a one-second window half-width, so the
+        // two windows cannot touch; both sit past their horizons.
+        let a_at = now - 20;
+        let b_at = now - 10;
+        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
+
+        let attempts: Arc<StdMutex<Vec<(CaptureWrite, String)>>> =
+            Arc::new(StdMutex::new(Vec::new()));
+        let seen = Arc::clone(&attempts);
+        let flip = Arc::clone(&b);
+        // Stands in for a report landing between the pass choosing to scan
+        // for B and the pass reaching B's verdict. Written straight into
+        // the cell rather than through `advance` because the point under
+        // test is what a pass does when it FINDS `Reported`, not how a
+        // state gets there. Every write is recorded and then failed, so an
+        // attempted store write shows up here and never reaches SQLite.
+        let fault: CaptureStoreFault = Arc::new(move |write, id| {
+            seen.lock()
+                .expect("fault log poisoned")
+                .push((write, id.to_string()));
+            if id == "session-a" {
+                *flip.capture.lock().expect("capture mutex poisoned") = reported("conv-hook-b");
+            }
+            Err(anyhow::anyhow!("no write reaches the store in this test"))
+        });
+        let sup = supervisor_over(&state, home.path(), Some(fault)).await;
+
+        let a = claude_entry("session-a", &cwd, Some(a_at), CaptureState::Unclaimed);
+        // Two records inside each session's window: the pair is what makes
+        // each verdict `Ambiguous` on its own evidence.
+        plant_claude_record(home.path(), &cwd, "conv-a1", a_at);
+        plant_claude_record(home.path(), &cwd, "conv-a2", a_at);
+        plant_claude_record(home.path(), &cwd, "conv-b1", b_at);
+        plant_claude_record(home.path(), &cwd, "conv-b2", b_at);
+
+        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], true).await;
+
+        let attempts = attempts.lock().expect("fault log poisoned").clone();
+        assert_eq!(
+            attempts,
+            vec![(CaptureWrite::Ambiguity, "session-a".to_string())],
+            "only the session that was still unclaimed may reach a durable ambiguity write; \
+             the reported one must be skipped before the store is touched: {attempts:?}"
+        );
+        assert!(
+            matches!(
+                &*b.capture.lock().expect("capture mutex poisoned"),
+                CaptureState::Reported { conversation } if conversation == "conv-hook-b"
+            ),
+            "and the pass must leave the reported identity exactly as the report left it"
+        );
+    }
+
+    /// A record another session has been TOLD is its own is not a candidate
+    /// for anybody else in the same (kind, cwd) group.
+    ///
+    /// The scenario is the `/clear` case seen from the outside: session A
+    /// has been running in this directory long enough that its capture
+    /// window closed hours ago, then clears its conversation and reports
+    /// the fresh id — whose record file is written NOW, inside the window
+    /// of session B, which has just started in the same directory. The
+    /// window-overlap bail cannot help B here, because the windows do not
+    /// overlap; without this exclusion A's brand-new record is B's lone
+    /// candidate and B durably commits A's conversation. That is the
+    /// wrong-conversation claim the whole design exists to prevent, and it
+    /// would survive every later pass, since a committed identity is never
+    /// replaced.
+    ///
+    /// The second half is what keeps the exclusion from being merely
+    /// conservative: with B's own record present too, the filter turns what
+    /// would otherwise be a two-candidate bail into the correct single
+    /// match. A report is strictly more evidence for the rivals, never
+    /// less.
+    #[tokio::test]
+    async fn a_rival_never_claims_a_conversation_another_session_reported() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = std::fs::canonicalize(work.path())
+            .expect("canonicalize")
+            .to_string_lossy()
+            .to_string();
+        let sup = supervisor_over(&state, home.path(), None).await;
+
+        // B sits past its horizon (`after` + `grace` = 2s under
+        // `fast_bounds`) so the pass is allowed to conclude for it, while
+        // A's window closed an hour ago — which is what takes the
+        // window-overlap bail out of the picture and leaves the candidate
+        // filter as the only thing standing between B and A's record.
+        let now = crate::agent_kind::now_unix();
+        let b_at = now - 10;
+        let a = claude_entry("session-a", &cwd, Some(now - 3600), reported("conv-a"));
+        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
+        plant_claude_record(home.path(), &cwd, "conv-a", b_at);
+
+        // `may_write` is false throughout: these entries were never
+        // inserted, so a durable write could only fail, and the verdict is
+        // fully observable in the in-memory state one step earlier.
+        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
+        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(verdict, CaptureState::UncapturedFinal),
+            "B must end its window with no identity rather than claiming the record A \
+             reported as its own: {verdict:?}"
+        );
+
+        // Now B's own record appears. The same filter that produced the
+        // bail above must now produce a match rather than an ambiguity, so
+        // B gets a fresh entry — the one above is terminally
+        // `UncapturedFinal` by design.
+        let b2 = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
+        plant_claude_record(home.path(), &cwd, "conv-b", b_at);
+        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b2)], false).await;
+        let verdict = b2.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(
+                &verdict,
+                CaptureState::PendingCommit { conversation, .. } if conversation == "conv-b"
+            ),
+            "with the reported record excluded, B's own is the single honest match rather \
+             than one of two colliding candidates: {verdict:?}"
+        );
+        assert!(
+            matches!(
+                &*a.capture.lock().expect("capture mutex poisoned"),
+                CaptureState::Reported { conversation } if conversation == "conv-a"
+            ),
+            "and nothing in the pass may disturb A's reported identity"
+        );
+    }
+
+    /// A reported id is spoken for even when its own session has never
+    /// taken input.
+    ///
+    /// This is the ordinary Claude shape, not a corner: Claude's hook fires
+    /// at process startup, so a session normally holds `Reported` before
+    /// this supervisor has confirmed a single keystroke for it. Such a
+    /// session occupies NO capture window — the window is anchored on first
+    /// input — so the overlap bail cannot protect anybody from it, and the
+    /// id filter is the only thing standing between a rival and a record
+    /// that is already accounted for. A collection that gathered reported
+    /// ids only from sessions with an anchor would leave exactly the common
+    /// case unprotected.
+    #[tokio::test]
+    async fn a_report_from_a_session_with_no_first_input_still_excludes_its_record() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = canonical(work.path());
+        let sup = supervisor_over(&state, home.path(), None).await;
+
+        let now = crate::agent_kind::now_unix();
+        let b_at = now - 10;
+        let a = claude_entry("session-a", &cwd, None, reported("conv-a"));
+        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
+        plant_claude_record(home.path(), &cwd, "conv-a", b_at);
+
+        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
+        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(verdict, CaptureState::UncapturedFinal),
+            "an anchorless reported session's id must still be excluded: {verdict:?}"
+        );
+    }
+
+    /// A settled `Reported` session still OCCUPIES its capture window, so a
+    /// rival overlapping it bails ambiguous.
+    ///
+    /// The exclusion tested above and this occupancy pull in opposite
+    /// directions, and both are needed. Dropping a reported session from the
+    /// window grouping would look like a harmless optimization — nothing
+    /// scans for it any more — and would be a regression: a rival whose own
+    /// record has not appeared yet would stop bailing, find the reported
+    /// session's record as its lone candidate, and commit somebody else's
+    /// conversation. The id filter alone does not save it, because the
+    /// filter can only remove candidates the rival can see; ambiguity is
+    /// about the ones it cannot.
+    #[tokio::test]
+    async fn a_reported_session_still_occupies_its_window_against_a_rival() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = canonical(work.path());
+        let sup = supervisor_over(&state, home.path(), None).await;
+
+        // Both anchored at the same instant, so their windows overlap by
+        // construction rather than by arithmetic that a bounds change could
+        // quietly undo.
+        let at = crate::agent_kind::now_unix() - 10;
+        let a = claude_entry("session-a", &cwd, Some(at), reported("conv-a"));
+        let b = claude_entry("session-b", &cwd, Some(at), CaptureState::Unclaimed);
+        plant_claude_record(home.path(), &cwd, "conv-b", at);
+
+        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
+        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(verdict, CaptureState::Ambiguous { .. }),
+            "a rival overlapping a reported session's window must refuse rather than claim \
+             the only record it can see: {verdict:?}"
+        );
+    }
+
+    /// Every reported id in a group is excluded, not merely the first one
+    /// found.
+    ///
+    /// Two agents reporting in one directory is the ordinary busy case, and
+    /// a collection that overwrote rather than accumulated per group — a
+    /// `HashMap<_, String>` where this uses a set — would pass every
+    /// single-report test above while silently leaving one of the two
+    /// records claimable.
+    #[tokio::test]
+    async fn every_reported_id_in_a_group_is_excluded() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = canonical(work.path());
+        let sup = supervisor_over(&state, home.path(), None).await;
+
+        // Neither reporter has an anchor, so neither occupies a window and
+        // the overlap bail cannot stand in for the filter under test.
+        let now = crate::agent_kind::now_unix();
+        let c_at = now - 10;
+        let a = claude_entry("session-a", &cwd, None, reported("conv-a"));
+        let b = claude_entry("session-b", &cwd, None, reported("conv-b"));
+        let c = claude_entry("session-c", &cwd, Some(c_at), CaptureState::Unclaimed);
+        plant_claude_record(home.path(), &cwd, "conv-a", c_at);
+        plant_claude_record(home.path(), &cwd, "conv-b", c_at);
+
+        capture_pass(
+            &sup,
+            &[Arc::clone(&a), Arc::clone(&b), Arc::clone(&c)],
+            false,
+        )
+        .await;
+        let verdict = c.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(verdict, CaptureState::UncapturedFinal),
+            "with both in-window records spoken for, C has no candidate left rather than a \
+             choice between two: {verdict:?}"
+        );
+    }
+
+    /// The exclusion is scoped to the correlation group, on BOTH halves of
+    /// the key: a report in another directory, or from another agent kind,
+    /// hides nothing.
+    ///
+    /// The negative matters as much as the positive. An exclusion keyed too
+    /// broadly — on the id alone, say — would silently suppress honest
+    /// captures across the whole host, and the symptom would be sessions
+    /// that mysteriously never offer a resume rather than anything that
+    /// looks like a bug in this filter.
+    #[tokio::test]
+    async fn a_report_outside_the_group_hides_nothing() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let elsewhere = tempfile::tempdir().expect("other workdir");
+        let work = tempfile::tempdir().expect("workdir");
+        let other_cwd = canonical(elsewhere.path());
+        let cwd = canonical(work.path());
+        let sup = supervisor_over(&state, home.path(), None).await;
+
+        let now = crate::agent_kind::now_unix();
+        let b_at = now - 10;
+        // Same conversation id reported by a session in a DIFFERENT
+        // directory, and by one of a different KIND in the same directory.
+        // Neither shares B's group, so neither may take B's record away.
+        let far = claude_entry("session-far", &other_cwd, None, reported("conv-b"));
+        let codex = entry_of_kind(
+            AgentKind::Codex,
+            "session-codex",
+            &cwd,
+            None,
+            reported("conv-b"),
+        );
+        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
+        plant_claude_record(home.path(), &cwd, "conv-b", b_at);
+
+        capture_pass(
+            &sup,
+            &[Arc::clone(&far), Arc::clone(&codex), Arc::clone(&b)],
+            false,
+        )
+        .await;
+        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(
+                &verdict,
+                CaptureState::PendingCommit { conversation, .. } if conversation == "conv-b"
+            ),
+            "reports from other groups must not suppress an honest capture: {verdict:?}"
+        );
+    }
+
+    /// A pending claim is re-checked against the reported set before it is
+    /// retried, and dropped when a rival has since claimed it.
+    ///
+    /// The gap this closes: a pending claim is produced by one pass and
+    /// written by a later one, and the report that invalidates it can land
+    /// in between — the report handler does not join the pass queue. The
+    /// verdict-time filter cannot help, because a session holding
+    /// `PendingCommit` is skipped by the scanning loop entirely; without
+    /// this check the stale claim would be committed by the retry as though
+    /// nothing had happened, and a committed identity is never replaced.
+    ///
+    /// `UncapturedFinal` is the state it lands in because that is what the
+    /// verdict loop would have produced from the same evidence: a pending
+    /// claim only exists past the horizon off a complete scan, so "the one
+    /// candidate belongs to someone else" means there is nothing to claim.
+    ///
+    /// The second half pins the negative — an unrelated report leaves the
+    /// pending claim alone — because a check that dropped every pending
+    /// claim whenever ANY report existed in the group would pass the first
+    /// half and quietly disable capture for every busy directory.
+    #[tokio::test]
+    async fn a_pending_claim_a_rival_has_reported_is_dropped_rather_than_committed() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = canonical(work.path());
+        let sup = supervisor_over(&state, home.path(), None).await;
+
+        let pending = |conversation: &str| CaptureState::PendingCommit {
+            conversation: conversation.to_string(),
+            record: PathBuf::from("/tmp/pending.jsonl"),
+            stamp: RecordStamp {
+                len: 0,
+                mtime_unix: None,
+            },
+        };
+        let at = crate::agent_kind::now_unix() - 10;
+        let a = claude_entry("session-a", &cwd, None, reported("conv-a"));
+        let b = claude_entry("session-b", &cwd, Some(at), pending("conv-a"));
+        let c = claude_entry("session-c", &cwd, Some(at), pending("conv-c"));
+
+        capture_pass(
+            &sup,
+            &[Arc::clone(&a), Arc::clone(&b), Arc::clone(&c)],
+            false,
+        )
+        .await;
+        let dropped = b.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(dropped, CaptureState::UncapturedFinal),
+            "a pending claim the rival reported must be abandoned, not written: {dropped:?}"
+        );
+        let kept = c.capture.lock().expect("capture mutex poisoned").clone();
+        assert!(
+            matches!(&kept, CaptureState::PendingCommit { conversation, .. }
+                if conversation == "conv-c"),
+            "an unrelated report must leave a pending claim exactly where it was: {kept:?}"
+        );
+    }
+
+    /// The canonical form of a temporary directory, which is what a capture
+    /// group is keyed on.
+    ///
+    /// Not cosmetic: on macOS (and anywhere `/tmp` is a symlink) the path a
+    /// `tempdir` hands back differs from the one the kernel reports to the
+    /// agent, and a test comparing the two would fail for a reason that has
+    /// nothing to do with capture.
+    fn canonical(path: &Path) -> String {
+        std::fs::canonicalize(path)
+            .expect("canonicalize")
+            .to_string_lossy()
+            .to_string()
     }
 }
