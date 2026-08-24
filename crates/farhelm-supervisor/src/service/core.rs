@@ -8856,11 +8856,13 @@ impl Supervisor {
     /// Shared deliberately, and this is the seam that keeps a relaunch from
     /// becoming a second, subtly different launch implementation: the spec
     /// contents, its 0600 publication, the shim path, the login-shell
-    /// window command, and the tmux invocation are all decided in exactly
-    /// one place. A relaunch that built its own would be free to drift on
-    /// any of them — a missing session-id marker (silently breaking the
-    /// kill sweep), a different shell resolution (breaking SPEC.md's
-    /// environment contract), a spec written world-readable.
+    /// window command, the `{cwd}` placeholder fill, and the tmux
+    /// invocation are all decided in exactly one place. A relaunch that
+    /// built its own would be free to drift on any of them — a missing
+    /// session-id marker (silently breaking the kill sweep), a different
+    /// shell resolution (breaking SPEC.md's environment contract), a spec
+    /// written world-readable, a wrapper handed a directory that is not
+    /// the one the pane got.
     ///
     /// `reuse` is the ONLY difference between the two callers: `None`
     /// creates a fresh tmux session (create, and a restart whose terminal
@@ -8904,10 +8906,26 @@ impl Supervisor {
         preamble: Option<Vec<u8>>,
         scope: Option<&str>,
     ) -> Result<Spawned, SpawnFailure> {
-        // The last thing done to the argv before it is written down: the
-        // spec on disk is what the shim execs, so the flags have to be in
-        // it, and putting the injection here is what lets the shim stay
-        // ignorant of hooks entirely.
+        // Placeholder substitution is the FIRST transformation and hook
+        // injection the second, so the injected tail — literals this crate
+        // wrote, never re-validated — is never itself a substitution
+        // target. `cwd` here is the directory tmux gets for this launch,
+        // which is the whole reason the fill lives in this function and
+        // not at the split sites: it is the one value that makes "the
+        // wrapper's directory" and "the pane's directory" the same string
+        // on every path. The log names the cwd and never the argv, which
+        // users do put credentials into (see `validate_create`).
+        let argv = if crate::agent_kind::has_cwd_placeholder(&argv) {
+            info!(session = %id, cwd, "substituting the working directory into the agent command line");
+            crate::agent_kind::fill_cwd(argv, cwd)
+        } else {
+            argv
+        };
+        // The last thing done to the argv before it is written down —
+        // after the fill above, and nothing after it: the spec on disk is
+        // what the shim execs, so the flags have to be in it, and putting
+        // the injection here is what lets the shim stay ignorant of hooks
+        // entirely.
         let (argv, hooked) = self.with_hook_argv(argv, snapshot, id);
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of

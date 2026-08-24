@@ -47,6 +47,7 @@ mod hook_identity;
 mod real_agent_capture;
 mod restart_under_concurrency;
 mod restart_with_resume;
+mod wrapper_launch;
 
 mod marker_model;
 mod tab_lifecycle_edges;
