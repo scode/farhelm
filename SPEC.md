@@ -434,10 +434,26 @@ reboot.
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
 `claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code and Codex
-integrations at this level are both required in v1. Capture works purely by observing the agent from the outside — its
-terminal, its own on-disk session records — never by configuring the agent; the no-agent-configuration rule from Status
-binds here too. Both Claude Code and Codex write discoverable session records, which is why requiring this in v1 is
-safe.
+integrations at this level are both required in v1. Identity is reported by the agent itself when its kind supports a
+per-launch hook, and scanned from the outside — the agent's terminal, its own on-disk session records — otherwise; a
+report wins over a scan, because it is the agent's own answer rather than a correlation over what the agent happened to
+leave on disk. What capture never does is write to the agent's own configuration or record directories. A hook passed on
+the command line for one launch is allowed because it writes nothing the vendor owns — no configuration file, no
+conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
+absolute: the report it delivers lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
+Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
+example — hooks written into the agent's configuration — still stands. Scanning stays the fallback whenever no report
+has been accepted, which covers more than unhooked launches: a hook that is skipped, fails, times out, or is refused
+leaves the scan in charge exactly as before. The hook is therefore never required. Both Claude Code and Codex offer such
+a hook and write discoverable session records, which is why requiring this in v1 is safe.
+
+Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
+no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job
+gives up silently within a bounded time and leaves its diagnostics in farhelm's own state directory, never in the user's
+session. The bound is on the part the agent waits for — reading the vendor's payload and reporting the result — because
+that is the whole of what can hold the agent up; writing the diagnostic happens afterwards, is best-effort, and is not
+itself bounded. The one accepted exception to the invisibility rule is a line the vendor itself prints because of a flag
+we pass (Codex's hook-trust warning), which must be documented.
 
 For agents without integration, restart falls back to the profile's resume invocation verbatim (which may land in the
 agent's own picker or most-recent-conversation behavior), or a fresh launch when the profile defines none. If a
