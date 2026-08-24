@@ -2958,6 +2958,8 @@ mod tests {
                     canonical_cwd: entry.canonical_cwd.clone(),
                     first_input: Arc::clone(&entry.first_input),
                     capture: Arc::clone(&entry.capture),
+                    hooked: Arc::clone(&entry.hooked),
+                    hook_warned: Arc::clone(&entry.hook_warned),
                     activity: Arc::clone(&entry.activity),
                     last_activity_at: Arc::clone(&entry.last_activity_at),
                     generation: entry.generation,

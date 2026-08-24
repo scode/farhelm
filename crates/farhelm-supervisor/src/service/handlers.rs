@@ -109,6 +109,76 @@ pub(crate) const CREATE_FIELD_CAP: usize = 64 * 1024;
 /// still leaving room for a caller that prefers structured keys.
 const INTENT_KEY_CAP: usize = 512;
 
+/// Byte cap on `ControlMsg::ReportConversation`'s `conversation`, enforced
+/// alongside the plausibility check and before any WRITE.
+///
+/// Not before every lookup: the credential check runs first and reads the
+/// session row, because answering an unauthenticated peer's malformed
+/// request with anything more specific than `Unauthorized` would tell it
+/// which half it got wrong. What this cap precedes is the store WRITE and
+/// the log line, which are the two places an unbounded field would cost
+/// something.
+///
+/// The handler's own bound rather than an inherited one, for the reason
+/// `MAX_LEASE_BYTES` is: a post-handshake control frame is bounded only by
+/// `MAX_FRAME_LEN` (megabytes), and the hello-only caps in
+/// `farhelm_proto::io` stop applying the moment the connection is
+/// established. The reported id is stored in a column, logged, and
+/// eventually placed on an agent's command line, so it wants a bound at
+/// the doorway even though `agent_kind::is_plausible_conversation_id`
+/// happens to enforce the same number today. Keeping them separate is what
+/// stops a future relaxation of the record parser — whose input is a file
+/// this process at least chose to open — from silently widening what an
+/// in-session peer can push over the wire. Both vendors use UUIDs (36
+/// bytes), so 128 is generous headroom either way.
+const MAX_CONVERSATION_BYTES: usize = 128;
+
+/// Byte cap on `ControlMsg::ReportConversation`'s `source` — the vendor's
+/// own word for why the hook fired (`startup`, `resume`, `clear`,
+/// `compact`, ...).
+///
+/// Unlike the conversation id, this field is never stored and never reaches
+/// an argv; it only ever appears in log lines. That is exactly why it needs
+/// a bound of its own rather than riding on the id's. A `source` is not
+/// validated for shape — a vendor may add an event name at any time, and
+/// refusing an unrecognized one would throw away a perfectly good report
+/// over a diagnostic string — so the field is whatever the peer sends, and
+/// the peer is any process inside the agent's tree holding the session
+/// credential. Without a cap, one such process turns the supervisor log
+/// into an unbounded write target.
+///
+/// Generous next to every real value (the longest vendor event is a
+/// handful of characters) and small enough that a log line stays readable.
+const MAX_SOURCE_BYTES: usize = 64;
+
+/// `source` reduced to something safe to put in a log line: at most
+/// [`MAX_SOURCE_BYTES`] bytes, with every control character replaced.
+///
+/// Sanitizing rather than refusing, deliberately. The report itself is the
+/// valuable thing and the `source` is a diagnostic beside it; rejecting a
+/// report because its event name was odd would trade a correct resume for a
+/// tidy log. So an over-long or control-laced value is trimmed and passed
+/// on, and the report is judged on its identity alone.
+///
+/// Control characters are what make this more than a length cap. The log is
+/// line-oriented and read by humans and by whatever tails it; a newline in
+/// this field lets a session-held credential forge log ENTRIES, and a
+/// terminal escape lets it repaint the operator's screen. Replacement keeps
+/// the value legible while making both impossible.
+///
+/// Truncation is on a CHARACTER boundary rather than a byte one — slicing a
+/// `String` mid-UTF-8 would panic, and this input is attacker-chosen.
+fn sanitized_source(source: &str) -> String {
+    source
+        .chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .scan(0usize, |used, c| {
+            *used += c.len_utf8();
+            (*used <= MAX_SOURCE_BYTES).then_some(c)
+        })
+        .collect()
+}
+
 /// Cap on how many argv elements `CreateSession`'s `resume_template`
 /// override may carry (PLAN_M3.md items 6 and 7).
 ///
@@ -2839,6 +2909,26 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         ControlMsg::DeleteProfile { req_id, profile_id } => {
             handle_delete_profile(sup, ctx.tx, req_id, profile_id).await
         }
+        // A REQUEST this authority may not make, and therefore one that
+        // needs a real reply rather than the catch-all below. A helm holds
+        // full authority over every session, but reporting a conversation
+        // identity is not an authority question at all — it is a claim to
+        // BE a particular session's agent, which only that agent's own
+        // credential can support (`handle_restricted_control`). Falling
+        // through to the catch-all would log a line and send nothing,
+        // leaving a helm that sent this waiting on a reply that never
+        // comes, and leaving a test with nothing to assert on.
+        ControlMsg::ReportConversation { req_id, .. } => {
+            send_reply(
+                ctx.tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message: "only the session's own agent may report its conversation".to_string(),
+                    kind: ErrorKind::Unauthorized,
+                },
+            )
+            .await;
+        }
         // Response/event messages arriving at the supervisor are peer
         // bugs; log and continue.
         other => warn!(?other, "unexpected control message at supervisor"),
@@ -2849,9 +2939,17 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
 /// session-authenticated peer.
 ///
 /// Presence of hello auth selected this path before any request was read.
-/// The peer can create a child and nothing else; keeping that split outside
-/// ordinary dispatch means a future handler cannot accidentally become
-/// available to spawn merely by being added to the full-authority match.
+/// The peer can create a child and report its own conversation identity,
+/// and nothing else; keeping that split outside ordinary dispatch means a
+/// future handler cannot accidentally become available to spawn merely by
+/// being added to the full-authority match.
+///
+/// The two admitted operations are admitted for opposite reasons, which is
+/// worth keeping in view when a third is proposed. A create is an action
+/// the peer takes on the host, so it is authorized and serialized like any
+/// other lifecycle operation. A report is the peer describing ITSELF —
+/// something no other authority can do, which is exactly why the
+/// full-authority dispatch refuses it.
 pub(crate) async fn handle_restricted_control(
     sup: &Arc<Supervisor>,
     msg: ControlMsg,
@@ -2950,12 +3048,110 @@ pub(crate) async fn handle_restricted_control(
             )
             .await;
         }
+        ControlMsg::ReportConversation {
+            req_id,
+            conversation,
+            source,
+        } => {
+            // NO lifecycle claim, deliberately, and the contrast with the
+            // `CreateSession` arm directly above is the point rather than
+            // an oversight. `restart_session` holds a session's lifecycle
+            // claim for the whole restart, and Claude's hook fires at the
+            // replacement process's startup — inside that window. Queuing
+            // this behind the claim would put the tail of a restart in
+            // front of a hook that has a 2 s budget and no retry, and the
+            // vendor shows a blown budget to the user as a hook error.
+            // `Supervisor::report_conversation` carries the full argument,
+            // including what the generation fence has to cover instead.
+            match sup
+                .store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message:
+                                "the session credential is invalid or its session no longer exists"
+                                    .to_string(),
+                            kind: ErrorKind::Unauthorized,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+                Err(error) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!(
+                                "could not validate the session credential: {error:#}"
+                            ),
+                            kind: ErrorKind::Internal,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+            // The length bound is this handler's own, not one inherited
+            // from the scan's parser: a post-handshake frame is capped
+            // only by `MAX_FRAME_LEN`, and the hello-only caps in
+            // `farhelm_proto::io` never applied here. Same job
+            // `MAX_LEASE_BYTES` does for a lease name.
+            if conversation.len() > MAX_CONVERSATION_BYTES
+                || !crate::agent_kind::is_plausible_conversation_id(&conversation)
+            {
+                warn!(
+                    session = %auth.session_id, bytes = conversation.len(),
+                    "refused a reported conversation identity this build will not store"
+                );
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!(
+                            "not a conversation identity this build will store: {}",
+                            truncate_for_error(&conversation)
+                        ),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
+            // Bounded and stripped of control characters HERE, at the
+            // doorway, so nothing downstream has to remember that this
+            // field is attacker-chosen: `report_conversation` puts it in
+            // several log lines and would otherwise be the place a
+            // credential-holding process could write megabytes of
+            // newline-laced text into the supervisor's log.
+            let source = sanitized_source(&source);
+            let reply = match sup
+                .report_conversation(&auth.session_id, conversation, source)
+                .await
+            {
+                Ok(()) => ControlMsg::ConversationReported { req_id },
+                Err(e) => ControlMsg::Error {
+                    req_id,
+                    message: e.message,
+                    kind: e.kind,
+                },
+            };
+            send_reply(tx, &reply).await;
+        }
         other => {
             send_reply(
                 tx,
                 &ControlMsg::Error {
                     req_id: other.request_req_id().unwrap_or(0),
-                    message: "a session-authenticated peer may only create sessions".to_string(),
+                    message: "a session-authenticated peer may only create sessions and report \
+                              its conversation"
+                        .to_string(),
                     kind: ErrorKind::Unauthorized,
                 },
             )
@@ -5011,10 +5207,21 @@ mod tests {
         );
     }
 
-    /// A session-authenticated peer has one operation, and even that
-    /// operation cannot forge a sibling or ancestor relationship.
+    /// A session-authenticated peer has a SHORT list of operations, and a
+    /// message outside it is refused as an authority question rather than
+    /// falling through to a catch-all; creating, which is on the list,
+    /// still cannot forge a sibling or ancestor relationship.
+    ///
+    /// The list is no longer "create only" — `ReportConversation` joined
+    /// it — so the two halves here are about different things: the first
+    /// pins that the allowlist is still an ALLOWLIST (an off-list message
+    /// gets `Unauthorized`, not a reply built from the session's own
+    /// credential), and the second pins the one check that has to happen
+    /// inside an allowed operation. Adding an operation must not quietly
+    /// turn the first half into a tautology about whichever message this
+    /// test happens to pick.
     #[tokio::test]
-    async fn restricted_dispatch_refuses_non_create_authority_and_a_forged_parent() {
+    async fn restricted_dispatch_refuses_an_off_list_message_and_a_forged_parent() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -5131,6 +5338,796 @@ mod tests {
             }
         ));
         assert_eq!(sup.store.reservation("revoked-key").await.unwrap(), None);
+    }
+
+    /// Seed a session that is able to report its own conversation
+    /// identity: the durable row a restricted connection's credential is
+    /// validated against, AND the in-memory entry the report itself lands
+    /// in.
+    ///
+    /// Both halves are needed, and for different reasons —
+    /// `authenticates_session` reads the row, while
+    /// `Supervisor::report_conversation` looks up the ENTRY for the
+    /// generation its durable write is fenced on and for the capture cell
+    /// the accepted report advances. `authenticated_parent` above seeds
+    /// only the durable half because a create needs nothing more, so a
+    /// report driven through it would answer `NotFound` for a reason that
+    /// has nothing to do with what is under test.
+    ///
+    /// Claude-kind with a placeholder-carrying resume template, so an
+    /// accepted report can actually turn into `RestartOffer::Resume`: a
+    /// Generic session has no integration, and its offer would stay
+    /// `FreshOnly` no matter what was reported — an assertion that passed
+    /// for the wrong reason.
+    async fn reporting_session(sup: &Arc<Supervisor>, id: &str) -> farhelm_proto::SessionAuth {
+        let claimed = sup
+            .store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: crate::store::now_unix(),
+                    last_activity_at: crate::store::now_unix(),
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "claude".to_string(),
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Claude,
+                    resume_template: Some(vec![
+                        "claude".to_string(),
+                        "--resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: Some("/tmp".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed a reporting session");
+        let crate::store::Claimed::Ours { session_token, .. } = claimed else {
+            panic!("an unkeyed insert cannot be taken");
+        };
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.to_string();
+        entry.snapshot = IntegrationSnapshot {
+            kind: AgentKind::Claude,
+            resume_template: None,
+        };
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::new(entry));
+        farhelm_proto::SessionAuth {
+            session_id: id.to_string(),
+            token: session_token,
+        }
+    }
+
+    /// Send one `ReportConversation` down a restricted connection and
+    /// decode the single reply it produces, with the ordinary `startup`
+    /// source every test that is not about the source field wants.
+    async fn send_report(
+        sup: &Arc<Supervisor>,
+        auth: &farhelm_proto::SessionAuth,
+        req_id: u64,
+        conversation: &str,
+    ) -> ControlMsg {
+        send_report_with_source(sup, auth, req_id, conversation, "startup").await
+    }
+
+    /// [`send_report`] with the vendor's `source` string chosen by the
+    /// caller, for the one test that has to drive a HOSTILE value through
+    /// the real dispatch rather than through `sanitized_source` alone.
+    async fn send_report_with_source(
+        sup: &Arc<Supervisor>,
+        auth: &farhelm_proto::SessionAuth,
+        req_id: u64,
+        conversation: &str,
+        source: &str,
+    ) -> ControlMsg {
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        handle_restricted_control(
+            sup,
+            ControlMsg::ReportConversation {
+                req_id,
+                conversation: conversation.to_string(),
+                source: source.to_string(),
+            },
+            &tx,
+            auth,
+        )
+        .await;
+        serde_json::from_slice(&rx.recv().await.expect("a report is always answered").body)
+            .expect("decode the report reply")
+    }
+
+    /// A helm — full authority over every session on the host — may not
+    /// report a conversation identity, and is TOLD so rather than ignored.
+    ///
+    /// Reporting is not an authority question. It is a claim to BE a
+    /// particular session's agent, which only that session's own
+    /// credential can support; a helm that could make it could silently
+    /// redirect any session's resume to any conversation. The full-
+    /// authority dispatch's catch-all would log the message and send
+    /// nothing, which is worse than a refusal in a specific way: the
+    /// sender waits on a reply that never arrives, and a request/reply
+    /// client with no timeout hangs forever. That is why this arm exists
+    /// at all, and why the exact message is pinned — it is the only thing
+    /// telling the sender which door to use instead.
+    #[tokio::test]
+    async fn a_helm_may_not_report_a_conversation_identity() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (_tasks, mut rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::ReportConversation {
+                req_id: 61,
+                conversation: "conv-helm".to_string(),
+                source: "startup".to_string(),
+            },
+        )
+        .await;
+        let reply: ControlMsg = serde_json::from_slice(
+            &rx.recv()
+                .await
+                .expect("the refusal must be SENT, not merely logged")
+                .body,
+        )
+        .unwrap();
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = reply
+        else {
+            panic!("a helm's report must be refused: {reply:?}");
+        };
+        assert_eq!(req_id, 61);
+        assert_eq!(kind, ErrorKind::Unauthorized);
+        assert_eq!(
+            message,
+            "only the session's own agent may report its conversation"
+        );
+    }
+
+    /// A report carrying a credential that does not authenticate is
+    /// refused, exactly as a create with the same credential would be.
+    ///
+    /// Hello-time authentication is admission to the connection, not
+    /// standing for each request on it — the session behind a cached
+    /// bearer can be deleted, or the token replaced, while the connection
+    /// stays open. Reporting revalidates for the same reason creating
+    /// does, and this is the check that stops a stale or forged credential
+    /// from rewriting a live session's resume identity.
+    #[tokio::test]
+    async fn a_report_with_an_invalid_credential_is_unauthorized() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+        let forged = farhelm_proto::SessionAuth {
+            session_id: auth.session_id.clone(),
+            token: "not-the-session-token".to_string(),
+        };
+
+        let reply = send_report(&sup, &forged, 62, "conv-forged").await;
+        assert!(
+            matches!(
+                reply,
+                ControlMsg::Error {
+                    req_id: 62,
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ),
+            "a report with a credential that does not authenticate must be refused: {reply:?}"
+        );
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation,
+            None,
+            "a refused report must not have written anything"
+        );
+    }
+
+    /// An identity this build will not store is refused as an INVALID
+    /// REQUEST, before any WRITE.
+    ///
+    /// Not before every lookup — the credential check runs first and reads
+    /// the session row, deliberately, so that an unauthenticated peer
+    /// cannot use the shape of the refusal to learn which half of its
+    /// request was wrong. What the shape check precedes is the store write
+    /// and the log line.
+    ///
+    /// Every row is a shape that reaches an agent's command line if it is
+    /// admitted. A leading `-` is the sharp one: `--resume --last` is not
+    /// a weird identifier, it is a different flag, and the argv slot
+    /// substitution that keeps an id in one argument does nothing about
+    /// it — slot substitution guarantees the id stays ONE argument, never
+    /// that the argument is not a flag. Whitespace is a different and
+    /// milder argument: it is not an injection vector at all once the id is
+    /// one argv element, it is simply not a shape any plausible vendor id
+    /// has. And the 129-byte row pins the handler's OWN bound —
+    /// post-handshake frames are capped only at `MAX_FRAME_LEN`, so nothing
+    /// upstream of this check bounds the field.
+    ///
+    /// `InvalidRequest` rather than `Unauthorized` because the peer is
+    /// entitled to report; what it sent is not reportable. The distinction
+    /// is what a hook's trace file records, and it is the difference
+    /// between "your credential is wrong" and "your vendor changed its id
+    /// format".
+    ///
+    /// The `req_id` is asserted per row rather than only the kind: a
+    /// refusal is a REPLY, and a reply carrying the wrong correlation id
+    /// leaves a request/reply client waiting on one that never comes —
+    /// exactly the hang the helm-refusal arm exists to prevent, reached
+    /// here by a different route.
+    #[tokio::test]
+    async fn a_report_carrying_an_implausible_identity_is_refused() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        let oversized = "a".repeat(MAX_CONVERSATION_BYTES + 1);
+        for (req_id, conversation) in [
+            (63u64, "-bad"),
+            (64, "has space"),
+            (65, ""),
+            (66, oversized.as_str()),
+        ] {
+            let reply = send_report(&sup, &auth, req_id, conversation).await;
+            let ControlMsg::Error {
+                req_id: answered,
+                kind,
+                ..
+            } = reply
+            else {
+                panic!("{conversation:?} is not an identity this build stores: {reply:?}");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert_eq!(
+                answered, req_id,
+                "{conversation:?}: the refusal must answer the request that caused it"
+            );
+        }
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation,
+            None,
+            "no refused shape may reach the column"
+        );
+    }
+
+    /// An accepted report becomes the session's resume identity, and a
+    /// SECOND report replaces the first.
+    ///
+    /// The first half is the whole point of the mechanism: the offer the
+    /// user sees, and the id a restart substitutes into the resume
+    /// template, both come from the durable column this handler writes.
+    /// Asserting through `session_snapshot` rather than the in-memory
+    /// capture state is deliberate — the snapshot is what a restart
+    /// actually reads, so it proves the write landed rather than that this
+    /// process merely believes it did.
+    ///
+    /// The second half is the bug the design exists to fix. `/clear` and
+    /// `/new` start a genuinely new conversation inside the SAME agent
+    /// process; the hook fires again with a new id, and the previous one
+    /// is then precisely what must never be resumed. A handler that
+    /// treated the second report as a duplicate would leave farhelm
+    /// offering to resume a conversation the user has already thrown away.
+    #[tokio::test]
+    async fn a_report_claims_the_resume_identity_and_a_later_one_replaces_it() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        let first = send_report(&sup, &auth, 67, "conv-first").await;
+        assert!(
+            matches!(first, ControlMsg::ConversationReported { req_id: 67 }),
+            "a plausible report from the session's own agent must be accepted: {first:?}"
+        );
+        let snapshot = sup
+            .session_snapshot(&auth.session_id)
+            .await
+            .unwrap()
+            .expect("the session exists");
+        assert_eq!(
+            snapshot.captured_conversation.as_deref(),
+            Some("conv-first")
+        );
+        assert_eq!(
+            snapshot.restart_offer,
+            RestartOffer::Resume,
+            "an integrated session with a stored identity owes the user a resume offer"
+        );
+
+        let second = send_report(&sup, &auth, 68, "conv-second").await;
+        assert!(
+            matches!(second, ControlMsg::ConversationReported { req_id: 68 }),
+            "a second report is a new conversation, not a duplicate request: {second:?}"
+        );
+        let snapshot = sup
+            .session_snapshot(&auth.session_id)
+            .await
+            .unwrap()
+            .expect("the session exists");
+        assert_eq!(
+            snapshot.captured_conversation.as_deref(),
+            Some("conv-second"),
+            "the identity the agent discarded must stop being offered"
+        );
+        let state = sup.sessions.lock().await[&auth.session_id]
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
+        assert!(
+            matches!(
+                &state,
+                CaptureState::Reported { conversation } if conversation == "conv-second"
+            ),
+            "and the in-memory mirror must follow the durable write: {state:?}"
+        );
+    }
+
+    /// A supervisor that may not record refuses the report and changes
+    /// NOTHING — not the row, not the in-memory state.
+    ///
+    /// `may_record` is false for a supervisor that does not hold its state
+    /// directory's claim or could not read this host's boot id: it can
+    /// still answer honestly from what is stored, but it has no standing
+    /// to draw new conclusions. A report accepted in that state would be
+    /// exactly such a conclusion. Advancing memory without the write would
+    /// be worse still — `Reported` advertises `Resume`, which promises a
+    /// restart there is a stored id to fill in, and there would not be.
+    ///
+    /// Nothing retries it: neither vendor re-fires the hook, so the report
+    /// is simply lost and the scan remains the fallback for that session,
+    /// which it still is precisely because this refusal left the state
+    /// unsettled.
+    #[tokio::test]
+    async fn a_report_is_refused_and_dropped_while_the_supervisor_is_not_recording() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+        sup.may_record
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+
+        let reply = send_report(&sup, &auth, 69, "conv-unrecorded").await;
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = reply
+        else {
+            panic!("a supervisor that may not record must refuse the report: {reply:?}");
+        };
+        assert_eq!(req_id, 69);
+        assert_eq!(kind, ErrorKind::Internal);
+        assert_eq!(message, "the supervisor is not recording right now");
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation,
+            None,
+            "nothing may be written by a supervisor with no standing to write"
+        );
+        let capture = sup.sessions.lock().await[&auth.session_id]
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
+        assert!(
+            matches!(capture, CaptureState::Unclaimed),
+            "and the session must stay under the scan's authority: {capture:?}"
+        );
+    }
+
+    /// A report whose durable write FAILS is refused, and leaves both the
+    /// row and the in-memory state exactly as they were.
+    ///
+    /// The invariant is the same one every capture write carries: the
+    /// DURABLE write decides what is claimed, so an in-memory `Reported`
+    /// installed after a failed write would advertise `RestartOffer::Resume`
+    /// — a promise that a restart has a stored id to substitute — with
+    /// nothing behind it. The session must instead stay under the scan's
+    /// authority, which is precisely what not advancing achieves.
+    ///
+    /// Driven through the capture store-fault seam rather than a genuinely
+    /// broken database, because what is under test is this handler's
+    /// response to a failed write, not SQLite's behaviour. `Internal`
+    /// rather than `Conflict` is the reply, because unlike a stale
+    /// generation something really did malfunction.
+    #[tokio::test]
+    async fn a_report_whose_write_fails_changes_nothing_and_answers_internal() {
+        let state = StateDir::new();
+        let attempts: Arc<std::sync::Mutex<Vec<crate::service::CaptureWrite>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = Arc::clone(&attempts);
+        let fault: crate::service::CaptureStoreFault = Arc::new(move |write, _id| {
+            seen.lock().expect("fault log poisoned").push(write);
+            Err(anyhow::anyhow!("the store is unavailable"))
+        });
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            crate::service::core::SupervisorTimeouts::default(),
+            crate::service::core::SupervisorSeams {
+                capture_store_fault: Some(fault),
+                ..crate::service::core::SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        let reply = send_report(&sup, &auth, 70, "conv-unwritable").await;
+        let ControlMsg::Error { req_id, kind, .. } = reply else {
+            panic!("a report whose write failed must be refused: {reply:?}");
+        };
+        assert_eq!(req_id, 70);
+        assert_eq!(kind, ErrorKind::Internal);
+        assert_eq!(
+            attempts.lock().expect("fault log poisoned").as_slice(),
+            [crate::service::CaptureWrite::Report],
+            "the report's own write is the one that was attempted"
+        );
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation,
+            None,
+            "a failed write must leave the column untouched"
+        );
+        let capture = sup.sessions.lock().await[&auth.session_id]
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
+        assert!(
+            matches!(capture, CaptureState::Unclaimed),
+            "and must not install a Reported state with nothing behind it: {capture:?}"
+        );
+    }
+
+    /// A report is answered while the session's LIFECYCLE CLAIM is held by
+    /// somebody else.
+    ///
+    /// This is the design's sharpest timing constraint, and it is invisible
+    /// in the code — the report path is defined by a lock it does NOT take.
+    /// Claude's hook fires at the replacement process's startup, which is
+    /// inside `restart_session`'s claim; a report that waited on that claim
+    /// would queue behind the tail of the very restart that caused it, blow
+    /// the hook's 2 s budget, and surface to the user as a hook error the
+    /// vendor never retries.
+    ///
+    /// Holding the claim from the test and requiring the reply BEFORE
+    /// releasing it is the only way to state that as a test: a version that
+    /// took the claim would deadlock here rather than fail an assertion,
+    /// which is why the reply is awaited inside the guard's scope instead
+    /// of after it.
+    ///
+    /// That deadlock is the reason for the timeout around the round trip.
+    /// The regression this test exists to catch does not produce a wrong
+    /// answer, it produces NO answer, and an un-timed await on it hangs the
+    /// whole test binary until CI's job limit kills it with no indication
+    /// of which test was at fault. The bound is deliberately generous — the
+    /// path under test does no I/O beyond one SQLite write, so seconds are
+    /// orders of magnitude of headroom, and nothing here is a latency
+    /// assertion.
+    #[tokio::test]
+    async fn a_report_is_answered_while_the_session_lifecycle_claim_is_held() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        let held = sup.lifecycle_locks.claim(&auth.session_id).await;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(30),
+            send_report(&sup, &auth, 71, "conv-during-restart"),
+        )
+        .await
+        .expect(
+            "a report must not wait on the session lifecycle claim; this timing out means the \
+             report path started taking it and would otherwise deadlock the suite",
+        );
+        assert!(
+            matches!(reply, ControlMsg::ConversationReported { req_id: 71 }),
+            "a report must not wait on the claim a restart holds: {reply:?}"
+        );
+        drop(held);
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session exists")
+                .captured_conversation
+                .as_deref(),
+            Some("conv-during-restart"),
+            "and it must have written, not merely replied"
+        );
+    }
+
+    /// The hook's `source` is bounded and de-controlled before it reaches a
+    /// log line, and doing so never costs the report.
+    ///
+    /// The field is unvalidated by design — a vendor may add an event name
+    /// at any time, and refusing an unrecognized one would throw away a
+    /// good report over a diagnostic string — so whatever a
+    /// credential-holding process in the agent's tree sends ends up in the
+    /// supervisor's log. Unbounded, that is an unbounded write target;
+    /// with control characters intact, a newline forges log ENTRIES and an
+    /// escape sequence repaints the operator's terminal.
+    ///
+    /// The multibyte case is not decoration: truncation has to land on a
+    /// character boundary, because slicing a `String` mid-UTF-8 panics and
+    /// this input is attacker-chosen. A cap enforced with `&s[..N]` would
+    /// turn a log-hygiene measure into a remote panic.
+    #[test]
+    fn a_reported_source_is_bounded_and_stripped_of_control_characters() {
+        assert_eq!(sanitized_source("startup"), "startup");
+        assert_eq!(
+            sanitized_source("start\nup\u{1b}[2J"),
+            "start\u{fffd}up\u{fffd}[2J",
+            "newlines and escapes must not survive into a line-oriented log"
+        );
+        assert!(
+            sanitized_source(&"a".repeat(4096)).len() <= MAX_SOURCE_BYTES,
+            "an unbounded source must not become an unbounded log line"
+        );
+        // Four-byte characters, so a byte-indexed cap would land inside one.
+        let wide = sanitized_source(&"🙂".repeat(64));
+        assert!(wide.len() <= MAX_SOURCE_BYTES);
+        assert_eq!(
+            wide.chars().count(),
+            MAX_SOURCE_BYTES / 4,
+            "truncation lands on a character boundary rather than splitting one"
+        );
+    }
+
+    /// The other half of the same rule, and the half the pure-function test
+    /// cannot state: a hostile `source` driven through the REAL dispatch
+    /// costs the report nothing.
+    ///
+    /// Sanitizing rather than refusing is a deliberate choice, and a choice
+    /// is only real if something holds the other side of it. The pure test
+    /// above proves the string is cleaned; it says nothing about whether
+    /// the handler that cleans it also decides to reject the frame. A
+    /// future reviewer looking at a field full of newlines, escapes, and
+    /// four kilobytes of padding would find refusing it the obvious move —
+    /// and refusing would trade a correct resume for a tidy log, on a path
+    /// the vendor never retries.
+    ///
+    /// So the assertion is on the identity, not on the log: the report is
+    /// ACCEPTED, and the conversation lands durably where a restart reads
+    /// it. Whether the log line itself is clean is the pure function's
+    /// business, tested without a tracing subscriber a few lines up. One
+    /// value carries all three hostilities at once — a newline that would
+    /// forge a log entry, an escape that would repaint a terminal, and
+    /// enough bytes to blow the cap — because the property is that NONE of
+    /// them can reject a report, and separate cases would only make it
+    /// easier to fix one and lose the others.
+    #[tokio::test]
+    async fn a_hostile_report_source_is_sanitized_without_costing_the_report() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        let hostile = format!("start\nup\u{1b}[2J{}", "🙂".repeat(1024));
+        let reply = send_report_with_source(&sup, &auth, 79, "conv-hostile-source", &hostile).await;
+        assert!(
+            matches!(reply, ControlMsg::ConversationReported { req_id: 79 }),
+            "a diagnostic field's shape must never decide a report's fate: {reply:?}"
+        );
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session exists")
+                .captured_conversation
+                .as_deref(),
+            Some("conv-hostile-source"),
+            "and the identity must have been written, not merely acknowledged"
+        );
+        let capture = sup
+            .sessions
+            .lock()
+            .await
+            .get(&auth.session_id)
+            .expect("the entry is still published")
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
+        assert!(
+            matches!(
+                &capture,
+                CaptureState::Reported { conversation } if conversation == "conv-hostile-source"
+            ),
+            "the in-memory mirror must follow the accepted report too: {capture:?}"
+        );
+    }
+
+    /// A report that arrives before the session's entry is published is
+    /// ACCEPTED, writing the durable row from the row's own generation.
+    ///
+    /// The gap is real and ordinary rather than a corner: Claude's hook
+    /// fires at process start, which lands inside the window a create leaves
+    /// between committing the reserved row and publishing the in-memory
+    /// entry, and inside the equivalent window a relaunch leaves. Answering
+    /// `NotFound` there would discard the report the vendor considers most
+    /// reliable, and nothing would re-send it.
+    ///
+    /// Nothing in memory is advanced, because there is nothing to advance.
+    /// The entry published afterwards does NOT read these columns — the
+    /// create path mints `Unclaimed` — so the row and the mirror diverge for
+    /// a while; `Supervisor::report_conversation`'s docs set out the three
+    /// things that make that divergence harmless and self-correcting. The
+    /// assertion is therefore on the row, which is what every decision that
+    /// acts on the identity reads, a restart included.
+    ///
+    /// The entry is removed after seeding rather than never created,
+    /// because the durable ROW is what makes the fallback possible and
+    /// `reporting_session` is the one helper that seeds a row a report can
+    /// legitimately claim.
+    #[tokio::test]
+    async fn a_report_during_the_publication_gap_is_written_from_the_row() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+        sup.sessions
+            .lock()
+            .await
+            .remove(&auth.session_id)
+            .expect("test premise: the entry existed before the gap was simulated");
+
+        let reply = send_report(&sup, &auth, 73, "conv-early").await;
+        assert!(
+            matches!(reply, ControlMsg::ConversationReported { req_id: 73 }),
+            "a report arriving before publication must be accepted, not lost: {reply:?}"
+        );
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session exists")
+                .captured_conversation
+                .as_deref(),
+            Some("conv-early"),
+            "the durable row is what carries the report until an entry appears"
+        );
+        assert!(
+            !sup.sessions.lock().await.contains_key(&auth.session_id),
+            "and nothing may fabricate an entry to hold it in the meantime"
+        );
+    }
+
+    /// A report from a launch the session has already moved past is
+    /// refused as a CONFLICT, and changes nothing.
+    ///
+    /// The generation fence is what stands in for the lifecycle claim this
+    /// path deliberately does not take (see
+    /// `Supervisor::report_conversation`): a session's credential survives
+    /// a relaunch, so a hook process that outlived the restart's kill sweep
+    /// still authenticates. It simply cannot write, because the generation
+    /// it belongs to is gone.
+    ///
+    /// `Conflict` rather than `Internal` because nothing malfunctioned —
+    /// the surviving launch's own hook is the one entitled to speak for this
+    /// session now. The entry is left at the OLD generation on purpose, which
+    /// is exactly the state a stale hook's report is judged against.
+    #[tokio::test]
+    async fn a_report_for_a_superseded_launch_is_refused_as_a_conflict() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+        // The row moves to generation 1 while the published entry — and so
+        // the report that reads its generation — stays at 0.
+        let claim = sup
+            .store
+            .begin_relaunch(
+                &auth.session_id,
+                crate::store::OfferBasis {
+                    captured_conversation: None,
+                    capture_ambiguous: false,
+                },
+                true,
+                false,
+            )
+            .await
+            .expect("open a new generation");
+        assert!(
+            matches!(claim, crate::store::RelaunchDecision::Claimed(_)),
+            "test premise: the relaunch must actually have opened generation 1"
+        );
+
+        let reply = send_report(&sup, &auth, 74, "conv-stale").await;
+        let ControlMsg::Error { req_id, kind, .. } = reply else {
+            panic!("a report for a superseded launch must be refused: {reply:?}");
+        };
+        assert_eq!(req_id, 74);
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session exists")
+                .captured_conversation,
+            None,
+            "a fenced-out report may not reach the column"
+        );
+    }
+
+    /// An id of exactly the cap is ACCEPTED and stored.
+    ///
+    /// The refusal table above pins one byte past the bound; this pins the
+    /// bound itself, which is the half an off-by-one silently breaks. The
+    /// direction matters: a cap that refused at exactly 128 would not fail
+    /// loudly anywhere — the session would simply stop being resumable the
+    /// day a vendor's id format grew, and the scan fallback would cover for
+    /// it convincingly enough that nobody would look here.
+    #[tokio::test]
+    async fn a_report_at_exactly_the_byte_cap_is_accepted() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        let at_cap = "a".repeat(MAX_CONVERSATION_BYTES);
+        let reply = send_report(&sup, &auth, 72, &at_cap).await;
+        assert!(
+            matches!(reply, ControlMsg::ConversationReported { req_id: 72 }),
+            "an id of exactly {MAX_CONVERSATION_BYTES} bytes is inside the bound: {reply:?}"
+        );
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session exists")
+                .captured_conversation
+                .as_deref(),
+            Some(at_cap.as_str())
+        );
     }
 
     /// An admitted spawn receives bounded idempotency, preserves its direct
@@ -5447,6 +6444,8 @@ mod tests {
                         durable: true,
                     })),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    hooked: crate::service::core::hook_flag(false),
+                    hook_warned: crate::service::core::hook_flag(false),
                     activity: crate::service::ticker::ActivitySample::unsampled(),
                     last_activity_at: crate::service::core::activity_stamp(
                         1_700_000_000 - index as i64,
@@ -5491,6 +6490,8 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: crate::service::core::hook_flag(false),
+                hook_warned: crate::service::core::hook_flag(false),
                 activity: crate::service::ticker::ActivitySample::unsampled(),
                 last_activity_at: crate::service::core::activity_stamp(1_699_999_997),
                 generation: 0,
@@ -5664,6 +6665,8 @@ mod tests {
                         durable: true,
                     })),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    hooked: crate::service::core::hook_flag(false),
+                    hook_warned: crate::service::core::hook_flag(false),
                     activity: crate::service::ticker::ActivitySample::unsampled(),
                     last_activity_at: crate::service::core::activity_stamp(
                         1_700_000_000 - index as i64,
@@ -5833,6 +6836,8 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: crate::service::core::hook_flag(false),
+                hook_warned: crate::service::core::hook_flag(false),
                 activity: crate::service::ticker::ActivitySample::unsampled(),
                 last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                 generation: 0,
@@ -6378,6 +7383,8 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: crate::service::core::hook_flag(false),
+                hook_warned: crate::service::core::hook_flag(false),
                 activity: crate::service::ticker::ActivitySample::unsampled(),
                 last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                 generation: 0,
@@ -6782,6 +7789,8 @@ mod tests {
                 durable: true,
             })),
             capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+            hooked: crate::service::core::hook_flag(false),
+            hook_warned: crate::service::core::hook_flag(false),
             activity: crate::service::ticker::ActivitySample::unsampled(),
             last_activity_at: crate::service::core::activity_stamp(created_at),
             generation: 0,
@@ -7281,6 +8290,8 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: crate::service::core::hook_flag(false),
+                hook_warned: crate::service::core::hook_flag(false),
                 activity: crate::service::ticker::ActivitySample::unsampled(),
                 last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                 generation: 0,

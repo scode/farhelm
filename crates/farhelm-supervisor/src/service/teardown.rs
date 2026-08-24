@@ -407,6 +407,12 @@ impl Supervisor {
             canonical_cwd: entry.canonical_cwd.clone(),
             first_input: Arc::clone(&entry.first_input),
             capture: Arc::clone(&entry.capture),
+            // Shared for the same reason `capture` is: archiving replaces
+            // the entry without ending the launch's story, so the tripwire
+            // must keep pointing at the same cells a tick may already be
+            // holding.
+            hooked: Arc::clone(&entry.hooked),
+            hook_warned: Arc::clone(&entry.hook_warned),
             activity: ActivitySample::unsampled(),
             // Shared rather than reset, unlike the sampler cell above:
             // archiving ends the RUN, not the session's history. This cell
@@ -793,11 +799,154 @@ impl Supervisor {
         if let Some(parked) = quarantined {
             crate::attachments::discard_quarantined(&parked).await;
         }
+        // The session's hook trace goes the same way, and in the same
+        // best-effort spirit: it is a per-session diagnostic file
+        // (`hook_log_path`), it names a session that no longer exists, and
+        // nothing about a delete should fail over it. Deliberately NOT
+        // fail-closed like the launch specs and the alt-screen snapshot
+        // above — those can hold the user's secrets, whereas this file
+        // holds timestamps, conversation ids, and error kinds this
+        // supervisor already logs itself. Most sessions have no such file
+        // at all (nothing writes one unless the launch was hooked), so a
+        // missing path is the ordinary case rather than a surprise.
+        let hook_log = crate::service::core::hook_log_path(&self.state_dir, session_id);
+        if let Err(e) = tokio::fs::remove_file(&hook_log).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(
+                session = %session_id, path = %hook_log.display(), error = %e,
+                "could not remove a deleted session's conversation-hook trace"
+            );
+        }
 
         for (channel, notify) in &notify_detach {
             notify_detached(notify, *channel, "session deleted".to_string());
         }
         drop(attachments);
         Ok(())
+    }
+}
+
+/// The archived entry's cell-sharing rule, which has no other coverage:
+/// archiving REPLACES a session's entry, and the cells that describe the
+/// launch must be the same objects the replaced entry held.
+#[cfg(test)]
+mod tests {
+    use super::super::core::tests::{StateDir, dummy_exe, entry_with};
+    use super::*;
+    use crate::store::{LastOutcome, StoredSession};
+
+    /// Archiving publishes a new entry that SHARES the run's live cells —
+    /// here the two hook-diagnostic flags — with the entry it replaced.
+    ///
+    /// The rule is the same one a rename follows and the opposite of the
+    /// one a relaunch follows, which is precisely why it needs pinning:
+    /// `relaunched_entry` mints `hooked` and `hook_warned` fresh on every
+    /// generation, and somebody applying that reasoning here would break
+    /// the tripwire. Archiving does not start a new launch. A tick already
+    /// holding the pre-archive entry — the capture pass runs on its own
+    /// schedule and resolves entries independently of archive — must be
+    /// able to spend the tripwire's once-per-launch latch through the entry
+    /// it has and have the published one see it, or a hooked session that
+    /// is archived near its horizon warns twice.
+    ///
+    /// Asserted by pointer identity rather than by value, because value
+    /// equality is exactly what a copied-flag implementation would also
+    /// satisfy at the moment of the copy while still splitting the two
+    /// writers afterwards.
+    ///
+    /// The entry is deliberately TERMINAL-LESS, which is the restart-gap
+    /// shape archive already has to handle: it takes the tmux work out of
+    /// the picture entirely, leaving the entry construction this test is
+    /// about. The row still has to exist, because archive reads the durable
+    /// tmux name before anything else.
+    #[tokio::test]
+    async fn archiving_shares_the_launchs_hook_cells_with_the_entry_it_replaces() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = "archived-session";
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "hooked".to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "claude".to_string(),
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    // An integrated kind with the resume template its
+                    // snapshot is required to carry: archive reads the row
+                    // back through `SessionStore::session`, which refuses a
+                    // hook-capable kind whose template could never be
+                    // filled. A `Generic` row would sidestep that, but a
+                    // hooked launch is by definition an integrated one, so
+                    // the fixture stays the shape production produces.
+                    resume_template: Some(vec![
+                        "claude".to_string(),
+                        "--resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: Some("/tmp".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session being archived");
+
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.to_string();
+        let entry = Arc::new(entry);
+        // The launch was hooked and the tripwire has not spoken yet: the
+        // state in which BOTH flags still have work left to do.
+        entry
+            .hooked
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+
+        // `ArchiveError` carries no `Debug`, so the failure is described
+        // here rather than unwrapped.
+        let Ok(archived) = sup.teardown_for_archive(&entry, id).await else {
+            panic!("a terminal-less session archives without tmux");
+        };
+
+        assert!(
+            Arc::ptr_eq(&entry.hooked, &archived.hooked),
+            "the hook-injection flag must be the SAME cell across an archive"
+        );
+        assert!(
+            Arc::ptr_eq(&entry.hook_warned, &archived.hook_warned),
+            "the tripwire latch must be the SAME cell across an archive"
+        );
+        // And the sharing is live in the direction the bug takes: the
+        // writer holds the pre-archive entry, the reader the published one.
+        entry
+            .hook_warned
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            archived
+                .hook_warned
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "a tripwire warning spent through the pre-archive entry must not be spendable again"
+        );
+        assert!(
+            archived.hooked.load(std::sync::atomic::Ordering::Relaxed),
+            "and the archived entry must still describe the launch as hooked"
+        );
     }
 }

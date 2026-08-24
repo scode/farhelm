@@ -26,7 +26,7 @@
 //! and inferred where it cannot — the scan is the fallback, never the override.
 
 use super::core::{SessionEntry, Supervisor};
-use crate::agent_kind::{CaptureVerdict, CaptureWindow, RecordStamp};
+use crate::agent_kind::{CaptureVerdict, CaptureWindow, CaptureWindowBounds, RecordStamp};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -50,6 +50,15 @@ pub enum CaptureWrite {
     Conversation,
     /// `store::SessionStore::record_capture_ambiguous`.
     Ambiguity,
+    /// `store::SessionStore::record_reported_conversation`, reached from
+    /// `Supervisor::report_conversation` rather than from a capture pass.
+    ///
+    /// Sharing the capture seam rather than getting one of its own because
+    /// the property under test is the same one the others exist for: a
+    /// failed durable write must never leave an in-memory state
+    /// advertising `Resume`. That the writer is the report handler instead
+    /// of a pass changes who fails, not what must hold.
+    Report,
 }
 
 /// A failure injected in place of one of the capture machinery's durable
@@ -204,9 +213,14 @@ pub(crate) enum CaptureState {
     /// `farhelm_proto::RestartOffer::Resume`) promises a restart that there
     /// is something stored for it to fill in. The reporting path
     /// (`Supervisor::report_conversation`) owes this ordering; a write that
-    /// fails is logged and leaves memory alone, with no retry list — the
-    /// vendor will not re-fire the hook, and the scan is still running for
-    /// that session precisely because it never reached `Reported`.
+    /// fails is logged and leaves memory alone, with no retry list. The
+    /// vendor does not re-attempt that DELIVERY — the hook call has already
+    /// returned, and its result is not revisited — which is not the same as
+    /// the hook never firing again: a later lifecycle event in the same
+    /// process (another `/clear`, a resume, a compaction) fires a fresh
+    /// hook and produces a fresh report. What is lost is this one report,
+    /// and the scan is still running for that session precisely because it
+    /// never reached `Reported`.
     Reported { conversation: String },
 }
 
@@ -288,7 +302,12 @@ impl CaptureState {
     ///   of a conversation the user has already discarded. That is the
     ///   exact bug this state exists to fix, so the replacement is the
     ///   feature rather than a hole in the ladder.
-    fn advance(&mut self, next: CaptureState) -> bool {
+    ///
+    /// `pub(crate)` for one caller outside this module:
+    /// `Supervisor::report_conversation`, which installs the `Reported`
+    /// state a hook delivered. Everything else that advances a capture
+    /// state is a capture pass, and lives here.
+    pub(crate) fn advance(&mut self, next: CaptureState) -> bool {
         let allowed = match (self.rank(), next.rank()) {
             (current, incoming) if incoming > current => true,
             (current, incoming) if incoming == current => matches!(
@@ -445,6 +464,22 @@ impl Supervisor {
     /// a tick that a poll has just made redundant.
     pub(crate) async fn capture_pass_for(&self, reason: CaptureReason) {
         if self.agent_home.is_none() {
+            // No home means no scan, so there is no pass to run — but the
+            // liveness tripwire is not part of the scan. It is a statement
+            // about a hook that did not report, which is a fact about the
+            // session rather than about any file on disk, and this is
+            // precisely the configuration in which nothing else would ever
+            // mention it. Bailing before running it, as an earlier shape of
+            // this function did, made the tripwire inside `capture_pass`
+            // unreachable in production for a homeless supervisor.
+            //
+            // Run outside the pass lock and the coalescing checks below,
+            // because it needs neither: it is pure, it touches only
+            // in-memory flags, and each entry's own capture mutex is what
+            // makes its check-and-latch atomic against a concurrent caller.
+            let entries: Vec<Arc<SessionEntry>> =
+                self.sessions.lock().await.values().cloned().collect();
+            report_liveness_tripwire(&entries, self.capture_window, crate::agent_kind::now_unix());
             return;
         }
         let requested_at = Instant::now();
@@ -769,11 +804,21 @@ fn is_spoken_for(
 /// has a retry state, so a failed one costs a poll interval rather than
 /// the capture.
 pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>], may_write: bool) {
+    let bounds = sup.capture_window;
+    let now = crate::agent_kind::now_unix();
+    // Deliberately AHEAD of the agent-home bail below. The tripwire is a
+    // statement about a hook that did not report, which is a fact about
+    // the session rather than about any file on disk, and a supervisor
+    // with no home to scan is precisely the configuration where nothing
+    // else would ever mention it. Production never reaches this function
+    // without a home — `capture_pass_for` bails first — so that
+    // configuration's tripwire is run by that bail instead; this call is
+    // what serves everything else, including the tests that drive
+    // `capture_pass` directly.
+    report_liveness_tripwire(entries, bounds, now);
     let Some(home) = sup.agent_home.as_deref() else {
         return;
     };
-    let bounds = sup.capture_window;
-    let now = crate::agent_kind::now_unix();
 
     // Retry the durable writes that failed earlier, off the input path.
     //
@@ -1139,6 +1184,117 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
     }
 }
 
+/// Warn once per launch about a session that was launched WITH a
+/// conversation-reporting hook and whose report was never successfully
+/// ACCEPTED.
+///
+/// That is deliberately broader than "the hook never ran", and the message
+/// is worded to match. The state this reads cannot distinguish a hook that
+/// was never invoked from one that ran and was refused — a credential the
+/// store could not validate, an implausible id, a supervisor that was not
+/// recording — because all three leave the session un-`Reported` in exactly
+/// the same way. What separates them is the hook's own trace file, which is
+/// where a diagnosis continues after this line points at a session.
+///
+/// This is the only way that failure is ever visible at all. A hook that
+/// does not run — a vendor that renamed its flag, a settings file the
+/// injection declined to fight over, a wrapper script that dropped the
+/// appended tail — costs nothing observable: the scan fallback keeps
+/// working, the session looks entirely ordinary, and the resume offer it
+/// produces is the same slightly-less-certain one farhelm made before hooks
+/// existed. Without a tripwire the mechanism could silently stop working
+/// across a vendor release and nobody would learn of it from anything but a
+/// wrong-conversation resume months later.
+///
+/// The horizon is `first input + after + grace` — the scan's own settling
+/// point, reused rather than given a constant of its own. It is late
+/// enough for both vendors from opposite directions: Claude reports at
+/// process startup, so a Claude session is normally `Reported` before it
+/// has an anchor at all, while Codex reports at the first prompt, which is
+/// the very event that sets the anchor. A session with no first input yet
+/// is therefore never warned about — the launch-to-first-prompt gap is
+/// unbounded by design, and a user who has not typed anything has not yet
+/// given a Codex hook anything to fire on.
+///
+/// Pure and write-free: it takes no store, honours no `may_write`, and
+/// touches nothing but the two diagnostic flags. A supervisor that may not
+/// record may still say what it sees — and, for the same reason, so may one
+/// with no agent home to scan, which is why `capture_pass_for` runs this on
+/// the path where it bails before ever entering a pass.
+///
+/// ## Why the decision is made under the capture lock
+///
+/// The check and the latch have to be one step. A report can land at any
+/// moment — the handler is not serialized with capture passes — so a
+/// sequence of "read the state, drop the lock, latch and warn" can warn
+/// about a session that became `Reported` in between, and then set the
+/// once-only latch so the truthful non-warning is never reconsidered
+/// either. Reading the state, testing the latch, and setting it all inside
+/// one hold of `entry.capture` makes the decision consistent with the state
+/// it was made from. It also serializes this function against another
+/// concurrent copy of itself, which matters on the homeless path above
+/// where no pass lock is held. The `warn!` itself stays outside: emitting a
+/// log line while holding a lock every capture pass wants is a needless
+/// coupling, and by then the decision is already made.
+///
+/// That lock covers the read-then-latch step, not the report handler's
+/// two-part landing: a report that has already written durably but has not
+/// yet advanced the in-memory state can still be warned about in that
+/// instant. Accepted rather than coordinated, because the latch bounds the
+/// cost at a single spurious line per launch, and the alternative is
+/// serializing the report path against every capture pass to buy nothing
+/// but a tidier log.
+///
+/// Returns how many warnings this call actually emitted. Production ignores
+/// it; it exists so "once per launch" is an ordinary assertion rather than a
+/// tracing-subscriber fixture. The latch alone cannot carry that test — an
+/// already-latched entry and one that just re-warned look identical from
+/// outside.
+fn report_liveness_tripwire(
+    entries: &[Arc<SessionEntry>],
+    bounds: CaptureWindowBounds,
+    now: i64,
+) -> usize {
+    let ordering = std::sync::atomic::Ordering::Relaxed;
+    let mut warned = 0;
+    for entry in entries {
+        // `hooked` is read outside the lock deliberately: it only ever goes
+        // false-to-true, at publication, so the worst a stale read costs is
+        // deferring the warning to the next pass.
+        if !entry.hooked.load(ordering) {
+            continue;
+        }
+        let Some(at) = entry
+            .first_input
+            .lock()
+            .expect("first-input mutex poisoned")
+            .at
+        else {
+            continue;
+        };
+        if now < bounds.horizon(at) {
+            continue;
+        }
+        let warn_now = {
+            let state = entry.capture.lock().expect("capture mutex poisoned");
+            let silent = !matches!(*state, CaptureState::Reported { .. });
+            let first = silent && !entry.hook_warned.load(ordering);
+            if first {
+                entry.hook_warned.store(true, ordering);
+            }
+            first
+        };
+        if warn_now {
+            warned += 1;
+            warn!(
+                session = %entry.info.id,
+                "this session was launched with a conversation hook but none has reported"
+            );
+        }
+    }
+    warned
+}
+
 /// Commit one settled claim and, if the store confirms it, advertise it.
 ///
 /// The DURABLE write decides what is claimed, not this process's
@@ -1230,11 +1386,17 @@ async fn commit_capture(
 /// pass erasing a report — this skip, and `record_capture_ambiguous`'s
 /// `conversation_source IS NULL` fence in the store — and they are not
 /// redundant, because they protect different things. They have to be
-/// separate: the report handler is not serialized with capture passes
-/// (passes serialize among themselves through `CaptureCoordination`; a
-/// report takes only its session's lifecycle claim), so a pass can compute
-/// an ambiguity, have a report land underneath it, and then try to write.
-/// The SQL fence is what makes the durable row right in that race. This
+/// separate: the report handler is not serialized with capture passes at
+/// all. Passes serialize among themselves through `CaptureCoordination`;
+/// the handler takes NEITHER that lock nor the session's lifecycle claim —
+/// see `Supervisor::report_conversation` for why a hook with a 2 s budget
+/// cannot be made to wait behind a restart. What a report does hold is the
+/// entry's own capture-state lock, for the moment it swaps the state, and
+/// the store's generation fence, which decides whether its row write lands
+/// at all. Neither of those orders it against a pass's DECISION, so a pass
+/// can compute an ambiguity, have a report land underneath it, and then try
+/// to write. The SQL fence is what makes the durable row right in that
+/// race. This
 /// skip is what keeps the log honest: without it the supervisor would emit
 /// a "recorded an ambiguous correlation" line for a session it did not
 /// mark ambiguous and is still, correctly, advertising a resume for.
@@ -1888,6 +2050,110 @@ mod tests {
         );
     }
 
+    /// The liveness tripwire fires exactly once for a hooked launch that
+    /// never reported, and never for one that did.
+    ///
+    /// This is the only signal that the whole hook mechanism has stopped
+    /// working. A hook that never runs — a vendor that renamed its flag, a
+    /// wrapper that swallowed the appended tail — degrades silently to the
+    /// scan fallback, which keeps producing plausible resume offers, so
+    /// there is no failure to notice and no test in production to notice
+    /// it. If this warning does not appear, nothing else will say anything
+    /// at all.
+    ///
+    /// Three properties in one pass, because they are one behaviour:
+    /// - a hooked, unreported session past its horizon warns;
+    /// - a hooked session that DID report never warns, since the mechanism
+    ///   worked and a warning would train the reader to ignore the line;
+    /// - the flag latches, so the ticker's next pass is silent — otherwise
+    ///   a single broken launch produces a line per poll for the life of
+    ///   the session and buries every other log.
+    ///
+    /// Ages the anchor rather than sleeping: the horizon is `after` +
+    /// `grace` past first input, and moving first input into the past is
+    /// the same arithmetic seen from the other end.
+    #[tokio::test]
+    async fn the_tripwire_warns_once_for_a_hooked_launch_that_never_reported() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let sup = supervisor_over(&state, home.path(), None).await;
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+
+        // Well past the horizon `fast_bounds` implies (1s + 1s), so the
+        // pass is entitled to conclude that no report is coming.
+        let stale = crate::agent_kind::now_unix() - 3600;
+        let silent = claude_entry(
+            "hooked-silent",
+            "/tmp/one",
+            Some(stale),
+            CaptureState::Unclaimed,
+        );
+        let spoke = claude_entry(
+            "hooked-reported",
+            "/tmp/two",
+            Some(stale),
+            reported("conv-hook"),
+        );
+        for entry in [&silent, &spoke] {
+            entry.hooked.store(true, ordering);
+        }
+
+        capture_pass(&sup, &[Arc::clone(&silent), Arc::clone(&spoke)], false).await;
+        assert!(
+            silent.hook_warned.load(ordering),
+            "a hooked launch still unreported past its horizon must trip the wire"
+        );
+        assert!(
+            !spoke.hook_warned.load(ordering),
+            "a session whose hook did report has nothing to warn about"
+        );
+
+        // Second pass: the latch is what makes this one line per launch
+        // rather than one per tick.
+        silent.hook_warned.store(false, ordering);
+        capture_pass(&sup, &[Arc::clone(&silent)], false).await;
+        assert!(
+            silent.hook_warned.load(ordering),
+            "the wire is armed by `hooked` alone, so clearing the latch re-arms it — \
+             which is what makes the latch the only thing suppressing repeats"
+        );
+    }
+
+    /// An UNHOOKED launch never trips the wire, however long it goes
+    /// without reporting.
+    ///
+    /// Most launches are unhooked — a Generic session, a kind excluded
+    /// from injection, an argv the injection declined to touch — and every
+    /// one of them stays unreported forever by design. Warning about them
+    /// would make the line meaningless, which is the same as removing it.
+    ///
+    /// The session with no first input yet is the second half of the same
+    /// point: the launch-to-first-prompt gap is unbounded by construction,
+    /// so a session nobody has typed into has not yet given a Codex hook
+    /// anything to fire on and cannot be late.
+    #[tokio::test]
+    async fn the_tripwire_stays_silent_without_a_hook_or_a_first_input() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let sup = supervisor_over(&state, home.path(), None).await;
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+
+        let stale = crate::agent_kind::now_unix() - 3600;
+        let unhooked = claude_entry("unhooked", "/tmp/one", Some(stale), CaptureState::Unclaimed);
+        let untyped = claude_entry("no-input", "/tmp/two", None, CaptureState::Unclaimed);
+        untyped.hooked.store(true, ordering);
+
+        capture_pass(&sup, &[Arc::clone(&unhooked), Arc::clone(&untyped)], false).await;
+        assert!(
+            !unhooked.hook_warned.load(ordering),
+            "a launch that carried no hook cannot be late with a report"
+        );
+        assert!(
+            !untyped.hook_warned.load(ordering),
+            "a session with no delivered input yet has no deadline running"
+        );
+    }
+
     /// A reported id is spoken for even when its own session has never
     /// taken input.
     ///
@@ -2107,6 +2373,139 @@ mod tests {
             matches!(&kept, CaptureState::PendingCommit { conversation, .. }
                 if conversation == "conv-c"),
             "an unrelated report must leave a pending claim exactly where it was: {kept:?}"
+        );
+    }
+
+    /// The tripwire warns once per launch across ORDINARY consecutive
+    /// evaluations, with nothing reset in between.
+    ///
+    /// The existing pass-level test clears the latch by hand to show the
+    /// wire re-arms; that deliberately does not answer the question a
+    /// reader actually has, which is whether an untouched entry stays
+    /// silent on the second pass. It cannot be answered from the latch —
+    /// "already true" and "set again" are indistinguishable — so this
+    /// counts the decisions instead, which is what the return value exists
+    /// for. A tripwire that warned per pass would produce a line every
+    /// couple of seconds for the life of the session and bury the log it
+    /// was meant to be visible in.
+    #[test]
+    fn the_tripwire_warns_once_across_consecutive_evaluations() {
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+        let bounds = fast_bounds();
+        let at = 1_700_000_000;
+        let entry = claude_entry(
+            "hooked-silent",
+            "/tmp/one",
+            Some(at),
+            CaptureState::Unclaimed,
+        );
+        entry.hooked.store(true, ordering);
+        let well_past = bounds.horizon(at) + 3600;
+
+        let entries = [Arc::clone(&entry)];
+        assert_eq!(
+            report_liveness_tripwire(&entries, bounds, well_past),
+            1,
+            "the first evaluation past the horizon is the one that speaks"
+        );
+        assert_eq!(
+            report_liveness_tripwire(&entries, bounds, well_past),
+            0,
+            "and every one after it is silent without anything being reset"
+        );
+        assert!(entry.hook_warned.load(ordering));
+    }
+
+    /// The horizon is a real boundary: silent one second before it, warning
+    /// at it.
+    ///
+    /// Driven by passing `now` directly rather than by aging an anchor
+    /// against the wall clock, because that is the only way to test a
+    /// boundary rather than a neighbourhood of one — a test built on
+    /// `now_unix()` would be deciding the answer with a race against the
+    /// second it happens to run in.
+    ///
+    /// The boundary itself is not arbitrary: the tripwire reuses the scan's
+    /// own settling point (`after` + `grace` past first input) rather than
+    /// inventing a deadline, so a session cannot be called late while the
+    /// scan still considers its evidence open.
+    #[test]
+    fn the_tripwire_is_silent_until_the_horizon_and_speaks_at_it() {
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+        let bounds = fast_bounds();
+        let at = 1_700_000_000;
+        let horizon = bounds.horizon(at);
+
+        let early = claude_entry("early", "/tmp/one", Some(at), CaptureState::Unclaimed);
+        early.hooked.store(true, ordering);
+        assert_eq!(
+            report_liveness_tripwire(&[Arc::clone(&early)], bounds, horizon - 1),
+            0,
+            "one second short of the horizon the report may still be on its way"
+        );
+        assert!(!early.hook_warned.load(ordering));
+        assert_eq!(
+            report_liveness_tripwire(&[Arc::clone(&early)], bounds, horizon),
+            1,
+            "at the horizon the scan itself has settled, so a missing report is real"
+        );
+    }
+
+    /// The tripwire runs on a supervisor with no agent home, which is the
+    /// configuration it matters most in.
+    ///
+    /// A homeless supervisor never enters `capture_pass` at all —
+    /// `capture_pass_for` bails before it — so a tripwire placed only inside
+    /// the pass was unreachable in production for exactly the deployment
+    /// where nothing else would ever mention a hook that stopped working.
+    /// Driven through `capture_pass_for` rather than the pass itself
+    /// because that early return IS the thing under test.
+    ///
+    /// "No home" is expressed as an empty path rather than by unsetting
+    /// `HOME`: the seam falls back to the environment when it is `None`,
+    /// and this repo's tests never mutate the test process's environment.
+    /// An empty override is filtered out at construction and yields exactly
+    /// the homeless supervisor production gets when `HOME` is unset.
+    #[tokio::test]
+    async fn the_tripwire_still_runs_where_there_is_no_agent_home() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                agent_home: Some(PathBuf::new()),
+                capture_window: fast_bounds(),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        assert!(
+            sup.agent_home.is_none(),
+            "test premise: an empty override must resolve to no agent home at all"
+        );
+
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+        let stale = crate::agent_kind::now_unix() - 3600;
+        let silent = claude_entry(
+            "hooked-silent",
+            "/tmp/one",
+            Some(stale),
+            CaptureState::Unclaimed,
+        );
+        silent.hooked.store(true, ordering);
+        // `capture_pass_for` reads the supervisor's own session map rather
+        // than taking entries, so the entry has to be published into it.
+        sup.sessions
+            .lock()
+            .await
+            .insert(silent.info.id.clone(), Arc::clone(&silent));
+
+        sup.capture_pass_for(CaptureReason::Reply).await;
+        assert!(
+            silent.hook_warned.load(ordering),
+            "a supervisor with nothing to scan must still say that a hook never reported"
         );
     }
 
