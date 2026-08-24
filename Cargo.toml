@@ -101,6 +101,12 @@ tokio = { version = "1", features = [
   "time",
   "fs",
 ] }
+# Not linked by any runtime code — the supervisor renders its one TOML
+# value by hand (`agent_kind::toml_basic_string`) rather than depending on
+# a TOML writer for a single quoted string. This entry exists purely as a
+# DEV-dependency, to round-trip-parse that hand-rendered output back in a
+# test and prove it is valid TOML.
+toml = "0.8"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"

@@ -16,10 +16,16 @@
 //!    different kind between two restarts and resume through a template
 //!    that never matched the agent actually running.
 //! 2. **Conversation-identity capture** (item 8). Both supported agents
-//!    write discoverable on-disk records; the supervisor reads them and
-//!    nothing else. Capture is observation-only per SPEC.md — no hooks, no
-//!    agent configuration, no file in the agent's own directories is ever
-//!    written.
+//!    write discoverable on-disk records; the supervisor reads them. For a
+//!    kind that supports one, identity is ALSO reported by the agent
+//!    itself, through a per-launch command-line hook
+//!    ([`AgentIntegration::hook_argv`]) that never touches the agent's own
+//!    configuration or record directories and cannot outlive the launch
+//!    that carried it — SPEC.md's line is "no file in the agent's own
+//!    directories is ever written", not "no hooks". The record scan stays
+//!    the fallback for kinds and launches the hook cannot reach, and it
+//!    never overrides a report: a report is exact, a scan is an inference,
+//!    and the two are never allowed to disagree about which wins.
 //! 3. **Status sharpening** (PLAN_M6_75.md item 2). The generic classifier
 //!    in `service::status` can only see whether successive sampled screens
 //!    differed from each other; recognizing that an agent is BLOCKED ON A
@@ -260,6 +266,36 @@ pub trait AgentIntegration: Send + Sync {
         let _ = tail;
         baseline
     }
+
+    /// Command-line elements that make THIS launch report its conversation
+    /// identity through `farhelm internal hook`, appended verbatim after the
+    /// user's argv by the caller (`Supervisor::with_hook_argv`). Empty
+    /// means "this kind cannot be hooked per launch"; the record scan
+    /// remains the only identity source for such a session.
+    ///
+    /// Must be PURE: no I/O, no environment reads, and in particular no
+    /// consulting the `FARHELM_AGENT_HOOKS` opt-out ([`AgentHooks`]) — the
+    /// caller applies that policy before ever calling this method, so an
+    /// implementation cannot be asked twice whether its kind is allowed to
+    /// be hooked.
+    ///
+    /// `hook_exe` is the ALREADY-RESOLVED absolute path of the farhelm
+    /// binary, as a `str` rather than a [`Path`]: every implementation
+    /// embeds it in a vendor's own quoting syntax via `shell_words::quote`,
+    /// which only accepts `&str`, so the caller resolves the path to a
+    /// `String` once (where the supervisor is constructed) rather than
+    /// making every implementation repeat the same fallible
+    /// `Path`-to-`str` conversion. Fallible, not lossy: `Path::to_str`
+    /// returns `None` for a non-UTF-8 path rather than substituting
+    /// replacement characters, so nothing here ever embeds a mangled path
+    /// in a vendor's config. A non-UTF-8 `farhelm_exe` is therefore not
+    /// this method's problem at all: the caller simply never calls it for
+    /// that launch, and logs the skip as one more entry in
+    /// `with_hook_argv`'s reason list.
+    fn hook_argv(&self, hook_exe: &str) -> Vec<String> {
+        let _ = hook_exe;
+        Vec::new()
+    }
 }
 
 /// The integration for a kind, or `None` for [`AgentKind::Generic`] —
@@ -344,6 +380,46 @@ impl AgentIntegration for ClaudeIntegration {
     /// required to appear with.
     fn sharpen(&self, baseline: SessionStatus, tail: &str) -> SessionStatus {
         promote_if_waiting(baseline, tail, CLAUDE_QUESTION_PHRASES)
+    }
+
+    /// `--settings <json>` carrying one SessionStart hook. Claude Code
+    /// MERGES an inline `--settings` JSON's hooks with whatever the user's
+    /// own settings files already declare — both fire — so this never
+    /// displaces a hook the user configured for themselves, and nothing
+    /// under `~/.claude` is ever written: the JSON lives only in this
+    /// process's argv and is gone the moment the launch ends (plan §1,
+    /// verified against Claude Code 2.1.241). `with_hook_argv` is what
+    /// refuses to inject when the user's OWN argv already contains a
+    /// `--settings` element — Claude keeps only the LAST such flag, so
+    /// appending a second one would silently discard theirs (plan D3);
+    /// that skip decision does not belong here, which is why this method
+    /// never inspects its caller's argv.
+    ///
+    /// The `command` string is shell-quoted (`shell_words::quote`) because
+    /// Claude runs a hook's `command` through a shell rather than exec'ing
+    /// it directly — a raw unquoted path containing a space would be
+    /// split into arguments Claude cannot find (verified). The JSON is
+    /// built with `serde_json::json!` rather than string formatting so a
+    /// path that happens to need JSON escaping (a quote, a backslash) can
+    /// never produce malformed JSON, only a correctly escaped string. The
+    /// `timeout` of 5 seconds is the OUTER bound Claude itself enforces on
+    /// the hook process; `farhelm internal hook` budgets 2 seconds
+    /// internally (`hook.rs`, a later step), so this is scheduling margin,
+    /// not an expectation that the hook will ever need it.
+    fn hook_argv(&self, hook_exe: &str) -> Vec<String> {
+        let command = format!("{} internal hook", shell_words::quote(hook_exe));
+        let settings = serde_json::json!({
+            "hooks": {
+                "SessionStart": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": command,
+                        "timeout": 5
+                    }]
+                }]
+            }
+        });
+        vec!["--settings".to_string(), settings.to_string()]
     }
 }
 
@@ -455,6 +531,110 @@ impl AgentIntegration for CodexIntegration {
     fn sharpen(&self, baseline: SessionStatus, tail: &str) -> SessionStatus {
         promote_if_waiting(baseline, tail, CODEX_QUESTION_PHRASES)
     }
+
+    /// Five argv elements: the per-launch hook-trust bypass, then two `-c`
+    /// overrides that both land in Codex's `SessionFlags` config layer
+    /// (`codex-rs/config/src/config_layer_source.rs`, audited in plan §1)
+    /// — one turning on the hooks feature gate, one declaring the
+    /// SessionStart hook itself.
+    ///
+    /// `--dangerously-bypass-hook-trust` is the ONLY per-launch trust
+    /// bypass Codex offers (plan D2): without it, an untrusted hook
+    /// triggers a startup review dialog the TUI cannot get past
+    /// unattended. Accepting it costs two things, both documented
+    /// user-facing rather than hidden here: Codex prints a warning line
+    /// above the composer on every launch (the one line this plan accepts
+    /// onto the agent's own terminal), and any hook already sitting
+    /// untrusted in the user's own `~/.codex/config.toml` runs during a
+    /// farhelm-launched session too, not just ours. `features.hooks=true`
+    /// is required because Codex gates the entire hooks subsystem behind
+    /// it; passing it again when the user's own config already sets it is
+    /// harmless.
+    ///
+    /// Unlike Claude, Codex's `SessionStart` fires at FIRST PROMPT
+    /// SUBMISSION in the TUI, not at process start (verified against
+    /// 0.149.1) — so a freshly created session's identity report lags
+    /// behind Claude's by however long the user takes to type, and a
+    /// session that is created but never prompted never reports at all.
+    /// Nothing here compensates for that; it is a property of the
+    /// resulting report's TIMING that the supervisor-side handler (a
+    /// later step) has to tolerate, not something this argv can fix.
+    ///
+    /// The command is rendered as a TOML basic string
+    /// ([`toml_basic_string`]) because Codex's `-c` value is TOML, not
+    /// JSON, and TOML runs a hook's `command` through a shell exactly as
+    /// Claude does, so the path is shell-quoted first and the RESULT of
+    /// that quoting is what gets TOML-escaped.
+    fn hook_argv(&self, hook_exe: &str) -> Vec<String> {
+        let quoted_command = format!("{} internal hook", shell_words::quote(hook_exe));
+        let command = toml_basic_string(&quoted_command);
+        vec![
+            "--dangerously-bypass-hook-trust".to_string(),
+            "-c".to_string(),
+            "features.hooks=true".to_string(),
+            "-c".to_string(),
+            format!(
+                "hooks.SessionStart=[{{hooks=[{{type=\"command\",command={command},timeout=5}}]}}]"
+            ),
+        ]
+    }
+}
+
+// ---------------------------------------------------------------------
+// Hook-argv support (plan §2.2): TOML-string rendering for Codex's `-c`.
+//
+// A crate-local helper rather than a `toml` runtime dependency, because
+// the only thing this crate ever needs to PRODUCE in TOML is one quoted
+// string, and pulling in a whole TOML writer for that would be a dependency
+// the rest of the crate never touches (`Cargo.lock` already carries
+// `toml`/`toml_edit` transitively, through `dx`'s own tooling — not through
+// anything this crate links). The `toml` crate is still used, as a
+// DEV-dependency only, to round-trip-test the output below.
+// ---------------------------------------------------------------------
+
+/// Render `s` as a TOML basic string — the quoted literal that embeds the
+/// hook command inside Codex's `-c hooks.SessionStart=...` value
+/// ([`CodexIntegration::hook_argv`]).
+///
+/// ## Why `serde_json::to_string` does almost all the work
+///
+/// A TOML basic string accepts nearly the exact same escapes JSON does:
+/// `\"`, `\\`, `\n`, `\t`, and `\uXXXX` for the other control characters
+/// below 0x20. `serde_json::to_string` already produces exactly that
+/// escaping, plus the surrounding quotes, for any Rust `&str` — so this
+/// function is mostly just reusing a JSON encoder as a TOML encoder for the
+/// (large) subset of syntax the two formats happen to share.
+///
+/// Non-ASCII text is where that reuse could have gone wrong and does not:
+/// both formats leave non-ASCII characters as raw UTF-8 bytes rather than
+/// escaping them, and TOML allows that unescaped. TOML would also accept
+/// an escaped spelling of its own — `\u` with four hex digits for the BMP,
+/// `\U` with eight for anything above it, so `😀` may legally be written
+/// `\U0001F600` — so raw UTF-8 is a choice between two valid encodings
+/// rather than the only one there is. What TOML does NOT accept is the
+/// JSON-style SURROGATE PAIR — that same emoji written as two `\u`
+/// escapes in the `D800`–`DFFF` range, the way UTF-16 encodes it — since
+/// neither half is a Unicode scalar value. That is the one spelling that
+/// would break the launch, and it is why this function deliberately does
+/// not ASCII-escape non-ASCII characters (some JSON encoders can be
+/// configured to do that). `serde_json::to_string` never emits surrogate
+/// pairs for a `&str` anyway, so the raw-UTF-8 path is both the simpler
+/// and the safer of the two.
+///
+/// ## The one gap, found by testing rather than by reading a spec
+///
+/// TOML forbids a raw DEL byte (U+007F) inside a basic string; JSON does
+/// not require DEL to be escaped (it is not one of the mandatory
+/// below-0x20 control characters), so `serde_json::to_string` emits it
+/// raw. This function therefore does one more pass after the JSON
+/// encoding: every raw DEL is replaced with the six-character escape
+/// `\u007F`. See `toml_basic_string_round_trips_through_escaping` for the
+/// exact character set this was verified against, including DEL and a
+/// multi-byte emoji.
+pub(crate) fn toml_basic_string(s: &str) -> String {
+    serde_json::to_string(s)
+        .expect("serializing a &str to JSON cannot fail: no float, no map key, no cycle")
+        .replace('\u{7f}', "\\u007F")
 }
 
 // ---------------------------------------------------------------------
@@ -1043,12 +1223,30 @@ fn correlators_from(
 /// Whether a conversation identifier is something this crate is willing
 /// to store, log, and eventually place on an agent's command line.
 ///
-/// Two callers, both feeding it the same kind of value from a different
-/// direction: the record parse below, which reads ids off disk, and the
-/// supervisor's `ReportConversation` handler, which takes one off the wire
-/// from inside a session's own process. Neither source is this process's
-/// own writing, and the argv they both end at is identical, so they get
-/// the identical predicate rather than two that could drift apart.
+/// TWO untrusted sources, and TWO downstream re-checks, all sharing this
+/// one predicate — which is the whole reason it is `pub(crate)` rather
+/// than private to this module. Splitting it would let the four drift, and
+/// the only way that drift shows up is a resume that runs the wrong
+/// command.
+///
+/// The sources are where a value first arrives from outside: the record
+/// parse above, which reads ids out of files the supervisor did not write,
+/// and the supervisor's `ReportConversation` handler
+/// (`service/handlers.rs` — plan §2.4), which takes an agent-REPORTED id
+/// off the wire before anything is retained. The re-checks are the two
+/// points where a stored value becomes user-facing again:
+/// [`IntegrationSnapshot::restart_offer`], so an id this build would refuse
+/// to substitute is never OFFERED, and
+/// [`IntegrationSnapshot::filled_resume_argv`], the last point before the
+/// value becomes an argv element. The re-checks are not redundant with the
+/// sources: a column written by an older build, or edited by hand, reaches
+/// them without ever passing a source check.
+///
+/// Slot substitution is the defence that lets this stay a SHAPE check
+/// rather than a sanitizer. `filled_resume_argv` replaces a whole argv
+/// ELEMENT, so an id is never quoted, escaped, or word-split on its way
+/// into a command line, and shell metacharacters in one are inert. What
+/// that does not buy is the paragraph below.
 ///
 /// ## Option injection is the threat, not exotic characters
 ///
@@ -1377,6 +1575,130 @@ pub fn ensure_resume_template(template: &[String]) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// The `FARHELM_AGENT_HOOKS` opt-out (plan D5): which agent kinds get the
+/// per-launch identity hook ([`AgentIntegration::hook_argv`]) appended to
+/// their argv at all.
+///
+/// This is a SEAM value, not a live environment lookup.
+/// [`crate::service::SupervisorSeams::agent_hooks`] carries exactly one of
+/// these, set ONCE when the
+/// supervisor process starts — `farhelm supervisor run`'s CLI arm reads
+/// the environment variable and calls [`parse_agent_hooks`] exactly once,
+/// never here and never per-launch — so [`Default`] below is
+/// UNCONDITIONALLY `All` rather than a live read of the environment.
+/// Keeping the environment out of this type entirely is what lets every
+/// seam-level test set the value directly instead of mutating the test
+/// process's environment, which this repo's tests never do.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AgentHooks {
+    /// Every integrated kind gets the hook. The default, and the only
+    /// value a supervisor started with the environment variable unset (or
+    /// set to `all`, or the empty string) ever produces. `#[default]`
+    /// spells the same "unconditionally `All`, never a live environment
+    /// read" contract this type's own doc comment states — a derived
+    /// `Default` cannot accidentally grow a side effect the way a hand-
+    /// written `fn default()` could.
+    #[default]
+    All,
+    /// No kind gets the hook; every session falls back to the record scan.
+    None,
+    /// Exactly these kinds get the hook; every other kind falls back to
+    /// the scan. [`AgentKind::Generic`] appearing in this list would be
+    /// inert rather than rejected — `allows` is never even asked about it,
+    /// since the caller (`Supervisor::with_hook_argv`) already skips
+    /// kinds with no integration before consulting this value at all.
+    Only(Vec<AgentKind>),
+}
+
+impl AgentHooks {
+    /// Whether `kind` should have the identity hook appended to its argv.
+    ///
+    /// Searches `Only` with [`Vec::contains`] rather than a set: `AgentKind`
+    /// derives `Eq` but neither `Hash` nor `Ord` (farhelm-proto's `lib.rs`),
+    /// and adding either derive to a wire-protocol enum just to back a set
+    /// here would be a proto-crate change in service of a supervisor-crate
+    /// convenience. The list is short by construction — only two kinds have
+    /// an integration today — and it is a `Vec`, so a value like
+    /// `claude,claude` holds a duplicate; `contains` answers the same
+    /// either way, which is why the parser does not bother de-duplicating.
+    pub fn allows(&self, kind: AgentKind) -> bool {
+        match self {
+            AgentHooks::All => true,
+            AgentHooks::None => false,
+            AgentHooks::Only(kinds) => kinds.contains(&kind),
+        }
+    }
+}
+
+/// Parse the `FARHELM_AGENT_HOOKS` environment variable's value into an
+/// [`AgentHooks`]. THE ONLY PARSER of that variable in this codebase —
+/// every other reader of the opt-out consults the seam value this
+/// produces, never the environment again. That is also why the
+/// environment READ itself lives in `farhelm supervisor run`'s CLI arm
+/// rather than here: keeping this function pure (a `&str` in, an
+/// `AgentHooks` out, no side effects) is what lets it be unit-tested
+/// without a test process ever setting an environment variable
+/// (CLAUDE.md's testability rule forbids that).
+///
+/// ## Grammar
+///
+/// - `all` — also what an EMPTY string means, so a variable that is SET
+///   but blank behaves the same as one that is unset — maps to
+///   [`AgentHooks::All`].
+/// - `none` maps to [`AgentHooks::None`].
+/// - Anything else is read as a comma-separated list of kind names
+///   (`claude`, `codex` — this module's own canonical spelling, from
+///   [`kind_name`], rather than a spelling invented for this variable).
+///   Whitespace around each token is trimmed, and matching is
+///   case-insensitive throughout this grammar: this is a value a human
+///   types into a shell profile, not a wire format, so tolerating `Claude`
+///   or `ALL` costs nothing and saves a support question.
+///
+/// An EMPTY element is not tolerated: `claude,,codex`, `,claude` and
+/// `codex,` all trim to a token that is no kind name at all and therefore
+/// take the unrecognized-token path below. That is deliberate rather than
+/// incidental — a stray comma is a typo in an opt-out, and the warning
+/// that names it is worth more than silently accepting a value the person
+/// who typed it may have meant differently.
+///
+/// ## Failure mode: fail open, not partially
+///
+/// A token that is not `all`, `none`, `claude`, or `codex` invalidates the
+/// WHOLE value, not just that token: a `tracing::warn!` names the bad
+/// token and the full offending value, and the result is `All`. The
+/// reasoning is that this variable is an opt-OUT — a typo in it must not
+/// silently turn into "opt out of everything" (which is what an
+/// unrecognized-token-means-None reading would do), so the safe failure
+/// direction is falling back to behaving as if the variable were never
+/// set.
+pub fn parse_agent_hooks(value: &str) -> AgentHooks {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("all") {
+        return AgentHooks::All;
+    }
+    if trimmed.eq_ignore_ascii_case("none") {
+        return AgentHooks::None;
+    }
+    let mut kinds = Vec::new();
+    for token in trimmed.split(',') {
+        let token = token.trim();
+        match token.to_ascii_lowercase().as_str() {
+            "claude" => kinds.push(AgentKind::Claude),
+            "codex" => kinds.push(AgentKind::Codex),
+            _ => {
+                tracing::warn!(
+                    token,
+                    value,
+                    "FARHELM_AGENT_HOOKS contains an unrecognized token; falling back to \
+                     the default (every kind hooked) rather than guessing what was meant"
+                );
+                return AgentHooks::All;
+            }
+        }
+    }
+    AgentHooks::Only(kinds)
 }
 
 /// Recognize an agent kind from the basename of an invocation's first
@@ -2493,5 +2815,229 @@ mod tests {
                 "a kind that declares no prompt knowledge must not lose its baseline"
             );
         }
+    }
+
+    // -------------------------------------------------------------------
+    // Hook injection (plan §2.2): `hook_argv`, `toml_basic_string`, and the
+    // `FARHELM_AGENT_HOOKS` grammar.
+    // -------------------------------------------------------------------
+
+    /// [`AgentKind::Generic`] has no integration and therefore no hook —
+    /// not a gap, but the definition of generic (see [`integration_for`]'s
+    /// own doc comment). Pinned directly because every other test in this
+    /// file that exercises `hook_argv` does so through a concrete
+    /// `ClaudeIntegration`/`CodexIntegration` value and would never notice
+    /// if this property broke.
+    #[test]
+    fn generic_kind_has_no_integration_and_therefore_no_hook() {
+        assert!(
+            integration_for(AgentKind::Generic).is_none(),
+            "a generic session must fall through to the scan unconditionally; there is no \
+             hook_argv to even ask"
+        );
+    }
+
+    /// The one property that actually matters about `hook_argv`: a path
+    /// hostile to EITHER quoting layer survives being embedded through
+    /// BOTH of them and comes back out as the exact three argv elements
+    /// `farhelm internal hook` was launched with.
+    ///
+    /// `hostile_path` is chosen to hit every character each layer is
+    /// responsible for: a space (breaks an unquoted shell word), a single
+    /// quote (the character shell quoting itself must escape), a double
+    /// quote and a backslash (the characters JSON/TOML string escaping
+    /// must handle). The two vendors are checked in the same test, against
+    /// the same path, because the property under test is that the SAME
+    /// underlying command survives two structurally different renderings
+    /// — a property a single-vendor test could not distinguish from "this
+    /// vendor's quoting happens to work".
+    #[test]
+    fn hook_argv_survives_a_path_hostile_to_both_quoting_layers() {
+        let hostile_path = r#"/tmp/a b's "q" \dir/farhelm"#;
+        let expected_words = vec![
+            hostile_path.to_string(),
+            "internal".to_string(),
+            "hook".to_string(),
+        ];
+
+        // --- Claude: `["--settings", <json>]` ---
+        let claude_argv = ClaudeIntegration.hook_argv(hostile_path);
+        assert_eq!(
+            claude_argv.len(),
+            2,
+            "Claude's tail is exactly the flag and its value: a third element would be an \
+             extra token appended to the user's command line, and on a vendor that takes a \
+             trailing positional prompt that is text typed at the agent"
+        );
+        assert_eq!(claude_argv[0], "--settings");
+        let claude_json: serde_json::Value = serde_json::from_str(&claude_argv[1])
+            .expect("Claude's --settings value must be valid JSON");
+        let claude_hook = &claude_json["hooks"]["SessionStart"][0]["hooks"][0];
+        assert_eq!(claude_hook["type"], "command");
+        assert_eq!(claude_hook["timeout"], 5);
+        let claude_command = claude_hook["command"]
+            .as_str()
+            .expect("command must be a JSON string");
+        let claude_words = shell_words::split(claude_command)
+            .expect("Claude's rendered command must be one valid shell command line");
+        assert_eq!(claude_words, expected_words);
+
+        // --- Codex: five argv elements, order and identity pinned. ---
+        let codex_argv = CodexIntegration.hook_argv(hostile_path);
+        assert_eq!(codex_argv.len(), 5);
+        assert_eq!(
+            codex_argv[0], "--dangerously-bypass-hook-trust",
+            "the bypass flag must lead the injected tail: it is what makes every -c override \
+             after it actually take effect without an interactive trust dialog"
+        );
+        assert_eq!(codex_argv[1], "-c");
+        assert_eq!(codex_argv[2], "features.hooks=true");
+        assert_eq!(codex_argv[3], "-c");
+        let hook_value = codex_argv[4]
+            .strip_prefix("hooks.SessionStart=")
+            .expect("the fifth element must be the SessionStart declaration");
+        // The stripped value is a valid TOML *value*, not a document, so
+        // it is wrapped in a throwaway `v = ...` assignment before
+        // `toml::from_str` — the same trick `toml_basic_string`'s own
+        // round-trip test below uses.
+        let document: toml::Value = toml::from_str(&format!("v = {hook_value}"))
+            .expect("Codex's rendered -c value must be valid TOML");
+        let codex_command = document["v"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("command must be a TOML string");
+        assert_eq!(
+            document["v"][0]["hooks"][0]["type"].as_str(),
+            Some("command")
+        );
+        assert_eq!(
+            document["v"][0]["hooks"][0]["timeout"].as_integer(),
+            Some(5)
+        );
+        let codex_words = shell_words::split(codex_command)
+            .expect("Codex's rendered command must be one valid shell command line");
+        assert_eq!(codex_words, expected_words);
+    }
+
+    /// `toml_basic_string`'s escaping is only as good as its ability to
+    /// survive TOML's own parser, so this test uses the `toml` crate (a
+    /// dev-dependency only — see the function's doc comment for why it is
+    /// not a runtime one) as an independent oracle rather than re-deriving
+    /// the escaping rules by hand.
+    ///
+    /// The character set is exactly what the function's doc comment
+    /// discusses: a space, both quote characters, a backslash, a tab, a
+    /// newline, the one gap between JSON's and TOML's escaping rules (a
+    /// raw DEL byte), and two non-ASCII cases — a two-byte accented letter
+    /// and a four-byte emoji, since the doc comment's surrogate-pair claim
+    /// is specifically about characters outside the Basic Multilingual
+    /// Plane.
+    #[test]
+    fn toml_basic_string_round_trips_through_escaping() {
+        let original = "a space, a 'quote', a \"quote\", a \\backslash, a\ttab, a\nnewline, \
+                         DEL:\u{7f}:, and non-ASCII: é😀";
+        let rendered = toml_basic_string(original);
+        let document: toml::Value = toml::from_str(&format!("v = {rendered}"))
+            .unwrap_or_else(|e| panic!("toml rejected the rendered string {rendered:?}: {e}"));
+        assert_eq!(
+            document["v"].as_str(),
+            Some(original),
+            "the value TOML parsed back must equal the original input before it was escaped"
+        );
+    }
+
+    /// `parse_agent_hooks`'s full documented grammar, pinned case by case.
+    /// This function is the ONLY parser of `FARHELM_AGENT_HOOKS` in the
+    /// codebase (its own doc comment), so every accepted and rejected
+    /// shape belongs in a test here rather than being re-derived, and
+    /// possibly re-diverged, at the one call site that actually reads the
+    /// environment variable.
+    #[test]
+    fn parse_agent_hooks_covers_the_documented_grammar() {
+        assert_eq!(parse_agent_hooks("all"), AgentHooks::All);
+        assert_eq!(parse_agent_hooks("none"), AgentHooks::None);
+        assert_eq!(
+            parse_agent_hooks("claude"),
+            AgentHooks::Only(vec![AgentKind::Claude])
+        );
+        assert_eq!(
+            parse_agent_hooks("codex,claude"),
+            AgentHooks::Only(vec![AgentKind::Codex, AgentKind::Claude]),
+            "input order is preserved rather than normalized; `allows` does not care, but \
+             nothing in the parser should silently reorder it either"
+        );
+        assert_eq!(
+            parse_agent_hooks(" claude , codex "),
+            AgentHooks::Only(vec![AgentKind::Claude, AgentKind::Codex]),
+            "whitespace around each token, and around the whole value, is trimmed"
+        );
+        assert_eq!(
+            parse_agent_hooks(""),
+            AgentHooks::All,
+            "an empty string means the same as an absent variable, so a profile that SETS the \
+             variable to nothing does not accidentally disable every hook"
+        );
+        assert_eq!(
+            parse_agent_hooks("bogus"),
+            AgentHooks::All,
+            "an unrecognized token falls back to the safe default (all kinds hooked) rather \
+             than to None — this variable is an opt-OUT, and a typo must not silently turn \
+             into opting out of everything"
+        );
+        assert_eq!(
+            parse_agent_hooks("claude,bogus"),
+            AgentHooks::All,
+            "one bad token invalidates the WHOLE value rather than being dropped from the \
+             list — a partially-applied list would be a second, undocumented grammar"
+        );
+
+        // Case folding applies to every branch of the grammar, not just to
+        // the kind names: this is a value typed into a shell profile, and
+        // a user who capitalizes one word capitalizes all of them.
+        assert_eq!(parse_agent_hooks("ALL"), AgentHooks::All);
+        assert_eq!(parse_agent_hooks("NONE"), AgentHooks::None);
+        assert_eq!(
+            parse_agent_hooks("Claude,CODEX"),
+            AgentHooks::Only(vec![AgentKind::Claude, AgentKind::Codex])
+        );
+
+        // An empty element is an unrecognized token, not a skipped one.
+        // Pinned in all three positions a stray comma can occupy because
+        // the tempting "tidy" fix — filtering empties out before matching
+        // — would change this behavior silently and in the dangerous
+        // direction: it would make `,` alone parse as an empty `Only`
+        // list, i.e. as `none`, out of what is almost certainly a typo.
+        for value in ["claude,,codex", ",claude", "codex,"] {
+            assert_eq!(
+                parse_agent_hooks(value),
+                AgentHooks::All,
+                "{value:?}: an empty element takes the unrecognized-token path, warning and \
+                 falling back to the default rather than narrowing the opt-out"
+            );
+        }
+    }
+
+    /// `AgentHooks::allows` is what every hook-injection call site actually
+    /// consults; this pins its three-way behavior directly, independent of
+    /// how the value was constructed, plus the unconditional `All` default
+    /// that [`AgentHooks`]'s own doc comment promises.
+    #[test]
+    fn agent_hooks_allows_reflects_its_variant() {
+        assert!(AgentHooks::All.allows(AgentKind::Claude));
+        assert!(AgentHooks::All.allows(AgentKind::Codex));
+        assert!(AgentHooks::All.allows(AgentKind::Generic));
+
+        assert!(!AgentHooks::None.allows(AgentKind::Claude));
+        assert!(!AgentHooks::None.allows(AgentKind::Codex));
+
+        let only_claude = AgentHooks::Only(vec![AgentKind::Claude]);
+        assert!(only_claude.allows(AgentKind::Claude));
+        assert!(!only_claude.allows(AgentKind::Codex));
+
+        assert_eq!(
+            AgentHooks::default(),
+            AgentHooks::All,
+            "the seam's default must never consult the environment (module doc comment); it \
+             is unconditionally All"
+        );
     }
 }

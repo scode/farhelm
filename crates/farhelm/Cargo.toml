@@ -27,6 +27,12 @@ libc.workspace = true
 # look like a parser bug (fake_agent.rs).
 serde_json.workspace = true
 tokio.workspace = true
+# `tracing-subscriber` installs the subscriber (init_tracing); `tracing`
+# itself is here for the handful of diagnostics this binary emits on its
+# own — the `FARHELM_AGENT_HOOKS` startup warning in main.rs — rather than
+# through a library crate. The attachment-diagnostics test also implements
+# a `tracing` layer against it.
+tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
@@ -38,7 +44,3 @@ tracing-subscriber.workspace = true
 reqwest.workspace = true
 shell-words.workspace = true
 tempfile.workspace = true
-# The attachment-diagnostics test implements a `tracing` layer to capture
-# the transfer trail's structured FIELDS; the binary itself only needs
-# tracing-subscriber to install a subscriber.
-tracing.workspace = true

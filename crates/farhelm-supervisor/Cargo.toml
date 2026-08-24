@@ -29,3 +29,8 @@ tempfile.workspace = true
 # behavior deterministically instead of racing wall-clock sleeps against
 # window lengths.
 tokio = { workspace = true, features = ["test-util"] }
+# Round-trip-parses `agent_kind::toml_basic_string`'s hand-rendered output
+# in tests; not a runtime dependency (see that function's doc comment for
+# why the supervisor renders TOML by hand instead of depending on a writer
+# for it).
+toml.workspace = true
