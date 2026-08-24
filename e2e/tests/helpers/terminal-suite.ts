@@ -29,8 +29,22 @@ import { waitForTermText } from "./term";
 // flake this constant exists to prevent, and that is exactly how the
 // badge-render test used to fail (see `settledSharedSessionRow` in
 // terminal.spec.ts).
+//
+// The word is no longer PAINTED for these three: since the 2026-08-23 UI
+// refresh a live status draws as a colored dot and keeps its word as
+// visually-hidden text inside the same `.status-badge` element (`status.rs`,
+// `.visually-hidden` in app.css). That is exactly why the hidden word had to stay in
+// the DOM — `toHaveText` reads `textContent`, which includes it, so every
+// assertion below keeps working against a badge nobody can read with their
+// eyes. Ended statuses (`exited`, `interrupted`, `error`) still paint their
+// word, because an exit code and a stop annotation are facts a dot cannot
+// carry. A change that dropped the hidden word would take this whole family
+// of oracles with it.
 export const LIVE_BADGE = /^(running|waiting|idle)$/;
 
+// A user-stopped session's badge: SPEC.md's "'stopped' is not a distinct
+// status", so the annotation QUALIFIES `exited` rather than replacing it.
+//
 // The exit code is optional in the pattern because a stopped session may or
 // may not have one — a signal death tmux cannot reduce to a code leaves the
 // badge at plain `exited`, and a shell that ran its EXIT trap first reports

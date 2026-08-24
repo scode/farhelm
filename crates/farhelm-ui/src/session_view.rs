@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 
+use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
     archive_session, close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, restart_mode_for,
     restart_session,
@@ -28,7 +29,7 @@ use crate::ops::ReadGate;
 use crate::peer::PeerLine;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::reconnect::reconnect_policy;
-use crate::status::{StatusBadge, status_badge};
+use crate::status::{StatusBadge, StatusBadgeView, status_badge};
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
     CLOSE_TAB_CONSEQUENCE, MAX_MOUNTED_TAB_ISLANDS, TAB_OPEN_ERROR_KEY, TabStripItem,
@@ -61,12 +62,13 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 /// ## The consolidated header (TODO.md's UI refresh)
 ///
 /// Everything that identifies the session lives in ONE ~40px row: the
-/// title, the `{cwd} — {invocation}` metadata, the status badge, and the
-/// two session-level lifecycle actions (archive and restart — rename stays
-/// in the sidebar, which owns navigation; tabs stay in the strip below). It
-/// replaced a stack of four bands — titlebar, archive row, restart offer,
-/// tab strip — that cost ~170px of chrome before the terminal started, on a
-/// surface whose whole point is the terminal.
+/// title, the `{cwd} — {invocation}` metadata, the status badge beside how
+/// long ago the session was last active, and the two session-level lifecycle
+/// actions (archive and restart — rename stays in the sidebar, which owns
+/// navigation; tabs stay in the strip below). It replaced a stack of four
+/// bands — titlebar, archive row, restart offer, tab strip — that cost
+/// ~170px of chrome before the terminal started, on a surface whose whole
+/// point is the terminal.
 ///
 /// Three rules keep it at one row, and each of them is a decision rather
 /// than an implementation detail:
@@ -94,7 +96,11 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 /// - **A classified status renders in at most one place.** The header
 ///   normally, the stale band for a stale session (whose notice already
 ///   carries SPEC.md's "last-known status"), nowhere for `Unknown`
-///   (`status_badge_destination`).
+///   (`status_badge_destination`). The last-activity age follows it to
+///   whichever SURFACE wins, so one session's status statement is never
+///   split across two of them — but it is present or absent on its own
+///   terms (`activity_destination`): a session nothing has classified yet
+///   has no badge and still has an age.
 ///
 /// There is deliberately no overflow `⋯` menu: this view has exactly two
 /// actions (archive and restart), which is what the row is sized for. A menu
@@ -1332,13 +1338,34 @@ pub(crate) fn SessionView(
     // SPEC.md's metadata triple for a stale session is "title, directory,
     // last-known status", and this band is where the third one lands: the
     // header above carries the title and the directory, and it deliberately
-    // drops its own badge while stale so the word is not printed twice.
+    // drops its own badge while stale so the status is not stated twice.
     // Rendered through the list's own badge so the two surfaces cannot
     // describe one session differently. `status_badge` is called exactly
     // once, inside `status_badge_destination`, so the stale/non-stale split
     // below and `status_badge`'s own `Unknown`-suppresses-everything rule
     // are the only two places a badge can ever go missing.
     let (stale_badge, header_badge) = status_badge_destination(&shown);
+    // How long ago the session was last active, routed to the SAME surface
+    // the badge went to — the header for a reachable session, the stale band
+    // for one whose host is gone — but decided independently of whether
+    // there IS a badge. The two are separate facts about a session, not one:
+    // an `Unknown` status is deliberately badgeless, and a session nothing
+    // has classified yet still has a perfectly good last-activity stamp that
+    // the sidebar is already showing. Gating the age on the badge would have
+    // made the right pane disagree with the row the user clicked.
+    //
+    // Reading the clock here subscribes this view to its tick (see
+    // `activity`), which is what advances the number while a terminal sits
+    // open and idle.
+    let (stale_activity, header_activity) = activity_destination(
+        shown.stale,
+        ActivityStamp::new(*ACTIVITY_NOW.read(), shown.effective_activity()),
+    );
+    // The stale band is SPEC.md's metadata triple, and it earns its box if
+    // it has either half of the status statement to make — a badgeless
+    // `Unknown` session on a dead host still has an age worth printing under
+    // the notice.
+    let stale_metadata = stale_badge.is_some() || stale_activity.is_some();
     // One string, built once, for both the visible metadata and its own
     // `title`: the line is truncated with an ellipsis at whatever width the
     // header has left, and the tooltip is the only way back to the full cwd
@@ -1372,15 +1399,17 @@ pub(crate) fn SessionView(
                 // to a value the row cannot fit.
                 span { class: "title", title: "{shown_title}", "{shown_title}" }
                 span { class: "meta", title: "{meta_line}", "{meta_line}" }
-                if let Some((badge_class, badge_text)) = header_badge {
-                    // `title` because `.status-badge` caps at 32ch and
-                    // ellipsizes (`app.css`) — the shim's own `error`
-                    // detail can run past that cap, and the tooltip is the
-                    // only way back to a badge that has visibly clipped.
+                if let Some(badge) = header_badge {
+                    StatusBadgeView { badge }
+                }
+                // Its own `if`, not nested under the badge's: see
+                // `activity_destination` for why an absent badge must not
+                // take the age with it.
+                if let Some(activity) = &header_activity {
                     span {
-                        class: "status-badge {badge_class}",
-                        title: "{badge_text}",
-                        "{badge_text}"
+                        class: "status-time",
+                        title: "{activity.absolute}",
+                        "{activity.age}"
                     }
                 }
                 div { class: "titlebar-actions",
@@ -1636,9 +1665,23 @@ pub(crate) fn SessionView(
                 // direction-isolated element, so none of them can rearrange
                 // the sentence explaining why this session has no terminal.
                 PeerLine { class: "host-stale-notice", parts: notice.clone() }
-                if let Some((badge_class, badge_text)) = stale_badge {
+                if stale_metadata {
                     div { class: "stale-metadata",
-                        span { class: "status-badge {badge_class}", "{badge_text}" }
+                        if let Some(badge) = stale_badge {
+                            StatusBadgeView { badge }
+                        }
+                        // How long ago the session was last active, which on
+                        // a stale session is the more useful half of the
+                        // pair: the status stopped being a live report the
+                        // moment the host went away, and this is what says
+                        // how long ago the session was doing anything at all.
+                        if let Some(activity) = &stale_activity {
+                            span {
+                                class: "status-time",
+                                title: "{activity.absolute}",
+                                "{activity.age}"
+                            }
+                        }
                     }
                 }
             }
@@ -1861,12 +1904,44 @@ fn visible_archive_error(archived: bool, error: Option<String>) -> Option<String
 /// Returns the PAIR rather than picking a winner internally so a test can
 /// assert the pair's own invariant (never both `Some`) directly, instead of
 /// only ever observing one destination at a time and trusting the other.
-fn status_badge_destination(session: &Session) -> (StatusBadge, StatusBadge) {
+///
+/// The last-activity age is routed by [`activity_destination`] rather than
+/// by this function, and the separation is deliberate — see there.
+fn status_badge_destination(session: &Session) -> (Option<StatusBadge>, Option<StatusBadge>) {
     let badge = status_badge(&session.status, session.annotation.as_deref());
     if session.stale {
         (badge, None)
     } else {
         (None, badge)
+    }
+}
+
+/// Where this session's last-activity age belongs, split the same two ways
+/// [`status_badge_destination`] splits the badge: `(stale band, header)`.
+///
+/// The SURFACE choice is shared with the badge — a stale session's status
+/// statement is assembled under its host-unreachable notice, and printing
+/// half of it up in the header would scatter one statement across two
+/// places. What is NOT shared is the presence choice, and that is the whole
+/// reason this is its own function rather than another field of the badge
+/// pair: `status_badge` suppresses `Unknown` entirely, while an unclassified
+/// session's last-activity stamp is as good as any other session's — the
+/// sidebar row prints it either way. Folding the two decisions together (as
+/// an earlier shape did, by nesting the age's `if let` inside the badge's)
+/// made a freshly created session's age vanish from the right pane while
+/// the row the user had just clicked went on showing it.
+///
+/// Takes the already-built stamp rather than the session, so the clock read
+/// stays at the call site where its subscription belongs and this stays a
+/// pure routing decision a test can drive.
+fn activity_destination(
+    stale: bool,
+    activity: Option<ActivityStamp>,
+) -> (Option<ActivityStamp>, Option<ActivityStamp>) {
+    if stale {
+        (activity, None)
+    } else {
+        (None, activity)
     }
 }
 
@@ -1954,6 +2029,7 @@ mod tests {
                 annotation: None,
                 restart_offer: crate::RestartOffer::FreshOnly,
                 created_at: 0,
+                last_activity_at: 0,
                 archived: true,
                 tabs: Vec::new(),
                 host: None,
@@ -2169,6 +2245,7 @@ mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::FreshOnly,
                 created_at: 0,
+                last_activity_at: 0,
                 archived: false,
                 tabs: Vec::new(),
                 host: None,
@@ -2179,7 +2256,15 @@ mod tests {
             }
         }
 
-        let running_badge = Some(("running", "running".to_string()));
+        // `visible: false` is not incidental to the routing question: a live
+        // status draws as a dot with its word kept for screen readers, so the
+        // value that reaches a destination is the whole badge — class, text,
+        // and which half of it is shown — not just a word.
+        let running_badge = Some(StatusBadge {
+            class: "running",
+            text: "running".to_string(),
+            visible: false,
+        });
 
         let live = session(SessionStatus::Running, false);
         assert_eq!(
@@ -2200,6 +2285,74 @@ mod tests {
             status_badge_destination(&session(SessionStatus::Unknown, false)),
             (None, None),
             "an unclassified session gets no verdict on any surface"
+        );
+    }
+
+    /// The last-activity age follows the badge's SURFACE but not its
+    /// presence: header for a reachable session, stale band for one whose
+    /// host is gone, and still shown for an `Unknown` session that has no
+    /// badge at all.
+    ///
+    /// The `Unknown` row is the one this test exists for. The age was
+    /// briefly rendered inside the badge's own `if let`, which meant a
+    /// freshly created session — badgeless by design, since nothing has
+    /// classified it yet — silently lost its age in the right pane while
+    /// the sidebar row the user had just clicked went on printing it. Two
+    /// surfaces disagreeing about the same session is the failure the whole
+    /// single-source badge arrangement exists to prevent, and gating one
+    /// fact on another unrelated one is how it crept back in.
+    ///
+    /// Asserted alongside `status_badge_destination` on the same session
+    /// rather than alone, because "independent" is a statement about the
+    /// PAIR of decisions: only reading both at once shows the age surviving
+    /// a `None` badge.
+    #[test]
+    fn the_activity_age_follows_the_badges_surface_but_not_its_presence() {
+        let stamp = ActivityStamp::new(Some(1_700_000_000), 1_700_000_000 - 120)
+            .expect("a positive stamp always renders");
+
+        assert_eq!(
+            activity_destination(false, Some(stamp.clone())),
+            (None, Some(stamp.clone())),
+            "a reachable session's age sits in the header, beside its badge"
+        );
+        assert_eq!(
+            activity_destination(true, Some(stamp.clone())),
+            (Some(stamp.clone()), None),
+            "a stale session's age joins the last-known status under the notice, \
+             so one statement is not split across two surfaces"
+        );
+
+        let unknown = Session {
+            id: "sess".to_string(),
+            title: "sess".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: RestartOffer::FreshOnly,
+            created_at: 0,
+            last_activity_at: 1_700_000_000 - 120,
+            archived: false,
+            tabs: Vec::new(),
+            host: None,
+            host_identity: None,
+            host_name: None,
+            stale: false,
+            source_profile: None,
+        };
+        assert_eq!(
+            status_badge_destination(&unknown),
+            (None, None),
+            "the premise: nothing has classified this session, so it gets no badge"
+        );
+        assert_eq!(
+            activity_destination(
+                unknown.stale,
+                ActivityStamp::new(Some(1_700_000_000), unknown.effective_activity())
+            ),
+            (None, Some(stamp)),
+            "and the age is still a fact about it, so the header still prints it"
         );
     }
 

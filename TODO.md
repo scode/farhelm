@@ -165,10 +165,6 @@ roadmap and carries no priorities unless an entry says so itself.
   fixed-width (a recorded decision; denser rows solve the same pain). Each sub-item is its own PR, and every one of them
   builds on the design-token layer app.css now has (its `:root` block) rather than on literals:
 
-  - Status as dot plus timestamp, not a word. Replace the `running`/`idle`/`exited` text with a color-coded dot beside
-    the title (pulsing for running) and put a relative last-activity timestamp (`2m`, `1h`) where the word was — it
-    makes the "recently active" sort visibly meaningful.
-
   - Row overflow menus float centered over the row with no tie to the `⋯` that opened them; with several `⋯` in view
     there is no way to tell which one is open. Make it an actual menu: one raised surface (1px border, soft shadow)
     anchored to the opening button's corner, full-width left-aligned rows, a divider before the destructive `delete`

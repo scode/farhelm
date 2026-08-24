@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 
+use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
     ListSort, SessionFilter, SessionListing, archive_session, delete_session, fetch_hosts,
     fetch_newest_created, fetch_session, fetch_sessions, rename_session, stop_session,
@@ -2050,6 +2051,12 @@ pub(crate) fn ListView(
         .iter()
         .find(|host| host.local)
         .map(|host| host.id);
+    // The shared coarse clock every row's activity age is measured against,
+    // read ONCE for the whole list rather than per row. Reading it here is
+    // also what subscribes this view to the 30-second tick, which is the
+    // only thing that makes an age on screen advance on a fleet where
+    // nothing else is happening (see `activity`).
+    let now_secs = *ACTIVITY_NOW.read();
 
     // Two questions about the same applied filter, and they part exactly
     // where the archive switch is concerned. Both read the APPLIED filter
@@ -2586,6 +2593,14 @@ pub(crate) fn ListView(
                                     selected: selected.read().as_deref()
                                         == Some(session.id.as_str()),
                                     host_is_local: session_is_local(session.host, local_host),
+                                    // Formatted HERE, not in the row: see
+                                    // `RowState::activity` for why the
+                                    // clock's tick must not reach a row
+                                    // whose displayed age has not moved.
+                                    activity: ActivityStamp::new(
+                                        now_secs,
+                                        session.effective_activity(),
+                                    ),
                                 },
                                 rename_draft,
                                 on_open: guarded_open,

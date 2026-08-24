@@ -143,6 +143,7 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::FreshOnly,
             created_at: 0,
+            last_activity_at: 0,
             archived: false,
             tabs: (0..tabs)
                 .map(|index| Tab {

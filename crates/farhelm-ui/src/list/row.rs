@@ -14,7 +14,7 @@ use crate::archive::confirmation as archive_confirmation;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{existence_word, source_profile_label};
 use crate::rename::RenameForm;
-use crate::status::{confirm_consequence, status_badge};
+use crate::status::{StatusBadgeView, confirm_consequence, status_badge};
 
 use super::menu_panel::{
     PanelPlacement, measurement_outcome, menu_panel_placement_style, should_measure_on_mount,
@@ -327,10 +327,10 @@ std::thread_local! {
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
 /// The row is at most three lines: the title (with the stale/archived/
-/// status badges beside it), the host — only when the session is NOT on
-/// the helm's own machine — and a meta line carrying the abbreviated cwd
-/// beside a compact invocation badge. Each field ellipsizes alone in the
-/// fixed-width sidebar.
+/// status badges and the last-activity age beside it), the host — only when
+/// the session is NOT on the helm's own machine — and a meta line carrying
+/// the abbreviated cwd beside a compact invocation badge. Each field
+/// ellipsizes alone in the fixed-width sidebar.
 ///
 /// The shape is a density decision (2026-08-23, the UI refresh), and it
 /// reverses the interviewed row contents recorded in BUGS_BURNDOWN.md's
@@ -489,6 +489,7 @@ pub(super) fn SessionRow(
         menu_open,
         selected,
         host_is_local,
+        activity,
     } = state;
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
@@ -636,27 +637,37 @@ pub(super) fn SessionRow(
                     // not the element kind.
                     span { class: "session-row-line",
                         span { class: "session-title", "{session.title}" }
-                        // Beside the status badge rather than replacing it:
-                        // the last-known status is still what the helm
-                        // knows, and this says how old that knowledge is —
-                        // two facts, not one, exactly as the stop annotation
-                        // qualifies rather than replaces `exited`.
                         if session.stale {
                             span { class: "stale-badge", "stale" }
                         }
                         if session.archived {
                             span { class: "archived-badge", "archived" }
                         }
-                        if let Some((badge_class, badge_text)) = badge {
-                            // `title` because `.status-badge` caps at 32ch
-                            // and ellipsizes (`app.css`) — the shim's own
-                            // `error` detail rides straight into this text
-                            // and can run long, so the tooltip is the only
-                            // way back to a badge that has visibly clipped.
+                        if let Some(badge) = badge {
+                            StatusBadgeView { badge }
+                        }
+                        // Beside the badge, and about something ELSE. The
+                        // badge is the session's current (or, on a stale
+                        // row, last-known) status; this is how long ago the
+                        // supervisor last saw the agent's pane change.
+                        // Neither this stamp nor `created_at` records when
+                        // the status was classified, so the two are
+                        // independent facts sitting next to each other, not
+                        // a verdict and its freshness.
+                        //
+                        // Its OWN element rather than text inside the badge,
+                        // and that is load-bearing in two directions. The
+                        // badge's text content stays exactly the status word
+                        // — which is what the browser suite asserts against
+                        // and what a screen reader announces for the status
+                        // — and the age stays legible as its own quiet field
+                        // instead of inheriting a status color that would
+                        // make "2m" look like a verdict.
+                        if let Some(activity) = &activity {
                             span {
-                                class: "status-badge {badge_class}",
-                                title: "{badge_text}",
-                                "{badge_text}"
+                                class: "status-time",
+                                title: "{activity.absolute}",
+                                "{activity.age}"
                             }
                         }
                     }
@@ -1035,6 +1046,7 @@ pub(super) fn row_specimen(id: &str) -> Session {
         annotation: None,
         restart_offer: crate::RestartOffer::FreshOnly,
         created_at: 0,
+        last_activity_at: 0,
         archived: false,
         tabs: Vec::new(),
         host: None,
@@ -1103,6 +1115,7 @@ mod tests {
                         menu_open: false,
                         selected: false,
                         host_is_local: false,
+                        activity: None,
                     },
                     rename_draft,
                     on_open,
@@ -1187,6 +1200,7 @@ mod tests {
                             menu_open: false,
                             selected: selected == id,
                             host_is_local: false,
+                            activity: None,
                         },
                         rename_draft,
                         on_open,

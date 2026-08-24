@@ -252,12 +252,13 @@ filtered. A filter someone typed or chose does, and the count then says how many
 A list the client could not read to the end says that in the same place, rather than presenting a partial list as the
 whole one.
 
-A row shows a session's title, its status, and its working directory. The host is named on its own line only for a
-session that is not on the helm's own machine — a fleet that is mostly local gains nothing from a host word repeated on
-every row, and the line returns the moment a session is remote. The working directory and the launch command are shown
-abbreviated, with their full, untouched values always available on the row (a tooltip on the web and desktop clients);
-an abbreviation is never the only place a value is recorded. Exactly how a row lays out its lines and pixels is an
-implementation choice, covered in SPEC_impl.md rather than here.
+A row shows a session's title, its status (drawn as described under Status), how long ago it was last active, and its
+working directory. The host is named on its own line only for a session that is not on the helm's own machine — a fleet
+that is mostly local gains nothing from a host word repeated on every row, and the line returns the moment a session is
+remote. The working directory and the launch command are shown abbreviated, with their full, untouched values always
+available on the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value is
+recorded. Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather
+than here.
 
 Per-host connection state is always visible, as a compact per-host indicator naming each host with its current phase;
 the full hosts panel — retry, retargeting, removal, profiles — opens on demand rather than occupying the session list
@@ -280,6 +281,23 @@ distinct status. Host unreachability is per-host connection state, not a session
 
 An interrupted session stays interrupted until the user acts: opening it and declining resume leaves it interrupted;
 restart, archive, or delete are the ways out.
+
+How a status is DRAWN depends on how much it has to say. The three live states are a color-coded dot beside the
+session's title — running pulses, waiting and idle do not — with the status word itself always present as text for
+screen readers and anything else that reads rather than looks, never replaced by the color. Ended states keep their word
+visible, because an exit code, the stop annotation, and the reason an agent never started are facts no dot carries. The
+pulse is a claim about the present, so it stands down wherever the status is a last-known report rather than a live one:
+a session on an unreachable host shows a still dot whatever its status says.
+
+Beside the status, a session shows how long ago it was last active as a short relative age (`2m`, `3h`), with the full
+timestamp available on the row; that is what makes the list's recently-active order legible instead of implicit. The age
+is a difference between two machines' clocks and is only as good as they are, so it is never the only place the
+underlying time is recorded. It is also independent of the status beside it: a session nothing has classified yet shows
+no status and still shows its age.
+
+Two cases have no age to show, and both show nothing rather than a guess. A helm predating the last-activity field sends
+no stamp, and the session's creation time stands in — the same fallback that orders the list, so the column and the
+order agree. A session with neither stamp gets no age at all, never one counted from 1970.
 
 Running/waiting/idle discrimination for raw TUIs is inherently heuristic, and the waiting/idle boundary especially so.
 The bar: best-effort observation-based heuristics (output activity, terminal state), optionally sharpened per agent
