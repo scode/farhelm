@@ -11,6 +11,14 @@ NOTE: This is early software. Usable for real work, minimal in everything else.
 NOTE: Every agent invocation entered through the GUI, whether typed into the create dialog or stored in a profile, is
 ordinary argv — visible to every local user via `ps`. Credentials do not belong in it.
 
+NOTE: Farhelm starts Codex with `--dangerously-bypass-hook-trust` so it can pass its own conversation-identity hook on
+the command line. Two consequences you should know about before you use a Codex profile, both of them limited to the
+launches that actually receive the flags — a launch farhelm skips, or one you have opted out of, carries no bypass:
+Codex prints a warning line about the bypass, and any hook in Codex's active configuration home (`$CODEX_HOME` when it
+is set, `~/.codex` otherwise) that you have NOT trusted will run during those sessions. Claude Code sessions get an
+equivalent hook without a trust bypass. See [docs/agent-hook-injection.md](docs/agent-hook-injection.md) for what the
+hook does, what it never does, and how to turn it off.
+
 NOTE: The Mac app is not signed or notarized. macOS will treat it as an untrusted downloaded app; codesigning is
 deferred until there is an Apple Developer identity to build with.
 

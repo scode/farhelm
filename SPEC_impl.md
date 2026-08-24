@@ -566,7 +566,9 @@ every version since 3 has followed — a new optional field with a decode defaul
 harmlessly, is additive; a new tagged variant or a required field is not. Absent means the sender predates the field and
 decodes to 0, which a receiver reads as "unknown, fall back to `created_at`" and never as an instant in 1970. This is
 recorded here because the per-version changelog in `lore/` is frozen at the moment it was written and is not maintained
-as the protocol grows.
+as the protocol grows. The identity hook's pair — `ControlMsg::ReportConversation` and `ConversationReported` — went the
+other way and took the protocol to version 12, since two new tagged variants are exactly what an older decoder refuses
+outright instead of ignoring. So 12 is the current protocol version, and the frozen changelog stops at 11.
 
 The session list is cursor-paginated on this wire (protocol 8, M6). The contract, recorded here because the milestone
 plan that settled it is history the moment M6 closes: pages walk a total order — creation time descending, session id
@@ -660,8 +662,38 @@ remains that can never be represented on any page.
   instead of a silent wrong guess. Plain resume appends to the existing record under the same id for both agents
   (audited on current versions; a new id appears only on explicit forks — `--fork-session`, `forked_from_id`), so a
   captured identity survives restarts; the watcher treats appends as the resume signal and cheaply re-verifies identity
-  after each restart rather than baking in either behavior. Capture is observation-only per SPEC.md — no hooks, no agent
-  configuration.
+  after each restart rather than baking in either behavior. Re-verification is a scan-only affair, because only a
+  scan-derived claim carries the record locator an append can confirm. A hook-reported identity carries none and is
+  never re-verified — nothing on disk can improve on the agent's own answer — so it simply stays durable, and the next
+  launch's own hook reports again from inside the new process. The scan is no longer the only identity source, though it
+  is still the only one that works without vendor cooperation — see the hook paragraph below.
+
+  **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
+  Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
+  they replaced, so a scan-derived identity keeps resuming the conversation the user just threw away. Both vendors fire
+  a `SessionStart` hook whose payload carries that id, and both accept a hook supplied on the command line for a single
+  launch, so farhelm appends itself as that hook (`farhelm internal hook`, reporting over the supervisor's one shared
+  `supervisor.sock` and authenticating with the per-session credential the launch already carries) and lets the agent
+  state its own identity. Claude takes it as `--settings <json>`; Codex takes
+  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`. Per-launch is the whole point:
+  nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set, `~/.codex`
+  otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which is what
+  keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The costs are accepted deliberately, and
+  both are scoped to the launches that actually carry the injected flags rather than to Codex launches in general: on
+  those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the user has in
+  that same configuration home but has not trusted runs too. Codex fires `SessionStart` at the first prompt rather than
+  at process start, so a Codex session's identity arrives only once the user has typed something, where Claude's arrives
+  at startup. And three invocation shapes disqualify a launch, which is skipped with a logged reason rather than made to
+  work: an argv that already carries `--settings` (Claude honors only the last one, so injecting ours would silently
+  drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag risks a rejected
+  command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either vendor —
+  an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the supervisor's
+  environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read once at
+  supervisor start and carried as a seam value. The scan is untouched by all of this and remains the fallback wherever
+  no report has been accepted — an unhooked launch, but also a hook that failed, timed out, or was refused; it is never
+  the override. A reported identity dominates every scan-derived state, the ambiguous verdict included, because it is
+  not evidence about which record is ours — it is the agent's own answer. `docs/agent-hook-injection.md` is the
+  user-facing account of the same mechanism.
 - Per-session spawn credential: random token in the session's environment (`FARHELM_SESSION_ID`,
   `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket.
 - Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the
