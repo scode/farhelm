@@ -24,10 +24,10 @@
  * The page ground is the terminal's own black; chrome (sidebar, main
  * header, tab strip) sits one step above it; panels that float over
  * chrome — menus, dialogs, forms, bands that interrupt a pane — sit one
- * step above that. The accent is a single blue, spent today on
- * selection and focus rings; a filled primary control is reserved for
- * it too, but that control has not landed yet (TODO.md's "Two-tier
- * buttons" item). The `:root` comments below carry the element-by-
+ * step above that. The accent is a single blue, and what it may be
+ * spent on is a closed list: selection, focus rings, the one filled
+ * primary control a surface is allowed, and the pressed state of a row's
+ * actions-menu toggle. The `:root` comments below carry the element-by-
  * element map.
  *
  * The dark palette is the only one today. A light theme is a decision
@@ -115,7 +115,7 @@
    indistinguishable in practice — are gone, folded into the role they
    were a second copy of. They were recorded verbatim when the token
    layer landed only because that change was meant to move zero pixels;
-   the layering item in TODO.md's UI refresh is where the fold could be
+   the layering item in the 2026-08 UI refresh is where the fold could be
    a deliberate decision, and this is that change. */
 :root {
   /* Surfaces. THREE levels are in use, and which level a thing sits on
@@ -178,20 +178,23 @@
      warn, red danger, orange archive, mauve archived). --info's sky blue
      is the near neighbor; the two are kept apart by role and weight —
      --info is a light tone that carries a WORD, the accent is a
-     saturated fill or edge that never carries text.
+     saturated fill, edge, or single glyph — never a run of prose.
 
-     Spend it on selection, `:focus-visible`, and the filled-primary tier
-     `.btn-primary` renders below — nothing else. That third use is bound
-     by the same one-per-SURFACE discipline `.btn-primary`'s own comment
-     states: the sidebar's resting chrome carries exactly one filled
-     control, and a dialog's own submit is the primary of that dialog, so
-     the accent never spreads into plain decoration. SPEC.md requires the
-     sidebar to mark the selected session's row "readable at a glance
-     rather than only from the titlebar", and a palette that spent the
-     accent more freely would have nothing distinct left to make that
-     true — the narrow spend is what keeps it meaning something. */
+     What it may be spent on is a CLOSED list, not a palette: selection,
+     `:focus-visible`, the one filled primary control a surface is
+     allowed (`.btn-primary`, under the one-per-SURFACE discipline its
+     own comment states: the sidebar's resting chrome carries exactly one
+     filled control, and a dialog's own submit is the primary of that
+     dialog), and the pressed state a row's actions-menu toggle holds
+     while its menu is up. Every one of those says the same thing — this
+     is where you are — and that is the test anything joining the list
+     has to pass. SPEC.md requires the sidebar to mark the selected
+     session's row "readable at a glance rather than only from the
+     titlebar", and a palette that spent the accent on ordinary
+     decoration would have nothing left to make that true. */
   --accent: #5896e8; /* the accent at full strength: the selected row's inset
-                        bar and every focus ring */
+                        bar, every focus ring, and the glyph of an actions-menu
+                        toggle whose menu is open */
   --accent-fill: #16294a; /* accent-tinted SURFACE: the selected row, the selected
                              tab, and the fill a primary button would take */
   --accent-fill-hover: #1b3054; /* hover/focus inside an already-selected row */
@@ -255,6 +258,20 @@
      would LIFT the reconnecting pane instead of dimming it — which is
      the floating-rectangle effect the surface levels exist to remove. */
   --scrim: rgba(0, 0, 0, 0.82); /* dims a stale terminal while it reconnects */
+
+  /* Elevation. The surface ladder above says which LEVEL a thing sits on;
+     this says that one of them is genuinely in front. Spent only on the
+     row actions menu, and the reason is specific to WHAT it covers: it
+     floats over other SESSION ROWS, elements that look exactly like the
+     row it belongs to and carry the same kinds of control, so a flat
+     panel would read as part of the list rather than in front of it.
+     `.header-confirm` also floats without reflowing or dimming and
+     deliberately has no shadow — it hangs under the header over the
+     terminal, a surface it could never be confused with. Black rather
+     than a tinted shade, and soft rather than tight, for the same reason
+     `--scrim` is black: against this ground a lighter or harder edge
+     reads as a drawn frame instead of as depth. */
+  --shadow-menu: 0 6px 18px rgba(0, 0, 0, 0.45);
 
   /* Corner radii. */
   --radius-sm: 3px; /* controls and inputs */
@@ -470,7 +487,7 @@ samp {
   height: 100%;
 }
 
-/* The consolidated header (TODO.md's UI refresh): title, metadata, status,
+/* The consolidated header (the 2026-08 UI refresh): title, metadata, status,
    and both lifecycle actions on ONE row, where four stacked bands used to
    cost ~170px before the terminal began. Everything that made that stack —
    the restart explanation, the confirmations, the failure lines — moved to
@@ -884,6 +901,35 @@ samp {
   background: var(--bg-2);
 }
 
+/* The row whose actions menu is open, for as long as it is open (the
+   `menu-open` class comes from `row_class` in list/row.rs). The panel
+   hangs below-LEFT of its own "⋯" and covers the rows under it — their
+   toggles stay clear, deliberately (see `menu_panel_style`'s anchor doc
+   in list/menu_panel.rs), which is exactly why several live "⋯" can be on
+   screen at once with one menu up. That makes "which one did I open?" a
+   question the ROW has to answer rather than the small glyph alone, and
+   it is exactly the question the menu redesign was asked to fix.
+
+   The same tint hover and focus use, deliberately: this is one more way
+   of saying "the pointer's attention is here", not a fourth row state
+   with a look of its own. It holds while the pointer is elsewhere, which
+   is the whole point — a menu stays up after the mouse has moved off. */
+.session-row.menu-open {
+  background: var(--bg-2);
+}
+
+/* ...except on the SELECTED row, where the neutral tint would erase the
+   accent fill SPEC.md requires to keep the current session readable at a
+   glance. One step up inside the accent family instead — the same
+   substitution `.session-row.selected .session-row-open:hover` makes, and
+   bound by the same `--fg-1` AA cap. Three classes outrank both two-class
+   rules above, so this wins on specificity and not on source order — and
+   it overrides the background ALONE, leaving `.session-row.selected`'s
+   inset accent bar in force. */
+.session-row.menu-open.selected {
+  background: var(--accent-fill-hover);
+}
+
 /* The selected row is the session the right pane currently shows. Same
    visual language as `.tab.selected` (filled background plus an inset
    accent bar), and for the same stated reason, which SPEC.md states as a
@@ -954,7 +1000,7 @@ samp {
   gap: 6px;
   /* No padding of its own: the open button's own bottom padding closes
      the row, and a second gap under it was a quarter of the height the
-     density pass (TODO.md's UI refresh) was trying to reclaim. The error
+     density pass (the 2026-08 UI refresh) was trying to reclaim. The error
      line below still gets its separation from `.action-error`. */
 }
 
@@ -972,7 +1018,7 @@ samp {
      (ellipsizing its lines) rather than pushing the toggle out.
 
      The padding is symmetric and tight: it and the line gap are the two
-     numbers the density pass (TODO.md's UI refresh) had to spend on this
+     numbers the density pass (the 2026-08 UI refresh) had to spend on this
      button's own box model. Most of the row's height came out of dropping
      lines rather than shrinking type — the one exception is
      `.session-title` itself, stepped down from the inherited 16px to 14px
@@ -1070,6 +1116,30 @@ samp {
 .session-row.selected .session-row-menu,
 .session-row-menu[aria-expanded="true"] {
   opacity: 1;
+}
+
+/* The PRESSED state, for as long as the menu it opened is up. Keyed off
+   `aria-expanded` rather than a class the component would have to also
+   set: the attribute is already the truth about this button (list/row.rs
+   writes it synchronously on click, before any measurement), the rule
+   above already selects on it, and a parallel class would be a second
+   copy of that truth to keep in step.
+
+   The fill alone would not do it — `--control-hover-bg` is exactly what
+   `:hover` gives every ghost button, so a toggle wearing it after the
+   pointer has left reads as "stale hover" rather than "open". The accent
+   is what separates the two, and it is the same rule the header's own
+   archive and restart triggers already follow while their confirmations
+   are up (`.titlebar-actions .btn[aria-expanded="true"]`, which spends
+   `--accent-fill` and `--accent-edge` for the same reason): a pressed disclosure
+   control wears the accent for as long as what it opened is showing. See
+   SPEC_impl.md's accent list — that entry covers this toggle and those
+   header triggers as one category, not as separate exceptions. It costs
+   the selection nothing — one glyph of accent text cannot compete with a
+   whole row's accent fill. */
+.session-row-menu[aria-expanded="true"] {
+  background: var(--control-hover-bg);
+  color: var(--accent);
 }
 
 /* Coarse/no-hover pointers (touch) never get a `:hover` state to reveal
@@ -1204,17 +1274,65 @@ samp {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  /* No gap and no side padding: the item rows below are full-bleed, so
+     their own hover fill has to reach the panel's edges — a gap would cut
+     the highlighted row into a floating stripe, which is precisely the
+     stack-of-outlined-buttons look this redesign replaced. The 4px above
+     and below keeps the first and last rows off the panel's own corners.
+     The confirm and rename sub-states are NOT a list of rows and get the
+     padded box back — see the `:not([role="menu"])` rule directly
+     below. */
+  gap: 0;
+  padding: 4px 0;
   /* The floating level, literally: this panel is `position: fixed` over
      the rows it belongs to, and a panel painted at the rows' own level
-     would have only its 1px border to say it is in front of them. */
+     would have only its 1px border to say it is in front of them. The
+     shadow is the other half of that claim — see `--shadow-menu`, which
+     exists for this one surface. */
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
   max-width: 288px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
+}
+
+/* The same box in its OTHER two lives. A confirm prompt and a rename
+   field are not lists of full-bleed rows, so the geometry above is wrong
+   for them; restoring the padded, gapped box they were designed in here
+   keeps that change local instead of pushing an inset onto each of the
+   eight elements those two states can contain.
+
+   Keyed off a class the component sets rather than off the panel's own
+   role, which is where this selector used to look: `role="menu"` has
+   moved INWARD, onto the item list, so that the panel can stay a neutral
+   positioned box while the profile footer and the error line sit outside
+   the menu they are not part of (see list/row.rs). A selector on a role
+   the element no longer carries would have kept matching every state and
+   silently un-padded the prompts. The class is emitted in the same
+   expression that chooses the markup, so the two cannot describe
+   different states. */
+.session-row-menu-panel.menu-prompt {
+  gap: 6px;
+  padding: 8px;
+}
+
+/* The `role="menu"` element itself. It exists so the accessibility tree
+   can say where the list of commands starts and stops — which the panel
+   could not, once it also held a profile footer and an error line — and
+   it carries only enough geometry to be transparent: the same column the
+   panel is, at the panel's own full width, so the items' full-bleed hover
+   fill still reaches both edges.
+
+   NOT `display: contents`, which would be the tidier way to say "no box
+   here": several engines have historically dropped `display: contents`
+   elements from the accessibility tree entirely, and this element exists
+   for no other reason than to be IN that tree. A real box that adds
+   nothing is the safe version of the same intent. */
+.session-row-menu-items {
+  display: flex;
+  flex-direction: column;
 }
 
 /* The ONE panel-specific override the title needs: the shared
@@ -1267,20 +1385,94 @@ samp {
 
 /* ===== Row actions and confirmations ============================== */
 
-/* Lifecycle actions and confirmations: small, secondary-looking
-   controls that stay out of the open button's way — plain text buttons
-   rather than icons, matching the rest of M2's undecorated chrome
-   (PLAN_M2.md). Box-model shape itself comes from `.btn` above; this
-   group only adds what differs, shared across every lifecycle control
-   rather than duplicated per pair since the shape is identical. `flex-shrink: 0`
+/* The items of the row's actions menu (four on an active row, two on an
+   archived one). Full-width rows that light up edge to edge on hover, not
+   a stack of small centered boxes: with a border and a padded box each,
+   they read as unrelated buttons that happened to land in the same
+   rectangle, which is the complaint the menu redesign answers — see
+   SPEC_impl.md's session-row actions menu for the contract this
+   implements. The look is
+   `.btn`'s ghost tier already — transparent border, `--control-hover-bg`
+   on hover AND focus — so this rule only has to change the SHAPE.
+
+   `display: block` plus `width: 100%` rather than letting the panel's
+   flex column stretch them: a stretched flex item still centers its own
+   text, and left alignment is what makes four rows scannable as a list.
+
+   The square corners are structural, not a design choice the token block
+   should have to name: these rows run the full width of a container that
+   has its own radius and clips them, so a rounded item inside would show
+   its corners against the panel's fill as four notches. */
+.session-row-menu-item {
+  display: block;
+  width: 100%;
+  /* `width: 100%` is a CONTENT width by default, and this button carries
+     10px of horizontal padding and `.btn`'s reserved 1px border on each
+     side — so the content-box default would make every item 22px wider
+     than the panel it sits in, overflowing the rounded corners it is
+     supposed to align with. Border-box is what makes `100%` mean "the
+     panel's width" rather than "the panel's width plus my own chrome". */
+  box-sizing: border-box;
+  text-align: left;
+  border-radius: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+  /* Louder than `.btn`'s resting `--fg-1`: these are the actions the menu
+     exists for, and the muted tone is for the footer under them. */
+  color: var(--fg-0);
+}
+
+/* An item the shared operation token has made inert. It is
+   `aria-disabled`, never natively `disabled` (list/row.rs, with the
+   reasoning), which means the browser will still focus it and still fire
+   its `onclick` — the handler's own guard is what refuses — so this rule
+   has to carry the whole visual message on its own AND suppress the hover
+   and focus fills `.btn` would otherwise give a control that cannot act.
+   The 0.5 opacity is `.btn:disabled`'s own, deliberately: a user should
+   not be able to tell the two mechanisms apart by looking. */
+.session-row-menu-item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.session-row-menu-item[aria-disabled="true"]:hover,
+.session-row-menu-item[aria-disabled="true"]:focus {
+  background: transparent;
+}
+
+/* The divider before the destructive item — the one place in this menu
+   where the reading has to slow down. A rule, not a red box: the two-tier
+   button system keeps destructive actions ghost (see `.session-row-delete`
+   below for the red TEXT they get instead), so the separation is done by
+   the quiet `--border-dim` rule rather than by dressing the item up as a
+   third tier.
+
+   Its own element, carrying `role="separator"`, rather than a `border-top`
+   on the delete item: drawn on the item, the boundary existed for sighted
+   users only, and the accessibility tree showed four consecutive commands
+   with nothing to mark the last as different in kind. The element is not
+   focusable and is not counted by the menu's focus arithmetic (see
+   `MenuOrder` in list/row.rs), so arrow keys step straight past it. */
+.session-row-menu-separator {
+  margin: 4px 0 0;
+  border-top: 1px solid var(--border-dim);
+}
+
+/* Lifecycle confirmations: small, secondary-looking controls that stay
+   out of the open button's way — plain text buttons rather than icons,
+   matching the rest of M2's undecorated chrome (PLAN_M2.md). Box-model
+   shape itself comes from `.btn` above; this group only adds what
+   differs, shared across every confirmation control rather than
+   duplicated per pair since the shape is identical. `flex-shrink: 0`
    is deliberate, not a default left implicit: `.confirm-title` below is
    the ONE row member allowed to shrink under space pressure (a long
    title, say) — these buttons must stay full-size and reachable
-   regardless, never the ones that give. */
-.session-row-rename,
-.session-row-stop,
-.session-row-archive,
-.session-row-delete,
+   regardless, never the ones that give.
+
+   The menu's own four items used to share this rule and no longer do:
+   a confirmation is a small centered prompt, an item is a full-width row,
+   and once the two shapes diverged the shared declaration was saying the
+   same thing about neither. */
 .confirm-delete,
 .confirm-cancel,
 .confirm-archive,
@@ -1509,15 +1701,33 @@ samp {
    container) since the sidebar redesign dropped it from the row proper, so
    it must NOT be a flexible item: `flex: 1 1 0` in a column context is a
    zero flex-basis HEIGHT, which collapsed the chip to an invisible
-   zero-height span. It ellipsizes against the panel's max-width instead. */
+   zero-height span. It ellipsizes against the panel's max-width instead.
+
+   It is the menu's FOOTER, not one of its items, and every declaration
+   below the flex ones says so: its own divider above it, a size below the
+   items' 12px, and the muted `--fg-1` they were lifted off. This is a
+   fact ABOUT the session, sitting under a list of things you can DO to
+   it, and reading it as a fifth clickable row was the confusion the menu
+   redesign set out to end. The horizontal padding matches the items' so
+   the two align down the panel's left edge; the divider is full-bleed for
+   the same reason theirs is (see `.session-row-menu-panel`'s zero side
+   padding).
+
+   The ellipsis rules are load-bearing, not tidiness: a profile name has
+   no length bound the UI enforces, and the browser suite pins that a
+   near-limit one is genuinely clipped inside the panel rather than
+   widening it out of the sidebar. */
 .session-profile {
   color: var(--fg-1);
-  font-size: 12px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: none;
   min-width: 0;
+  margin-top: 4px;
+  padding: 6px 10px 2px;
+  border-top: 1px solid var(--border-dim);
 }
 
 /* A profile that is NOT KNOWN to be present under this name: renamed since,

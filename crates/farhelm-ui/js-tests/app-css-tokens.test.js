@@ -5,9 +5,9 @@
 // `var(--token)` rather than a literal).
 //
 // Why this file exists rather than trusting review: the token layer is a
-// contract the rest of the UI refresh is queued to build on (TODO.md's
-// surface-layering and light-theme items both assume every color already
-// has a name). None of the other test suites would catch a regression
+// contract the rest of the 2026-08 UI refresh built on (the surface
+// layering and the light theme both assume every color already has a
+// name). None of the other test suites would catch a regression
 // here — `cargo fmt`/`dprint` don't know a hex code from a token, the
 // Playwright suite only sees rendered pixels (a stray literal that
 // happens to match its token's value looks identical on screen), and a

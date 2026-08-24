@@ -1,5 +1,5 @@
 /**
- * The consolidated session header (TODO.md's UI refresh): title, metadata,
+ * The consolidated session header (the 2026-08 UI refresh): title, metadata,
  * status badge, and the archive/restart actions folded into one row over
  * the tab strip. `session_view.rs`'s own docs carry the design; this file
  * proves the two properties that only a real layout engine can check —

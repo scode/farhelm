@@ -3,6 +3,7 @@
 //! The row keeps the floating-panel hook state with the component; only the
 //! geometry decisions are delegated to the pure menu-panel helpers.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
@@ -17,7 +18,9 @@ use crate::rename::RenameForm;
 use crate::status::{StatusBadgeView, confirm_consequence, status_badge};
 
 use super::menu_panel::{
-    PanelPlacement, measurement_outcome, menu_panel_placement_style, should_measure_on_mount,
+    MenuFocusMove, MenuKeyAction, MenuOpenIntent, PanelPlacement, closed_toggle_key_intent,
+    measurement_outcome, menu_key_action, menu_panel_placement_style, next_menu_focus,
+    should_measure_on_mount,
 };
 use super::shared::{DeleteTarget, RowState};
 
@@ -43,7 +46,207 @@ fn row_control_visibility(archived: bool) -> RowControlVisibility {
     }
 }
 
-/// The session row's class list for its two independent visual states.
+// ===== The menu's items, and how they are addressed ==================
+//
+// Everything below identifies a menu item by WHAT IT DOES rather than by
+// where it currently sits. That distinction is the fix for a real bug:
+// the item set is not fixed for the life of an open menu. Archiving a
+// session withdraws Stop and Archive, and the surviving Delete keeps its
+// DOM node rather than remounting, so a scheme that filed handles under
+// "index 3" left Delete's handle at an index the shorter list no longer
+// reaches while navigation had already moved on to the new numbering.
+// Positions are derived from `MenuOrder` at the moment a key is pressed;
+// nothing durable is ever keyed by one.
+
+/// One command in a session row's actions menu.
+///
+/// The identity a mounted handle is filed under, and the vocabulary
+/// `MenuOrder` speaks — see this section's own note for why position is
+/// never that identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum MenuAction {
+    Rename,
+    Stop,
+    Archive,
+    Delete,
+}
+
+/// Every action the menu can offer, in the order it offers them.
+///
+/// The canonical order lives here rather than in the rsx so that
+/// `MenuOrder` and the rendered list cannot disagree about what "the
+/// first item" or "the last item" means — the two places arrow keys and
+/// the open-intent both resolve against.
+const MENU_ACTIONS: [MenuAction; 4] = [
+    MenuAction::Rename,
+    MenuAction::Stop,
+    MenuAction::Archive,
+    MenuAction::Delete,
+];
+
+/// The actions one render actually put in the panel, in order.
+///
+/// Fixed-capacity rather than a `Vec` so the whole thing stays `Copy`:
+/// every per-item event closure in the rsx captures it, and a `Copy`
+/// value needs no clone dance to hand the same list to five closures.
+/// Only the leading `Some` entries are meaningful — `from_visibility`
+/// packs the visible actions to the front, so iteration stops at the
+/// first gap by construction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MenuOrder([Option<MenuAction>; MENU_ACTIONS.len()]);
+
+impl MenuOrder {
+    /// The visible subset of [`MENU_ACTIONS`], packed to the front.
+    fn from_visibility(controls: RowControlVisibility) -> Self {
+        let mut packed = [None; MENU_ACTIONS.len()];
+        let mut next = 0;
+        for action in MENU_ACTIONS {
+            let visible = match action {
+                MenuAction::Rename => controls.rename,
+                MenuAction::Stop => controls.stop,
+                MenuAction::Archive => controls.archive,
+                MenuAction::Delete => controls.delete,
+            };
+            if visible {
+                packed[next] = Some(action);
+                next += 1;
+            }
+        }
+        Self(packed)
+    }
+
+    fn actions(self) -> impl Iterator<Item = MenuAction> {
+        self.0.into_iter().flatten()
+    }
+
+    /// How many items arrow navigation has to wrap around.
+    fn len(self) -> usize {
+        self.actions().count()
+    }
+
+    /// The action at a focus position, or `None` for a position this
+    /// render's list does not have — the shape `next_menu_focus` already
+    /// treats as "not on an item".
+    fn get(self, position: usize) -> Option<MenuAction> {
+        self.actions().nth(position)
+    }
+
+    fn last(self) -> Option<MenuAction> {
+        self.actions().last()
+    }
+
+    /// Where an action sits in THIS render's list, which is the only
+    /// place a position number is ever produced.
+    fn position(self, action: MenuAction) -> Option<usize> {
+        self.actions().position(|candidate| candidate == action)
+    }
+}
+
+/// Handles for the menu items currently mounted, keyed by the action each
+/// one performs.
+///
+/// Row-local and reset with the row, exactly like `toggle_handle` —
+/// `ListView` owns WHICH row's menu is open and has no business holding
+/// this row's DOM handles. Cleared on every fresh open AND on every
+/// close, so a handle never outlives the panel that mounted it: the
+/// entries are strong `Rc<MountedData>`s, and on the web renderer a
+/// retained handle retains a detached DOM node with it.
+type MenuItemHandles = Signal<HashMap<MenuAction, Rc<MountedData>>>;
+
+// ===== Moving focus, one request at a time ===========================
+
+/// One row's serialized pipeline of `MountedData::set_focus` requests.
+///
+/// Focus is asynchronous here — on desktop it crosses the WebView bridge
+/// — and a user holding an arrow key down produces requests far faster
+/// than the bridge answers them. Spawning an independent task per
+/// keystroke let those tasks interleave: each computed its target from
+/// whatever was focused when it STARTED (still the same item, since none
+/// had landed yet), mixed directions could complete out of order, and a
+/// slow bridge accumulated tasks each retaining a DOM handle. This queue
+/// replaces that with the two properties that make the behavior
+/// predictable: at most ONE request is ever in flight, and a request made
+/// while one is in flight simply overwrites the pending target instead of
+/// queueing behind it. Coalescing is the right semantic for focus — only
+/// the last destination asked for can be observed anyway — and it is what
+/// bounds the outstanding work no matter how long the bridge takes.
+#[derive(Clone, Copy)]
+struct MenuFocusQueue {
+    /// Where focus should end up, overwritten by each new request and
+    /// taken by the drainer. `None` means nothing is waiting.
+    target: Signal<Option<Rc<MountedData>>>,
+    /// Whether a task is currently draining `target`. Guards against a
+    /// second drainer, which is what would reintroduce the interleaving.
+    draining: Signal<bool>,
+}
+
+/// Ask for focus on `handle`, superseding any request not yet delivered.
+///
+/// The `Result` from `set_focus` is discarded deliberately — see this
+/// module's "Moving focus inside the open menu" note for why a renderer
+/// that cannot move focus is an unimproved keyboard experience rather
+/// than a lost safety default.
+fn request_menu_focus(queue: MenuFocusQueue, handle: Rc<MountedData>) {
+    let mut queue = queue;
+    queue.target.set(Some(handle));
+    // A drainer already running will pick the new target up on its next
+    // turn; starting a second one is exactly the concurrency this exists
+    // to prevent.
+    if *queue.draining.peek() {
+        return;
+    }
+    queue.draining.set(true);
+    spawn(async move {
+        let mut queue = queue;
+        loop {
+            // The write guard is scoped to this statement on purpose: it
+            // must be released before the `await` below, or the next
+            // `request_menu_focus` (which runs while this task is
+            // suspended) would panic against a borrow still outstanding.
+            let next = queue.target.write().take();
+            let Some(next) = next else {
+                break;
+            };
+            let _ = next.set_focus(true).await;
+        }
+        queue.draining.set(false);
+    });
+}
+
+/// Drop any request that has not been delivered yet.
+///
+/// Called when the menu closes: a target captured for a panel that no
+/// longer exists would focus a detached node. The one request already
+/// awaiting the renderer cannot be recalled, but focusing a detached node
+/// is a browser no-op, so the residual is nothing a user can observe.
+fn cancel_menu_focus(mut queue: MenuFocusQueue) {
+    queue.target.set(None);
+}
+
+/// Everything a key press or a mount inside the open menu needs to reach.
+///
+/// Bundled — and kept `Copy` — so the five rsx closures that need it can
+/// each capture it without cloning, and so adding a piece of menu state
+/// does not mean threading another argument through every call site.
+#[derive(Clone, Copy)]
+struct MenuWiring {
+    /// This render's item list, the only source of position numbers.
+    order: MenuOrder,
+    handles: MenuItemHandles,
+    focus: MenuFocusQueue,
+    /// Which item focus is on, or `None` when it is not on one — see
+    /// `SessionRow`'s `menu_focus` for what maintains it and what reads
+    /// it.
+    focused: Signal<Option<usize>>,
+    /// Where focus should land as the panel mounts, honoured once and
+    /// then cleared (see [`MenuOpenIntent`]).
+    open_intent: Signal<Option<MenuOpenIntent>>,
+    /// The row's own close path — `ListView`'s toggle callback, which is
+    /// the same one a click on the "⋯" uses.
+    close_menu: EventHandler<String>,
+}
+
+/// The session row's class list for its three independent visual states.
 ///
 /// A stale row is DIMMED and badged, never hidden or disabled: SPEC.md
 /// requires such sessions to stay listed and be clearly marked, and their
@@ -52,14 +255,30 @@ fn row_control_visibility(archived: bool) -> RowControlVisibility {
 /// composes with staleness rather than replacing it — the stale dimming
 /// lives on `.session-row-open`'s opacity while the selection highlight is
 /// the ROW's background, so a selected stale row shows both truthfully.
+///
+/// `menu_open` is the third, and it is not decoration: the panel hangs
+/// below-left of its toggle and covers the rows under it (see
+/// `menu_panel::menu_panel_style`'s anchor doc), so "which of the several
+/// visible ⋯ is the open one" has to be answerable from the ROW, not just
+/// from the small toggle glyph — the toggles themselves stay uncovered
+/// and clickable, which is exactly why several of them are visible at
+/// once with one menu up. It composes with the other two the same
+/// way — app.css keeps the selected row's own accent fill when both are
+/// on, rather than letting the neutral menu tint erase the selection
+/// SPEC.md requires to stay readable at a glance.
+///
 /// Static strings per combination, matching the prior two-state shape,
 /// rather than a formatted class string.
-fn row_class(stale: bool, selected: bool) -> &'static str {
-    match (stale, selected) {
-        (true, true) => "session-row stale selected",
-        (true, false) => "session-row stale",
-        (false, true) => "session-row selected",
-        (false, false) => "session-row",
+fn row_class(stale: bool, selected: bool, menu_open: bool) -> &'static str {
+    match (stale, selected, menu_open) {
+        (true, true, true) => "session-row stale selected menu-open",
+        (true, true, false) => "session-row stale selected",
+        (true, false, true) => "session-row stale menu-open",
+        (true, false, false) => "session-row stale",
+        (false, true, true) => "session-row selected menu-open",
+        (false, true, false) => "session-row selected",
+        (false, false, true) => "session-row menu-open",
+        (false, false, false) => "session-row",
     }
 }
 
@@ -74,6 +293,16 @@ fn row_class(stale: bool, selected: bool) -> &'static str {
 /// was cut. Char-based, not byte-based, so a multi-byte title can never
 /// split a codepoint.
 fn menu_label(title: &str) -> String {
+    format!("session actions for {}", clamp_title(title))
+}
+
+/// The session title as it may appear inside an accessible name, clamped
+/// to a length worth reading aloud.
+///
+/// Shared by [`menu_label`] and by the panel's prompt-state names, so
+/// every accessible name this row produces clamps the same way — see
+/// `menu_label` for the length argument and why the cut is char-based.
+fn clamp_title(title: &str) -> String {
     const MAX_CHARS: usize = 64;
     let mut clamped: String = title.chars().take(MAX_CHARS + 1).collect();
     if clamped.chars().count() > MAX_CHARS {
@@ -83,10 +312,186 @@ fn menu_label(title: &str) -> String {
                 .nth(MAX_CHARS)
                 .map_or(clamped.len(), |(i, _)| i),
         );
-        format!("session actions for {clamped}…")
-    } else {
-        format!("session actions for {clamped}")
+        clamped.push('…');
     }
+    clamped
+}
+
+// ===== Moving focus inside the open menu =============================
+//
+// The helpers below are the impure half of the keyboard support whose
+// decisions live in `menu_panel` (`menu_key_action`, `next_menu_focus`,
+// `closed_toggle_key_intent`): they touch real events and real DOM
+// handles, so they cannot be exercised by a headless `VirtualDom` and are
+// kept as small as the job allows, with every branch that could go wrong
+// pushed into the pure functions instead.
+//
+// Every focus move INSIDE the menu routes through `MenuFocusQueue`
+// rather than spawning its own task; the one that leaves it —
+// `focus_menu_toggle` — goes through JS instead, for a reason its own doc
+// gives. All of them are fire-and-forget, discarding the `Result` that
+// `MountedData::set_focus` returns. That is the opposite of what this
+// file does for the confirm prompt's cancel button (see `SessionRow`'s
+// "Focus-on-open" note: that one uses the declarative `autofocus`
+// attribute precisely so a dropped `Result` cannot silently lose a SAFETY
+// default). The difference is what failure costs. A renderer that cannot
+// move focus leaves the arrow keys inert and the menu closing without
+// restoring focus — an unimproved keyboard experience, identical to what
+// existed before any of this — and there is no fallback to reach for
+// anyway, since the whole point of these calls is to focus an element
+// chosen at runtime, which no static attribute can express.
+
+/// Apply one key press arriving on the menu's toggle or on one of its
+/// items — the single place `menu_panel`'s pure decisions meet a real
+/// event and a real DOM handle.
+///
+/// `current` is the position of the item the key arrived on, or `None`
+/// when it arrived on the toggle.
+///
+/// `prevent_default` fires only for a key the menu CLAIMS, which is what
+/// keeps it out of the way of everything it does not implement: Enter and
+/// Space still activate the focused `<button>` natively rather than being
+/// swallowed here. The arrows and Home/End are claimed because their
+/// default action is to scroll, which would move the sidebar out from
+/// under the very menu they are navigating; Tab is claimed on an item for
+/// the timing reason [`MenuKeyAction::Exit`] records, and deliberately
+/// NOT claimed on the toggle, where it is how the browser walks into the
+/// open menu.
+fn handle_menu_key(
+    evt: &Event<KeyboardData>,
+    current: Option<usize>,
+    wiring: MenuWiring,
+    session_id: &str,
+) {
+    let Some(action) = menu_key_action(&evt.key()) else {
+        return;
+    };
+    // Tab arriving on the TOGGLE is not an exit from anything: with the
+    // roving `tabindex` below, the menu's one tabbable item is the next
+    // stop in document order, so the browser's own default is what walks
+    // INTO the open menu. Closing here would take that destination away
+    // mid-keystroke.
+    if action == MenuKeyAction::Exit && current.is_none() {
+        return;
+    }
+    evt.prevent_default();
+    let count = wiring.order.len();
+    let target = match action {
+        // Both closes hand the focus decision to `SessionRow`'s dismissal
+        // effect rather than making it here, so that Escape, Tab, and an
+        // automatic dismissal all resolve focus through one path — which
+        // is also what keeps the destination consistent no matter which
+        // of them fired.
+        MenuKeyAction::Close | MenuKeyAction::Exit => {
+            wiring.close_menu.call(session_id.to_string());
+            return;
+        }
+        MenuKeyAction::Step(direction) => next_menu_focus(count, current, direction),
+        MenuKeyAction::First => next_menu_focus(count, None, MenuFocusMove::Next),
+        MenuKeyAction::Last => next_menu_focus(count, None, MenuFocusMove::Previous),
+    };
+    if let Some(position) = target {
+        focus_menu_item(wiring, position);
+    }
+}
+
+/// Record a freshly mounted menu item's handle under the action it
+/// performs, and honour a pending open-intent if this is the item that
+/// intent named.
+///
+/// Doing the open-focus here rather than in an effect is what makes it
+/// independent of mount ORDER: `onmounted` fires per item with no
+/// guaranteed sequence, so instead of waiting for "all items mounted"
+/// (which nothing reports) each item asks whether IT is the one wanted.
+/// Exactly one can answer yes, and it does so holding its own handle.
+///
+/// Takes the signals by value because `Signal` is a `Copy` handle into
+/// shared storage: each item's closure captures its own copy, and they
+/// all write to the one map.
+fn remember_menu_item(wiring: MenuWiring, action: MenuAction, data: Rc<MountedData>) {
+    let mut handles = wiring.handles;
+    handles.write().insert(action, data.clone());
+    let wanted = match *wiring.open_intent.peek() {
+        Some(MenuOpenIntent::First) => wiring.order.get(0),
+        Some(MenuOpenIntent::Last) => wiring.order.last(),
+        None => None,
+    };
+    if wanted != Some(action) {
+        return;
+    }
+    let mut open_intent = wiring.open_intent;
+    open_intent.set(None);
+    let mut focused = wiring.focused;
+    focused.set(wiring.order.position(action));
+    request_menu_focus(wiring.focus, data);
+}
+
+/// Move keyboard focus onto the menu item at `position`, if that item is
+/// in this render's list and has actually mounted.
+///
+/// `focused` is updated SYNCHRONOUSLY, before the asynchronous focus
+/// request goes out, so the roving `tabindex` and the next key press both
+/// see the intended destination rather than whatever the renderer has
+/// caught up to. Silently does nothing for a position or an action no
+/// item has claimed: not an expected state — every position handed here
+/// comes from `next_menu_focus`, bounded by this render's own item count
+/// — but a menu that quietly declines to move focus is a far better
+/// failure than one that panics while the user holds a key down.
+fn focus_menu_item(wiring: MenuWiring, position: usize) {
+    let Some(action) = wiring.order.get(position) else {
+        return;
+    };
+    let Some(handle) = wiring.handles.peek().get(&action).cloned() else {
+        return;
+    };
+    let mut focused = wiring.focused;
+    focused.set(Some(position));
+    request_menu_focus(wiring.focus, handle);
+}
+
+/// Put focus back on the "⋯" that owned the menu, WITHOUT scrolling to
+/// reach it.
+///
+/// Called from the row's dismissal teardown, and it is the half of
+/// "the menu closed" that matters to a keyboard user: closing alone
+/// destroys the element holding focus and drops them at the top of the
+/// document, several dozen Tab presses from the row they were working on.
+///
+/// ## Why this one does not use `MountedData::set_focus`
+///
+/// `preventScroll` is the whole reason, and it is not a nicety. One of
+/// the things that CLOSES this menu is the sidebar scrolling (`ListView`
+/// watches for it, because a `position: fixed` panel does not travel with
+/// its row). If the teardown then focused the toggle through
+/// `set_focus` — which the web renderer implements as a plain
+/// `HTMLElement.focus()`, with the default "scroll it into view" — the
+/// browser would scroll the row the user just scrolled AWAY from back
+/// into view, undoing the very gesture that dismissed the menu. Focus
+/// belongs on the toggle; the viewport belongs to the user.
+///
+/// Dioxus's `set_focus` takes no options, so the option has to come from
+/// JS. The script compares `data-session-id` as a STRING rather than
+/// interpolating it into a selector: a session id reaches this UI from
+/// the wire, and a value carrying a quote would otherwise be able to
+/// reshape the query. `serde_json` produces the literal, and nothing else
+/// about the id is trusted.
+///
+/// Fire-and-forget, like every other focus call here: a renderer that
+/// cannot run this leaves the keyboard experience unimproved rather than
+/// losing a safety default (see this section's own note).
+fn focus_menu_toggle(session_id: &str) {
+    let id_js = serde_json::to_string(session_id).expect("a string is serializable");
+    document::eval(&format!(
+        r#"(() => {{
+            const wanted = {id_js};
+            for (const row of document.querySelectorAll('[data-session-id]')) {{
+                if (row.getAttribute('data-session-id') === wanted) {{
+                    row.querySelector('.session-row-menu')?.focus({{ preventScroll: true }});
+                    return;
+                }}
+            }}
+        }})();"#
+    ));
 }
 
 // ===== Compacting the row's two long fields ==========================
@@ -460,6 +865,54 @@ std::thread_local! {
 /// closing and reopening the panel remounts the prompt and lands focus
 /// on cancel again. That repeat is the safe direction — every fresh
 /// appearance of the prompt starts with the escape hatch focused.
+///
+/// ## Keyboard
+///
+/// The item list is a real `role="menu"` of `role="menuitem"` buttons,
+/// and it behaves like one:
+///
+/// - Opening it enters it. Pointer, Enter, Space, and ArrowDown all land
+///   focus on the FIRST command; ArrowUp on a closed toggle opens onto
+///   the last. The intent is recorded at open time and honoured by the
+///   item that matches it as it mounts (`MenuOpenIntent`,
+///   `remember_menu_item`).
+/// - ArrowDown/ArrowUp step (wrapping), Home/End jump to the ends. The
+///   toggle answers the same keys while the menu is open, which is how a
+///   user who stepped back out to it gets in again.
+/// - The whole menu is ONE tab stop: a roving `tabindex` gives only the
+///   focused item (or, before focus lands, the first) `tabindex="0"`, and
+///   Tab/Shift+Tab dismiss the menu and put focus back on the toggle it
+///   stands in for — from which the next Tab continues out of the row
+///   natively. Walking four commands with Tab is what `role="menu"`
+///   promises not to make anyone do. See [`MenuKeyAction::Exit`] for why
+///   the browser's own focus move is suppressed rather than ridden.
+/// - Escape closes and hands focus back to the "⋯". So does every
+///   automatic dismissal that took the menu away from a focused item; see
+///   the dismissal effect in the body for why that teardown is
+///   centralized rather than written per key.
+///
+/// The decisions are pure functions in `menu_panel` (`menu_key_action`,
+/// `next_menu_focus`, `closed_toggle_key_intent`); `handle_menu_key`
+/// below is the one place they meet a real event.
+///
+/// The confirm and rename sub-states deliberately bind NOTHING. Their
+/// contents are not menu items — a text field and a two-button prompt —
+/// and arrow keys inside a rename field belong to the caret, not to a
+/// menu. Escape is left unbound there too, and that one is a decision
+/// rather than an omission: closing the panel does not clear
+/// `ListView`'s confirming/renaming flag (see `menu_panel_placement_style`
+/// for why that state outlives the panel), so an Escape that dismissed
+/// the prompt without answering it would leave the row primed to reopen
+/// straight back into the same prompt.
+///
+/// What each of those states focuses on arrival differs, and the
+/// difference is deliberate rather than an inconsistency to iron out. A
+/// CONFIRMATION autofocuses its cancel button, because the risk is a
+/// stray Enter landing on a destructive action; cancel is one keystroke
+/// away from the moment the prompt appears. RENAME autofocuses its text
+/// area (`rename::RenameForm`), because the whole point of opening it is
+/// to type, and its cancel sits after Save in tab order — so backing out
+/// of a rename is Shift+Tab away, not Escape and not one Tab.
 #[component]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn SessionRow(
@@ -526,6 +979,45 @@ pub(super) fn SessionRow(
     let rename_submit_id = session.id.clone();
     let controls = row_control_visibility(session.archived);
     let menu_id = session.id.clone();
+    // This render's item list, derived from the same visibility answer
+    // that decides whether each item renders at all — an archived row's
+    // menu is rename + delete, and its delete is position 1, not the 3 a
+    // fixed numbering would give it. Every focus position below is read
+    // out of this one value (see `MenuOrder`), so the rendered list and
+    // the navigable list cannot disagree.
+    let menu_order = MenuOrder::from_visibility(controls);
+    // Whether the panel is currently showing its ITEM list, as opposed to
+    // a confirm prompt or the rename field. Only the item list is a menu
+    // — see the "Keyboard" section above for why the other two states
+    // carry neither the ARIA role nor any key binding.
+    let showing_menu_items = !(confirming || confirming_archive || renaming);
+    // The accessible name for the panel's prompt states. Only read when
+    // one of them is showing; the menu state names its inner list
+    // instead. Same clamp as the toggle's own name, for the same reason
+    // (see `clamp_title`).
+    let prompt_label = if confirming {
+        format!("delete confirmation for {}", clamp_title(&session.title))
+    } else if confirming_archive {
+        format!("archive confirmation for {}", clamp_title(&session.title))
+    } else {
+        format!("rename {}", clamp_title(&session.title))
+    };
+    // The separator earns its place only when something actually
+    // precedes delete. Rename is unconditional today, so this is always
+    // true in practice — but a separator as the list's FIRST child would
+    // be a rule under nothing, and deriving the answer costs one lookup.
+    let delete_follows_a_separator = menu_order
+        .position(MenuAction::Delete)
+        .is_some_and(|position| position > 0);
+    // The row's identity, once per key handler: Escape closes the menu
+    // through the same `on_menu_toggle` a click uses, and each closure
+    // owns what it captures — the same reason the click handlers above
+    // each hold their own clone.
+    let toggle_key_id = session.id.clone();
+    let rename_key_id = session.id.clone();
+    let stop_key_id = session.id.clone();
+    let archive_key_id = session.id.clone();
+    let delete_key_id = session.id.clone();
     // The toggle's own `MountedData`, captured once via `onmounted` below,
     // and where the panel believes its own screen position currently is
     // (`PanelPlacement` — its own doc has the state machine) — both
@@ -534,7 +1026,50 @@ pub(super) fn SessionRow(
     // this row's screen geometry, and this row has no business deciding
     // WHETHER its menu is open — the split mirrors that division exactly.
     let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
-    let mut placement = use_signal(|| PanelPlacement::Unmeasured);
+    let placement = use_signal(|| PanelPlacement::Unmeasured);
+    // The mounted menu items, for the arrow keys to move focus between —
+    // see `MenuItemHandles`. Cleared on every fresh open (the toggle's
+    // `onclick`) AND on every close (the dismissal effect below) rather
+    // than trusted to be overwritten: the panel unmounts when the menu
+    // closes, so every handle in here is detached from that moment on,
+    // and each one is a strong `Rc` keeping a dead DOM node alive with
+    // it.
+    let mut item_handles: MenuItemHandles = use_signal(HashMap::new);
+    // Which item currently holds keyboard focus, as a position in this
+    // render's `MenuOrder`, or `None` when focus is not on an item at
+    // all. Three things read it and each needs it to mean exactly that:
+    // the roving `tabindex` (which item is the menu's single tab stop),
+    // the dismissal teardown (was focus INSIDE the menu when it closed,
+    // and therefore ours to hand back), and the arrow keys' own sense of
+    // where they are stepping from.
+    //
+    // Maintained from both directions on purpose. Our own focus moves
+    // write it synchronously, ahead of the asynchronous request, so a
+    // fast second key press does not compute from a stale position. The
+    // items' `onfocusin`/`onfocusout` then keep it honest about focus
+    // this component did not move — a pointer click straight onto an
+    // item, and, load-bearingly, focus LEAVING the menu. That last case
+    // is what lets the teardown below tell "the menu was taken away from
+    // a focused item" (hand focus back to the toggle) from "the user went
+    // somewhere else and the menu closed behind them" (leave their focus
+    // alone): clicking the hosts toggle, the filter bar, or the create
+    // form moves focus first and closes the menu second, so `focusout`
+    // has already cleared this by the time the teardown runs. An item
+    // UNMOUNTING cannot fire `focusout` here — a removed node's events
+    // never reach the delegated listener — so a scroll or resize
+    // dismissal correctly keeps its position and gets the handback.
+    let mut menu_focus = use_signal(|| None::<usize>);
+    // Where focus should land as the panel mounts, recorded by whatever
+    // opened the menu and consumed by the first item that matches it (see
+    // `remember_menu_item`). Row-local, and always `None` while the menu
+    // is closed.
+    let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
+    // The row's serialized focus pipeline — see `MenuFocusQueue` for the
+    // interleaving it exists to prevent.
+    let focus_queue = MenuFocusQueue {
+        target: use_signal(|| None::<Rc<MountedData>>),
+        draining: use_signal(|| false),
+    };
     // Bumped on every FRESH open (the toggle's `onclick`, opening branch
     // only — never on close, and never by the `onmounted` heal path,
     // which reuses whatever generation is already current rather than
@@ -547,7 +1082,7 @@ pub(super) fn SessionRow(
     // moved) can have their measurements resolve out of order, and
     // without this counter the OLDER one finishing LAST would silently
     // overwrite the newer, correct measurement with a stale one.
-    let mut open_generation = use_signal(|| 0_u64);
+    let open_generation = use_signal(|| 0_u64);
     // Shared by the toggle's `onclick` (every fresh open) and its
     // `onmounted` (healing a remount that lands with the menu ALREADY
     // open — see that handler's own doc for why that happens and why
@@ -582,7 +1117,137 @@ pub(super) fn SessionRow(
             }
         });
     };
-    let row_class = row_class(session.stale, selected);
+    // Everything a FRESH open has to reset, in one place, because two
+    // paths open this menu: the toggle's `onclick` (pointer, and the
+    // native activation Enter and Space produce) and its `onkeydown` for
+    // the closed-state arrows. Both want the identical sequence, and an
+    // open that skipped any part of it would carry the previous open's
+    // state into the new one.
+    //
+    // The captured signals are shadowed as local `mut` copies rather than
+    // mutated through the closure's own captures, which keeps this an
+    // `Fn` (and therefore `Copy`) and lets both event closures capture it
+    // — `Signal` is a `Copy` handle into shared storage, so a local copy
+    // writes exactly the same cell.
+    let begin_open = move |intent: MenuOpenIntent| {
+        let mut open_generation = open_generation;
+        let mut placement = placement;
+        let mut item_handles = item_handles;
+        let mut menu_focus = menu_focus;
+        let mut open_intent = open_intent;
+        // A fresh measurement every open: the toggle can move BETWEEN
+        // opens (a row above it changing height, the window resizing), so
+        // a rect measured for a previous open is not safe to reuse —
+        // hence resetting to `Unmeasured` rather than leaving whatever
+        // `placement` last held. The generation bump BEFORE
+        // `spawn_measurement` is what keeps a measurement still in flight
+        // for a PRIOR open of this SAME toggle from landing after this
+        // reset and clobbering it — see `open_generation`'s own doc for
+        // the exact race.
+        open_generation += 1;
+        placement.set(PanelPlacement::Unmeasured);
+        // Every handle in here belongs to the previous open's
+        // now-unmounted panel — see `item_handles`' own doc.
+        item_handles.write().clear();
+        // Cancel BEFORE recording the new intent, never after: the
+        // intent's own focus request goes out as the items mount, and a
+        // cancel written below it would throw that request away (see the
+        // dismissal effect, where getting this order wrong once already
+        // cost the toggle its focus).
+        cancel_menu_focus(focus_queue);
+        // Focus is on the toggle at this instant, not on an item; the
+        // intent is what moves it, as each item mounts.
+        menu_focus.set(None);
+        open_intent.set(Some(intent));
+        spawn_measurement();
+    };
+    // Which item is the menu's single tab stop. A `role="menu"` is one
+    // stop in the document's tab order by contract — Tab enters it or
+    // leaves it, arrows move within it — so exactly one item may carry
+    // `tabindex="0"` and the rest `-1`. The focused item is that stop
+    // while there is one; before focus has landed anywhere (the instant
+    // between mount and the open-intent's focus call, or after focus has
+    // left the menu without closing it) the FIRST item stands in, so the
+    // menu is never a hole in the tab order.
+    let menu_tab_stop = menu_focus()
+        .and_then(|position| menu_order.get(position))
+        .or_else(|| menu_order.get(0));
+    // The bundle every menu closure below reaches through, assembled once
+    // from this render's own item list — see `MenuWiring`.
+    let menu_wiring = MenuWiring {
+        order: menu_order,
+        handles: item_handles,
+        focus: focus_queue,
+        focused: menu_focus,
+        open_intent,
+        close_menu: on_menu_toggle,
+    };
+    // The item set can change UNDER an open menu: archiving a session
+    // withdraws stop and archive while the panel stays up. Rename and
+    // delete keep their DOM nodes across that change (Dioxus diffs them
+    // in place), so nothing re-registers them and the withdrawn items'
+    // handles would otherwise sit in the map retaining detached nodes,
+    // while a `menu_focus` recorded against the longer list would point
+    // past the end of the shorter one. Rebuilt here rather than in the
+    // click path because no click is involved — the listing simply
+    // reports a different session.
+    //
+    // `use_reactive` because `session.archived` is a plain prop value:
+    // an effect body that merely closed over it would run once with the
+    // first render's answer and never again.
+    let archived = session.archived;
+    use_effect(use_reactive((&archived,), move |(archived,)| {
+        let order = MenuOrder::from_visibility(row_control_visibility(archived));
+        item_handles
+            .write()
+            .retain(|action, _| order.position(*action).is_some());
+        let stale_focus = menu_focus
+            .peek()
+            .is_some_and(|position| position >= order.len());
+        if stale_focus {
+            menu_focus.set(None);
+        }
+    }));
+    // Every close funnels through here, whichever path caused it —
+    // Escape, Tab, a click on the toggle, or one of `ListView`'s
+    // automatic dismissals (a sidebar scroll or resize, the hosts panel
+    // or filter bar opening, the create form, the row reordering under a
+    // refresh). Those last ones are the reason this cannot live in the
+    // key handler: `ListView` owns `menu_open` and closes it without
+    // consulting this row at all, so a teardown written per key press
+    // would leave every automatic dismissal dropping keyboard focus onto
+    // the document body.
+    //
+    // The row's own id, owned by this effect: the teardown runs after the
+    // render whose `session` prop it would otherwise have to borrow.
+    let dismiss_id = session.id.clone();
+    // Focus goes back to the toggle only when it was still INSIDE the
+    // menu at the moment it closed (`menu_focus`, whose own doc explains
+    // how `focusout` makes that distinction reliable): reclaiming it
+    // unconditionally would yank focus away from whatever control the
+    // user had just moved to, which is exactly what dismissed the menu in
+    // the hosts-panel and filter-bar cases.
+    use_effect(use_reactive((&menu_open,), move |(menu_open,)| {
+        if menu_open {
+            return;
+        }
+        // ORDER MATTERS, and it is the opposite of the obvious one:
+        // discard the pending request FIRST — it names an item of the
+        // panel that just went away — and only then ask for the toggle.
+        // Cancelling after requesting would clear the very target this
+        // teardown just set, which is a silent way to lose focus
+        // entirely.
+        cancel_menu_focus(focus_queue);
+        let was_inside = menu_focus.peek().is_some();
+        menu_focus.set(None);
+        open_intent.set(None);
+        // Detached the instant the panel unmounted; see `item_handles`.
+        item_handles.write().clear();
+        if was_inside {
+            focus_menu_toggle(&dismiss_id);
+        }
+    }));
+    let row_class = row_class(session.stale, selected, menu_open);
 
     rsx! {
         div {
@@ -803,6 +1468,48 @@ pub(super) fn SessionRow(
                     // read aloud in full.
                     aria_label: menu_label(&session.title),
                     aria_expanded: menu_open,
+                    // What this button opens, in the vocabulary the ARIA
+                    // menu-button pattern uses — the counterpart of the
+                    // item list's own `role="menu"` below, and the reason
+                    // a screen reader announces "menu button" rather than
+                    // leaving the "⋯" to speak for itself. It tracks the
+                    // sub-state rather than claiming "menu" unconditionally:
+                    // a row mid-confirmation or mid-rename opens onto a
+                    // prompt, and that prompt carries `role="dialog"`, so
+                    // saying "menu" there would promise a list of commands
+                    // that is not what this button is about to show.
+                    aria_haspopup: if showing_menu_items { "menu" } else { "dialog" },
+                    // The toggle answers keys in both of its states, and
+                    // they are different sets. CLOSED, it answers only the
+                    // two arrows, by opening at the end each one names
+                    // (`closed_toggle_key_intent`) — Escape must not
+                    // become a second way to open, and Enter/Space already
+                    // reach `onclick` as native button activation. OPEN,
+                    // it is the way back INTO a menu whose focus has
+                    // stepped out to it, so the full navigation set
+                    // applies. The sub-state guard is the one exception:
+                    // with a confirm prompt or the rename field showing,
+                    // the toggle binds nothing, or Shift+Tab back to it
+                    // would offer an Escape that dismisses the panel while
+                    // leaving the prompt itself unanswered.
+                    onkeydown: move |evt| {
+                        if !menu_open {
+                            let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
+                                return;
+                            };
+                            // Both arrows scroll by default, and this one
+                            // is opening a panel measured against the
+                            // toggle's current position.
+                            evt.prevent_default();
+                            on_menu_toggle.call(toggle_key_id.clone());
+                            begin_open(intent);
+                            return;
+                        }
+                        if !showing_menu_items {
+                            return;
+                        }
+                        handle_menu_key(&evt, None, menu_wiring, &toggle_key_id);
+                    },
                     // Fires once this button is actually in the DOM, giving
                     // us a handle `get_client_rect()` can be called on
                     // later. Also covers a rarer case: a FAILED listing
@@ -842,26 +1549,54 @@ pub(super) fn SessionRow(
                         if !opening {
                             return;
                         }
-                        // A fresh measurement every open: the toggle can
-                        // move BETWEEN opens (a row above it changing
-                        // height, the window resizing), so a rect measured
-                        // for a previous open is not safe to reuse — hence
-                        // resetting to `Unmeasured` here rather than
-                        // leaving whatever `placement` last held. The
-                        // generation bump BEFORE `spawn_measurement` is
-                        // what keeps a measurement still in flight for a
-                        // PRIOR open of this SAME toggle from landing after
-                        // this reset and clobbering it — see
-                        // `open_generation`'s own doc for the exact race.
-                        open_generation += 1;
-                        placement.set(PanelPlacement::Unmeasured);
-                        spawn_measurement();
+                        // A pointer open lands on the first command, the
+                        // same as Enter, Space, and ArrowDown — all four
+                        // arrive here or at `closed_toggle_key_intent`,
+                        // and a menu button that opens its menu without
+                        // entering it makes every keyboard user press one
+                        // extra arrow for the list they just asked for.
+                        begin_open(MenuOpenIntent::First);
                     },
                     "⋯"
                 }
                 if menu_open {
                     div {
-                        class: "session-row-menu-panel",
+                        // The panel is the POSITIONED box and nothing
+                        // more; what it currently IS lives one level in
+                        // (the item list's own `role="menu"`) or on the
+                        // panel only while it is a prompt. The class
+                        // carries the sub-state because the geometry
+                        // differs — a full-bleed list of rows versus a
+                        // padded prompt — and it is derived from the same
+                        // `showing_menu_items` value that picks the
+                        // markup, in the same expression, so the two
+                        // cannot drift. (This used to key off the panel's
+                        // own `role="menu"`; that attribute has moved
+                        // inward, and a selector on a role the element no
+                        // longer carries would have silently stopped
+                        // matching.)
+                        class: if showing_menu_items {
+                            "session-row-menu-panel"
+                        } else {
+                            "session-row-menu-panel menu-prompt"
+                        },
+                        // The confirm and rename sub-states ARE a small
+                        // named exchange: one consequence sentence and
+                        // the two answers to it, or a field and its two
+                        // answers, with focus deliberately placed on the
+                        // safe one as it appears. `dialog` is the role
+                        // that says so, and the toggle's own
+                        // `aria-haspopup` above tracks it. Non-modal by
+                        // omission (`aria-modal` defaults to false) —
+                        // nothing behind the panel is hidden, and the
+                        // row's open button is disabled rather than
+                        // trapped. It deliberately does NOT bind Escape,
+                        // which a dialog conventionally would: see the
+                        // "Keyboard" section in this component's doc for
+                        // why dismissing a prompt without answering it
+                        // would leave the row primed to reopen into it.
+                        role: if !showing_menu_items { "dialog" },
+                        aria_label: if !showing_menu_items { prompt_label.clone() },
                         // The presentation half of `PanelPlacement`'s state
                         // machine — see that type's own doc for what each
                         // variant means and why the panel needs three
@@ -944,40 +1679,208 @@ pub(super) fn SessionRow(
                                 on_cancel: move |_| on_rename_cancel.call(()),
                             }
                         } else {
-                            if controls.rename {
-                                button {
-                                    r#type: "button",
-                                    class: "btn session-row-rename",
-                                    disabled: busy,
-                                    onclick: move |_| on_rename_start.call(rename_start.clone()),
-                                    "rename"
+                            // The menu proper: ONLY the actionable rows,
+                            // in their own element. The panel around it
+                            // also holds the profile footer (a fact about
+                            // the session, not a command) and, as a
+                            // sibling below, any refusal line — neither
+                            // belongs inside a `role="menu"`, where a
+                            // screen reader would have to decide what a
+                            // non-`menuitem` child means. Naming it here
+                            // rather than on the panel is the same move:
+                            // the name belongs to the list of commands,
+                            // which is what the toggle's
+                            // `aria-haspopup="menu"` promises.
+                            div {
+                                class: "session-row-menu-items",
+                                role: "menu",
+                                aria_label: menu_label(&session.title),
+                                // Every item carries the same menu
+                                // attachments beside its own action: the
+                                // `menuitem` role, an `onmounted` that
+                                // files its DOM handle under the action
+                                // it performs (see `remember_menu_item`),
+                                // the focus bookkeeping that keeps
+                                // `menu_focus` honest, a roving
+                                // `tabindex`, and an `onkeydown` that
+                                // resolves its own position out of this
+                                // render's `MenuOrder`.
+                                //
+                                // Two of those are worth naming. The
+                                // roving `tabindex` makes the whole menu
+                                // ONE tab stop, which is what a
+                                // `role="menu"` promises: Tab leaves,
+                                // arrows navigate, and Tab never walks
+                                // four commands one at a time. And busy
+                                // items are `aria-disabled` with a
+                                // guarded `onclick` rather than natively
+                                // `disabled`, because a browser cannot
+                                // focus a disabled control — a menu that
+                                // went busy while the user was in it
+                                // would consume every arrow key and be
+                                // unable to honour any of them, and an
+                                // item whose own action made the menu
+                                // busy would lose focus mid-press,
+                                // putting Escape out of reach.
+                                // `.session-row-menu-item` is the shared
+                                // LOOK — a full-width, left-aligned,
+                                // borderless row — while the per-action
+                                // class beside it stays exactly what it
+                                // was, since the browser suite keys off
+                                // those.
+                                if controls.rename {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn session-row-menu-item session-row-rename",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(MenuAction::Rename) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(
+                                                menu_wiring,
+                                                MenuAction::Rename,
+                                                element.data(),
+                                            )
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(MenuAction::Rename));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(MenuAction::Rename),
+                                                menu_wiring,
+                                                &rename_key_id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            on_rename_start.call(rename_start.clone());
+                                        },
+                                        "rename"
+                                    }
                                 }
-                            }
-                            if controls.stop {
-                                button {
-                                    r#type: "button",
-                                    class: "btn session-row-stop",
-                                    disabled: busy,
-                                    onclick: move |_| on_stop.call(stop_id.clone()),
-                                    "stop"
+                                if controls.stop {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn session-row-menu-item session-row-stop",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(MenuAction::Stop) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(
+                                                menu_wiring,
+                                                MenuAction::Stop,
+                                                element.data(),
+                                            )
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(MenuAction::Stop));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(MenuAction::Stop),
+                                                menu_wiring,
+                                                &stop_key_id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            on_stop.call(stop_id.clone());
+                                        },
+                                        "stop"
+                                    }
                                 }
-                            }
-                            if controls.archive {
-                                button {
-                                    r#type: "button",
-                                    class: "btn session-row-archive",
-                                    disabled: busy,
-                                    onclick: move |_| on_archive.call(archive_target.clone()),
-                                    "archive"
+                                if controls.archive {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn session-row-menu-item session-row-archive",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(MenuAction::Archive) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(
+                                                menu_wiring,
+                                                MenuAction::Archive,
+                                                element.data(),
+                                            )
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(MenuAction::Archive));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(MenuAction::Archive),
+                                                menu_wiring,
+                                                &archive_key_id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            on_archive.call(archive_target.clone());
+                                        },
+                                        "archive"
+                                    }
                                 }
-                            }
-                            if controls.delete {
-                                button {
-                                    r#type: "button",
-                                    class: "btn session-row-delete",
-                                    disabled: busy,
-                                    onclick: move |_| on_delete.call(delete_target.clone()),
-                                    "delete"
+                                // The boundary before the destructive
+                                // item, as a real one: sighted users
+                                // already got a rule (drawn by this
+                                // element's own CSS), and without a
+                                // `role="separator"` the accessibility
+                                // tree showed four consecutive commands
+                                // with nothing to say the last is
+                                // different in kind. Not focusable and
+                                // not counted — `MenuOrder` holds only
+                                // actionable items, so arrow navigation
+                                // steps straight past it.
+                                if delete_follows_a_separator {
+                                    div { class: "session-row-menu-separator", role: "separator" }
+                                }
+                                if controls.delete {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn session-row-menu-item session-row-delete",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(MenuAction::Delete) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(
+                                                menu_wiring,
+                                                MenuAction::Delete,
+                                                element.data(),
+                                            )
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(MenuAction::Delete));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(MenuAction::Delete),
+                                                menu_wiring,
+                                                &delete_key_id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            on_delete.call(delete_target.clone());
+                                        },
+                                        "delete"
+                                    }
                                 }
                             }
                             // The profile this session was CREATED from, as
@@ -990,7 +1893,9 @@ pub(super) fn SessionRow(
                             // from reading as a claim about today's
                             // catalog. `data-profile-existence` remains the
                             // browser suite's handle on the half that does
-                            // change.
+                            // change. A SIBLING of the menu above, never a
+                            // child of it: it is a fact about the session,
+                            // not a fifth thing to do to it.
                             if let Some(source) = &session.source_profile {
                                 span {
                                     class: "session-profile peer-value",
@@ -1075,6 +1980,78 @@ mod tests {
                 delete: true,
             }
         );
+    }
+
+    /// The item list a render offers, and every focus position derived
+    /// from it, must follow the retention state rather than a fixed
+    /// numbering.
+    ///
+    /// This is the arithmetic behind a real bug. Archiving a session
+    /// while its menu is open withdraws stop and archive, and delete's
+    /// DOM node survives that change rather than remounting — so a scheme
+    /// that filed handles under "position 3" left delete's handle at an
+    /// index the two-item list no longer reaches, and Home/End/arrows
+    /// silently did nothing. Keying handles by action and asking
+    /// `MenuOrder` for the position at key-press time is the fix; this
+    /// pins the half of it that can be checked without a renderer.
+    ///
+    /// The `last()` case earns its own assertion because ArrowUp on a
+    /// closed toggle and End both resolve through it, and an archived
+    /// row's last item is delete at position 1, not at 3.
+    #[test]
+    fn menu_order_follows_the_retention_state_rather_than_a_fixed_numbering() {
+        let active = MenuOrder::from_visibility(row_control_visibility(false));
+        assert_eq!(active.len(), 4);
+        assert_eq!(active.get(0), Some(MenuAction::Rename));
+        assert_eq!(active.get(1), Some(MenuAction::Stop));
+        assert_eq!(active.get(2), Some(MenuAction::Archive));
+        assert_eq!(active.get(3), Some(MenuAction::Delete));
+        assert_eq!(active.get(4), None);
+        assert_eq!(active.last(), Some(MenuAction::Delete));
+        assert_eq!(active.position(MenuAction::Delete), Some(3));
+
+        let archived = MenuOrder::from_visibility(row_control_visibility(true));
+        assert_eq!(archived.len(), 2);
+        assert_eq!(archived.get(0), Some(MenuAction::Rename));
+        assert_eq!(archived.get(1), Some(MenuAction::Delete));
+        assert_eq!(archived.get(2), None);
+        assert_eq!(archived.last(), Some(MenuAction::Delete));
+        // The whole point: the SAME action, a different position, and no
+        // durable state anywhere that remembers the old one.
+        assert_eq!(archived.position(MenuAction::Delete), Some(1));
+        // Withdrawn actions have no position at all, which is what the
+        // handle map's rebuild filters on when the set shrinks under an
+        // open menu.
+        assert_eq!(archived.position(MenuAction::Stop), None);
+        assert_eq!(archived.position(MenuAction::Archive), None);
+    }
+
+    /// Accessible names built from a session title clamp the title, and
+    /// say so with an ellipsis.
+    ///
+    /// A title has no length bound the UI enforces (tens of KB is legal
+    /// on the wire) and an accessible name is read aloud in full, so the
+    /// clamp is what keeps a screen-reader user from listening to a
+    /// pasted document to find out which row a toggle belongs to. Pinned
+    /// here because the same helper now names four different things —
+    /// the toggle, the menu, and the two prompt states — and a regression
+    /// would be silent to every visual test.
+    #[test]
+    fn accessible_names_clamp_a_long_session_title() {
+        assert_eq!(clamp_title("short"), "short");
+        let long = "x".repeat(200);
+        let clamped = clamp_title(&long);
+        assert_eq!(
+            clamped.chars().count(),
+            65,
+            "64 characters plus the ellipsis"
+        );
+        assert!(clamped.ends_with('…'));
+        assert_eq!(menu_label("short"), "session actions for short");
+        // Char-based, not byte-based: a multi-byte title must never be
+        // cut mid-codepoint (which would not even be a `String`).
+        let multibyte = "é".repeat(200);
+        assert_eq!(clamp_title(&multibyte).chars().count(), 65);
     }
 
     /// Repeated parent refreshes must update direct callback props in place
@@ -1241,17 +2218,34 @@ mod tests {
         });
     }
 
-    /// `stale` and `selected` are independent row states and every
-    /// combination must say so in the class list — in particular a
+    /// `stale`, `selected` and `menu-open` are independent row states and
+    /// every combination must say so in the class list — in particular a
     /// selected STALE row carries both, because selection must not hide
     /// the SPEC.md-required stale marking and staleness must not hide
     /// which session the main pane is on.
+    ///
+    /// `menu-open` joined them when the actions panel became a floating
+    /// surface hanging below-left of its toggle: the panel covers the
+    /// rows below it, so the row itself has to say which "⋯" owns the
+    /// open menu (see `row_class`). It must not displace either of the
+    /// other two — a stale, selected row with its menu up is still stale
+    /// and still the selection.
     #[test]
-    fn row_class_composes_stale_and_selected_independently() {
-        assert_eq!(row_class(false, false), "session-row");
-        assert_eq!(row_class(true, false), "session-row stale");
-        assert_eq!(row_class(false, true), "session-row selected");
-        assert_eq!(row_class(true, true), "session-row stale selected");
+    fn row_class_composes_stale_selected_and_menu_open_independently() {
+        assert_eq!(row_class(false, false, false), "session-row");
+        assert_eq!(row_class(true, false, false), "session-row stale");
+        assert_eq!(row_class(false, true, false), "session-row selected");
+        assert_eq!(row_class(true, true, false), "session-row stale selected");
+        assert_eq!(row_class(false, false, true), "session-row menu-open");
+        assert_eq!(row_class(true, false, true), "session-row stale menu-open");
+        assert_eq!(
+            row_class(false, true, true),
+            "session-row selected menu-open"
+        );
+        assert_eq!(
+            row_class(true, true, true),
+            "session-row stale selected menu-open"
+        );
     }
 
     /// A home directory folds to `~` only where the path actually names an

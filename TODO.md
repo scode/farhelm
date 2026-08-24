@@ -158,16 +158,3 @@ roadmap and carries no priorities unless an entry says so itself.
 - Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
   state, all "not run"). Blocked on the macOS release bundle above and a human with a real Mac. Not covered by any CI:
   Playwright's WebKit is not WKWebView.
-
-- UI refresh (brainstormed 2026-08-22 from screenshots of the web UI): a set of chrome tweaks to make the shell read as
-  modern rather than as the "minimal M1 chrome, nothing decorative" placeholder app.css still declares itself to be. The
-  terminal itself is off-limits throughout — fidelity to the agent's real TUI is the product — and the sidebar stays
-  fixed-width (a recorded decision; denser rows solve the same pain). Each sub-item is its own PR, and every one of them
-  builds on the design-token layer app.css now has (its `:root` block) rather than on literals:
-
-  - Row overflow menus float centered over the row with no tie to the `⋯` that opened them; with several `⋯` in view
-    there is no way to tell which one is open. Make it an actual menu: one raised surface (1px border, soft shadow)
-    anchored to the opening button's corner, full-width left-aligned rows, a divider before the destructive `delete`
-    (red text, no red box), and the `profile: …` line demoted to a small muted footer under its own divider. The opening
-    `⋯` stays in a visible pressed/active state and its row gets a subtle highlight for as long as the menu is up. Check
-    that Escape and arrow-key navigation work while at it.

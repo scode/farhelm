@@ -17,11 +17,24 @@
  * reconciliation) and the sidebar's on-demand chrome (hosts/filter
  * toggles, the compact host strip, the applied-filter note).
  *
+ * The menu's own group is the largest of those and is worth naming, since
+ * almost none of it can be checked anywhere else: the anchor's covered-
+ * toggle safety property, the ARIA menu-button relationship read out of
+ * the accessibility tree rather than out of class names, arrow/Home/End
+ * navigation over the real nodes (including an archived row's shorter
+ * list), the roving `tabindex` and Tab's exit, the keys the menu leaves
+ * native, the prompt states' refusal to answer any of them, focus
+ * returning to the toggle on an automatic dismissal, a busy menu staying
+ * navigable, and the raised surface's computed style. The pure decisions
+ * behind all of it live in list/menu_panel.rs and are unit-tested there;
+ * nothing in the Rust suite can dispatch a key, move focus, or resolve a
+ * computed style, which is what this file is for.
+ *
  * Like every per-area file since M6.5, new coverage starts its own spec
  * rather than growing the terminal spec family. An area file keeps one
  * subject's tests findable and runnable together.
  */
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import {
   cleanupProfile,
   cleanupSession,
@@ -288,7 +301,7 @@ test("switching sessions directly tears the old view down and mounts the new one
  * class); a wrapper or flex regression that restored horizontal packing
  * or let a line force the row wide would pass every text-content
  * assertion and fail only here. The geometry asserted below is the
- * density pass's layout (TODO.md's UI refresh): directory and invocation
+ * density pass's layout (the 2026-08 UI refresh): directory and invocation
  * deliberately SHARE a line now, so the check is that they overlap
  * vertically and sit side by side, not that one is under the other.
  *
@@ -371,7 +384,7 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
  * beside it keeps a usable share of the shared meta line.
  *
  * The 300-char raw invocation above no longer exercises the badge's own
- * overflow handling: TODO.md's UI refresh compacts any RAW command line to
+ * overflow handling: the 2026-08 UI refresh compacts any RAW command line to
  * one short word (the program's basename, plus at most a short marker —
  * `list::row::compact_invocation`), so a long raw invocation can no longer
  * widen the badge. A profile-backed session answers differently — the
@@ -598,6 +611,931 @@ test("row actions exist only inside the open actions panel", async ({ page, requ
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-stop")).toHaveCount(0);
   } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * Resolve a design token to the exact string `getComputedStyle` will
+ * report for it, by asking the page to compute it on a throwaway element.
+ *
+ * Comparing a rule's computed color against the raw `:root` declaration
+ * does not work — the engine normalizes `#1c2530` to `rgb(28, 37, 48)` —
+ * and hard-coding the normalized form in a test would pin the palette's
+ * VALUES here, exactly the duplication the token layer exists to end. A
+ * probe element resolves the token through the same machinery the rule
+ * under test goes through, so the two strings are comparable and the test
+ * keeps saying "this rule spends THIS token" rather than "this rule is
+ * this shade of blue".
+ */
+async function tokenColor(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement("div");
+    probe.style.color = `var(${name})`;
+    document.body.append(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return resolved;
+  }, token);
+}
+
+/**
+ * The actions menu's ARIA contract, read out of the accessibility tree
+ * rather than out of its class names.
+ *
+ * Every other test in this file finds the menu's parts by CSS class,
+ * which means every one of them would stay green if `aria-haspopup`, the
+ * menu role, its accessible name, or every `menuitem` role vanished — the
+ * markup a screen-reader user has instead of the panel's appearance. This
+ * is the one test that fails for those, and it checks the sub-states too:
+ * a confirm prompt is not a menu, it stops advertising itself as one, and
+ * the toggle's own `aria-haspopup` follows it rather than promising a
+ * list of commands the panel is not about to show.
+ */
+test("the actions menu exposes a real menu-button relationship", async ({ page, request }) => {
+  const title = `menu-aria-${Date.now()}`;
+  const session = await createSession(request, { title, cwd: "/tmp", invocation: "sleep 300" });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    const toggle = target.getByRole("button", { name: `session actions for ${title}` });
+    await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await openRowMenu(target);
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    // Located by ROLE and NAME, never by class: the name is what tells a
+    // screen-reader user which of the several identical menus in this
+    // list they have opened.
+    const menu = target.getByRole("menu", { name: `session actions for ${title}` });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem")).toHaveText(["rename", "stop", "archive", "delete"]);
+    // The boundary before the destructive item exists in the tree, not
+    // only in the paint — four consecutive commands with nothing marking
+    // the last as different in kind is what this replaces.
+    await expect(menu.getByRole("separator")).toHaveCount(1);
+    // The profile footer and any refusal line are the panel's, not the
+    // menu's: a `role="menu"` whose children are not all commands is a
+    // grouping a screen reader has to guess at.
+    await expect(menu.locator(".session-profile")).toHaveCount(0);
+
+    await target.locator(".session-row-delete").click();
+    // The prompt is a named exchange, not a menu with no items in it.
+    await expect(target.getByRole("menu")).toHaveCount(0);
+    await expect(
+      target.getByRole("dialog", { name: `delete confirmation for ${title}` }),
+    ).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-haspopup", "dialog");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    await target.locator(".confirm-cancel").click();
+    await expect(target.getByRole("menu", { name: `session actions for ${title}` })).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * Arrow navigation reaches EVERY item, wraps at both ends, and Home/End
+ * jump — through the real nodes, not through index arithmetic.
+ *
+ * `next_menu_focus` in list/menu_panel.rs already pins the arithmetic,
+ * and it cannot prove any of what this proves: that all four items
+ * mounted, that each registered a handle under its own action, and that
+ * the positions the key handler derives from `MenuOrder` line up with the
+ * order the panel actually renders. A previous version of this test
+ * walked two of the four, which left archive and delete — the two with
+ * separately duplicated wiring, and the two whose misfire is destructive
+ * — covered by nothing at all.
+ *
+ * The separator sitting between archive and delete is part of what is
+ * being checked: it is not focusable and not counted, so ArrowDown must
+ * step straight over it.
+ */
+test("the actions menu walks every item and wraps at both ends", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-keys-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    // A host read landing mid-test changes the compact strip's shape,
+    // which list.rs treats as a layout cause and closes any open menu for
+    // — see the clipping test below for the same precaution.
+    await waitForHostsStripSettled(page);
+
+    await openRowMenu(target);
+    const toggle = target.locator(".session-row-menu");
+    const rename = target.locator(".session-row-rename");
+    const stop = target.locator(".session-row-stop");
+    const archive = target.locator(".session-row-archive");
+    const remove = target.locator(".session-row-delete");
+
+    // Focus is put on the toggle EXPLICITLY rather than left where the
+    // opening click put it: this test is about stepping through the list
+    // from OUTSIDE it, and the opening focus is the next test's subject.
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+
+    await page.keyboard.press("ArrowDown");
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(stop).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(archive).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(remove, "the separator is not a stop on the way to delete").toBeFocused();
+    // Both wrap boundaries, in the two directions that reach them.
+    await page.keyboard.press("ArrowDown");
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(remove).toBeFocused();
+
+    await page.keyboard.press("Home");
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(remove).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The half a plain "Escape closes it" assertion would miss: closing
+    // destroys the element that held focus, and without the handoff the
+    // user lands on the document body with the row they were working on
+    // dozens of Tab presses away.
+    await expect(toggle).toBeFocused();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * An archived row's SHORTER menu navigates on its own length.
+ *
+ * Archiving withdraws stop and archive, which moves delete from position
+ * 3 to position 1. Nothing durable may remember the old number — this is
+ * the bug that motivated keying mounted handles by ACTION rather than by
+ * index — and wrapping has to happen on two, not on an assumed four.
+ * Only a real browser can show that the surviving nodes registered
+ * themselves under the shorter list.
+ */
+test("an archived row's two-item menu navigates on its own length", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-archived-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    const archived = await request.post(`/api/sessions/${session.id}/archive`);
+    expect(archived.ok(), await archived.text()).toBeTruthy();
+    await page.goto("/");
+    // The filter bar is on-demand chrome; its checkbox is not in the DOM
+    // until the bar is open (see `openFilterBar`'s own doc).
+    await openFilterBar(page);
+    await page.locator(".filter-include-archived").check();
+    await page.locator(".filter-apply").click();
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    await openRowMenu(target);
+    const menu = target.getByRole("menu");
+    await expect(menu.getByRole("menuitem")).toHaveText(["rename", "delete"]);
+
+    const toggle = target.locator(".session-row-menu");
+    const rename = target.locator(".session-row-rename");
+    const remove = target.locator(".session-row-delete");
+    await toggle.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(remove).toBeFocused();
+    // Wraps on TWO. A list that still believed it had four would leave
+    // focus where it was, or reach for a handle nothing mounted.
+    await page.keyboard.press("ArrowDown");
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(remove).toBeFocused();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The item set changing UNDER an open menu re-numbers it, and navigation
+ * follows.
+ *
+ * This is the regression for a bug the type system cannot prevent.
+ * Archiving a session withdraws stop and archive while the panel stays
+ * up; delete survives that change, and a scheme that filed its mounted
+ * handle under "position 3" left that handle stranded at an index the
+ * two-item list no longer reaches, while the key handler had already
+ * moved on to the shorter numbering. Arrow, Home and End then targeted a
+ * node that was not there and silently did nothing.
+ *
+ * The listing is STUBBED rather than driven through a real archive call,
+ * for the same reason the refresh test below stubs it: the row must stay
+ * at the same index across the change, and a shared stack with other
+ * specs' sessions in it cannot promise that. Flipping one field in a
+ * frozen fabrication isolates exactly the transition under test.
+ */
+test("archiving under an open menu renumbers it and navigation follows", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  const sessionId = "menu-renumber-fixture-session";
+  const listingBody = {
+    sessions: [
+      {
+        id: sessionId,
+        title: `menu-renumber-${Date.now()}`,
+        cwd: "/tmp",
+        invocation: "sleep 300",
+        status: { state: "idle" },
+        archived: false,
+      },
+    ],
+    total: 1,
+    matching: 1,
+    truncated: false,
+  };
+  await page.route(
+    (url) => url.pathname === "/api/sessions",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+        json: listingBody,
+      });
+    },
+  );
+  const feed = await stubFeed(page);
+  await page.goto("/");
+  await feed.waitForConnection(1);
+  feed.notify(1);
+
+  const target = row(page, sessionId);
+  await expect(target).toBeVisible({ timeout: 20_000 });
+  await waitForHostsStripSettled(page);
+  await openRowMenu(target);
+  await expect(target.getByRole("menuitem")).toHaveCount(4);
+
+  // The change lands through an ordinary refresh, with the row keeping
+  // its place in the list — so nothing closes the menu, which is the
+  // whole premise.
+  listingBody.sessions[0].archived = true;
+  const responded = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/sessions" && r.request().method() === "GET",
+  );
+  feed.notify(2);
+  await responded;
+  await expect(target).toHaveAttribute("data-session-archived", "true");
+  await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+  await expect(target.getByRole("menuitem")).toHaveText(["rename", "delete"]);
+
+  // Delete is at position 1 now, not 3, and the node that survived the
+  // change answers to it.
+  const toggle = target.locator(".session-row-menu");
+  await toggle.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(target.locator(".session-row-rename")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(target.locator(".session-row-delete")).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(target.locator(".session-row-delete")).toBeFocused();
+});
+
+/**
+ * Opening the menu ENTERS it, the menu is a single tab stop, and the keys
+ * it does not claim stay native.
+ *
+ * Four separate promises, all of which only exist in a real browser:
+ *
+ * - Pointer, Enter, Space and ArrowDown open onto the FIRST command and
+ *   ArrowUp onto the last, so a keyboard user never opens a menu and then
+ *   has to aim separately.
+ * - The roving `tabindex` gives exactly one item `tabindex="0"`, which is
+ *   what makes Tab mean "leave" rather than "walk four commands".
+ * - Tab and Shift+Tab dismiss the menu onto the toggle, and the next Tab
+ *   from a closed toggle continues out of the row natively — so focus is
+ *   never trapped and never dropped.
+ * - Enter and Space still activate the focused `<button>`. The pure key
+ *   map asserts they are unclaimed; only the real handler can show that
+ *   `prevent_default` was not hoisted above the mapping's early return,
+ *   which would leave every unit test green and every command dead.
+ */
+test("opening the actions menu enters it, and Tab leaves it", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-entry-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+    // The lone session auto-attaches, and its terminal takes focus for
+    // itself when the mount lands — which can be after the row is already
+    // visible. Every step below is a focus move followed by a keystroke,
+    // so a mount landing mid-sequence steals the focus the keystroke was
+    // aimed at (ArrowDown reaching the terminal instead of the toggle; the
+    // post-Escape refocus overridden — both observed on loaded CI runs).
+    // Waiting for the mount makes this test's own moves the last ones.
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
+
+    const toggle = target.locator(".session-row-menu");
+    const rename = target.locator(".session-row-rename");
+    const stop = target.locator(".session-row-stop");
+    const remove = target.locator(".session-row-delete");
+
+    // ArrowDown on a CLOSED toggle: opens and lands on the first command.
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(toggle).toBeFocused();
+
+    // ArrowUp on a closed toggle opens at the OTHER end.
+    await page.keyboard.press("ArrowUp");
+    await expect(remove).toBeFocused();
+    await page.keyboard.press("Escape");
+
+    // A pointer open enters the menu too. `openRowMenu` clicks, which is
+    // the ordinary path every other test in this file takes.
+    await openRowMenu(target);
+    await expect(rename).toBeFocused();
+
+    // One tab stop, not four: the focused item carries it, everything
+    // else is skipped by Tab.
+    await expect(rename).toHaveAttribute("tabindex", "0");
+    await expect(stop).toHaveAttribute("tabindex", "-1");
+    await expect(remove).toHaveAttribute("tabindex", "-1");
+    await page.keyboard.press("ArrowDown");
+    await expect(stop).toBeFocused();
+    await expect(stop).toHaveAttribute("tabindex", "0");
+    await expect(rename).toHaveAttribute("tabindex", "-1");
+
+    // Tab dismisses the menu and lands on the toggle — the tab stop the
+    // whole menu stands in for — rather than walking the remaining
+    // commands one at a time.
+    await page.keyboard.press("Tab");
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
+    // And from there the next Tab is the browser's own again: a CLOSED
+    // toggle claims neither Tab nor Shift+Tab, so focus continues out of
+    // the row rather than being trapped on it.
+    await page.keyboard.press("Tab");
+    await expect(toggle).not.toBeFocused();
+
+    // Shift+Tab out of an item is the same dismissal in the other
+    // direction.
+    await openRowMenu(target);
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    // Enter activates the focused command natively.
+    await openRowMenu(target);
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(target.locator(".rename-form")).toBeVisible();
+    await target.locator(".rename-cancel").click();
+
+    // And so does Space, on a different command, so that neither key is
+    // proven only through the other. Focus is re-established from the
+    // TOGGLE rather than assumed: cancelling the rename above unmounted
+    // the button that held it, and the panel never closed, so there was
+    // no fresh open to place focus anywhere.
+    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+    await toggle.focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await expect(target.locator(".session-row-archive")).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(target.locator(".confirm-archive")).toBeVisible();
+    await target.locator(".archive-cancel").click();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The panel's prompt states answer NO menu keys, and the sub-state they
+ * hold survives them.
+ *
+ * The toggle binds the navigation set only while the panel is showing its
+ * items. Without that guard, Shift+Tab back to the toggle would offer an
+ * Escape that dismisses the panel while leaving the confirmation
+ * unanswered — and since `ListView` keeps confirming/renaming state
+ * independently of whether the panel is open, the row would sit primed to
+ * reopen straight back into a prompt the user thought they had dismissed.
+ * An arrow would be worse still: it would reach for item handles that
+ * belong to a list this state is not showing.
+ */
+test("a confirm prompt ignores the menu's keys and keeps its state", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-prompt-keys-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    await openRowMenu(target);
+    await target.locator(".session-row-delete").click();
+    const consequence = target.locator(".confirm-consequence");
+    await expect(consequence).toBeVisible();
+
+    const toggle = target.locator(".session-row-menu");
+    await toggle.focus();
+    await page.keyboard.press("Escape");
+    await expect(
+      consequence,
+      "Escape on the toggle must not dismiss a confirmation that was never answered",
+    ).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    await page.keyboard.press("ArrowDown");
+    await expect(consequence).toBeVisible();
+    await expect(
+      target.locator(".session-row-menu-item"),
+      "there are no items in this state for an arrow to reach",
+    ).toHaveCount(0);
+
+    // Cancel is the only way out, and it is the one the prompt autofocuses.
+    await target.locator(".confirm-cancel").click();
+    await expect(target.locator(".session-row-stop")).toBeVisible();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * An automatic dismissal hands focus back to the toggle instead of
+ * dropping it on the document body.
+ *
+ * Escape is not the only way this menu closes. A sidebar scroll or
+ * resize, the hosts panel or filter bar opening, the create form, and a
+ * refresh that reorders the row all close it through `ListView`, which
+ * owns `menu_open` and does not consult the row at all. If an item held
+ * focus, unmounting it leaves the user at the top of the document — one
+ * of the worst things a keyboard interface can do — and no test of the
+ * Escape path would ever notice.
+ *
+ * A viewport RESIZE is the cause chosen here because it is the cheapest
+ * to cause honestly: `.app-sidebar` is observed by a `ResizeObserver`
+ * (lib.rs), so changing the window's height changes the sidebar's and
+ * bumps the layout epoch, with no fixture of eighteen sessions needed to
+ * make anything scroll.
+ */
+test("a menu dismissed by a layout change returns focus to its toggle", async ({
+  page,
+  request,
+}) => {
+  const session = await createSession(request, {
+    title: `menu-dismiss-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  const original = page.viewportSize();
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    await openRowMenu(target);
+    const toggle = target.locator(".session-row-menu");
+    await expect(target.locator(".session-row-rename")).toBeFocused();
+
+    await page.setViewportSize({
+      width: original?.width ?? 1280,
+      height: (original?.height ?? 720) - 120,
+    });
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+  } finally {
+    if (original) await page.setViewportSize(original);
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * An in-flight operation makes the menu's commands inert WITHOUT making
+ * them unfocusable.
+ *
+ * A browser cannot focus a natively `disabled` control, and the menu
+ * keeps consuming Arrow/Home/End regardless — so an implementation that
+ * used the `disabled` attribute here produced a menu that swallowed every
+ * navigation key and honoured none of them, and an item that lost focus
+ * the moment its own action made the row busy, putting Escape out of
+ * reach with the panel still open. `aria-disabled` plus a guarded
+ * `onclick` is the fix, and it is invisible to every other test: the
+ * items still report as disabled to Playwright, still refuse clicks, and
+ * still look inert.
+ *
+ * The stalled route is the whole fixture. It holds the shared operation
+ * token for as long as this test needs the busy window to last, and is
+ * released in `finally` so the request completes rather than being left
+ * dangling.
+ */
+test("a busy menu stays navigable while refusing to act", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-busy-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    await page.route(`**/api/sessions/${session.id}/stop`, async (route) => {
+      await held;
+      // Swallowed on purpose: by the time the gate opens the test may
+      // already be tearing down, and a route whose page has gone away
+      // rejects rather than resolving. The stop the row asked for is not
+      // this test's subject — `cleanupSession` issues its own through the
+      // API context, which `page.route` never touches.
+      await route.continue().catch(() => {});
+    });
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    const toggle = target.locator(".session-row-menu");
+    const rename = target.locator(".session-row-rename");
+    const stop = target.locator(".session-row-stop");
+    const archive = target.locator(".session-row-archive");
+
+    // Start a stalled action FROM a focused item: the item that made the
+    // menu busy must keep its focus rather than being blurred out from
+    // under the user mid-keystroke.
+    await openRowMenu(target);
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(stop).toBeFocused();
+    await stop.click();
+    await expect(stop).toHaveAttribute("aria-disabled", "true");
+    await expect(stop, "the item that went busy must not lose focus").toBeFocused();
+
+    // And the menu still navigates while every command in it is inert —
+    // the property a native `disabled` cannot have.
+    await page.keyboard.press("ArrowDown");
+    await expect(archive).toBeFocused();
+    await expect(archive).toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Home");
+    await expect(rename).toBeFocused();
+    // Escape is reachable, which is the point of keeping focus inside a
+    // busy menu at all.
+    await page.keyboard.press("Escape");
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    // Opening DURING the global operation is the other direction of the
+    // same property: nothing has ever been focused inside this panel, and
+    // the open still lands on the first command.
+    await openRowMenu(target);
+    await expect(rename).toBeFocused();
+    await expect(rename).toHaveAttribute("aria-disabled", "true");
+  } finally {
+    release();
+    await page.unroute(`**/api/sessions/${session.id}/stop`).catch(() => {});
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * An open panel leaves every OTHER row's "⋯" clickable.
+ *
+ * This is the anchor's reason for existing, stated as the failure it
+ * prevents. The panel extends downward over the rows below it, and at the
+ * point where those rows draw their own toggle it is showing `stop` and
+ * `delete` — a click aimed at a neighbouring session's menu would stop
+ * that session's process tree or delete the row outright, for the WRONG
+ * session, with no confirmation step in between. Anchoring the panel to
+ * the LEFT of the toggle column is what makes that impossible, and only a
+ * coordinate-level click can prove it: a Playwright `click()` on the
+ * locator would helpfully scroll and retarget, hiding exactly the overlap
+ * this test is about.
+ */
+test("an open menu leaves the other rows' toggles clickable", async ({ page, request }) => {
+  const a = await createSession(request, {
+    title: `menu-cover-a-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let b: { id: string } | undefined;
+  try {
+    b = await createSession(request, {
+      title: `menu-cover-b-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
+    await page.goto("/");
+    await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, b.id)).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    const firstIsA = (await row(page, a.id).boundingBox())!.y < (await row(page, b.id).boundingBox())!.y;
+    const first = firstIsA ? row(page, a.id) : row(page, b.id);
+    const second = firstIsA ? row(page, b.id) : row(page, a.id);
+
+    await openRowMenu(first);
+    const panel = first.locator(".session-row-menu-panel");
+    const panelBox = (await panel.boundingBox())!;
+    const coveredToggle = second.locator(".session-row-menu");
+    const toggleBox = (await coveredToggle.boundingBox())!;
+    // The geometric statement of the anchor: the panel's right edge stops
+    // before the toggle column starts.
+    expect(
+      panelBox.x + panelBox.width,
+      "the panel must not extend into the column the rows below draw their own toggles in",
+    ).toBeLessThanOrEqual(toggleBox.x);
+
+    // And the behavioral one. A raw coordinate click is what a user aiming
+    // at the visible "⋯" actually does.
+    await page.mouse.click(toggleBox.x + toggleBox.width / 2, toggleBox.y + toggleBox.height / 2);
+
+    await expect(coveredToggle).toHaveAttribute("aria-expanded", "true");
+    await expect(first.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+    // Nothing destructive was reached on the way: a covered `delete`
+    // would have swapped the first row's panel for a confirm prompt, and
+    // a covered `stop` would have left its row busy.
+    await expect(page.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(first).toBeVisible();
+  } finally {
+    await cleanupSession(request, a.id);
+    if (b) await cleanupSession(request, b.id);
+  }
+});
+
+/**
+ * The row and its toggle say which menu is open, in computed style, after
+ * the pointer and the keyboard have both moved away.
+ *
+ * The panel covers the rows below it, so "which of the several visible ⋯
+ * did I open?" has to be answerable from the row itself. Existing tests
+ * check the class string and the toggle's opacity, neither of which would
+ * notice a missing selector or a specificity regression that let the
+ * hover rule win — and the cue that matters most is precisely the one
+ * that has to survive the pointer leaving, since a menu stays up after
+ * the mouse has moved off.
+ *
+ * The selected row is checked separately because it is the case where two
+ * rules compete: the neutral menu tint would erase the accent fill
+ * SPEC.md requires the current session to keep.
+ */
+test("an open menu tints its own row and presses its own toggle", async ({ page, request }) => {
+  const a = await createSession(request, {
+    title: `menu-cues-a-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let b: { id: string } | undefined;
+  try {
+    b = await createSession(request, {
+      title: `menu-cues-b-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
+    await page.goto("/");
+    const selectedRow = row(page, a.id);
+    const plainRow = row(page, b.id);
+    await expect(selectedRow).toBeVisible({ timeout: 20_000 });
+    await expect(plainRow).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    const [hoverTint, accent, selectedTint] = await Promise.all([
+      tokenColor(page, "--bg-2"),
+      tokenColor(page, "--accent"),
+      tokenColor(page, "--accent-fill-hover"),
+    ]);
+    // Selection is established BEFORE any menu is opened: an open panel
+    // hangs over the row's own open button, so a click aimed at it would
+    // be intercepted by the very surface under test.
+    await selectedRow.locator(".session-row-open").click();
+    await expect(selectedRow).toHaveAttribute("data-session-selected", "true", { timeout: 20_000 });
+    await expect(plainRow).toHaveAttribute("data-session-selected", "false");
+
+    // Both the pointer and the keyboard are parked OUTSIDE the row before
+    // every reading: hover and `:focus-within` reveal the toggle too, so
+    // leaving either in place would let this pass with the
+    // `aria-expanded` rules missing entirely.
+    const styles = async (target: Locator) => {
+      await page.mouse.move(0, 0);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      return target.evaluate((element) => {
+        const rowStyle = getComputedStyle(element);
+        const toggleStyle = getComputedStyle(element.querySelector(".session-row-menu")!);
+        return {
+          rowBackground: rowStyle.backgroundColor,
+          toggleColor: toggleStyle.color,
+          toggleOpacity: toggleStyle.opacity,
+        };
+      });
+    };
+
+    const closed = await styles(plainRow);
+    expect(closed.rowBackground).not.toBe(hoverTint);
+    expect(closed.toggleColor).not.toBe(accent);
+
+    await openRowMenu(plainRow);
+    // The toggle's opacity is transitioned (100ms, app.css), and the
+    // reveal that matters here — `aria-expanded` — starts that fade from
+    // whatever the hover reveal left it at. A one-shot read right after
+    // the open landed mid-fade (`0.9835…`, observed on a loaded CI run);
+    // the polling assertion waits for it to settle, with the pointer and
+    // keyboard already parked outside the row so nothing else holds it up.
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect(
+      plainRow.locator(".session-row-menu"),
+      "the toggle stays visible while its menu is up",
+    ).toHaveCSS("opacity", "1");
+    const open = await styles(plainRow);
+    expect(open.rowBackground, "the owning row holds the tint with nothing hovering it").toBe(
+      hoverTint,
+    );
+    expect(open.toggleColor, "the pressed toggle wears the accent").toBe(accent);
+    expect(open.toggleOpacity, "and stays visible while its menu is up").toBe("1");
+
+    // The SELECTED row keeps its accent fill rather than taking the
+    // neutral tint: SPEC.md requires the current session to stay readable
+    // at a glance, and three classes deep is where a specificity
+    // regression would quietly hand that to the menu tint.
+    await openRowMenu(selectedRow);
+    const selected = await styles(selectedRow);
+    expect(selected.rowBackground).toBe(selectedTint);
+    expect(selected.toggleColor).toBe(accent);
+  } finally {
+    await cleanupSession(request, a.id);
+    if (b) await cleanupSession(request, b.id);
+  }
+});
+
+/**
+ * The menu is a RAISED surface of full-bleed rows, not a stack of
+ * outlined buttons in a box.
+ *
+ * That is the entire visual half of the redesign, and nothing else
+ * asserts it: the old appearance — a bordered box per item, each inset
+ * from the panel's edges — would come back without breaking a single
+ * behavioral test. The shadow is the load-bearing one, because this panel
+ * floats over other session rows and would otherwise read as part of the
+ * list rather than in front of it.
+ *
+ * The width assertions are also the regression for a real box-model bug:
+ * an item is `width: 100%` and carries 10px of padding plus a 1px border
+ * on each side, so without `box-sizing: border-box` every row is 22px
+ * wider than the panel and spills past its rounded corners.
+ */
+test("the actions menu is a raised surface of full-bleed rows", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-visuals-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+    await openRowMenu(target);
+
+    const panel = target.locator(".session-row-menu-panel");
+    const surface = await panel.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        background: style.backgroundColor,
+        borderWidth: style.borderTopWidth,
+        shadow: style.boxShadow,
+      };
+    });
+    expect(surface.background).toBe(await tokenColor(page, "--bg-2"));
+    expect(surface.borderWidth).toBe("1px");
+    expect(surface.shadow, "the shadow is what says this is in FRONT of the rows").not.toBe("none");
+
+    // Items: borderless, left-aligned, and exactly as wide as the panel's
+    // content box, so their hover fill reaches both edges.
+    const items = await panel.evaluate((element) => {
+      const panelBox = element.getBoundingClientRect();
+      return [...element.querySelectorAll(".session-row-menu-item")].map((item) => {
+        const style = getComputedStyle(item);
+        const box = item.getBoundingClientRect();
+        return {
+          borderColor: style.borderTopColor,
+          textAlign: style.textAlign,
+          overhangLeft: panelBox.left - box.left,
+          overhangRight: box.right - panelBox.right,
+        };
+      });
+    });
+    expect(items).toHaveLength(4);
+    for (const item of items) {
+      // `.btn` reserves a 1px border so an opaque edge costs no layout
+      // shift; on a menu item it must stay fully transparent.
+      expect(item.borderColor).toBe("rgba(0, 0, 0, 0)");
+      expect(item.textAlign).toBe("left");
+      expect(item.overhangLeft).toBeLessThanOrEqual(0);
+      expect(item.overhangRight).toBeLessThanOrEqual(0);
+    }
+
+    // The one rule in the list, on its own element between archive and
+    // delete rather than drawn on delete itself.
+    const separator = panel.locator(".session-row-menu-separator");
+    await expect(separator).toHaveCount(1);
+    expect(
+      await separator.evaluate((element) => getComputedStyle(element).borderTopColor),
+    ).toBe(await tokenColor(page, "--border-dim"));
+    const separatorBox = (await separator.boundingBox())!;
+    const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
+    const archiveBox = (await panel.locator(".session-row-archive").boundingBox())!;
+    expect(separatorBox.y).toBeGreaterThanOrEqual(archiveBox.y + archiveBox.height);
+    expect(separatorBox.y).toBeLessThanOrEqual(deleteBox.y);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The panel stays inside a NARROW viewport, and no wider than the room
+ * actually left in it.
+ *
+ * The measured placement derives its `max-width` from the toggle's own
+ * coordinate, while the `right` inset it is paired with is separately
+ * floored at 8px. When the two disagree — a narrow shell where the toggle
+ * sits at or past the viewport's right edge — the width can be computed
+ * from space that is not there and take the panel's LEFT edge off screen.
+ * The fix is a `calc(100vw - 16px)` term the engine resolves at paint
+ * time, which is exactly what this asserts.
+ *
+ * Honest about what it does NOT do: the arithmetic band where the old
+ * clamp actually overflowed needs a viewport narrower than the sidebar's
+ * fixed 340px by enough that the toggle is no longer reachable to click,
+ * so this is an invariant check at the narrowest width the menu can still
+ * be opened at, not a reproduction. The clamp's own shape is pinned
+ * exactly in `menu_panel.rs`'s unit tests, which is where the emitted
+ * expression can be read directly.
+ */
+test("the actions panel stays inside a narrow viewport", async ({ page, request }) => {
+  const session = await createSession(request, {
+    // A long title is the panel's own widest content: the confirm state
+    // quotes it, and a panel that grew to fit would be the one to spill.
+    title: `menu-narrow-${"wide".repeat(20)}-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  const original = page.viewportSize();
+  try {
+    await page.setViewportSize({ width: 360, height: 700 });
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+
+    await openRowMenu(target);
+    const panel = target.locator(".session-row-menu-panel");
+    const inViewport = async () => {
+      const box = (await panel.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(360);
+      expect(box.width).toBeLessThanOrEqual(360 - 16);
+    };
+    await inViewport();
+
+    // The confirm state is the widest thing this panel ever holds.
+    await target.locator(".session-row-delete").click();
+    await expect(target.locator(".confirm-consequence")).toBeVisible();
+    await inViewport();
+    await target.locator(".confirm-cancel").click();
+  } finally {
+    if (original) await page.setViewportSize(original);
     await cleanupSession(request, session.id);
   }
 });
