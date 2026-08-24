@@ -360,7 +360,15 @@ fn record_agent(shape: RecordShape, home: Option<std::path::PathBuf>) -> anyhow:
     // actually RUN rather than inferring it from a side effect. Joined with
     // single spaces: no test needs to recover the original word boundaries,
     // and every value these tests look for (a conversation id) contains no
-    // whitespace.
+    // whitespace. `std::env::args()` is the process's REAL argv, so this
+    // includes whatever the supervisor appended past `--script`/
+    // `--record-home` — the per-launch hook flags such as `--settings
+    // <json>` — which clap's `FakeAgent::extra` catch-all accepts but never
+    // inspects. That is the whole point: a test can assert injection
+    // happened by reading this line without the fixture needing to
+    // understand the injected flags' shape. (A resumed launch's identity
+    // does not travel in this tail: resume templates replace the argv, and
+    // the fixture reads its conversation from `RESUME_ENV_VAR`.)
     writeln!(
         out,
         "FAKE-AGENT ARGV:{}\r",
