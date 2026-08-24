@@ -968,7 +968,12 @@ pub struct Profile {
     /// The launch invocation, as one shell-parsed command line — the same
     /// spelling and the same parsing rules as
     /// [`ControlMsg::CreateSession::invocation`], because that is exactly
-    /// what a profile-backed create resolves this into.
+    /// what a profile-backed create resolves this into. A word equal to
+    /// `{cwd}` in full is the session's working directory, filled at
+    /// launch under the same whole-element rule `{conversation}` uses —
+    /// which is what lets one profile serve every directory when the
+    /// agent is started through a launcher that takes the directory as
+    /// an argument.
     pub invocation: String,
     /// Which integrated agent this profile IS, or [`AgentKind::Generic`]
     /// for a profile that names no kind — SPEC.md's "profiles without a
@@ -992,7 +997,10 @@ pub struct Profile {
     /// launch per SPEC.md. Identical in its `{conversation}` placement
     /// rule to [`ControlMsg::CreateSession::resume_template`] — see that
     /// field for the exact-equality rule and for which kinds require a
-    /// placeholder.
+    /// placeholder. An element equal to `{cwd}` is the session's working
+    /// directory under that same rule, so a resume through a launcher
+    /// that takes the directory as an argument lands in the session's
+    /// directory rather than in one baked into the template.
     pub resume_template: Option<Vec<String>>,
 }
 
@@ -1352,7 +1360,24 @@ pub enum ControlMsg {
         cwd: String,
         /// The agent command line under the raw selector. `None` means one
         /// of the profile selectors supplies it — see this variant's own
-        /// exclusivity contract.
+        /// exclusivity contract. A word equal to `{cwd}` in full is
+        /// replaced at launch with the directory that launch hands tmux,
+        /// under the same whole-element rule `{conversation}` obeys in
+        /// `resume_template` below; it is for launchers that take the
+        /// directory as an argument, and it may not be the first word.
+        /// That directory is this request's `cwd` after `~` expansion on
+        /// a create, and the VERIFIED resolved path on a restart or on
+        /// the retry of an interrupted create WHERE the session has a
+        /// recorded canonical identity — the supervisor re-canonicalizes
+        /// against that identity and launches into what it checked,
+        /// closing the check-then-repoint window. A row predating that
+        /// recorded identity has nothing to check and launches into the
+        /// spelling, as a create does. What holds on every path is that
+        /// the wrapper is handed the SAME string tmux is, which is the
+        /// property this placeholder exists to preserve; on a create that
+        /// string is still a spelling each side resolves for itself, so a
+        /// symlink repointed between the two resolutions can separate
+        /// them.
         ///
         /// Was a required `String` before `PROTOCOL_VERSION` 10, which is
         /// part of what forced that bump. A profile-mode request reaches a
@@ -1432,13 +1457,24 @@ pub enum ControlMsg {
         /// in full — `--resume={conversation}` or any other embedded
         /// form does not count as a placeholder occurrence under this
         /// rule, because substitution replaces a whole element, never
-        /// splices into part of one. A session with an integrated
+        /// splices into part of one. `{cwd}` is a second placeholder
+        /// under the identical rule: an element equal to it in full is
+        /// replaced with the session's working directory at launch, for
+        /// launchers that take the directory as an argument. Neither
+        /// placeholder may be the template's FIRST element, where
+        /// substitution would make the value the program the session
+        /// tries to run. A session with an integrated
         /// `agent_kind` (derived or overridden) must have a template
-        /// containing an element meeting that exact-equality rule — a
-        /// template with no such element is only valid on a non-integrated
-        /// kind, where it is a verbatim fallback resume invocation
-        /// (SPEC.md's "falls back to the profile's resume invocation
-        /// verbatim"). This crate does not enforce that invariant itself
+        /// containing a `{conversation}` element under that
+        /// exact-equality rule — `{cwd}` does not satisfy it, since a
+        /// template that cannot name the conversation could only discard
+        /// the identity the session captured. A template with no
+        /// `{conversation}` is valid only on a non-integrated kind, where
+        /// it is the fallback resume invocation run verbatim apart from
+        /// placeholder substitution: `{cwd}` is still filled in it, like
+        /// in every other launch (SPEC.md's "falls back to the profile's
+        /// resume invocation verbatim apart from placeholder
+        /// substitution"). This crate does not enforce that invariant itself
         /// (it is vocabulary, not validation); the supervisor's create
         /// handler is where it will be checked once item 7 lands, and this
         /// exact-equality wording is what keeps that future validator from

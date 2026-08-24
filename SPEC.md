@@ -36,8 +36,9 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
   (command line including arguments, e.g. `claude`, `claude --dangerously-skip-permissions`, `codex`); an optional
   resume invocation, a template that may reference the captured conversation identity (e.g.
   `claude --resume {conversation}`); and optional agent-specific integrations (status heuristics, conversation-identity
-  capture — see Status and Durability). The user controls the invocations completely; the integrations are the only
-  per-agent machinery Farhelm itself carries.
+  capture — see Status and Durability). Both invocations may reference the session's working directory as `{cwd}`, for
+  launchers that take the directory as an argument. The user controls the invocations completely; the integrations are
+  the only per-agent machinery Farhelm itself carries.
 
 ## Topology
 
@@ -455,12 +456,13 @@ that is the whole of what can hold the agent up; writing the diagnostic happens 
 itself bounded. The one accepted exception to the invisibility rule is a line the vendor itself prints because of a flag
 we pass (Codex's hook-trust warning), which must be documented.
 
-For agents without integration, restart falls back to the profile's resume invocation verbatim (which may land in the
-agent's own picker or most-recent-conversation behavior), or a fresh launch when the profile defines none. If a
-supported agent's conversation identity was never captured for a session, restart says so and offers that same fallback
-or a fresh launch — it must never silently resume the wrong conversation. A resume invocation referencing
-`{conversation}` is never run with the placeholder unfilled: no captured identity means restart offers a fresh launch
-and says why, not a garbled command line.
+For agents without integration, restart falls back to the profile's resume invocation verbatim apart from placeholder
+substitution (which may land in the agent's own picker or most-recent-conversation behavior), or a fresh launch when the
+profile defines none. If a supported agent's conversation identity was never captured for a session, restart says so and
+offers that same fallback or a fresh launch — it must never silently resume the wrong conversation. A resume invocation
+referencing `{conversation}` is never run with the placeholder unfilled: no captured identity means restart offers a
+fresh launch and says why, not a garbled command line. `{cwd}` is always filled where it stands as a whole argument, on
+every launch and restart; there is no launch without a working directory.
 
 ## VCS neutrality
 
