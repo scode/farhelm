@@ -157,6 +157,31 @@ enum InternalCmd {
         /// own tree. Ignored by every other script.
         #[arg(long)]
         record_home: Option<PathBuf>,
+        /// Whatever the supervisor appends for the real vendor after the
+        /// fixture's own flags — the per-launch hook flags, or anything a
+        /// test's resume template places there. Every script tolerates the
+        /// tail; only the record-writing scripts (`claude-record`,
+        /// `codex-record`) print the process argv in their `FAKE-AGENT
+        /// ARGV:` marker, which is where a test asserts on injection
+        /// without the fixture understanding the injected flags.
+        ///
+        /// The conversation-capture and restart integration fixtures
+        /// (`conversation_identity_capture.rs`, `restart_with_resume.rs`)
+        /// ARE this binary, symlinked as `claude` or `codex` and invoked as
+        /// `internal fake-agent`. A supervisor that appends real-vendor
+        /// flags to that argv the way it does for the genuine CLI —
+        /// `--settings <json>` for Claude-kind sessions, or
+        /// `--dangerously-bypass-hook-trust -c ... -c ...` for Codex-kind
+        /// ones — would otherwise hand clap flags it has no arm for, and
+        /// clap rejects the whole argv with a usage error, killing the
+        /// fixture before a single line of script output is produced.
+        /// `trailing_var_arg` plus `allow_hyphen_values` make capture begin
+        /// at the first token clap does not recognize (`--script` and
+        /// `--record-home` still bind normally ahead of it), the same
+        /// tolerance a real vendor CLI has for flags appended after its own.
+        /// Order is preserved so the marker can be asserted on verbatim.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        extra: Vec<String>,
     },
     /// Reap dead test-harness state dirs under /tmp (see farhelm_teststate
     /// for the naming scheme and flock liveness protocol). Called by
@@ -249,6 +274,12 @@ fn main() -> anyhow::Result<()> {
             InternalCmd::FakeAgent {
                 script,
                 record_home,
+                // The fake agent does not need to understand the injected
+                // tail — it only has to survive parsing it. The record
+                // scripts read the same strings straight from
+                // `std::env::args()` for their `FAKE-AGENT ARGV:` marker,
+                // so nothing is passed through here.
+                extra: _,
             } => fake_agent::run(script, record_home),
             InternalCmd::SweepTestState => {
                 let outcome = farhelm_teststate::sweep(
@@ -584,5 +615,92 @@ mod tests {
                 command: InternalCmd::SweepTestState
             }
         ));
+    }
+
+    /// A supervisor that injects real-vendor hook flags past `--script`/
+    /// `--record-home` must not turn the claude/codex-kind test fixtures
+    /// into a clap usage error. This exercises a Claude-shaped tail
+    /// (`--settings <json>`) immediately followed by a Codex-shaped one
+    /// (`--dangerously-bypass-hook-trust -c a=b`) plus one more unknown
+    /// flag pair (`--resume <id>`, purely a synthetic example of a tail
+    /// the fixture has never heard of), and checks `extra` captures every
+    /// one of those tokens untouched and in argv order — the exact
+    /// property the `FAKE-AGENT ARGV:` marker relies on to let a test
+    /// assert injection happened without the fixture parsing the injected
+    /// flags itself.
+    #[test]
+    fn internal_fake_agent_parses_with_injected_vendor_tail() {
+        let cli = Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "fake-agent",
+            "--script",
+            "basic",
+            "--settings",
+            r#"{"x":1}"#,
+            "--dangerously-bypass-hook-trust",
+            "-c",
+            "a=b",
+            "--resume",
+            "conv-1",
+        ])
+        .unwrap();
+        let Cmd::Internal {
+            command: InternalCmd::FakeAgent { script, extra, .. },
+        } = cli.command
+        else {
+            panic!("expected InternalCmd::FakeAgent");
+        };
+        assert!(matches!(script, fake_agent::Script::Basic));
+        assert_eq!(
+            extra,
+            vec![
+                "--settings",
+                r#"{"x":1}"#,
+                "--dangerously-bypass-hook-trust",
+                "-c",
+                "a=b",
+                "--resume",
+                "conv-1",
+            ]
+        );
+    }
+
+    /// Companion to the tail-injection test above: `trailing_var_arg`
+    /// only starts collecting once clap can no longer match a known flag,
+    /// so this pins that `--script` and `--record-home` still bind to
+    /// their own fields — rather than being swallowed into `extra` — when
+    /// an injected tail follows them on the same command line.
+    #[test]
+    fn internal_fake_agent_named_flags_still_parse_before_the_tail() {
+        let cli = Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "fake-agent",
+            "--script",
+            "claude-record",
+            "--record-home",
+            "/tmp/fake-agent-home",
+            "--settings",
+            "{}",
+        ])
+        .unwrap();
+        let Cmd::Internal {
+            command:
+                InternalCmd::FakeAgent {
+                    script,
+                    record_home,
+                    extra,
+                },
+        } = cli.command
+        else {
+            panic!("expected InternalCmd::FakeAgent");
+        };
+        assert!(matches!(script, fake_agent::Script::ClaudeRecord));
+        assert_eq!(
+            record_home,
+            Some(std::path::PathBuf::from("/tmp/fake-agent-home"))
+        );
+        assert_eq!(extra, vec!["--settings", "{}"]);
     }
 }
