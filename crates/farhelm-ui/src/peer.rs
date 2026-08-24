@@ -304,6 +304,35 @@ mod tests {
         assert_eq!(display_peer("\u{202E}"), "<U+202E>");
     }
 
+    /// A placeholder refusal reaches the user through this renderer — the
+    /// profile editor's error line, and the create dialog's for a raw
+    /// invocation, both show a `display_peer`d supervisor string, not this
+    /// crate's own words — so nothing here may treat `{cwd}` or
+    /// `{conversation}` as template syntax to fill in. `must_escape` only
+    /// matches control and bidi/invisible characters (see its doc comment);
+    /// braces are ordinary visible text to it, so a renderer that somehow
+    /// mangled them would make the refusal the wrapper-profile docs promise
+    /// unreadable, and this pins that it does not.
+    #[test]
+    fn placeholder_braces_in_a_supervisor_error_render_unchanged() {
+        let refusal = "profile invocation's first element is {cwd}, so \
+             substituting the working directory would make it the PROGRAM \
+             this session tries to run; the placeholder belongs in an \
+             argument slot";
+        assert_eq!(display_peer(refusal), refusal);
+        assert!(refusal.contains("{cwd}"));
+
+        // `{conversation}` is the sibling placeholder from the resume-plan
+        // refusal text (`ensure_resume_template`); same property, same
+        // reason it must hold.
+        let sibling = "resume template's first element is {conversation}, \
+             so substituting the captured conversation identity would make \
+             it the PROGRAM this session tries to run; the placeholder \
+             belongs in an argument slot";
+        assert_eq!(display_peer(sibling), sibling);
+        assert!(sibling.contains("{conversation}"));
+    }
+
     /// A confirmation keeps trusted newlines while every hostile character
     /// inside those lines becomes visible rather than controlling layout.
     #[test]

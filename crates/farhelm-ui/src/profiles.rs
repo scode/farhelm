@@ -1952,7 +1952,19 @@ fn ProfileForm(
                 }
             }
             label {
-                "invocation"
+                // The kind clause is here because the failure it prevents is
+                // silent: a wrapper profile left at the `generic` kind still
+                // launches fine, but nothing captures its conversation, so
+                // the row never offers to resume the exact conversation (a
+                // placeholder-free template only gets the generic fallback
+                // replay) — and nothing else in this form would tell the
+                // user why.
+                //
+                // `{{cwd}}` is doubled to render the literal text `{cwd}`:
+                // rsx! text is a format string, so a single-braced `{cwd}`
+                // would be parsed as an interpolation of a `cwd` binding
+                // (and fail to compile, since none exists here).
+                "invocation ({{cwd}} is replaced with the session's directory; set the agent kind when the first word is a wrapper rather than the agent)"
                 input {
                     r#type: "text",
                     class: "profile-invocation-input",
