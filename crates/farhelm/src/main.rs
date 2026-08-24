@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod fake_agent;
+mod hook;
 
 #[derive(Parser)]
 #[command(
@@ -142,6 +143,18 @@ enum InternalCmd {
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
     /// can never fire there).
     Launch { spec: PathBuf },
+    /// The agent's `SessionStart` hook: read the vendor's JSON payload
+    /// from stdin and report the conversation id it names to the
+    /// supervisor that launched this session.
+    ///
+    /// Farhelm injects `<farhelm_exe> internal hook` into the agent's own
+    /// launch, so this runs as a child of the agent, inside the user's
+    /// terminal, with the session credential in its environment. It takes
+    /// no flags: everything it needs arrives on stdin or in that
+    /// environment, and a flag would be one more thing the injected
+    /// command line could get wrong. See `hook.rs` for the silence and
+    /// budget contract this arm exists to honour.
+    Hook,
     /// A scripted TUI standing in for real agents in tests: prompts,
     /// echoes, colors, terminal modes, and raw-byte output — deterministic
     /// and free of vendor auth (PLAN_M1.md's test harness).
@@ -307,6 +320,94 @@ fn main() -> anyhow::Result<()> {
             InternalCmd::Launch { spec } => {
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
+            }
+            InternalCmd::Hook => {
+                // No tracing init, and this one is necessity rather than
+                // belt and braces: init_tracing logs to stderr at `info`,
+                // and this process's stderr is the AGENT's terminal. A
+                // single log line here is a line the user sees in the
+                // middle of their session — or, on a non-zero exit, one
+                // the vendor surfaces as a hook error.
+                //
+                // The panic hook goes in before anything can panic: the
+                // default one prints to that same stderr. hook::run_with
+                // catches the unwind itself; this only silences it.
+                std::panic::set_hook(Box::new(|_| {}));
+
+                // The environment read lives here, not in hook.rs: the
+                // tests over there must not depend on the environment of
+                // the process running them (a test suite run from inside a
+                // farhelm session already carries all three variables and
+                // would otherwise dial a live supervisor).
+                //
+                // Read variable by variable rather than through
+                // `spawn_environment`, which answers a different question
+                // ("may `farhelm spawn` dial?") and answers it
+                // all-or-nothing. The two outputs below do not need the
+                // same inputs: reporting needs all three values, while the
+                // LOG PATH needs only the session id and the socket's
+                // directory. Deriving them together is what used to make a
+                // half-configured environment — an id and a socket with the
+                // token missing — leave no trace at all, which is precisely
+                // the situation whose only evidence would have been this
+                // file. Now such a run still writes its `no-credential`
+                // line.
+                //
+                // A missing or non-UTF-8 value is treated as absent
+                // throughout: the supervisor's own ids and paths are UTF-8
+                // strings, so a value that is not one cannot be ours. No
+                // default supervisor is ever guessed — the socket comes
+                // from FARHELM_SUPERVISOR_SOCK or the run reports nothing.
+                let session_id = std::env::var(farhelm_supervisor::launch::SESSION_ID_ENV_VAR).ok();
+                let token = std::env::var(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR).ok();
+                let socket = std::env::var(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR)
+                    .ok()
+                    .map(PathBuf::from);
+
+                // <state_dir>/hook-log/<session>.log, where the state dir
+                // is the socket's own directory — the derivation the
+                // supervisor mirrors in `hook_log_path`; change one and you
+                // must change the other.
+                let hook_log = match (&session_id, &socket) {
+                    (Some(id), Some(socket)) => socket
+                        .parent()
+                        .map(|dir| dir.join("hook-log").join(format!("{id}.log"))),
+                    _ => None,
+                };
+                let credential = match (session_id, token, socket) {
+                    (Some(session_id), Some(token), Some(socket)) => Some(hook::HookCredential {
+                        session_id,
+                        token,
+                        socket,
+                    }),
+                    // Anything short of all three is "no credential":
+                    // there is no supervisor to report to, whether the
+                    // environment is absent entirely or a session
+                    // predating spawn support left the token out.
+                    _ => None,
+                };
+
+                // Well under the timeout the injected hook config gives
+                // the vendor, so the vendor never gets to time us out.
+                const BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+                hook::run_with(credential, std::io::stdin(), BUDGET, hook_log);
+
+                // Exit rather than return, for the STATUS above all: 0 is
+                // decided right here, unconditionally, rather than by
+                // whatever `main`'s shared return path grows later — a
+                // non-zero exit is what makes the vendor show the user an
+                // error about a hook that is, by contract, allowed to fail
+                // silently.
+                //
+                // It also draws the line under the budget, though not for
+                // the reason it might look like: no runtime is waiting,
+                // because `run_with` builds and drops its own inside that
+                // call. What is still out there is the detached
+                // payload-reader thread, possibly blocked forever on a pipe
+                // the vendor holds open. Abandoning it is the design (see
+                // `hook::read_payload`), and terminating here is what makes
+                // the abandonment immediate instead of merely eventual.
+                std::process::exit(0);
             }
             InternalCmd::FakeAgent {
                 script,
