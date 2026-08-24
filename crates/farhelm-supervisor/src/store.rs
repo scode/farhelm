@@ -2329,7 +2329,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
 /// Finish decoding a row read by [`read_session_columns`], refusing rather
 /// than guessing on anything outside this build's vocabulary.
 ///
-/// Two SEMANTIC checks run here, not only syntactic ones, and they are
+/// Several SEMANTIC checks run here, not only syntactic ones, and they are
 /// deliberately the same invariants `create` enforces (`agent_kind`'s
 /// `IntegrationSnapshot::resolve`). The database is a trust boundary like
 /// any other input: a row is whatever the last process to write it left
@@ -2338,7 +2338,15 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
 /// in its template describes a session that could capture an identity and
 /// then be unable to resume with it — SPEC.md's exact-conversation promise
 /// silently false — so it is refused at load rather than allowed to reach
-/// the restart path and be discovered there.
+/// the restart path and be discovered there. A row whose resume template
+/// has [`crate::agent_kind::CWD_PLACEHOLDER`] as its program is refused by
+/// [`crate::agent_kind::ensure_resume_template`] (which folds in the check
+/// below), and a row whose stored invocation has the same shape is refused
+/// separately by [`crate::agent_kind::ensure_no_cwd_program`] — for the
+/// parallel reason in both cases: slot 0 is never substituted, so a
+/// `{cwd}`-first vector that slipped past this refusal would exec a
+/// program literally named `{cwd}` on restart, not the working directory
+/// itself.
 ///
 /// A HALF-WRITTEN source-profile pair is refused for the same class of
 /// reason (see [`ProfileSnapshot`] for why SQLite is not asked to enforce
@@ -2383,6 +2391,24 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
     // silently declining to resume a conversation the session captured.
     if let Some(template) = row.resume_template.as_deref()
         && let Err(message) = crate::agent_kind::ensure_resume_template(template)
+    {
+        anyhow::bail!("session {}: {message}", row.id);
+    }
+    // The stored INVOCATION gets the same trust-boundary treatment as the
+    // template above, but only when it still parses as a command line: a
+    // hand-edited row with `{cwd}` in argv[0] would otherwise exec a
+    // program literally named `{cwd}` on the next Fresh restart — the only
+    // mode that splits and execs the stored invocation; resume and
+    // fallback modes work from the template instead. A string that
+    // does NOT parse is deliberately left alone here — refusing it is
+    // already `relaunch_argv`'s `Fresh` arm's job (service/core.rs), and
+    // refusing it at LOAD instead would turn a row this build has always
+    // tolerated (an unparsable invocation, which every restart mode other
+    // than `Fresh` never even splits) into a load failure for a reason
+    // that has nothing to do with the `{cwd}` placeholder this check
+    // exists for.
+    if let Ok(argv) = shell_words::split(&row.invocation)
+        && let Err(message) = crate::agent_kind::ensure_no_cwd_program("session invocation", &argv)
     {
         anyhow::bail!("session {}: {message}", row.id);
     }
@@ -2510,12 +2536,14 @@ pub(crate) const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
 ///   picked out of a list, and a blank row in that list is not something a
 ///   user can act on or tell apart from its neighbours.
 /// - **A usable invocation.** Parsed as a command line and checked as an
-///   executable argv (`agent_kind::ensure_executable_argv`), then resolved
-///   through the very same `IntegrationSnapshot::resolve` a create will run
-///   it through — so a profile that could never launch anything is refused
-///   when it is WRITTEN rather than at every create that names it
-///   afterwards. Catching it here is what keeps "pick a profile" from being
-///   a request that can fail for reasons the picker could not have shown.
+///   executable argv (`agent_kind::ensure_executable_argv`), refused if its
+///   program slot is the `{cwd}` placeholder (`agent_kind::ensure_no_cwd_program`),
+///   then resolved through the very same `IntegrationSnapshot::resolve` a
+///   create will run it through — so a profile that could never launch
+///   anything is refused when it is WRITTEN rather than at every create
+///   that names it afterwards. Catching it here is what keeps "pick a
+///   profile" from being a request that can fail for reasons the picker
+///   could not have shown.
 /// - **An executable resume template**
 ///   (`agent_kind::ensure_resume_template`). Same argument, one step further
 ///   out: the moment a bad template would otherwise be discovered is a
@@ -2573,6 +2601,12 @@ pub(crate) fn validate_profile_fields(
     let argv = shell_words::split(invocation)
         .map_err(|e| format!("profile invocation does not parse as a command line: {e}"))?;
     crate::agent_kind::ensure_executable_argv("profile invocation", &argv)?;
+    // Checked here rather than left to `IntegrationSnapshot::resolve` below:
+    // the profile editor renders this store-side `Err` verbatim
+    // (`profiles.rs`'s error path), and it is the ONLY UI the `{cwd}`
+    // placeholder gets — no separate client-side check exists to catch a
+    // wrapper invocation typed with the placeholder in argv[0].
+    crate::agent_kind::ensure_no_cwd_program("profile invocation", &argv)?;
     crate::agent_kind::IntegrationSnapshot::resolve(
         &argv[0],
         Some(agent_kind),
@@ -8359,6 +8393,13 @@ mod tests {
     ///
     /// A matrix rather than one case, because these are independent
     /// decoders and a fix to one says nothing about the others.
+    ///
+    /// The two `{cwd}` cases (invocation, template) cover the same hazard
+    /// [`decode_session_row`]'s new invocation check exists for: a
+    /// hand-edited row with the placeholder in the program slot would
+    /// otherwise exec a program literally named `{cwd}` on the next Fresh
+    /// restart (the only mode that execs the stored invocation directly),
+    /// rather than running a "run in this directory" wrapper.
     #[tokio::test]
     async fn a_semantically_impossible_session_row_is_refused_at_load() {
         let cases = [
@@ -8382,6 +8423,12 @@ mod tests {
             (
                 "UPDATE sessions SET resume_template = '[1,2,3]'",
                 "resume template",
+            ),
+            ("UPDATE sessions SET invocation = '{cwd} claude'", "{cwd}"),
+            (
+                "UPDATE sessions SET resume_template = \
+                 '[\"{cwd}\",\"claude\",\"--resume\",\"{conversation}\"]'",
+                "{cwd}",
             ),
         ];
         for (corruption, expected) in cases {
@@ -8407,6 +8454,115 @@ mod tests {
             // silently-dropped refusal would be worst.
             assert!(store.load_all().await.is_err());
         }
+    }
+
+    /// An invocation that no longer parses as a command line must still
+    /// LOAD, rather than being turned into a refusal by the new `{cwd}`
+    /// program check `decode_session_row` added.
+    ///
+    /// That check only fires when `shell_words::split` succeeds AND the
+    /// first element is the placeholder — a string that fails to parse at
+    /// all (an unterminated quote, here) is left alone at decode time on
+    /// purpose, because refusing it is already `relaunch_argv`'s `Fresh`
+    /// arm's job at the point a restart actually needs to split it. A row
+    /// this build has always tolerated at load (every restart mode other
+    /// than `Fresh` never even splits the stored invocation) must keep
+    /// loading; regressing that would turn an unrelated hand-edit into a
+    /// session nobody can even list.
+    #[tokio::test]
+    async fn an_unparsable_stored_invocation_still_loads() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        {
+            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
+            conn.execute(
+                "UPDATE sessions SET invocation = 'claude \"unterminated' WHERE id = 's1'",
+                [],
+            )
+            .expect("plant an unparsable invocation");
+        }
+        let row = store
+            .session("s1")
+            .await
+            .expect("an unparsable invocation must still load")
+            .expect("the row is present");
+        assert_eq!(row.invocation, "claude \"unterminated");
+        // The bulk loader shares the decoder; both readers must agree that
+        // this row is tolerated, the same way the corruption matrix above
+        // asserts both readers agree on what is REFUSED.
+        assert!(store.load_all().await.is_ok());
+    }
+
+    /// A `{cwd}` element in an ARGUMENT slot — never `argv[0]` — is exactly
+    /// what this feature exists to allow, so a row carrying one in both its
+    /// invocation and its resume template must load cleanly through both
+    /// readers, not merely fail to be refused. An overbroad refusal that
+    /// matched the placeholder ANYWHERE in the vector, rather than only at
+    /// slot 0, would pass every negative test above while still breaking
+    /// every legitimate wrapper profile — this is the test that would catch
+    /// that mistake.
+    #[tokio::test]
+    async fn a_wrapper_shaped_session_row_loads_through_both_readers() {
+        let (_dir, store) = fresh_store().await;
+        let template = vec![
+            "w".to_string(),
+            "run".to_string(),
+            crate::agent_kind::CWD_PLACEHOLDER.to_string(),
+            "claude".to_string(),
+            "--resume".to_string(),
+            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+        ];
+        store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: "s1".to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "s1".to_string(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    creation_seq: 0,
+                    cwd: "/tmp/work".to_string(),
+                    invocation: format!("w run {} claude", crate::agent_kind::CWD_PLACEHOLDER),
+                    tmux_name: "fh-s1".to_string(),
+                    pane: "%0".to_string(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    resume_template: Some(template.clone()),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("a wrapper-shaped row is a legal insert");
+
+        let read = store
+            .session("s1")
+            .await
+            .expect("read")
+            .expect("row is present");
+        assert_eq!(
+            read.invocation,
+            format!("w run {} claude", crate::agent_kind::CWD_PLACEHOLDER)
+        );
+        assert_eq!(read.resume_template.as_deref(), Some(template.as_slice()));
+
+        let loaded = store
+            .load_all()
+            .await
+            .expect("the bulk loader must accept the same row")
+            .into_iter()
+            .find(|row| row.id == "s1")
+            .expect("s1 is in the bulk load");
+        assert_eq!(loaded.resume_template.as_deref(), Some(template.as_slice()));
     }
 
     /// An agent-kind column outside this build's vocabulary is refused
@@ -9567,6 +9723,129 @@ mod tests {
         );
     }
 
+    /// A wrapper profile's `{cwd}` elements are TEXT to the store, never a
+    /// value to substitute — filling the placeholder belongs to
+    /// `fill_cwd`, at spawn time, against the session's own directory, not
+    /// the catalog's.
+    ///
+    /// Asserted through the same create/update/read round trip as
+    /// [`profiles_round_trip_through_create_update_and_delete`]. The
+    /// contract under test: a profile with `{cwd}` in an ARGUMENT slot
+    /// (never `argv[0]`, which [`validate_profile_fields`] refuses) must
+    /// come back byte-for-byte identical to what was written, in both the
+    /// invocation string and the resume template vector — the store holds
+    /// the text and never substitutes.
+    #[tokio::test]
+    async fn a_wrapper_profile_round_trips_with_its_placeholders_intact() {
+        let (_dir, store) = fresh_store().await;
+        let invocation = "w run {cwd} claude".to_string();
+        let template = vec![
+            "w".to_string(),
+            "run".to_string(),
+            crate::agent_kind::CWD_PLACEHOLDER.to_string(),
+            "claude".to_string(),
+            "--resume".to_string(),
+            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+        ];
+
+        let created = match store
+            .create_profile(
+                "Wrapper".to_string(),
+                invocation.clone(),
+                farhelm_proto::AgentKind::Claude,
+                Some(template.clone()),
+            )
+            .await
+            .expect("a profile whose placeholder sits in an argument slot must be accepted")
+        {
+            ProfileCreation::Created(profile) => profile,
+            ProfileCreation::CatalogFull => panic!("a catalog of four starters is not full"),
+        };
+        assert_eq!(
+            created.invocation, invocation,
+            "create must not touch {{cwd}}"
+        );
+        assert_eq!(
+            created.resume_template.as_deref(),
+            Some(template.as_slice()),
+            "create must not touch the template's {{cwd}} element either"
+        );
+        assert_eq!(
+            store.profile(&created.id).await.expect("read"),
+            Some(created.clone()),
+            "a read must give back exactly what was written, placeholders intact"
+        );
+
+        let updated = farhelm_proto::Profile {
+            id: created.id.clone(),
+            name: "Wrapper (renamed)".to_string(),
+            invocation: invocation.clone(),
+            agent_kind: farhelm_proto::AgentKind::Claude,
+            resume_template: Some(template.clone()),
+        };
+        assert_eq!(
+            store
+                .update_profile(updated.clone())
+                .await
+                .expect("an update replaying the same placeholders must also be accepted"),
+            Some(updated.clone())
+        );
+        assert_eq!(
+            store.profile(&created.id).await.expect("read"),
+            Some(updated),
+            "an update must not substitute either, any more than a create does"
+        );
+
+        // Plan D5: `{cwd}` is independent of agent kind. A GENERIC profile
+        // has no integration and so no `{conversation}` obligation on its
+        // template — this covers the two shapes rule 5 above does not: no
+        // template at all, and a template that never mentions
+        // `{conversation}`, both of which `ensure_resume_template`'s
+        // conversation check would refuse for an INTEGRATED kind but must
+        // accept here.
+        let generic_no_template = match store
+            .create_profile(
+                "Generic wrapper, no template".to_string(),
+                invocation.clone(),
+                farhelm_proto::AgentKind::Generic,
+                None,
+            )
+            .await
+            .expect("a generic profile may use {cwd} with no resume template at all")
+        {
+            ProfileCreation::Created(profile) => profile,
+            ProfileCreation::CatalogFull => panic!("plenty of catalog room left"),
+        };
+        assert_eq!(generic_no_template.invocation, invocation);
+        assert_eq!(generic_no_template.resume_template, None);
+
+        let generic_template_without_conversation = vec![
+            "w".to_string(),
+            "run".to_string(),
+            crate::agent_kind::CWD_PLACEHOLDER.to_string(),
+            "cat".to_string(),
+        ];
+        let generic_with_template = match store
+            .create_profile(
+                "Generic wrapper, plain template".to_string(),
+                invocation.clone(),
+                farhelm_proto::AgentKind::Generic,
+                Some(generic_template_without_conversation.clone()),
+            )
+            .await
+            .expect(
+                "a generic profile's template may use {cwd} without ever mentioning \
+                 {conversation}, since a generic kind offers no resume to fill it into",
+            ) {
+            ProfileCreation::Created(profile) => profile,
+            ProfileCreation::CatalogFull => panic!("plenty of catalog room left"),
+        };
+        assert_eq!(
+            generic_with_template.resume_template.as_deref(),
+            Some(generic_template_without_conversation.as_slice())
+        );
+    }
+
     /// The catalog bound at its exact boundary (PLAN_M6_75.md item 4): the
     /// create that brings the catalog TO `MAX_PROFILES_PER_HOST` succeeds
     /// and the next one is refused with nothing written.
@@ -9953,6 +10232,13 @@ mod tests {
     /// template whose program slot is the substitution placeholder. Reaching
     /// that state needs nothing exotic: a database written by a build with
     /// looser rules, restored from a backup, or hand-edited.
+    ///
+    /// The two `{cwd}`-first rows (invocation, template) exercise
+    /// `decode_profile_row`'s call into `validate_profile_fields`, which is
+    /// where a profile row's `ensure_no_cwd_program` check lives — a
+    /// hand-edited row naming `{cwd}` as its program would otherwise decode
+    /// into a well-formed `Profile` that no create could have written and
+    /// no restart could safely launch.
     #[tokio::test]
     async fn a_corrupt_profile_row_is_refused_by_both_readers() {
         for (column, value, expected) in [
@@ -9976,6 +10262,12 @@ mod tests {
             (
                 "resume_template",
                 "'[\"{conversation}\", \"--resume\"]'",
+                "the PROGRAM",
+            ),
+            ("invocation", "'{cwd} claude'", "the PROGRAM"),
+            (
+                "resume_template",
+                "'[\"{cwd}\", \"claude\", \"--resume\", \"{conversation}\"]'",
                 "the PROGRAM",
             ),
             (
@@ -10026,18 +10318,36 @@ mod tests {
     /// Create and update are asserted together because an update that
     /// accepted what a create refuses would let a bounded catalog be grown
     /// past its bound one edit at a time.
+    ///
+    /// The two `{cwd}`-as-program cases (invocation and template)
+    /// additionally pin the shared refusal wording
+    /// `agent_kind::ensure_no_cwd_program` produces. That is the same
+    /// message `validate_profile_fields` hands back to the handler, which
+    /// is what the profile editor actually shows — but the store methods
+    /// under test here wrap it with their own "refusing to store this
+    /// profile:" prefix before returning it, so this pins the shared
+    /// wording embedded in the store's error, not a byte-for-byte capture
+    /// of the editor's text; `handlers.rs`'s own `CreateProfile` /
+    /// `UpdateProfile` tests pin that boundary directly.
     #[tokio::test]
     async fn the_store_refuses_a_profile_no_create_could_use() {
         let (_dir, store) = fresh_store().await;
         let seeded = store.profiles().await.expect("catalog").len();
 
-        for (what, name, invocation, kind, template) in [
+        // `pins_wording` replaces a `what.contains("{cwd}")` string check
+        // that used the case's prose label as control flow — fragile,
+        // because renaming a label for clarity would silently stop
+        // checking the wording. An explicit field says which cases carry
+        // the wording assertion without coupling it to how the case is
+        // described.
+        for (what, name, invocation, kind, template, pins_wording) in [
             (
                 "a blank name",
                 "   ",
                 "bash",
                 farhelm_proto::AgentKind::Generic,
                 None,
+                false,
             ),
             (
                 "an invocation naming no program",
@@ -10045,6 +10355,7 @@ mod tests {
                 "''",
                 farhelm_proto::AgentKind::Generic,
                 None,
+                false,
             ),
             (
                 "a template whose program slot is the placeholder",
@@ -10055,9 +10366,31 @@ mod tests {
                     crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                     "--resume".to_string(),
                 ]),
+                false,
+            ),
+            (
+                "an invocation whose program slot is the {cwd} placeholder",
+                "cwd program invocation",
+                "{cwd} claude",
+                farhelm_proto::AgentKind::Claude,
+                None,
+                true,
+            ),
+            (
+                "a resume template whose program slot is the {cwd} placeholder",
+                "cwd program template",
+                "claude",
+                farhelm_proto::AgentKind::Claude,
+                Some(vec![
+                    crate::agent_kind::CWD_PLACEHOLDER.to_string(),
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ]),
+                true,
             ),
         ] {
-            store
+            let create_err = store
                 .create_profile(
                     name.to_string(),
                     invocation.to_string(),
@@ -10068,7 +10401,7 @@ mod tests {
                 .expect_err(&format!(
                     "a create with {what} must be refused by the store"
                 ));
-            store
+            let update_err = store
                 .update_profile(farhelm_proto::Profile {
                     id: "starter-claude".to_string(),
                     name: name.to_string(),
@@ -10078,6 +10411,24 @@ mod tests {
                 })
                 .await
                 .expect_err(&format!("and so must an update with {what}"));
+            // The `{cwd}` cases exist to pin the FULL wording, not merely
+            // that a refusal occurs: a future change that refused the
+            // shape for a different reason, or dropped part of the
+            // message, would silently regress the only UI the placeholder
+            // gets. The other cases above only assert that a refusal
+            // happens at all.
+            if pins_wording {
+                for (side, err) in [("create", &create_err), ("update", &update_err)] {
+                    let rendered = err.to_string();
+                    assert!(
+                        rendered.contains("PROGRAM")
+                            && rendered.contains(crate::agent_kind::CWD_PLACEHOLDER)
+                            && rendered.contains("belongs in an argument slot"),
+                        "{side}'s refusal for {what} must use the full placeholder-as-program \
+                         wording: {rendered}"
+                    );
+                }
+            }
         }
 
         assert_eq!(

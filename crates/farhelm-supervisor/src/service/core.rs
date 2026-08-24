@@ -4712,7 +4712,11 @@ impl Supervisor {
     /// `agent_kind::ensure_resume_template`), which is the same rule profile
     /// writes enforce. A raw create is otherwise the door through which a
     /// command line that names no program — `''` splits into a one-element
-    /// argv holding the empty string — reaches tmux.
+    /// argv holding the empty string — reaches tmux. An additional check
+    /// refuses a `{cwd}` placeholder as the program
+    /// (`agent_kind::ensure_no_cwd_program`): a raw create is the one path
+    /// that reaches tmux without a profile in front of it, so it needs the
+    /// identical refusal the profile editor applies.
     ///
     /// ## Profile resolution (PLAN_M6_75.md item 4)
     ///
@@ -4929,6 +4933,13 @@ impl Supervisor {
         // for a while; this is the same rule reaching the raw path.
         crate::agent_kind::ensure_executable_argv("agent invocation", &argv)
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        // A raw create is the boundary that reaches tmux without ever
+        // passing through a profile, so it needs the same `{cwd}`-as-PROGRAM
+        // refusal the profile editor applies (`store::validate_profile_fields`)
+        // — the rule is about the shape of the argv, not about which door it
+        // came through.
+        crate::agent_kind::ensure_no_cwd_program("agent invocation", &argv)
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         // The resume-template OVERRIDE is caller data on exactly the same
         // footing as a profile's template, and it becomes this session's
         // immutable snapshot — so it is held to the same rule here rather
@@ -5080,11 +5091,15 @@ impl Supervisor {
     ///   ([`LaunchRequest::launch_cwd`]), so the same link cannot be
     ///   repointed again between this check and the tmux call.
     /// - The stored invocation must still be an executable argv
-    ///   (`agent_kind::ensure_executable_argv`), and so must the stored
-    ///   resume template. They were once, so this cannot fail for a row this
-    ///   build wrote — but the database is a trust boundary like any other
-    ///   input (`store`'s own decode says the same), and the alternative to
-    ///   checking is handing tmux a vector that names no program.
+    ///   (`agent_kind::ensure_executable_argv`) whose program is not the
+    ///   `{cwd}` placeholder (`agent_kind::ensure_no_cwd_program`), and so
+    ///   must the stored resume template. They were once, so this cannot
+    ///   fail for a row this build wrote — but the database is a trust
+    ///   boundary like any other input (`store`'s own decode says the
+    ///   same), and the alternative to checking is handing tmux a vector
+    ///   that names no program, or (slot 0 is never substituted) one that
+    ///   would exec a program literally named `{cwd}` instead of failing
+    ///   loudly on the refusal.
     ///
     /// A retry whose row is GONE falls back to validating the request
     /// normally. That is the honest fallback rather than a failure: there is
@@ -5123,6 +5138,17 @@ impl Supervisor {
         // `''` and an embedded NUL both survive a round trip through
         // SQLite, and neither is an argv anything can run.
         crate::agent_kind::ensure_executable_argv(
+            "the interrupted attempt's recorded agent invocation",
+            &argv,
+        )
+        .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        // `decode_session_row` already refuses a `{cwd}`-first invocation
+        // when the row is loaded, so a row read through the store cannot
+        // carry one here. Checked again anyway: this is the gate on the
+        // vector about to be exec'd, and the repo's pattern for a rule this
+        // sharp is to hold both ends of the pipe to it rather than trust
+        // that the one enforcing end never changes underneath the other.
+        crate::agent_kind::ensure_no_cwd_program(
             "the interrupted attempt's recorded agent invocation",
             &argv,
         )
@@ -12314,6 +12340,96 @@ pub(crate) mod tests {
         assert!(
             missing.contains("available profiles") && missing.contains("starter-claude"),
             "a missing exact name lists candidates the caller can send: {missing}"
+        );
+    }
+
+    /// A raw create is the one path that reaches tmux with no profile in
+    /// front of it — its invocation comes straight from the HTTP API's
+    /// `CreateSession` (or a test), never from `farhelm spawn`, which only
+    /// selects or derives a profile and never carries a raw invocation. So
+    /// `{cwd}` as the invocation's PROGRAM has to be refused here too, in
+    /// the identical wording the profile editor gives
+    /// (`agent_kind::ensure_no_cwd_program`) — otherwise a wrapper-shaped
+    /// invocation given directly to the raw-create path would slip past
+    /// the one boundary a profile write goes through.
+    #[tokio::test]
+    async fn a_raw_create_refuses_a_cwd_placeholder_as_the_program() {
+        let state = StateDir::new();
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = work.path().to_string_lossy().to_string();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let refusal = match sup
+            .validate_create(CreateInputs {
+                cwd: &cwd,
+                parent: None,
+                mode: CreateMode::Raw {
+                    invocation: format!("{} claude", crate::agent_kind::CWD_PLACEHOLDER),
+                    agent_kind: None,
+                    resume_template: None,
+                },
+                title: None,
+                cols: 80,
+                rows: 24,
+            })
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a `{{cwd}}`-first invocation must not validate"),
+        };
+        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
+        let refusal = format!("{refusal:#}");
+        // Pin the FULL shared wording, not one fragment: an editor user
+        // needs the placeholder name to recognize what tripped the
+        // refusal, "PROGRAM" to understand why, and the remedy to know
+        // what to do about it. A test that checked only one substring
+        // could pass while any of the other two silently regressed away.
+        assert!(
+            refusal.contains(crate::agent_kind::CWD_PLACEHOLDER)
+                && refusal.contains("PROGRAM")
+                && refusal.contains("belongs in an argument slot"),
+            "the refusal uses the shared placeholder-as-program wording: {refusal}"
+        );
+    }
+
+    /// `{cwd}` is legal anywhere past the program slot, and by design
+    /// filling it is spawn-time's job (`agent_kind::fill_cwd`, meant to be
+    /// called only from `Supervisor::spawn_agent`, once the launch cwd is
+    /// known) rather than validation's — so a wrapper invocation must
+    /// validate successfully with the placeholder still literally present
+    /// in the resulting `LaunchRequest`. `spawn_agent` does not wire up the
+    /// fill in this commit (that lands in the next commit of the stack);
+    /// this test pins the half already in place: "argv shape is
+    /// acceptable" is checked here and must not eagerly substitute the
+    /// placeholder validation is not responsible for.
+    #[tokio::test]
+    async fn a_raw_create_accepts_a_cwd_placeholder_in_an_argument_slot() {
+        let state = StateDir::new();
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = work.path().to_string_lossy().to_string();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let resolved = sup
+            .validate_create(CreateInputs {
+                cwd: &cwd,
+                parent: None,
+                mode: CreateMode::Raw {
+                    invocation: format!("wrapper {} claude", crate::agent_kind::CWD_PLACEHOLDER),
+                    agent_kind: None,
+                    resume_template: None,
+                },
+                title: None,
+                cols: 80,
+                rows: 24,
+            })
+            .await
+            .expect("a `{cwd}` in an argument slot is a valid invocation");
+        assert_eq!(
+            resolved.argv,
+            ["wrapper", crate::agent_kind::CWD_PLACEHOLDER, "claude"],
+            "validation must not substitute the placeholder itself"
         );
     }
 

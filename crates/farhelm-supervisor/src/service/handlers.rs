@@ -4330,6 +4330,14 @@ mod tests {
     /// placeholder-free resume template are both refused here rather than
     /// at every create that later names the profile, which is what keeps
     /// "pick a profile" from failing for reasons the picker could not show.
+    ///
+    /// The trailing `{cwd}`-as-program block (invocation and template) is
+    /// asserted separately from the table above because it is the one
+    /// case where the exact wording matters, not merely that a refusal
+    /// happens: this handler's `message` is what the profile editor
+    /// renders verbatim, so it has to carry the placeholder name, the
+    /// reason ("PROGRAM"), and the remedy ("belongs in an argument slot")
+    /// together.
     #[tokio::test]
     async fn a_profile_write_is_refused_when_it_breaks_a_bound_or_could_never_launch() {
         let state = StateDir::new();
@@ -4497,6 +4505,69 @@ mod tests {
                 "request {req_id}'s refusal must say what was wrong: {message}"
             );
         }
+
+        // `{cwd}` as the PROGRAM, checked at this handler boundary rather
+        // than only in the store's own tests, because this is the reply
+        // the profile editor actually renders — a single fragment check
+        // here would leave the placeholder name, "PROGRAM", or the
+        // "belongs in an argument slot" remedy free to silently drop out
+        // of the message the user reads.
+        for (req_id, invocation, resume_template) in [
+            (
+                40,
+                format!("{} claude", crate::agent_kind::CWD_PLACEHOLDER),
+                None,
+            ),
+            (
+                41,
+                "claude".to_string(),
+                Some(vec![
+                    crate::agent_kind::CWD_PLACEHOLDER.to_string(),
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ]),
+            ),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateProfile {
+                    req_id,
+                    name: format!("cwd-as-program {req_id}"),
+                    invocation,
+                    agent_kind: AgentKind::Claude,
+                    resume_template,
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error {
+                req_id: replied,
+                kind,
+                message,
+            } = decoded
+            else {
+                panic!("request {req_id} must be refused, got {decoded:?}");
+            };
+            assert_eq!(replied, req_id, "the refusal must correlate");
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert!(
+                message.contains(crate::agent_kind::CWD_PLACEHOLDER)
+                    && message.contains("PROGRAM")
+                    && message.contains("belongs in an argument slot"),
+                "request {req_id}'s refusal must carry the complete editor-facing message: \
+                 {message}"
+            );
+        }
+
         assert_eq!(
             sup.store.profiles().await.expect("catalog").len(),
             4,
@@ -4618,6 +4689,10 @@ mod tests {
     /// passing for the unrelated reason that the id is unknown — and the
     /// stored record is read back afterwards to prove a refused edit
     /// changed nothing.
+    ///
+    /// The trailing `{cwd}`-as-program block mirrors the create-side test's
+    /// full-wording assertion on `UpdateProfile`'s own validation call,
+    /// which is wired independently of `CreateProfile`'s.
     #[tokio::test]
     async fn an_edit_is_held_to_the_same_rules_as_a_create() {
         let state = StateDir::new();
@@ -4719,6 +4794,69 @@ mod tests {
             assert!(
                 message.contains(expected),
                 "edit {req_id}'s refusal must say what was wrong: {message}"
+            );
+        }
+
+        // `{cwd}` as the PROGRAM, held to the same full-wording bar as the
+        // create-side test: `UpdateProfile` runs its own
+        // `validate_profile_fields` call independently of `CreateProfile`'s
+        // (`handle_update_profile`, not shared code beyond the validator
+        // itself), so a regression in this wiring specifically would pass
+        // every create-side test above while still breaking edits.
+        for (req_id, invocation, resume_template) in [
+            (
+                50,
+                format!("{} claude", crate::agent_kind::CWD_PLACEHOLDER),
+                None,
+            ),
+            (
+                51,
+                "claude".to_string(),
+                Some(vec![
+                    crate::agent_kind::CWD_PLACEHOLDER.to_string(),
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ]),
+            ),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::UpdateProfile {
+                    req_id,
+                    profile: farhelm_proto::Profile {
+                        invocation,
+                        resume_template,
+                        agent_kind: AgentKind::Claude,
+                        ..original.clone()
+                    },
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error {
+                req_id: replied,
+                kind,
+                message,
+            } = decoded
+            else {
+                panic!("edit {req_id} must be refused, got {decoded:?}");
+            };
+            assert_eq!(replied, req_id);
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert!(
+                message.contains(crate::agent_kind::CWD_PLACEHOLDER)
+                    && message.contains("PROGRAM")
+                    && message.contains("belongs in an argument slot"),
+                "edit {req_id}'s refusal must carry the complete editor-facing message: {message}"
             );
         }
 
