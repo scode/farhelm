@@ -153,6 +153,25 @@ pub enum Script {
     /// Writes a Codex-shaped rollout record on first input; otherwise
     /// identical to [`Script::ClaudeRecord`].
     CodexRecord,
+    /// [`Script::ClaudeRecord`] plus a `report <id>` command that fires the
+    /// REAL `farhelm internal hook` binary, standing in for the vendor's
+    /// own `SessionStart` hook.
+    ///
+    /// The stand-in is deliberately thin. Everything downstream of the
+    /// vendor is genuine: the hook binary, the payload shape both vendors
+    /// send, the supervisor socket, the injected session credential this
+    /// process already carries in its environment, and the supervisor's
+    /// authentication of it. The only faked thing is *what makes the hook
+    /// run* — a typed line instead of a vendor deciding a conversation
+    /// started. That is precisely the part CI cannot have, and precisely
+    /// the part the `#[ignore]`d real-agent tests exist to keep honest.
+    ///
+    /// Being built on `ClaudeRecord` rather than beside it is what lets one
+    /// session hold BOTH kinds of evidence — a scan-visible record on disk
+    /// and a report — which is the only way to test that a report wins.
+    ///
+    /// See [`hook_report`] for the markers and what each one proves.
+    HookReport,
     /// Echoes one rc-file-sourced environment variable
     /// ([`RC_MARKER_VAR`]) at startup, then behaves like [`Script::Basic`].
     ///
@@ -235,8 +254,9 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
              i=$((i + 1)); done",
             "spawner-fork-storm",
         ),
-        Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home),
-        Script::CodexRecord => record_agent(RecordShape::Codex, record_home),
+        Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home, false),
+        Script::CodexRecord => record_agent(RecordShape::Codex, record_home, false),
+        Script::HookReport => record_agent(RecordShape::Claude, record_home, true),
         Script::EnvEcho => env_echo(),
     }
 }
@@ -342,7 +362,19 @@ enum RecordShape {
 /// Markers (`RECORD-WRITTEN:`, `RECORD-APPENDED:`, `RECORD-FORKED:`) are
 /// printed so tests key on the record genuinely existing rather than on a
 /// sleep — the same discipline `FAKE-AGENT READY` established.
-fn record_agent(shape: RecordShape, home: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+///
+/// `hook_reports` adds ONE extra input form, `report <id>`, and nothing
+/// else ([`Script::HookReport`]). It is a flag rather than a second copy of
+/// this function because every property above has to hold for a hooked
+/// session too: the whole point of the hook tests is that a session can
+/// hold a scan-visible record AND a report at the same time, and a
+/// divergent second implementation of the record half would be testing the
+/// wrong fixture.
+fn record_agent(
+    shape: RecordShape,
+    home: Option<std::path::PathBuf>,
+    hook_reports: bool,
+) -> anyhow::Result<()> {
     let home = home.context(
         "the record-writing fake-agent scripts need --record-home; without it there is no \
          tree to write into and a test would silently observe no capture",
@@ -439,6 +471,14 @@ fn record_agent(shape: RecordShape, home: Option<std::path::PathBuf>) -> anyhow:
                 let (id, _forked_path) = write_record(shape, &home, &cwd)?;
                 writeln!(out, "RECORD-FORKED:{id}\r")?;
             }
+            // The one extra form [`Script::HookReport`] adds. Guarded on
+            // the flag so `ClaudeRecord`/`CodexRecord` keep treating a line
+            // starting with `report ` as ordinary prompt text — those
+            // fixtures' contract with their tests must not shift because a
+            // sibling script grew a command.
+            (line, _) if hook_reports && line.starts_with(REPORT_COMMAND) => {
+                hook_report(line[REPORT_COMMAND.len()..].trim(), &mut out)?;
+            }
             _ => {
                 if current.is_none() {
                     let (id, path) = write_record(shape, &home, &cwd)?;
@@ -450,6 +490,164 @@ fn record_agent(shape: RecordShape, home: Option<std::path::PathBuf>) -> anyhow:
         }
         write!(out, "> ")?;
         out.flush()?;
+    }
+    Ok(())
+}
+
+/// The prefix of [`Script::HookReport`]'s extra input form, `report <id>`.
+///
+/// Named so the matching arm and the slicing that follows it cannot drift
+/// apart by a character. It is NOT shared with the tests: this crate has no
+/// library target, so an integration test cannot reach this constant and
+/// spells the command itself — a rename here has to be made in
+/// `tests/e2e/hook_identity.rs` too, where it shows up as a fixture that
+/// never answers rather than as a compile error.
+const REPORT_COMMAND: &str = "report ";
+
+/// Longest [`hook_report`] waits for one hook child before declaring it
+/// hung, killing it, and carrying on.
+///
+/// Generously past the hook binary's own 2 s internal budget, and well
+/// inside the 30 s the tests give a `report` line: a fixture that blocked
+/// forever on `wait_with_output` would take its test's whole deadline and
+/// then fail with a transcript that says nothing about why, whereas a
+/// `HOOK-HUNG:` marker names the failure in the pane the test prints.
+const HOOK_CHILD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Fire the real `farhelm internal hook` for `conversation`, as the vendor
+/// would at `SessionStart`, and report what came back.
+///
+/// The child is the CURRENT EXECUTABLE — the same multi-call binary this
+/// fixture is a subcommand of, and the same one the supervisor injects into
+/// the vendor's hook configuration — invoked exactly as the injected
+/// configuration invokes it. The environment is inherited untouched because
+/// that is where the session credential lives (`FARHELM_SESSION_ID` and
+/// friends, injected at launch); nothing here has to know those names, and
+/// a test that had to set them would be faking the very thing under test.
+///
+/// The payload is deliberately small: `session_id` and `source` are the
+/// only fields the hook reads at all, and both vendors send many more that
+/// it is specified to ignore, so transcribing them would test this
+/// fixture's copying rather than the parser's tolerance.
+/// `hook_event_name` is the one field here the hook never looks at — it is
+/// carried because every real `SessionStart` payload carries it, so the
+/// bytes on the wire stay vendor-shaped rather than minimal.
+///
+/// ## The markers, and what each proves
+///
+/// - `HOOK-REPORTED:<id>` — the hook process ran to completion for `<id>`.
+///   Tests key on this instead of sleeping.
+/// - `HOOK-HUNG:<id>` — the hook child outlived [`HOOK_CHILD_DEADLINE`]
+///   and was killed. It replaces `HOOK-REPORTED:` rather than joining it,
+///   so a test waiting on the report fails on its own deadline with this
+///   line in the transcript naming the reason.
+/// - `HOOK-STDOUT-EMPTY` — the child said nothing on EITHER descriptor and
+///   exited 0. This is the silence contract (see `crate::hook`): Claude
+///   feeds a `SessionStart` hook's stdout to the model as text and shows
+///   stderr to the user on a non-zero exit, so a single stray byte here is
+///   a user-visible defect. Asserted from inside a REAL supervised session,
+///   which is the only place the credential path, the socket dial and the
+///   reply are all genuine at once.
+/// - `HOOK-STDOUT-DIRTY:<bytes>` / `HOOK-EXIT:<code>` — the two ways that
+///   contract breaks, reported separately (and never instead of each other)
+///   so a failing test names which one happened rather than just "not
+///   silent".
+///
+/// Both descriptors are PIPED rather than inherited, and that is the
+/// mechanism as much as the assertion: inheriting them would send the
+/// child's output to this fixture's own pty, where it would be
+/// indistinguishable from the fixture's markers and would silently satisfy
+/// a naive transcript scan.
+fn hook_report(conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
+    let exe = std::env::current_exe().context("locating this fixture's own executable")?;
+    let payload = serde_json::json!({
+        "session_id": conversation,
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+    })
+    .to_string();
+
+    let mut child = std::process::Command::new(&exe)
+        .args(["internal", "hook"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("spawning the hook binary {}", exe.display()))?;
+    {
+        // Scoped so the pipe is CLOSED before the wait below: the hook
+        // reads to EOF under a budget, and a writer that never hangs up
+        // would turn every report into a timeout.
+        let mut stdin = child
+            .stdin
+            .take()
+            .context("the hook child was spawned with a piped stdin")?;
+        stdin
+            .write_all(payload.as_bytes())
+            .context("writing the SessionStart payload to the hook")?;
+    }
+    // Polled against a local deadline rather than `wait_with_output`,
+    // which waits forever. The hook is the process under test here, so
+    // "it hung" is a result this fixture has to be able to REPORT: a
+    // blocking wait would instead take the whole terminal down with it,
+    // leaving the test to fail on its own timeout with a transcript that
+    // never says a hook was involved. Polling is safe against the pipes
+    // only because the child is silent by contract and its output could
+    // not fill a pipe buffer even when it misbehaves.
+    let started = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait().context("polling the hook binary")? {
+            Some(status) => break Some(status),
+            None if started.elapsed() >= HOOK_CHILD_DEADLINE => {
+                // Killed AND reaped: a fixture that only signalled would
+                // leave a zombie behind for every hung report, and the
+                // session outlives many of them.
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    };
+    let Some(status) = status else {
+        writeln!(out, "HOOK-HUNG:{conversation}\r")?;
+        return Ok(());
+    };
+
+    // Read only after the child is gone: its descriptors are closed by
+    // then, so neither read can block. Both are taken with `context`
+    // rather than skipped when absent — a missing pipe would read as an
+    // empty one, which is exactly the verdict this fixture exists to
+    // report and must never reach by accident.
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    child
+        .stdout
+        .take()
+        .context("the hook child was spawned with a piped stdout")?
+        .read_to_end(&mut stdout)
+        .context("reading the hook's stdout")?;
+    child
+        .stderr
+        .take()
+        .context("the hook child was spawned with a piped stderr")?
+        .read_to_end(&mut stderr)
+        .context("reading the hook's stderr")?;
+
+    writeln!(out, "HOOK-REPORTED:{conversation}\r")?;
+    let noise = stdout.len() + stderr.len();
+    if noise == 0 && status.success() {
+        writeln!(out, "HOOK-STDOUT-EMPTY\r")?;
+    } else {
+        if noise > 0 {
+            writeln!(out, "HOOK-STDOUT-DIRTY:{noise}\r")?;
+        }
+        if !status.success() {
+            // `-1` stands in for "killed by a signal", which has no exit
+            // code of its own; either way the contract is broken and the
+            // test fails with the code printed.
+            writeln!(out, "HOOK-EXIT:{}\r", status.code().unwrap_or(-1))?;
+        }
     }
     Ok(())
 }
