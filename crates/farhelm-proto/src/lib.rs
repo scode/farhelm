@@ -85,7 +85,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// clear error per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
 ///
-/// Within version 11 the additive discipline of every prior version
+/// Within version 12 the additive discipline of every prior version
 /// continues to apply, with version 9's sharper reading intact: new
 /// optional fields with decode defaults are fine WHEN ignoring one is
 /// harmless; a field whose omission changes behavior, a new tagged variant,
@@ -116,15 +116,18 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// before it ever sends a create — there is nothing for this protocol to
 /// carry.
 ///
-/// `protocol_version_is_pinned_at_11` (renamed at every bump since `_at_4`)
+/// `protocol_version_is_pinned_at_12` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
 /// never there.
 ///
 /// The entry-by-entry history for versions 2 through 11 is preserved in
-/// `lore/2026-08-20-protocol-version-changelog.md`.
-pub const PROTOCOL_VERSION: u32 = 11;
+/// `lore/2026-08-20-protocol-version-changelog.md`; that file is frozen at
+/// the moment it was written (`lore/AGENTS.md`) and is not extended for
+/// version 12 or later — see [`ControlMsg::ReportConversation`] for what
+/// this bump added.
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -1678,6 +1681,94 @@ pub enum ControlMsg {
     /// freshly recomputed `restart_offer`) so a caller does not have to
     /// re-list to see it.
     SessionRestarted { req_id: u64, session: SessionInfo },
+    /// A session's agent reporting its own conversation identity from
+    /// inside its process — sent by the vendor `SessionStart` hook farhelm
+    /// injects into the agent's launch argv, the moment a new (or resumed)
+    /// conversation id comes into being. Accepted only on a
+    /// session-authenticated connection (`ControlMsg::Hello::auth`), and
+    /// only to report on the session that connection is authenticated AS —
+    /// a peer cannot report a conversation for any session but its own. A
+    /// full-authority (helm) connection has no session identity to report
+    /// and must not send this message at all: the supervisor's
+    /// full-authority dispatch refuses it explicitly, distinctly from its
+    /// catch-all, so a misbehaving helm gets an answer rather than waiting
+    /// forever for one. This vocabulary-level contract is what the
+    /// dispatch in `handle_control`/`handle_restricted_control` enforces;
+    /// this crate only states it.
+    ///
+    /// `conversation` is exactly the value the agent kind's resume
+    /// template substitutes for its `{conversation}` placeholder — the
+    /// literal argument a later `--resume`-shaped relaunch would pass, not
+    /// a display name or a value this crate derives.
+    ///
+    /// ## Trust boundary
+    ///
+    /// Every process in the session's tree holds the session credential —
+    /// the agent itself, and anything its tools spawn — so any of them can
+    /// send this message and REPLACE the resume identity the supervisor
+    /// has recorded. That is a wider power than `CreateSession` grants a
+    /// session-authenticated peer today, but not a new hole: it is the
+    /// same boundary the conversation-record SCAN already relies on, since
+    /// the agent writes the very record files that scan reads to infer an
+    /// id in the first place. What that boundary does and does not protect
+    /// must be stated exactly. Any holder of the credential can redirect
+    /// the session's resume to ANY id it knows that passes the supervisor's
+    /// plausibility check (`agent_kind::is_plausible_conversation_id`: one
+    /// word of 1–128 ASCII graphic bytes, no leading `-`, no quotes or
+    /// backslashes — that function is the single definition, for the scan
+    /// and for reports alike), including the id of some other existing
+    /// conversation of the same user. The mitigations do not prevent that
+    /// misdirection; they prevent the id from becoming anything OTHER than
+    /// an id: the shape check, and the fact that the resume argv is always
+    /// substituted into its own argv slot and never spliced into a command
+    /// string, mean a hostile report cannot make a relaunch run anything.
+    /// Which conversation gets resumed is, and always was, the agent's
+    /// call.
+    ///
+    /// ## Ordering and replacement
+    ///
+    /// A second report from the same launch REPLACES the first rather than
+    /// being refused as a conflict: Claude's `/clear` and Codex's `/new`
+    /// both start a genuinely new conversation, with a new id, inside the
+    /// SAME process — the hook fires again, and the new id is exactly what
+    /// a later resume should target. Overwriting the prior report is
+    /// therefore the correct outcome, not a duplicate request to reject.
+    /// Reports are last-write-wins with no ordering field of their own,
+    /// which is sound only because of how the senders behave: both vendors
+    /// run a `SessionStart` hook to completion (or to its timeout) before
+    /// the agent continues, so one launch's reports complete in the order
+    /// its conversations came into being, never overlapping. Across
+    /// launches the supervisor fences on the session's generation, so a
+    /// report from a previous launch of the same session is refused rather
+    /// than applied.
+    ReportConversation {
+        req_id: u64,
+        /// The conversation id as the agent's own hook reported it.
+        /// Treated as an opaque, untrusted string until the supervisor's
+        /// plausibility check accepts it — see this variant's own "Trust
+        /// boundary" section.
+        conversation: String,
+        /// The vendor's own word for why the hook fired (Claude's hook
+        /// payload names this field `source`, with values including
+        /// `"startup"`, `"resume"`, `"clear"`, and `"compact"`; Codex has
+        /// its own vocabulary). Recorded for diagnostics only — nothing in
+        /// this crate or the supervisor keys behavior on this value, so a
+        /// vendor renaming or adding a reason can never break decoding or
+        /// dispatch.
+        source: String,
+    },
+    /// Acknowledgement of `ReportConversation`, sent only once the
+    /// supervisor has validated the id AND written it durably — receiving
+    /// this means a restart will resume that conversation. Every other
+    /// outcome (bad credential, implausible id, a supervisor that is not
+    /// recording, a launch that has since been replaced, a store failure)
+    /// arrives as a correlated `Error` instead, so a sender can tell
+    /// refusal from acceptance and transport loss from both. The hook that
+    /// sends the request cannot ACT on any of these — its own contract is
+    /// to run silently and exit successfully regardless — but it does wait
+    /// for the reply within its budget and records which one it got in its
+    /// per-session log, which is the only place a lost report is visible.
+    ConversationReported { req_id: u64 },
     /// Rename a session (PLAN_M5.md item 1) — SPEC.md's v1 client-surface
     /// rename verb. The supervisor is the authority on accepted title text;
     /// clients carry it verbatim and render any refusal.
@@ -2256,6 +2347,7 @@ impl ControlMsg {
             | ControlMsg::SessionDeleted { req_id, .. }
             | ControlMsg::SessionArchived { req_id, .. }
             | ControlMsg::SessionRestarted { req_id, .. }
+            | ControlMsg::ConversationReported { req_id, .. }
             | ControlMsg::SessionRenamed { req_id, .. }
             | ControlMsg::ProfileList { req_id, .. }
             | ControlMsg::ProfileCreated { req_id, .. }
@@ -2277,6 +2369,7 @@ impl ControlMsg {
             | ControlMsg::DeleteSession { .. }
             | ControlMsg::ArchiveSession { .. }
             | ControlMsg::RestartSession { .. }
+            | ControlMsg::ReportConversation { .. }
             | ControlMsg::RenameSession { .. }
             | ControlMsg::ListProfiles { .. }
             | ControlMsg::CreateProfile { .. }
@@ -2316,6 +2409,7 @@ impl ControlMsg {
             | ControlMsg::DeleteSession { req_id, .. }
             | ControlMsg::ArchiveSession { req_id, .. }
             | ControlMsg::RestartSession { req_id, .. }
+            | ControlMsg::ReportConversation { req_id, .. }
             | ControlMsg::RenameSession { req_id, .. }
             | ControlMsg::ListProfiles { req_id, .. }
             | ControlMsg::CreateProfile { req_id, .. }
@@ -2333,6 +2427,7 @@ impl ControlMsg {
             | ControlMsg::SessionDeleted { .. }
             | ControlMsg::SessionArchived { .. }
             | ControlMsg::SessionRestarted { .. }
+            | ControlMsg::ConversationReported { .. }
             | ControlMsg::SessionRenamed { .. }
             | ControlMsg::ProfileList { .. }
             | ControlMsg::ProfileCreated { .. }
@@ -3115,10 +3210,14 @@ mod tests {
     /// history linked from the const's own docs for the M2 bump to 3, the
     /// M2.5 bump to 4, the M3 bump to 5, the M4 bump to 6, the M5 bump to 7,
     /// the M6 bump to 8, the non-displacing attach's bump to 9, the M6.75
-    /// bump to 10, and M7's vocabulary bump to 11): pinning its value
-    /// here makes an accidental re-bump (or a forgotten one, if a later change
-    /// needed it) a loud test failure rather than a silent drift discovered only
-    /// by two builds refusing to talk to each other.
+    /// bump to 10, and M7's vocabulary bump to 11). The bump to 12 adds the
+    /// agent-reported conversation identity pair,
+    /// `ControlMsg::ReportConversation`/`ConversationReported` — a new
+    /// tagged variant pair, and so incompatible by this crate's own
+    /// additive-discipline rule same as every prior bump. Pinning the
+    /// value here makes an accidental re-bump (or a forgotten one, if a
+    /// later change needed it) a loud test failure rather than a silent
+    /// drift discovered only by two builds refusing to talk to each other.
     ///
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
@@ -3126,8 +3225,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[test]
-    fn protocol_version_is_pinned_at_11() {
-        assert_eq!(PROTOCOL_VERSION, 11);
+    fn protocol_version_is_pinned_at_12() {
+        assert_eq!(PROTOCOL_VERSION, 12);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -5073,6 +5172,105 @@ mod tests {
         );
     }
 
+    /// Golden JSON for `ReportConversation`/`ConversationReported`, pinned
+    /// the same way as `stop_and_delete_json_shapes_are_pinned`: a serde
+    /// attribute change here (dropping `rename_all`, renaming a field)
+    /// would compile and round-trip cleanly while quietly producing bytes
+    /// an unmodified peer cannot parse.
+    #[test]
+    fn report_conversation_json_shapes_are_pinned() {
+        let report = ControlMsg::ReportConversation {
+            req_id: 21,
+            conversation: "abc123def456".to_string(),
+            source: "startup".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&report).unwrap(),
+            serde_json::json!({
+                "type": "report_conversation",
+                "req_id": 21,
+                "conversation": "abc123def456",
+                "source": "startup",
+            })
+        );
+
+        let reported = ControlMsg::ConversationReported { req_id: 21 };
+        assert_eq!(
+            serde_json::to_value(&reported).unwrap(),
+            serde_json::json!({
+                "type": "conversation_reported",
+                "req_id": 21,
+            })
+        );
+    }
+
+    /// `ReportConversation`/`ConversationReported` round-tripped through the
+    /// real encode/decode path, matching `stop_and_delete_roundtrip_through_frames`'s
+    /// treatment of the M2 additions — this is what would catch a drift
+    /// between the codec's framing and serde's JSON shape for the version
+    /// 12 vocabulary this bump adds, which the JSON-only golden test above
+    /// cannot see.
+    #[test]
+    fn report_conversation_roundtrip_through_frames() {
+        for msg in [
+            ControlMsg::ReportConversation {
+                req_id: 1,
+                conversation: "abc123def456".to_string(),
+                source: "resume".to_string(),
+            },
+            ControlMsg::ConversationReported { req_id: 1 },
+        ] {
+            let mut wire = Vec::new();
+            Frame::control(&msg).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                msg
+            );
+        }
+    }
+
+    /// A v11 decoder has neither the report nor the ack tag and must reject
+    /// both messages rather than ignore either as an additive field on an
+    /// older operation — the same reasoning
+    /// `archive_messages_fail_under_a_legacy_v10_decoder` pins for the v10
+    /// -> v11 boundary, one bump earlier.
+    #[test]
+    fn report_conversation_messages_fail_under_a_legacy_v11_decoder() {
+        /// The v11 control slice needed to prove the version-12-earning
+        /// report/ack tags are unrecognized by a decoder that predates
+        /// them. Unknown enum tags fail before any handler could
+        /// accidentally assign them an older meaning; the slice only needs
+        /// ONE known tag to exercise that failure, so it borrows the small
+        /// `StopSession` — mirroring `LegacyV10ControlMsg`'s own choice of
+        /// small variants — rather than something like `RestartSession`
+        /// whose embedded `SessionInfo` trips `clippy::large_enum_variant`
+        /// on a throwaway test-only type.
+        #[derive(Debug, Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum LegacyV11ControlMsg {
+            #[allow(dead_code)]
+            StopSession { req_id: u64, session_id: String },
+        }
+
+        for msg in [
+            ControlMsg::ReportConversation {
+                req_id: 2,
+                conversation: "abc123def456".to_string(),
+                source: "clear".to_string(),
+            },
+            ControlMsg::ConversationReported { req_id: 2 },
+        ] {
+            let decoded =
+                serde_json::from_value::<LegacyV11ControlMsg>(serde_json::to_value(&msg).unwrap());
+            assert!(
+                decoded.is_err(),
+                "a v11 decoder accepted a v12 report_conversation tag: {msg:?}"
+            );
+        }
+    }
+
     /// Version 5's additive rule for FIELDS (see `PROTOCOL_VERSION`'s
     /// docs): the future-extra-field tolerance direction, mirroring
     /// `pause_and_resume_with_future_extra_fields_decode_through_parse_control`.
@@ -6207,6 +6405,30 @@ mod tests {
             UPLOAD_ABORT_REASON_STALLED,
             "transfer stopped making progress (stalled)"
         );
+    }
+
+    /// The version-12 pair must sit in the RIGHT arms of both accessors,
+    /// not merely in some arm: the exhaustive matches force a placement but
+    /// cannot tell a misplacement from a correct one, and each direction
+    /// of error is silent. `ReportConversation` classified as a reply would
+    /// let a peer's echo of the request be delivered as its own answer and
+    /// lose the correlated `Unauthorized`/`InvalidRequest` that the hook
+    /// records in its log; `ConversationReported` classified as a request
+    /// would leave the hook waiting on a reply that the demultiplexer
+    /// never routes to it.
+    #[test]
+    fn report_conversation_pair_is_classified_as_request_and_reply() {
+        let request = ControlMsg::ReportConversation {
+            req_id: 21,
+            conversation: "abc123def456".to_string(),
+            source: "startup".to_string(),
+        };
+        assert_eq!(request.request_req_id(), Some(21));
+        assert_eq!(request.reply_req_id(), None);
+
+        let reply = ControlMsg::ConversationReported { req_id: 21 };
+        assert_eq!(reply.reply_req_id(), Some(21));
+        assert_eq!(reply.request_req_id(), None);
     }
 
     /// [`ControlMsg::reply_req_id`] is what every demultiplexer routes
