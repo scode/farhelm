@@ -145,8 +145,17 @@
                        pane (tab confirm, count banner, attach status) — and
                        the tint a session row takes while hovered or holding
                        focus */
-  --control-hover-bg: #2e333f; /* the hover fill of a bordered control, which
-                                   has to read on --bg-2 as well as on --bg-1 */
+  --control-hover-bg: #2c313d; /* the hover fill of a bordered control, which
+                                   has to read on --bg-2 as well as on --bg-1.
+                                   Also a binding constraint like --fg-1
+                                   below rather than a free pick: this is
+                                   the fill `.btn`'s own --fg-1 text sits on
+                                   while hovered or focused
+                                   (app-css-contrast.test.js pins the pair
+                                   at 4.5:1), so LIGHTENING it any further
+                                   than this — toward the surfaces it has
+                                   to stay distinct from — would take that
+                                   text below AA again */
   --chip-bg: #394252; /* the default-profile badge's small filled chip */
 
   /* Foregrounds, loudest first. Each clears WCAG AA (4.5:1) against
@@ -171,15 +180,16 @@
      --info is a light tone that carries a WORD, the accent is a
      saturated fill or edge that never carries text.
 
-     Spend it on selection and `:focus-visible` — today. Nothing else. A
-     filled primary control is RESERVED for this accent too (TODO.md's
-     "Two-tier buttons" item in the UI refresh), not yet spent: that
-     control has not landed, so claiming it here would describe a UI this
-     sheet does not render. SPEC.md requires the sidebar to mark the
-     selected session's row "readable at a glance rather than only from
-     the titlebar", and a palette that used the accent for decoration
-     before that control exists would have nothing left to make that
-     true. */
+     Spend it on selection, `:focus-visible`, and the filled-primary tier
+     `.btn-primary` renders below — nothing else. That third use is bound
+     by the same one-per-SURFACE discipline `.btn-primary`'s own comment
+     states: the sidebar's resting chrome carries exactly one filled
+     control, and a dialog's own submit is the primary of that dialog, so
+     the accent never spreads into plain decoration. SPEC.md requires the
+     sidebar to mark the selected session's row "readable at a glance
+     rather than only from the titlebar", and a palette that spent the
+     accent more freely would have nothing distinct left to make that
+     true — the narrow spend is what keeps it meaning something. */
   --accent: #5896e8; /* the accent at full strength: the selected row's inset
                         bar and every focus ring */
   --accent-fill: #16294a; /* accent-tinted SURFACE: the selected row, the selected
@@ -230,7 +240,6 @@
                                 its row is plain, hovered, focused, or
                                 selected. */
   --danger-soft: #e0b0b0; /* pale red, for an outline that has to read against a red fill */
-  --danger-border: #5a3838; /* outline of a destructive confirmation */
   --danger-bg: #7a3b3b; /* the filled red banner */
   --danger-bg-dim: #3a2a2a; /* barely-there red hover behind a destructive icon button */
   --danger-fill-hover: #964a4a; /* hover on a control that sits on the red banner */
@@ -696,18 +705,43 @@ samp {
 
 /* ===== Shared button look ========================================= */
 
-/* Shared secondary-button look: `.new-session-button`,
-   the create form's submit button, and the per-row stop/delete buttons
-   all want the same plain outlined box, so that shape lives here ONCE
-   rather than repeated per class (which had drifted into four
-   copy-pasted declaration blocks before this consolidation) — each call
-   site's own class only adds what actually differs (font-size, padding,
-   color, alignment). */
+/* Two-tier button system: before this, every `.btn` — from "new session"
+   down to the row's tiny rename/stop/archive/delete controls — drew the
+   SAME bordered gray box, so a sidebar with a dozen of them read as a wall
+   of identical outlined rectangles with no cue for which one thing was
+   worth clicking. `.btn` (below) is the GHOST tier — transparent border,
+   no fill, a hover/focus background the only resting affordance — and is
+   the DEFAULT look for a control in this system, not a look every control
+   is forced into: `.tab-close` opts out of `.btn` entirely rather than
+   layer on top of it (see its own comment for why). `.btn-primary` is a
+   second class layered on top of `.btn` for the filled, bordered exception
+   a given SURFACE gets.
+
+   "One filled primary per surface" is the actual rule, not "one filled
+   primary in the whole sheet": the sidebar's resting chrome carries
+   exactly one (`.new-session-button`), and each dialog that floats over
+   it — create session, add a host, rename — supplies its own submit as
+   THAT dialog's one primary, since a dialog reads as its own surface
+   rather than being counted against the sidebar's. Everything else, on
+   any surface, stays ghost, including destructive actions, which mark
+   themselves with red TEXT instead of a red fill (`.btn-primary`'s own
+   comment below names the fixed list of call sites that earn the class,
+   and why nothing else does). Shape (font-size, padding, alignment) still
+   lives per call-site class exactly as before; only the look moved here.
+
+   The border is TRANSPARENT, not `none`: a ghost button and a filled-
+   primary or selected one (`.btn-primary`, `.tab.selected`) sit beside
+   each other in several places (a rename form's save next to its cancel,
+   a tab strip's selected tab next to its neighbors), and `border: none`
+   there would make the colored variant 2px taller/wider than its ghost
+   siblings the instant it gained a real border — a box-size jitter that
+   swapping only the border's COLOR avoids, since the reserved 1px never
+   changes width whether transparent or accent-toned. */
 .btn {
   background: none;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  color: var(--fg-0);
+  color: var(--fg-1);
   font: inherit;
   cursor: pointer;
   /* ~100ms, and only on the color that actually changes. This chrome is
@@ -722,14 +756,45 @@ samp {
    token exists to fill: a control can sit on the chrome level or on a
    floating panel, and a hover fill equal to the floating level would
    vanish for every button inside the row actions menu, the create form,
-   and the auth card. */
-.btn:hover:not(:disabled) {
+   and the auth card. Also on `:focus-visible`, not only `:hover`: a ghost
+   control carries no border to mark its box, so a keyboard user tabbing
+   through it needs the same fill the mouse gets, not just the sheet-wide
+   accent outline (below) floating over nothing. */
+.btn:hover:not(:disabled),
+.btn:focus-visible:not(:disabled) {
   background: var(--control-hover-bg);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* The filled-primary tier: exactly the sidebar's "new session" control plus
+   the confirming action of the three affirmative dialogs whose own primary
+   it is — create session, add a host, rename (`.new-session-button`,
+   `.create-session-submit`, `.add-host-submit`, `.rename-submit`). Nothing
+   else in the sheet carries this class; a confirm-delete/-remove stays
+   ghost with red TEXT instead (see those rules below), and confirm-archive
+   stays plain ghost with no color override at all — archiving is
+   reversible (see the archived-state comment further down), so it never
+   earns the danger family's red in the first place. That keeps the one
+   filled control per surface meaning "the affirmative default action
+   here" rather than becoming one more box among equals. `border-color`
+   only, not a full `border` shorthand: `.btn` above already reserves the
+   same 1px solid width and style for every ghost control, so this class
+   only needs to color that already-reserved border — `--accent-edge`
+   rather than plain `--accent`, since the token's own role comment names
+   this exact use ("the outline a filled primary would take"). */
+.btn-primary {
+  background: var(--accent-fill);
+  border-color: var(--accent-edge);
+  color: var(--fg-bright);
+}
+
+.btn-primary:hover:not(:disabled),
+.btn-primary:focus-visible:not(:disabled) {
+  background: var(--accent-fill-hover);
 }
 
 /* ===== Focus ====================================================== */
@@ -934,7 +999,23 @@ samp {
 /* The row's actions-menu toggle: deliberately small — the row IS the open
    affordance, and this is the one square that is not. Its top margin
    tracks the open button's top padding so the toggle sits on the title
-   line rather than floating above or below it. */
+   line rather than floating above or below it.
+
+   Hidden at rest via `opacity`, not `display`/`visibility`, until one of
+   the reveal conditions below applies — rather than sitting as one of
+   eight identical "⋯" boxes down the whole visible list at once. `opacity`
+   specifically because the toggle must stay in the tab order and stay
+   clickable at `opacity: 0`: Playwright's actionability checks (`click()`
+   included) do not treat `opacity: 0` as hidden, only `display`/
+   `visibility` and a zero-size box do, and neither does `toBeVisible()` —
+   a caller cannot lean on that assertion to notice the reveal state at
+   all and must read the toggle's computed `opacity` directly instead (see
+   buttons.spec.ts). `openRowMenu` in the browser suite drives the toggle
+   by `click()` rather than a visibility assertion for exactly this
+   reason: a hidden-at-rest target is equally clickable either way, so
+   `click()` is not a shortcut here, it is the only check that means
+   anything. This rule only changes what a SIGHTED mouse user sees at
+   rest. */
 .session-row-menu {
   flex: 0 0 auto;
   align-self: flex-start;
@@ -942,6 +1023,50 @@ samp {
   padding: 0 8px;
   font-size: 14px;
   line-height: 1.4;
+  opacity: 0;
+  transition:
+    opacity 100ms,
+    background-color 100ms;
+}
+
+/* Revealed by hover, by keyboard focus anywhere in the row (including on
+   the toggle itself, via `:focus-within` on its own ancestor — no separate
+   `:focus` selector needed), by the row being the current selection, or by
+   the toggle's OWN menu being open — for as long as it stays open, not
+   after. The floating panel it opens (`.session-row-menu-panel`) is
+   `position: fixed` and escapes the row's own box entirely (see that
+   rule's own comment), so a pointer that moves off the row to reach an
+   item inside the still-open panel drops `:hover` on `.session-row`
+   without touching `aria-expanded` — the toggle would otherwise vanish out
+   from under a menu that is still visibly open. Once the menu closes,
+   `aria-expanded` reverts and this selector stops matching on its own;
+   whatever keeps the toggle visible after that falls to the other three
+   conditions above. */
+.session-row:hover .session-row-menu,
+.session-row:focus-within .session-row-menu,
+.session-row.selected .session-row-menu,
+.session-row-menu[aria-expanded="true"] {
+  opacity: 1;
+}
+
+/* Coarse/no-hover pointers (touch) never get a `:hover` state to reveal
+   it, so the toggle stays permanently visible there — the only way such a
+   pointer could otherwise discover the row has a menu at all.
+
+   Both media features, not just `(hover: none)`: a HYBRID device — a
+   laptop with a touchscreen, a tablet with a paired mouse — can report
+   `(hover: hover)` for its precise pointer while `(any-pointer: coarse)`
+   still correctly reports that a coarse (touch) pointer is ALSO present,
+   and `(hover: none)` alone would miss exactly that device, hiding the
+   toggle from a finger even though a mouse happens to share the machine.
+   `any-pointer`, not the primary-only `pointer`, is deliberate here for
+   the same reason: it asks "is a coarse pointer available at all",
+   which is what determines whether touch is a real path to this control,
+   not merely "which pointer is primary right now". */
+@media (hover: none), (any-pointer: coarse) {
+  .session-row-menu {
+    opacity: 1;
+  }
 }
 
 /* ===== Row actions menu =========================================== */
@@ -1153,11 +1278,13 @@ samp {
    undersells what it is about to do. The tab strip's "confirm close"
    borrows `.confirm-delete` rather than inventing a second red: closing a
    tab kills its shell and everything under it, so it belongs in the same
-   visual class as the other irreversible actions, not a gentler one. */
+   visual class as the other irreversible actions, not a gentler one.
+   Color only, no border: the two-tier system keeps destructive actions
+   ghost like everything else that is not the one filled primary — a red
+   BOX would read as its own third tier. */
 .session-row-delete,
 .confirm-delete {
   color: var(--danger);
-  border-color: var(--danger-border);
 }
 
 /* Inline delete confirmation (replaces the old native `window.confirm()`
@@ -2390,7 +2517,24 @@ samp {
 /* The manual control on that surface. Interactivity is restored for the
    BUTTON alone: its host keeps `pointer-events: none` (see above), so a
    recovering pane swallows nothing else — and, unlike everything else the
-   placeholder has ever held, this one exists to be clicked. */
+   placeholder has ever held, this one exists to be clicked.
+
+   It DOES carry `.btn` (terminal.js sets `className = "btn
+   terminal-reconnect-now"`), so it inherits the ghost tier's geometry and
+   transition for free — only the COLOR needs overriding here, via
+   `border-color` rather than a full `border` shorthand that would just
+   restate the width and style `.btn` already set. The override exists
+   because this control sits on the warm scrim over a reconnecting
+   terminal rather than the sheet's neutral chrome: a transparent border
+   would have nothing but its own text to separate it from that colored
+   surface, and the neutral hover/focus fill `.btn` gives every other
+   ghost control would read as barely-there against the warm background
+   too. Both `:hover` and `:focus-visible` restate the warm fill
+   explicitly — same-specificity, same-pseudo-count rules only fall back
+   to source order, and `.btn` declares no dedicated `:focus-visible`
+   variant of its own to lose to, so a control that restated only `:hover`
+   would keep the warm fill for a mouse click yet silently revert to the
+   neutral one the instant a keyboard user tabbed onto it. */
 .terminal-reconnect-now {
   margin-top: 10px;
   pointer-events: auto;
@@ -2400,7 +2544,8 @@ samp {
   color: var(--fg-bright);
 }
 
-.terminal-reconnect-now:hover:not(:disabled) {
+.terminal-reconnect-now:hover:not(:disabled),
+.terminal-reconnect-now:focus-visible:not(:disabled) {
   background: var(--warn-fill-hover);
 }
 
@@ -2410,8 +2555,16 @@ samp {
 
 /* The "take control" button terminal.js paints into a detach banner when
    this view lost the session to another client (see that file's takeover
-   latch). Styled against the banner's red rather than the page background,
-   since that is what it sits on. */
+   latch). It carries `.btn` (terminal.js sets `className = "btn
+   banner-reclaim"`) the same as `.terminal-reconnect-now` above, and for
+   the same reason overrides only the border's COLOR rather than restating
+   the shorthand: styled against the banner's own red rather than the
+   sheet's neutral chrome, since that red banner is what this button
+   actually sits on. `:focus-visible` restates the hover fill explicitly
+   for the same specificity reason documented on
+   `.terminal-reconnect-now` — without it, a keyboard user tabbing here
+   would get `.btn`'s plain neutral fill instead of this banner's own
+   red-toned one. */
 .banner-reclaim {
   margin-left: 10px;
   font-size: 12px;
@@ -2420,7 +2573,8 @@ samp {
   color: var(--fg-bright);
 }
 
-.banner-reclaim:hover:not(:disabled) {
+.banner-reclaim:hover:not(:disabled),
+.banner-reclaim:focus-visible:not(:disabled) {
   background: var(--danger-fill-hover);
 }
 
@@ -2493,17 +2647,41 @@ samp {
   flex-shrink: 0;
 }
 
-/* The close button deliberately does NOT carry `.btn`: it sits flush
-   against its tab, and a second full border between them would read as
-   two separate controls rather than one tab with an affordance on it. */
+/* The radius keeps the two halves reading as one rounded pill when either
+   one paints a background (hover, or `.tab.selected`'s fill). No
+   `border-right: none` here any more: both `.tab` (via `.btn`) and
+   `.tab-close` now carry a TRANSPARENT 1px border by default — see
+   `.btn`'s own comment for why that beats an absent one — so there is no
+   visible seam between the two halves to suppress in the first place. */
 .tab-slot .tab {
-  border-right: none;
   border-radius: var(--radius-sm) 0 0 var(--radius-sm);
 }
 
+/* `.tab.selected` (below) colors all four of its inherited border sides,
+   right edge included — fine for a lone tab, but here the right edge sits
+   flush against `.tab-close`'s own transparent left edge, and an opaque
+   accent line on one side of that join with nothing answering it on the
+   other reintroduces exactly the seam the shared transparent border above
+   exists to avoid. Restated at higher specificity (`.tab-slot .tab` beats
+   `.tab.selected` alone) to keep that one edge transparent regardless of
+   selection. */
+.tab-slot .tab.selected {
+  border-right-color: transparent;
+}
+
+/* The close button deliberately does NOT carry `.btn`: its hover color is
+   the destructive red rather than the shared neutral fill, which a bare
+   `.btn` would give it. Ghost like `.tab` beside it, for the same
+   two-tier reason — a visibly bordered close box glued to a borderless
+   tab would read as two different kinds of control rather than one tab
+   with an affordance on it. */
 .tab-close {
   background: none;
-  border: 1px solid var(--border);
+  /* Transparent, not `none` — same reason `.btn`'s own base border is
+     transparent rather than absent: this sits flush against `.tab`, which
+     reserves the same 1px, so the joined pair's height matches exactly
+     whether or not either half is showing a real border color. */
+  border: 1px solid transparent;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   color: var(--fg-1);
   font: inherit;
@@ -2516,7 +2694,13 @@ samp {
   transition: background-color 100ms;
 }
 
-.tab-close:hover:not(:disabled) {
+/* Keyboard focus gets the same destructive preview a mouse hover does —
+   `.tab-close` opts out of `.btn` (see its own comment above) and so gets
+   none of `.btn:focus-visible`'s fill for free either; without restating
+   it here a keyboard user tabbing onto this control saw no warning at all
+   before pressing it, unlike every mouse user who hovers first. */
+.tab-close:hover:not(:disabled),
+.tab-close:focus-visible:not(:disabled) {
   background: var(--danger-bg-dim);
   color: var(--danger);
 }
@@ -2528,24 +2712,33 @@ samp {
 
 /* The selected tab is the one whose terminal is visible. Marked by a
    filled background rather than only a border tint: with several tabs the
-   selection has to be readable at a glance from across the strip. */
+   selection has to be readable at a glance from across the strip.
+   `border-color` only, not a full `border` shorthand: `.tab` (via `.btn`)
+   already reserves the same 1px solid width and style, so restating them
+   here would say nothing new while inviting the two declarations to drift
+   apart on a future edit to either. `--accent-edge` is exactly the token
+   the layering PR names for this ("the outline a filled primary would
+   take"), so the selected tab reads as this strip's own filled-primary
+   moment — `.tab-slot .tab.selected` above keeps the abutting right edge
+   transparent regardless. */
 .tab.selected {
   background: var(--accent-fill);
   color: var(--fg-bright);
   border-color: var(--accent-edge);
 }
 
-/* Every tab carries `.btn` too (see `TabStripItem` in tabs.rs), and
-   `.btn:hover:not(:disabled)` above OUTRANKS `.tab.selected` on
-   specificity — one class plus two pseudo-classes beats two plain
-   classes — regardless of which rule comes later in the file. Without
-   this, hovering the selected tab replaced its accent fill with the
-   neutral control-hover tint, the same swallowed-selection failure
-   `.session-row.selected`'s own hover rule exists to prevent below. One
-   more class than `.tab.selected` alone, plus the same two pseudo-
-   classes `.btn:hover:not(:disabled)` has, is enough to win the fill
-   back for the accent family. */
-.tab.selected:hover:not(:disabled) {
+/* Every tab carries `.btn` too (see `TabStripItem` in tabs.rs), and both
+   `.btn:hover:not(:disabled)` and `.btn:focus-visible:not(:disabled)`
+   above OUTRANK `.tab.selected` on specificity — one class plus two
+   pseudo-classes beats two plain classes — regardless of which rule comes
+   later in the file. Without this pair, hovering OR keyboard-focusing the
+   selected tab replaced its accent fill with the neutral control-hover
+   tint, the same swallowed-selection failure `.session-row.selected`'s own
+   hover rule exists to prevent below. One more class than `.tab.selected`
+   alone, plus the same two pseudo-classes `.btn`'s rule has, is enough to
+   win the fill back for the accent family either way it was reached. */
+.tab.selected:hover:not(:disabled),
+.tab.selected:focus-visible:not(:disabled) {
   background: var(--accent-fill-hover);
 }
 

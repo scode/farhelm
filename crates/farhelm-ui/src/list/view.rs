@@ -2442,7 +2442,7 @@ pub(crate) fn ListView(
         div { class: "list-toolbar",
             button {
                 r#type: "button",
-                class: "btn new-session-button",
+                class: "btn btn-primary new-session-button",
                 // This control UNMOUNTS the create form, so it must not act
                 // while anything is in flight: dropping the component drops
                 // its `spawn`ed task's ability to ever act on the response,

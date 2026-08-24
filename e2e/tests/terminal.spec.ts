@@ -230,7 +230,16 @@ test("keyboard activation opens the session, matching a real click", async ({
     await pinAutoSelect(page, bounce.id);
     await page.goto("/");
     await expect(page.locator(".titlebar .title")).toContainText("kbd-bounce-");
-    await sharedSessionRow(page).locator(".session-row-open").focus();
+    // The bounce session's terminal takes focus for itself when its mount
+    // lands, which can be AFTER the title already reads "kbd-bounce-".
+    // Focusing the open button before that mount means the steal moves
+    // focus off it again and the Enter below goes to the terminal — the
+    // title then never changes, which is how this test failed on two
+    // loaded CI runs. Wait for the mount, then prove the focus held.
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    const openButton = sharedSessionRow(page).locator(".session-row-open");
+    await openButton.focus();
+    await expect(openButton).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);

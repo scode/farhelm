@@ -796,10 +796,32 @@ export async function openFilterBar(page: Page): Promise<void> {
  * already `"true"`, so calling this on an already-open menu (a defensive
  * reopen after a background dismissal raced some earlier step, say) is a
  * safe no-op rather than an accidental close.
+ *
+ * The toggle is also hover-revealed (`opacity: 0` at rest, `opacity: 1` on
+ * `.session-row:hover`/`:focus-within`/`.selected`, or while its own menu
+ * is open — see app.css). `hover()` first is not strictly required for
+ * `click()` to land — Playwright's actionability checks do not treat
+ * `opacity: 0` as hidden, only `visibility`/`display` do — but every
+ * caller here is standing in for a real mouse user, and a real one has to
+ * hover the toggle before it is even visible to click. Doing it
+ * explicitly, rather than relying on `click()`'s own incidental pointer
+ * move, keeps this helper testing the same path a person takes instead of
+ * a shortcut only available to automation.
+ *
+ * Hovers the TOGGLE, not the row's center: another row's already-open
+ * menu panel is `position: fixed` (see `.session-row-menu-panel`'s own
+ * comment in app.css for why) and can float directly over this row's
+ * center point, which would make Playwright's actionability check land
+ * the hover on the covering panel instead of this row. The toggle sits at
+ * the row's trailing edge, clear of where a neighboring panel opens. Only
+ * hovered when about to open it, too — an already-open menu has no
+ * reason to be re-hovered, and its toggle may itself now sit under its
+ * own panel depending on placement.
  */
 export async function openRowMenu(row: Locator): Promise<void> {
   const menu = row.locator(".session-row-menu");
   if ((await menu.getAttribute("aria-expanded")) !== "true") {
+    await menu.hover();
     await menu.click();
   }
   // Await the panel itself, not just the click: the toggle's signal write

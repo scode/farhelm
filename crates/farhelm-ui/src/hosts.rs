@@ -1631,7 +1631,7 @@ fn AddHostForm(
                 }
                 button {
                     r#type: "submit",
-                    class: "btn add-host-submit",
+                    class: "btn btn-primary add-host-submit",
                     disabled: busy,
                     if *probing.read() { "probing…" } else { "add" }
                 }
