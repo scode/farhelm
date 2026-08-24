@@ -1676,6 +1676,48 @@ pub(crate) fn activity_stamp(at: i64) -> Arc<std::sync::atomic::AtomicI64> {
     Arc::new(std::sync::atomic::AtomicI64::new(at))
 }
 
+/// A [`SessionEntry::hooked`] / [`SessionEntry::hook_warned`] cell holding
+/// `raised`.
+///
+/// A named constructor for [`activity_stamp`]'s reason: the `Arc` is part
+/// of the contract rather than an implementation detail — a title-only
+/// replacement SHARES the cell so a tick already holding the old entry
+/// still writes where the published one is read from, and a relaunch mints
+/// a fresh one, unconditionally and with a fresh `false`, so the previous
+/// launch's injection and its diagnosis do not leak into the next.
+/// Spelling the wrapper out at each entry-construction site is how that
+/// distinction gets quietly lost.
+///
+/// Every fresh launch starts unhooked and unwarned; `with_hook_argv` is
+/// the only thing that ever passes `true`.
+pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
+    Arc::new(std::sync::atomic::AtomicBool::new(raised))
+}
+
+/// Where one session's hook trace lives: `<state_dir>/hook-log/<id>.log`.
+///
+/// The hook process is the ONLY place a hook-side failure is ever visible
+/// — it may not write to stdout or stderr, because the terminal it would
+/// write to is the agent's — so it appends one line per run to this file.
+/// The supervisor never reads it; it owns this path for exactly one
+/// reason, which is to remove the file when the session is deleted, the
+/// same way a session's attachments and launch specs go.
+///
+/// ## The two derivations must agree
+///
+/// The writer (`crates/farhelm/src/hook.rs`, a separate step of the same
+/// plan) is a short-lived process that knows nothing about the supervisor
+/// beyond the three environment variables the agent was launched with, so
+/// it derives the state directory as the PARENT of `FARHELM_SUPERVISOR_SOCK`
+/// — the socket is `<state_dir>/supervisor.sock` — and rebuilds this same
+/// path from it. Nothing checks that the two agree at runtime: a
+/// divergence is silent, and its symptom is per-session trace files that
+/// accumulate forever because delete no longer finds them. Change one side
+/// and you must change the other.
+pub(crate) fn hook_log_path(state_dir: &Path, session_id: &str) -> PathBuf {
+    state_dir.join("hook-log").join(format!("{session_id}.log"))
+}
+
 /// Build the entry that describes the SAME launch under a new title
 /// (PLAN_M5.md item 3) — everything but `info.title` carried over.
 ///
@@ -1713,6 +1755,8 @@ fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
         canonical_cwd: entry.canonical_cwd.clone(),
         first_input: Arc::clone(&entry.first_input),
         capture: Arc::clone(&entry.capture),
+        hooked: Arc::clone(&entry.hooked),
+        hook_warned: Arc::clone(&entry.hook_warned),
         activity: Arc::clone(&entry.activity),
         last_activity_at: Arc::clone(&entry.last_activity_at),
         generation: entry.generation,
@@ -1787,6 +1831,18 @@ fn relaunched_entry(
         canonical_cwd: entry.canonical_cwd.clone(),
         first_input: Arc::new(std::sync::Mutex::new(first_input)),
         capture: Arc::new(std::sync::Mutex::new(capture)),
+        // Fresh cells with fresh VALUES, on every relaunch and whatever
+        // `reset_capture` says — the one pair here that does not follow the
+        // capture window. Both describe a LAUNCH's hook injection and the
+        // diagnostic spent on it, not the conversation: a launch this
+        // process has not spawned yet is not hooked until `with_hook_argv`
+        // says so, and `publish_relaunched` is what raises the flag when it
+        // did. Carrying them over a Resume would state something about the
+        // new launch that only the old one had established, and would carry
+        // a warning already spent — so a second broken launch of the same
+        // session would trip the wire silently.
+        hooked: hook_flag(false),
+        hook_warned: hook_flag(false),
         // Never carried over, whatever `reset_capture` says: the sampled
         // tail and the unchanged-sample streak beside it both describe a
         // process that no longer exists. Inheriting them would classify the
@@ -2442,6 +2498,51 @@ pub(crate) struct SessionEntry {
     /// two cells above — a capture pass mid-scan must be advancing the
     /// same state the published entry is read from.
     pub(crate) capture: Arc<std::sync::Mutex<CaptureState>>,
+    /// Whether THIS launch's argv carried the conversation-reporting hook
+    /// (`Supervisor::with_hook_argv`, a later step in the same plan).
+    ///
+    /// Diagnostics only: nothing about capture, restart, or the wire reply
+    /// consults it, and nothing persists it. It describes what this
+    /// process did when it spawned this generation, so a supervisor that
+    /// did not perform the launch — one that reloaded the session after a
+    /// restart — has nothing to say about it and correctly comes back with
+    /// the flag clear.
+    ///
+    /// Its one reader is [`crate::service::capture::capture_pass`]'s
+    /// liveness tripwire. A hooked launch that is still not
+    /// [`CaptureState::Reported`] well past its capture horizon means no
+    /// report was successfully ACCEPTED — which is broader than "the hook
+    /// never ran" and is worded that way on purpose. A hook that never
+    /// fired (a vendor that renamed its flag, a settings file the
+    /// injection declined to fight over, a wrapper script that swallowed
+    /// the tail) and a hook that fired and was REFUSED (a credential the
+    /// store would not validate, an implausible id, a supervisor that was
+    /// not recording) leave this state identical, and nothing the entry
+    /// holds can tell them apart. Separating them is the job of the
+    /// session's own hook trace file, which is where a diagnosis continues
+    /// after the tripwire names a session. Either failure is otherwise
+    /// INVISIBLE, because the scan fallback keeps working and the session
+    /// looks entirely ordinary; the tripwire is the only place it
+    /// surfaces.
+    ///
+    /// STRICTLY per-launch — a narrower scope than the capture window
+    /// beside it: [`relaunched_entry`] mints it `false` on EVERY relaunch,
+    /// including a Resume that keeps its capture state, because the
+    /// question it answers is "was THIS launch's argv injected", and no
+    /// previous launch can answer that. Whoever raises it must therefore
+    /// raise it on the entry PUBLISHED for the new generation, not on the
+    /// previous entry a relaunch was computed from.
+    pub(crate) hooked: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the tripwire described above has already logged for this
+    /// launch, so a hook that never reports costs one line per launch
+    /// rather than one per tick for the life of the session.
+    ///
+    /// Minted `false` exactly where `hooked` is, and for the sharper half
+    /// of the same reason: a warning already spent belongs to the launch
+    /// that earned it. Carrying it across a relaunch would silence the
+    /// tripwire for the NEXT broken launch of the same session — the case
+    /// where a user restarting to fix things most needs to see the line.
+    pub(crate) hook_warned: Arc<std::sync::atomic::AtomicBool>,
     /// What the status sampler last saw on this session's agent pane
     /// (PLAN_M6_75.md item 1). See [`ActivitySample`], and
     /// [`crate::service::ticker`] for the cadence that fills it.
@@ -3800,6 +3901,14 @@ impl Supervisor {
                         durable: row.first_input_at.is_some(),
                     })),
                     capture: Arc::new(std::sync::Mutex::new(capture)),
+                    // Clear on a reload, whatever the previous supervisor
+                    // did: `hooked` records that THIS process appended the
+                    // hook flags when it spawned the agent, and this
+                    // process spawned nothing. Leaving the tripwire armed
+                    // from a stored guess would warn about a launch nobody
+                    // here can account for.
+                    hooked: hook_flag(false),
+                    hook_warned: hook_flag(false),
                     // Activity samples are process-local and deliberately
                     // not durable: a reloaded session has been observed by
                     // nobody in THIS process, and inventing a STATUS for
@@ -5840,6 +5949,8 @@ impl Supervisor {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: hook_flag(false),
+                hook_warned: hook_flag(false),
                 // The agent has printed nothing this supervisor has looked
                 // at yet; the ticker's next sample establishes the baseline
                 // every later one is compared against.
@@ -8600,6 +8711,257 @@ impl Supervisor {
         self.may_record.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Record the conversation identity a session's own agent reported
+    /// from inside its process, through the launch hook.
+    ///
+    /// This is the authoritative answer to the question the capture scan
+    /// can only infer: the agent names its own conversation, so the result
+    /// dominates every scan-derived verdict (see [`CaptureState`]'s
+    /// ladder). A second report for the same launch REPLACES the first —
+    /// `/clear` and `/new` start a new conversation inside a running
+    /// process, and the id they retire is exactly the one that must not be
+    /// resumed again.
+    ///
+    /// ## The durable write decides what is claimed
+    ///
+    /// Modelled on `super::capture::commit_capture`: the in-memory
+    /// [`CaptureState::Reported`] is entered only AFTER the store write
+    /// has landed, because `committed_conversation` — and therefore
+    /// `farhelm_proto::RestartOffer::Resume` — promises a restart that
+    /// there is a stored id for it to fill in. A failed write is logged
+    /// and changes nothing in memory, with no retry list: neither vendor
+    /// re-fires the hook, so that report is simply lost, and the scan is
+    /// still running for this session precisely because it never reached
+    /// `Reported`. A store that cannot write is a supervisor in trouble,
+    /// not a state to engineer a queue around.
+    ///
+    /// The same "no retry" rule covers a failed REPLACEMENT, and there it
+    /// is worth naming what it costs (plan §2.5): when a `/clear` report
+    /// cannot be written, the PREVIOUS identity keeps standing, durably
+    /// and in memory, so the session goes on offering to resume a
+    /// conversation the user has discarded until the next report or
+    /// relaunch. That is deliberately not repaired here. A retry queue for
+    /// this write would have to survive the process to be worth anything,
+    /// which means durable state describing an intention rather than a
+    /// fact — and the failure it would serve is a store this supervisor
+    /// can no longer write to at all.
+    ///
+    /// ## The publication gap
+    ///
+    /// A report can arrive before the session has an in-memory entry.
+    /// Claude's hook fires at process start, which lands inside two real
+    /// windows: a create between reserving the row and publishing the
+    /// entry, and a relaunch between opening the new generation and
+    /// publishing the replacement. `NotFound` there would throw away a
+    /// perfectly good report at exactly the moment the vendor's own event
+    /// says it is most reliable.
+    ///
+    /// So the durable ROW is the fallback authority for the generation:
+    /// it exists from reservation onwards, which is strictly earlier than
+    /// any hook can run. The write goes through and the in-memory advance
+    /// is simply skipped, because there is no cell to advance yet.
+    ///
+    /// ### Why the memory that appears afterwards converges
+    ///
+    /// Worth spelling out, because the naive reading — "the entry that
+    /// shows up next will be built from the row" — is NOT what happens and
+    /// a reviewer who checks will find it does not. The create path mints
+    /// its entry with [`CaptureState::Unclaimed`] unconditionally, and
+    /// `relaunched_entry` either mints `Unclaimed` or clones the previous
+    /// entry's cell; neither reads these columns. Only a supervisor RELOAD
+    /// derives the capture state from the row. So for a create-gap report,
+    /// the durable row says `Reported` while memory says `Unclaimed`, and
+    /// they stay that way for a while. That divergence is accepted rather
+    /// than repaired, on three legs:
+    ///
+    /// - **Nothing can spoil the row in the meantime.** Both scan writers
+    ///   are fenced against exactly this shape:
+    ///   [`crate::store::SessionStore::record_captured_conversation`]
+    ///   demands `captured_conversation IS NULL` and
+    ///   [`crate::store::SessionStore::record_capture_ambiguous`] demands
+    ///   `conversation_source IS NULL`. A hook-written row fails both, so
+    ///   an `Unclaimed` mirror cannot talk a pass into overwriting the
+    ///   reported identity or into recording an ambiguity over it.
+    /// - **Everything that ACTS on the identity reads the row, not the
+    ///   mirror.** `session_snapshot` builds `resume_argv` and the restart
+    ///   mode validation from `captured_conversation` in SQLite, so a
+    ///   restart landing inside the divergence resumes the reported
+    ///   conversation regardless of what memory holds.
+    /// - **The mirror catches up on its own.** The next capture pass that
+    ///   reaches a commit has its write-once UPDATE refused by the fence
+    ///   above and reads the row back; `commit_capture` then advances the
+    ///   entry to the id it read — the reported one — with an empty record
+    ///   path that re-verification fills in. A reload does the same thing
+    ///   more directly.
+    ///
+    /// What the divergence costs is one thing only: `session_restart_offer`
+    /// reads the ENTRY, so `ListSessions` advertises `FreshOnly` for the
+    /// interval. That is an understatement of what the session can do, and
+    /// an understatement is the safe direction — it never offers a resume of
+    /// a conversation the agent is not in. Nothing is lost by not advancing
+    /// memory here; something would be lost by refusing the report.
+    ///
+    /// ## It takes NO lifecycle claim, deliberately
+    ///
+    /// Unlike every neighbouring session operation. `restart_session`
+    /// holds a session's lifecycle claim for the WHOLE restart, and
+    /// Claude's hook fires at the new agent process's startup — squarely
+    /// inside that window. Waiting on the claim would queue the report
+    /// behind the tail of the restart that caused it and blow the hook's
+    /// own 2 s budget under load, which the vendor surfaces as a hook
+    /// error in the user's terminal and never retries.
+    ///
+    /// The generation fence in the store is what protects the write
+    /// instead, and its one accepted gap is worth stating: a session's
+    /// token survives a relaunch, so a hook process from the PREVIOUS
+    /// generation that somehow outlived the restart's kill sweep would
+    /// still pass the credential check at the connection. It cannot do
+    /// damage, because `record_reported_conversation` is fenced on the
+    /// generation this entry was published with and the stale process's
+    /// generation is gone; the accepted case is exactly the one the sweep
+    /// already makes unreachable, since it kills the whole process tree —
+    /// the hook included — before the new generation exists.
+    pub(crate) async fn report_conversation(
+        &self,
+        id: &str,
+        conversation: String,
+        source: String,
+    ) -> Result<(), RequestError> {
+        let entry = self.sessions.lock().await.get(id).cloned();
+        // The same gate every scan write honours. A supervisor that is not
+        // recording is shutting down or has been replaced, and a report it
+        // accepted would be a conclusion it has no standing to draw. It is
+        // not parked for later either: queuing a write past this gate is
+        // the precise thing `may_record` exists to prevent.
+        if !self.may_record() {
+            return Err(RequestError::new(
+                ErrorKind::Internal,
+                "the supervisor is not recording right now",
+            ));
+        }
+        // Which LAUNCH this report is about. The entry is the authority
+        // when there is one; the row stands in during a publication gap
+        // (see the docs above), and it can do so because the reservation
+        // commits it before anything is spawned. Only when NEITHER exists
+        // is this genuinely a report for a session that is gone.
+        let generation = match &entry {
+            Some(entry) => entry.generation,
+            None => match self.store.session(id).await {
+                Ok(Some(row)) => row.generation,
+                Ok(None) => {
+                    return Err(RequestError::new(
+                        ErrorKind::NotFound,
+                        format!("no such session: {}", truncate_for_error(id)),
+                    ));
+                }
+                Err(e) => {
+                    warn!(
+                        session = %id, conversation = %conversation, source = %source,
+                        error = %format!("{e:#}"),
+                        "could not read the session row a report arrived for before its \
+                         entry was published; the report is discarded"
+                    );
+                    return Err(RequestError::new(
+                        ErrorKind::Internal,
+                        "the reported conversation identity could not be recorded",
+                    ));
+                }
+            },
+        };
+        // The injected failure STANDS IN for the store call rather than
+        // preceding it, so a test can exercise this function's own failure
+        // path without a store that is genuinely broken.
+        let injected = self
+            .seams
+            .capture_store_fault
+            .as_ref()
+            .map(|fault| fault(super::capture::CaptureWrite::Report, id));
+        let written = match injected {
+            Some(Err(e)) => Err(e),
+            _ => {
+                self.store
+                    .record_reported_conversation(id, generation, &conversation)
+                    .await
+            }
+        };
+        match written {
+            Ok(true) => {}
+            // The row moved out from under this report: the session was
+            // relaunched (a new generation) or deleted between the entry
+            // read above and the write. `Conflict` rather than `Internal`
+            // because nothing malfunctioned — the report is simply about a
+            // launch that no longer exists, and the surviving launch's own
+            // hook is the one entitled to speak for it.
+            Ok(false) => {
+                warn!(
+                    session = %id, conversation = %conversation, source = %source,
+                    generation,
+                    "this session's agent reported a conversation identity for a launch \
+                     that is no longer current; the report is discarded"
+                );
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session has moved on to another launch",
+                ));
+            }
+            Err(e) => {
+                warn!(
+                    session = %id, conversation = %conversation, source = %source,
+                    error = %format!("{e:#}"),
+                    "could not record the conversation identity this session's agent \
+                     reported; nothing will retry it and the scan remains the fallback"
+                );
+                return Err(RequestError::new(
+                    ErrorKind::Internal,
+                    "the reported conversation identity could not be recorded",
+                ));
+            }
+        }
+        // The publication gap: the row now holds the report, and there is
+        // no in-memory cell to mirror it into. The entry that appears next
+        // will NOT be built from these columns — see the "why the memory
+        // that appears afterwards converges" section above for the three
+        // things that make that divergence harmless and self-correcting.
+        let Some(entry) = entry else {
+            info!(
+                session = %id, conversation = %conversation, source = %source, generation,
+                "this session's agent reported a conversation identity before its entry \
+                 was published; the durable row carries it until the entry appears"
+            );
+            return Ok(());
+        };
+        // Read the outgoing claim under the same lock that installs the
+        // new one, so the line below describes the transition that
+        // actually happened rather than one a racing pass has since
+        // changed.
+        let displaced = {
+            let mut state = entry.capture.lock().expect("capture mutex poisoned");
+            let previous = state.committed_conversation().map(str::to_string);
+            state.advance(CaptureState::Reported {
+                conversation: conversation.clone(),
+            });
+            previous.filter(|was| was != &conversation)
+        };
+        info!(
+            session = %id, conversation = %conversation, source = %source,
+            "recorded the conversation identity this session's agent reported"
+        );
+        // Only a DIFFERENT id is worth a second line. A scan claim that
+        // agrees with the report is the ordinary Codex sequence — the
+        // record usually lands before the first-prompt hook fires — and
+        // logging it would bury the case that matters underneath it: an
+        // agent that started a new conversation before its first prompt,
+        // whose earlier id must stop being offered.
+        if let Some(was) = displaced {
+            info!(
+                session = %id, was = %was, now = %conversation,
+                "this session's agent reported a conversation identity that replaces the \
+                 one previously claimed for it"
+            );
+        }
+        Ok(())
+    }
+
     /// Offer a witnessed transition to `session`'s durable outcome and
     /// bring the in-memory mirror in line with what was COMMITTED.
     ///
@@ -9301,6 +9663,8 @@ pub(crate) mod tests {
                 durable: true,
             })),
             capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+            hooked: hook_flag(false),
+            hook_warned: hook_flag(false),
             activity: ActivitySample::unsampled(),
             last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
             generation: 0,
@@ -9365,6 +9729,44 @@ pub(crate) mod tests {
             renamed.activity.lock().unwrap().samples,
             1,
             "a sample taken through the old entry must be what the published one reports"
+        );
+
+        // The two hook-diagnostic flags are the newest cells here and the
+        // easiest to get wrong, because their sibling rule under RELAUNCH
+        // is the opposite one: `relaunched_entry` mints both fresh on every
+        // generation. A rename is not a generation, so copying the values
+        // instead of sharing the cells would split the tripwire's latch in
+        // two — `with_hook_argv` raises `hooked` on the entry it launched,
+        // and a rename landing between the launch and the horizon would
+        // leave the published entry claiming an unhooked launch (no warning
+        // ever, for a hook that really is broken), or leave `hook_warned`
+        // unspent so the tripwire re-warns once per tick forever.
+        //
+        // `Arc::ptr_eq` as well as a value check for these two: they are
+        // `AtomicBool`s written with `Relaxed` stores from the pass, so a
+        // copied-value implementation could still pass a mutate-and-observe
+        // assertion the moment somebody "fixed" it by re-copying, whereas
+        // pointer identity is the property the writers actually rely on.
+        assert!(
+            Arc::ptr_eq(&old.hooked, &renamed.hooked),
+            "the hook-injection flag must be the SAME cell across a rename"
+        );
+        assert!(
+            Arc::ptr_eq(&old.hook_warned, &renamed.hook_warned),
+            "the tripwire latch must be the SAME cell across a rename"
+        );
+        old.hooked.store(true, std::sync::atomic::Ordering::Relaxed);
+        old.hook_warned
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            renamed.hooked.load(std::sync::atomic::Ordering::Relaxed),
+            "a launch flagged as hooked through the old entry must stay hooked once renamed"
+        );
+        assert!(
+            renamed
+                .hook_warned
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "a tripwire warning already spent must not be spendable again after a rename"
         );
     }
 
@@ -9469,11 +9871,15 @@ pub(crate) mod tests {
                 conversation: "conv-prov".to_string(),
             },
             // The retry state, included because it is the one variant that
-            // carries an outstanding INTENTION rather than a conclusion: a
-            // relaunch that failed to reset it would leave the next pass
-            // trying to commit the previous run's identity onto the new
-            // generation, where the store's generation fence would refuse
-            // it silently and forever.
+            // carries an outstanding INTENTION rather than a conclusion,
+            // and because nothing downstream would catch it. A pending
+            // claim carried into the published entry is retried by the very
+            // next pass, and that retry reads the generation off the entry
+            // it is holding — the NEW one — so the store's generation fence
+            // sees a current write and lets it through. The previous run's
+            // conversation would land durably on the fresh launch. This
+            // reset is the only thing standing in the way, which is exactly
+            // why the variant is asserted here rather than assumed safe.
             CaptureState::PendingCommit {
                 conversation: "conv-pending".to_string(),
                 record: PathBuf::from("/tmp/pending.jsonl"),
@@ -9566,6 +9972,58 @@ pub(crate) mod tests {
             "carried by VALUE, not by cell: a pass still holding the previous entry must \
              not be able to write its late verdict onto this generation"
         );
+    }
+
+    /// The hook tripwire cells are minted fresh on EVERY relaunch, a
+    /// Resume included — the one pair here that does not follow the
+    /// capture window.
+    ///
+    /// The distinction is subtle enough to be worth a test of its own,
+    /// because the neighbouring rule is so nearly right: a Resume keeps its
+    /// capture state, so keeping the "hooked" flag beside it looks
+    /// consistent. It is not. `hooked` answers "was THIS launch's argv
+    /// injected", and two launches of one session can genuinely differ — a
+    /// resume template carrying a `--`, a kind newly excluded, a
+    /// `farhelm_exe` that stopped resolving. Carrying `true` across would
+    /// arm the tripwire for a launch that never had a hook, producing a
+    /// warning about a report that was never going to come.
+    ///
+    /// `hook_warned` carries the sharper half: a warning already spent
+    /// belongs to the launch that earned it, and inheriting it would
+    /// silence the wire for the next broken launch — exactly the restart a
+    /// user performs when trying to fix the thing the warning is about.
+    #[test]
+    fn a_relaunch_mints_fresh_hook_cells_even_when_it_keeps_the_capture_window() {
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+        for reset_capture in [true, false] {
+            let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+            old.hooked.store(true, ordering);
+            old.hook_warned.store(true, ordering);
+
+            let relaunched = relaunched_entry(
+                &old,
+                old.info.clone(),
+                old.terminal.clone(),
+                old.generation + 1,
+                None,
+                LastOutcome::Launching,
+                reset_capture,
+            );
+            assert!(
+                !relaunched.hooked.load(ordering),
+                "a relaunch this process has not injected yet is not hooked \
+                 (reset_capture = {reset_capture})"
+            );
+            assert!(
+                !relaunched.hook_warned.load(ordering),
+                "and the previous launch's warning must not silence this one's \
+                 (reset_capture = {reset_capture})"
+            );
+            assert!(
+                !Arc::ptr_eq(&old.hooked, &relaunched.hooked),
+                "fresh CELLS too, so a late writer cannot reach across the generation"
+            );
+        }
     }
 
     /// The activity sample is the one cell a relaunch resets outright
@@ -9996,6 +10454,173 @@ pub(crate) mod tests {
             scanned.committed_conversation(),
             Some(format!("conv-{scanned_id}").as_str())
         );
+    }
+
+    /// Deleting a session removes its conversation-hook trace, at the path
+    /// [`hook_log_path`] names — and removes that one only.
+    ///
+    /// The trace is per-session and unbounded in lifetime: one line per
+    /// hook run, appended for as long as the session exists. Nothing else
+    /// ever removes it — the hook only appends, and the startup
+    /// reconciliation that sweeps the attachments tree knows nothing about
+    /// this directory — so if delete misses it, every session farhelm has
+    /// ever run leaves a file behind forever, each naming a conversation
+    /// id of a session the user believes is gone.
+    ///
+    /// Scope, stated so nobody reads a guarantee that is not here: the
+    /// fixture plants its file through the DELETER's own helper, so this
+    /// says nothing whatever about the writer. That writer lives in
+    /// another crate and derives its path independently, from the socket's
+    /// parent directory; whether the two agree on a file is a cross-crate
+    /// contract this test cannot observe even in principle, and the e2e
+    /// suite is what holds it. Using the deleter's helper is deliberate
+    /// anyway — a hand-spelled path here would make this a test of the
+    /// layout rather than of the removal, and it would still not reach the
+    /// writer.
+    ///
+    /// A neighbouring file in the same directory is planted to pin the
+    /// scope: delete removes ONE session's trace, not the directory, and
+    /// certainly not a sibling session's history.
+    #[tokio::test]
+    async fn deleting_a_session_removes_its_conversation_hook_trace() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let doomed = "hooked-session";
+        let bystander = "other-session";
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: doomed.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "hooked".to_string(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "claude".to_string(),
+                    tmux_name: format!("fh-{doomed}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    resume_template: None,
+                    canonical_cwd: Some("/tmp".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session being deleted");
+
+        let trace = hook_log_path(state.path(), doomed);
+        let survivor = hook_log_path(state.path(), bystander);
+        std::fs::create_dir_all(trace.parent().expect("the trace has a parent directory"))
+            .expect("hook-log directory");
+        std::fs::write(&trace, "1700000000 acked\n").expect("plant the doomed trace");
+        std::fs::write(&survivor, "1700000000 acked\n").expect("plant the bystander's trace");
+
+        // No terminal, so the teardown skips tmux entirely: what is under
+        // test is the file cleanup that runs after the row is gone, and a
+        // real pane would only add a tmux server to the test.
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = doomed.to_string();
+        // `TeardownError` carries no `Debug`, so the assertion says what
+        // was expected rather than unwrapping.
+        assert!(
+            sup.teardown_session(&entry, doomed).await.is_ok(),
+            "a terminal-less session tears down without tmux"
+        );
+
+        assert!(
+            !trace.exists(),
+            "the deleted session's hook trace must be gone: {}",
+            trace.display()
+        );
+        assert!(
+            survivor.exists(),
+            "another session's trace must be untouched: {}",
+            survivor.display()
+        );
+    }
+
+    /// A session that never had a hook trace still deletes cleanly: the
+    /// removal is reached, finds nothing, and the delete reports success
+    /// with the row gone.
+    ///
+    /// This is the ordinary case by a wide margin — nothing writes a trace
+    /// unless the launch was hooked. Note what a mishandled `NotFound`
+    /// would and would not cost, because the earlier framing of this test
+    /// overstated it: the removal runs AFTER the row is already deleted and
+    /// is log-only, so no handling of it could make a delete fail. What the
+    /// explicit `NotFound` arm buys is warning suppression — without it
+    /// every unhooked delete would emit "could not remove a deleted
+    /// session's conversation-hook trace", the kind of routine false alarm
+    /// that trains an operator to stop reading this subsystem's warnings,
+    /// including the ones that mean something. That log line is not
+    /// observable from here without a tracing fixture; what this test
+    /// holds is the surrounding claim, that the missing file is reached on
+    /// the success path rather than short-circuited before it.
+    #[tokio::test]
+    async fn deleting_a_session_with_no_hook_trace_is_not_an_error() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = "unhooked-session";
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "unhooked".to_string(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session being deleted");
+
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.to_string();
+        assert!(
+            sup.teardown_session(&entry, id).await.is_ok(),
+            "a missing hook trace is the ordinary case, not a failure"
+        );
+        assert!(sup.store.session(id).await.unwrap().is_none());
     }
 
     /// PLAN_M3.md item 4's crash boundary, both edges: what reload makes

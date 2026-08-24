@@ -1040,14 +1040,23 @@ fn correlators_from(
     })
 }
 
-/// Whether a conversation identifier is something this module is willing
+/// Whether a conversation identifier is something this crate is willing
 /// to store, log, and eventually place on an agent's command line.
+///
+/// Two callers, both feeding it the same kind of value from a different
+/// direction: the record parse below, which reads ids off disk, and the
+/// supervisor's `ReportConversation` handler, which takes one off the wire
+/// from inside a session's own process. Neither source is this process's
+/// own writing, and the argv they both end at is identical, so they get
+/// the identical predicate rather than two that could drift apart.
 ///
 /// ## Option injection is the threat, not exotic characters
 ///
 /// This value comes off DISK — out of a file the supervisor did not write,
 /// in a directory any process running as this user can create files in —
-/// and ends up as an argv element in `<agent> --resume <id>`. An id
+/// or off a session-authenticated connection, which every process in the
+/// agent's tree can open. Either way it ends up as an argv element in
+/// `<agent> --resume <id>`. An id
 /// beginning with `-` is therefore not a weird id: it is a FLAG. A record
 /// whose id reads `--last` turns a resume of one conversation into a
 /// resume of whichever the vendor calls last; one reading
@@ -1056,10 +1065,11 @@ fn correlators_from(
 /// the shape check alone (below) never sees them coming — which is why the
 /// leading dash is refused outright and unconditionally.
 ///
-/// Slot substitution is not a defence against this and never was: it
-/// guarantees the id stays ONE argument, not that the argument is not a
-/// flag. `--` separators are not one either, since neither vendor's CLI is
-/// documented to accept one where the template puts the id.
+/// Slot substitution is not a defence against this and never was, which is
+/// exactly the limit of the guarantee described above: keeping the id in
+/// ONE argument says nothing about whether that argument is a flag. `--`
+/// separators are not one either, since neither vendor's CLI is documented
+/// to accept one where the template puts the id.
 ///
 /// ## Shape
 ///
@@ -1069,7 +1079,7 @@ fn correlators_from(
 /// silently — but everything a legitimate identifier has no business
 /// containing is refused: whitespace, control characters, quotes,
 /// backslashes, and anything past a bounded length.
-fn is_plausible_conversation_id(id: &str) -> bool {
+pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_CONVERSATION_ID_LEN
         && !id.starts_with('-')

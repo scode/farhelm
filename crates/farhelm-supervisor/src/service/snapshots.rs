@@ -476,6 +476,8 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: crate::service::core::hook_flag(false),
+                hook_warned: crate::service::core::hook_flag(false),
                 activity: crate::service::ticker::ActivitySample::unsampled(),
                 last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                 generation: 0,
