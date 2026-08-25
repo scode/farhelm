@@ -23,30 +23,115 @@ is set, `~/.codex` otherwise) that you have NOT trusted will run during those se
 equivalent hook without a trust bypass. See [docs/agent-hook-injection.md](docs/agent-hook-injection.md) for what the
 hook does, what it never does, and how to turn it off.
 
-NOTE: The Mac app is not signed or notarized. macOS will treat it as an untrusted downloaded app; codesigning is
-deferred until there is an Apple Developer identity to build with.
+## Install
+
+```
+curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
+```
+
+NOTE: No release under this asset layout has been published yet. The only release currently on the
+[releases page](https://github.com/scode/farhelm/releases) (`v0.0.3-rc.1`) predates this script and carries the old, ad
+hoc archive names, so `scripts/install.sh` has nothing to install against until a real `vX.Y.Z` release exists. Until
+then, see "Development" below for a source build.
+
+The script detects your platform (Linux x86_64 or aarch64, macOS on Apple silicon), downloads the matching release from
+GitHub, verifies its SHA-256 against the release's `SHA256SUMS`, and puts `farhelm` — and on macOS also
+`farhelm-desktop` — into `~/.local/bin` (set `FARHELM_INSTALL_DIR` to choose another directory; set `FARHELM_VERSION` to
+`X.Y.Z`, `vX.Y.Z`, or a `-rc.N` prerelease of one, e.g. `v1.2.3-rc.1`, to pin a version). That is all it does. It does
+not touch systemd, launchd, or your shell configuration, and leaves nothing behind outside that directory (it stages
+downloads in a temporary directory inside it and deletes that); if `~/.local/bin` is not on your `PATH` it tells you and
+leaves the fix to you. Read it before you run it — it is short, and it is the same file for every platform. It needs
+`curl`, `tar`, and one of `sha256sum`, `shasum`, or `openssl`.
+
+`FARHELM_VERSION` and `FARHELM_INSTALL_DIR` need to be set for the `sh` at the far end of the pipe, not for `curl` —
+`FARHELM_VERSION=v1.2.3 curl ... | sh` sets it for `curl` and does nothing useful. Put the assignment after the pipe
+instead:
+
+```
+curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | FARHELM_VERSION=v1.2.3 sh
+curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | FARHELM_INSTALL_DIR="$HOME/farhelm/bin" sh
+```
+
+No token, account, or GitHub login is needed. The binaries are static (Linux) or single-file (macOS), unsigned, and
+carry no installer or updater of their own (this may change in a future version).
+
+NOTE: Unsigned is fine for the curl path specifically — a file `curl` writes to disk carries no macOS quarantine
+attribute, so there is no Gatekeeper prompt to get past. A `farhelm-desktop` binary downloaded through a browser instead
+would need the Control-click-then-confirm dance a browser-downloaded `.app` or `.zip` always needs.
+
+### Update
+
+Run the same command again. It downloads and verifies the newest release first, then replaces the old binaries; if
+replacing the second binary fails it puts the first one back, so you never end up with a mixed pair. Then restart what
+is running:
+
+- Linux: `systemctl --user restart farhelm-supervisor farhelm-helm`.
+- macOS: quit and reopen `farhelm-desktop`. The app owns the embedded helm and the local supervisor it started — those
+  are its child processes and stop with it — so reopening it starts them from the new binaries. If the app found a
+  supervisor already running when it started (one you started by hand with `farhelm supervisor run`), it reuses it;
+  restart that one by hand.
+
+Running sessions survive either way: they live in a tmux server that neither restart touches, and the new supervisor
+reattaches to them. Linux hosts you added from the hosts panel keep running their old supervisor until you update them
+from that panel (its existing "update" action), which pushes the helm's own version. To go back, run the script with
+`FARHELM_VERSION=vX.Y.Z`.
+
+### After installing: which kind of machine is this?
+
+- **It should run your helm and host sessions itself** (the usual single-machine setup, Linux): run
+  `farhelm helm setup`. It writes the helm and supervisor user units into `~/.config/systemd/user/`, enables and starts
+  them, and prints the `loginctl enable-linger` line. `--dry-run` shows what it would write; `--uninstall` removes the
+  unit files setup wrote (each carries a marker line; it refuses to touch a unit it did not write). It refuses if no
+  tmux ≥ 3.7c is installed, and tells you how to install one; it never installs tmux for you. On a helm machine, the
+  hosts panel's local row never installs a supervisor by itself: it points you at `farhelm helm setup`.
+- **It runs the desktop app** (a Mac laptop): run `farhelm-desktop`. The app starts its own helm and a local supervisor
+  as child processes — the Mac is a host already — and remote machines are added as hosts from its hosts panel. Do not
+  run `farhelm helm setup` here; the app is the helm.
+- **It is a Linux machine that only hosts sessions, added from another helm's hosts panel**: install nothing here by
+  hand. The helm you add it from copies `farhelm` (and a tmux, if the host has none at or above the floor) over SSH and
+  writes the supervisor unit itself. Hosts keep today's layout (`~/.local/lib/farhelm` on the host, written by the
+  helm). A Mac used as a host is still set up by hand (`farhelm supervisor run`), as today.
+- **You only want to look at a helm running elsewhere**: install nothing. Open the helm's `http://127.0.0.1:7433/`
+  through an SSH tunnel in any browser and paste its token. There is no "desktop app against a remote helm" mode; the
+  app always brings its own helm.
+
+### What "add host" needs
+
+When you add a Linux host, the helm downloads the host's `farhelm` and, if needed, `tmux` from the GitHub release that
+matches the helm's own version, verifies the release's `SHA256SUMS` signature with a key built into farhelm, verifies
+each file's SHA-256, caches them under the helm's state directory, and pushes them over SSH. The helm's machine
+therefore needs to reach `github.com` at that moment; the host never does. A download that fails verification is
+refused, never used. Offline or air-gapped helms can point `farhelm helm run --payload-dir` at a directory holding the
+release's files exactly as downloaded from the releases page (the archives and the `tmux-*` files, unmodified); that
+directory is trusted as-is — nothing in it is verified, because you put it there. A farhelm you built from source
+yourself downloads nothing: "add host" tells you to pass `--payload-dir` (or install a release).
+
+### What a release contains
+
+Each `vX.Y.Z` on the releases page carries one archive per platform (`farhelm-<target>.tar.gz`, plus
+`farhelm-desktop-aarch64-apple-darwin.tar.gz`, each holding exactly one bare binary), the two static `tmux` builds for
+Linux hosts, and `SHA256SUMS` with its `.minisig` signature, plus cargo-dist's own metadata (`dist-manifest.json`, a
+`.sha256` beside each archive, and a lowercase `sha256.sum`), none of which is signed or read by Farhelm. Do not mistake
+`sha256.sum` for `SHA256SUMS`: the uppercase one, covering the six payloads and signed as `SHA256SUMS.minisig`, is the
+only checksum file Farhelm and the install script verify against. The web UI is inside the `farhelm` binary; there is no
+separate `web/` directory, no unit files to copy, and no `.app` bundle.
 
 ## Quickstart: desktop app plus one remote host
 
-The quickest setup is the Mac app (Apple silicon) as your local helm, driving one remote Ubuntu host. Artifacts are on
-the [releases page](https://github.com/scode/farhelm/releases). No Linux desktop app exists; on a Linux machine the helm
-is a user service and the UI is a browser tab (see below).
+The quickest setup is `farhelm-desktop` (Apple silicon only) as your local helm, driving one remote Ubuntu host. No
+Linux desktop app exists; on a Linux machine the helm is a user service and the UI is a browser tab (see "Running the
+helm on Linux" below).
 
-NOTE: The macOS artifact is not published yet — the current release carries only the Linux archive. Until
-`Farhelm-macos-aarch64.zip` appears on the releases page, this quickstart cannot be followed; use "Running the helm on
-Linux" below instead.
-
-- `brew install tmux`. The app does not bundle tmux. Homebrew's (3.7c at the time of writing) is the recommended way to
-  meet the version floor, and the app looks for a tmux in the Homebrew and MacPorts prefixes itself, since GUI apps do
-  not see your shell's `PATH`; `FARHELM_TMUX` in the app's environment names one explicitly. Without an acceptable tmux
-  the managed supervisor refuses to start — today that refusal reaches the supervisor's log rather than a window, a gap
-  TODO.md's macOS entry records — see the tmux NOTE below.
-- Extract `Farhelm-macos-aarch64.zip` and start `Farhelm.app`. Because the app is unsigned, Control-click it in Finder,
-  choose **Open**, then confirm **Open**. If macOS offers no confirmation there, attempt one normal launch and use
-  **System Settings → Privacy & Security → Open Anyway** before trying again.
-- The app starts its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when
-  the app exits. The window shows the web UI at `http://127.0.0.1:7433/`. If another process owns that port, the app
-  refuses to start instead of choosing an undiscoverable origin; stop the conflicting service and relaunch.
+- Install with the curl command above; on macOS it puts both `farhelm` and `farhelm-desktop` into `~/.local/bin`.
+- `brew install tmux`. Neither binary bundles tmux. Homebrew's (3.7c at the time of writing) is the recommended way to
+  meet the version floor, and `farhelm-desktop` looks for a tmux in the Homebrew and MacPorts prefixes itself, since GUI
+  apps do not see your shell's `PATH`; `FARHELM_TMUX` in its environment names one explicitly. Without an acceptable
+  tmux the managed supervisor refuses to start — today that refusal reaches the supervisor's log rather than a window, a
+  gap TODO.md's macOS entry records — see the tmux NOTE below.
+- Start `farhelm-desktop` (double-click it in Finder, or run `~/.local/bin/farhelm-desktop` from a terminal). It starts
+  its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when the app exits.
+  The window shows the web UI at `http://127.0.0.1:7433/`. If another process owns that port, the app refuses to start
+  instead of choosing an undiscoverable origin; stop the conflicting service and relaunch.
 - Add the remote host: open the hosts panel, choose "add host", and enter the host's SSH destination. Farhelm connects
   with your existing passwordless SSH configuration and inspects the host. A supervisor already running for your user is
   registered as-is; on a host without one, Farhelm shows the exact file-and-unit plan and does nothing until you confirm
@@ -60,8 +145,8 @@ Linux" below instead.
   [docs/agent-wrappers.md](docs/agent-wrappers.md).
 
 To use an ordinary browser instead of (or alongside) the app window, open `http://127.0.0.1:7433/` and paste the token
-printed by `Farhelm.app/Contents/MacOS/farhelm helm token show`. `Farhelm.app/Contents/MacOS/farhelm helm token rotate`
-replaces that token and invalidates every browser that has signed in.
+printed by `farhelm helm token show`. `farhelm helm token rotate` replaces that token and invalidates every browser that
+has signed in.
 
 ## Setting up supervisors
 
@@ -124,67 +209,49 @@ any other.
 ### macOS hosts
 
 There is no system integration on the Mac yet: the supervisor runs while something runs it. On the machine where
-Farhelm.app is your helm, the app already manages one. To make some other Mac a host for a helm running elsewhere,
-`brew install tmux` there and start the supervisor by hand. Homebrew's `bin` is normally on a login shell's `PATH`, so
-this is enough:
+`farhelm-desktop` is your helm, it already manages one. To make some other Mac a host for a helm running elsewhere,
+`brew install tmux` there, install farhelm with the curl command above, and start the supervisor by hand:
 
 ```
-/Applications/Farhelm.app/Contents/MacOS/farhelm supervisor run
+~/.local/bin/farhelm supervisor run
 ```
 
-If it is not, name the binary: `farhelm supervisor run --tmux "$(brew --prefix)/bin/tmux"`.
+If `~/.local/bin` is not on that shell's `PATH`, use the full path, or name the tmux explicitly:
+`~/.local/bin/farhelm supervisor run --tmux "$(brew --prefix)/bin/tmux"` (the leading path locates farhelm; `--tmux`
+separately locates tmux — the two are independent).
 
-Then add the Mac from the hosts panel: enter its SSH destination, and put
-`/Applications/Farhelm.app/Contents/MacOS/farhelm` in the "remote farhelm (optional)" field — the discovery probe runs
-`farhelm` over a fresh SSH login, whose `PATH` does not include the app bundle, so without that field (or a symlink onto
-the login shell's `PATH`) a running supervisor is reported as unreachable. Discovery then registers it — automatic setup
+Then add the Mac from the hosts panel: enter its SSH destination, and put farhelm's path in the "remote farhelm
+(optional)" field — the discovery probe runs `farhelm` over a fresh SSH login, whose `PATH` may not include
+`~/.local/bin`, so without that field (or a symlink onto the login shell's `PATH`) a running supervisor is reported as
+unreachable. NOTE: this field is shell-quoted before it reaches the remote login shell, so a leading `~` is sent as a
+literal character rather than expanded — `~/.local/bin/farhelm` will NOT work here. Get the real path instead, e.g. by
+running `echo ~/.local/bin/farhelm` on that Mac (or `ssh <destination> 'echo ~/.local/bin/farhelm'` from wherever you
+are), and paste the absolute result (`/Users/<name>/.local/bin/farhelm`). Discovery then registers it — automatic setup
 is not offered for Macs. Stopping the supervisor does not stop its sessions: tmux keeps them running and they reattach
 when the supervisor returns; only a reboot takes them down.
 
-NOTE: do not start Farhelm.app itself on a Mac you mean to drive from another helm — the app has no helmless mode, so
-launching it starts a second helm, and running more than one helm is unsupported.
+NOTE: do not start `farhelm-desktop` itself on a Mac you mean to drive from another helm — the app has no helmless mode,
+so launching it starts a second helm, and running more than one helm is unsupported.
 
 ## Running the helm on Linux
 
 NOTE for coding agents: these steps modify the operator's live install. They are written for the human operator, and
 AGENTS.md forbids agents from running them — or from restarting the helm's units — unless the user explicitly asks.
 
-- Extract `farhelm-linux-x86_64.tar.gz` into `~/.local/lib/farhelm/`.
-- Run `~/.local/lib/farhelm/farhelm helm setup`. It writes the helm and supervisor systemd user units, enables and
-  starts both, and prints the two hints below. `--dry-run` prints the units it would write and the commands it would
-  run, and changes nothing; `--uninstall` removes the units it wrote. It owns only the files it wrote — a unit you wrote
-  yourself makes it refuse rather than replace it — and it never installs tmux. The helm unit it writes serves the web
-  UI out of the binary, so it expects a release build with the UI embedded. Beside the units it keeps two dot-files
-  systemd ignores: a lock, so two setups cannot run at once, and a short-lived `.<unit>.restart-pending` marker that
-  makes a rerun finish a restart an interrupted run still owed.
+- Install with the curl command from "Install" above. It puts `farhelm` into `~/.local/bin`.
+- Run `farhelm helm setup`. It writes the helm and supervisor systemd user units, enables and starts both, and prints
+  the two hints below. `--dry-run` prints the units it would write and the commands it would run, and changes nothing;
+  `--uninstall` removes the units it wrote. It owns only the files it wrote — a unit you wrote yourself makes it refuse
+  rather than replace it — and it never installs tmux. The helm unit it writes serves the web UI out of the binary, so
+  it expects a release build with the UI embedded. Beside the units it keeps two dot-files systemd ignores: a lock, so
+  two setups cannot run at once, and a short-lived `.<unit>.restart-pending` marker that makes a rerun finish a restart
+  an interrupted run still owed.
 - Run `loginctl enable-linger "$USER"` so the helm can start at boot and survive logout, where the machine allows it.
-- Open `http://127.0.0.1:7433/` and paste the token printed by `~/.local/lib/farhelm/farhelm helm token show`.
+- Open `http://127.0.0.1:7433/` and paste the token printed by `farhelm helm token show`.
 - In the hosts panel, remote hosts are added exactly as in the quickstart above. The panel never installs a supervisor
   on the helm's own machine: with none running there it tells you to run `farhelm helm setup`, and with one this setup
   installed it says so and points at `systemctl --user`. A running local supervisor is discovered and used like any
   other host.
-
-## Install
-
-Interim section — a fuller installation chapter (Step 6) replaces this. For the desktop app see "Quickstart: desktop app
-plus one remote host" above; for a Linux helm see "Running the helm on Linux" above.
-
-Provisioning payloads (the per-target `farhelm-*.tar.gz` archives and `tmux-*` binaries) are published as individual
-assets by the cargo-dist release workflow, but only from the next release onward: releases already on the
-[releases page](https://github.com/scode/farhelm/releases) predate it and carry one aggregate
-`farhelm-linux-x86_64.tar.gz` in the old layout. Against those, stage `--payload-dir` by hand. Each archive is named
-`<package>-<target>.tar.gz` (e.g. `farhelm-x86_64-unknown-linux-musl.tar.gz`) and holds one binary nested a level down,
-at `<package>-<target>/<binary>` — the layout `dist` itself produces — and each tmux build is a bare, unarchived
-executable named `tmux-<target>` alongside them. `crates/farhelm-helm/src/provisioning/assets.rs` is the exact name
-list. Point `--payload-dir <dir>` (or set `FARHELM_HELM_PAYLOAD_DIR`) at that directory to provision hosts from it
-instead of downloading. `--payload-dir` trusts the files it finds there without any verification (D3): the release's
-`SHA256SUMS` may sit alongside them in the same directory, but this path never reads it — checksum and signature
-verification is only the download source's job.
-
-A release also carries files Farhelm does not use: `dist-manifest.json`, a `.sha256` beside each archive, and a
-lowercase `sha256.sum` — cargo-dist's own metadata, none of it signed. Do not mistake `sha256.sum` for `SHA256SUMS`: the
-uppercase one, covering the six payloads and signed as `SHA256SUMS.minisig`, is the only checksum file Farhelm verifies
-against.
 
 ## Development
 

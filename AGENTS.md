@@ -59,6 +59,17 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   the embedded helm, managed supervisor, desktop authentication, the tmux override reaching the managed supervisor,
   hard-exit tether, restart persistence, and that every asset the window requested went through the desktop asset
   handler. The optional coordinate-driven leg is not part of CI.
+- `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
+  `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
+  before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
+  POSIX `sh` (it is never piped into a stranger's shell, so nothing forces the same portability constraint), which is
+  why only `install.sh` goes through `sh -n`.
+- `bash scripts/test-install-sh.sh` — drives `install.sh` as a real child process against a fixture HTTP server: fresh
+  install, update, a forced-failure rollback (macOS-shaped, via a `uname` shim), 404, checksum mismatch, two
+  malformed-archive shapes, version normalization (including a `-rc.N` prerelease), invalid versions, missing
+  prerequisites (via an isolated `PATH`), the exact closing-message contract across five tmux fixtures, and that nothing
+  outside `FARHELM_INSTALL_DIR` — no `systemctl`/`launchctl` call, nothing else under `$HOME` — ever changes. Every
+  invocation goes through `env -i` with an explicit environment, never this process's own.
 - `dprint check`
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
