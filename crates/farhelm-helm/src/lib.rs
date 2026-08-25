@@ -94,6 +94,7 @@ use farhelm_proto::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tracing::warn;
 
 mod client;
 pub use client::{
@@ -113,6 +114,12 @@ mod auth;
 /// end: authenticated, capped, and forwarded into native `tracing` under
 /// the `webview_console` target (PLAN_desktop_web_bug_triage.md).
 mod client_log;
+
+/// The web UI tree a release build compiles into this binary (D12/D13) —
+/// `build.rs`'s counterpart. Public so `farhelm-desktop` (Step 4) can reach
+/// the same compiled-in tree its embedded helm serves.
+mod embedded_ui;
+pub use embedded_ui::embedded_ui;
 
 /// `--ensure-hosts`: the JSON5 floor under the registry, applied once
 /// before serving starts.
@@ -211,8 +218,12 @@ pub struct HelmArgs {
     #[arg(long)]
     pub state_dir: Option<PathBuf>,
 
-    /// Directory with the built web UI (index.html + assets). Without
-    /// it the API still serves; the UI returns 404.
+    /// Directory with the built web UI (index.html + assets). Overrides
+    /// whatever UI this binary compiled in (D12/D13), for pointing at a
+    /// freshly rebuilt `dx` output without recompiling `farhelm-helm`. The
+    /// browser UI is unavailable — the API still serves, and the UI's own
+    /// paths 404 — only when neither this flag nor a compiled-in tree is
+    /// present.
     #[arg(long)]
     pub ui_dist: Option<PathBuf>,
 
@@ -619,6 +630,205 @@ fn api_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Where [`build_router`] gets the web UI it serves, decided once at
+/// startup by [`select_ui_source`] and threaded through unchanged for the
+/// life of the process (D12/D13).
+///
+/// `Dir` and `Embedded` answer a MISSING asset differently, and that split
+/// is deliberate rather than something to reconcile away:
+///
+/// - `Dir` keeps `ServeDir`'s own behaviour — ANY miss, including a typo in
+///   an asset path that would be a real bug, falls back to `index.html`.
+/// - `Embedded` draws the asset/SPA-route line itself: an extension means a
+///   concrete asset the browser expected to exist (404 on a miss), no
+///   extension means a path reserved for a client-side route (`index.html`
+///   on a miss) — the fallback a single-page-application router would need,
+///   whether that is the UI as it exists today or one added later. The
+///   current UI has no router of its own to claim such a path yet; this
+///   rule exists so adding one is a client-side change with nothing to
+///   update here.
+///
+/// In EITHER mode the shipped UI never actually asks for a missing asset —
+/// its own build pins every asset URL it emits to a file that exists — so
+/// this divergence is observable only to a client hand-crafting requests,
+/// never to the UI as built.
+#[derive(Debug)]
+pub enum UiSource {
+    /// A filesystem directory of a built UI, read at request time so
+    /// editing it takes effect with no restart. Where `--ui-dist` (or a
+    /// developer override) points.
+    Dir(PathBuf),
+    /// The UI tree this binary compiled in via `FARHELM_UI_DIST` (see
+    /// [`embedded_ui`]). `'static` because `include_dir!` places it in the
+    /// binary's own read-only data, not behind a value anyone constructs at
+    /// runtime.
+    Embedded(&'static include_dir::Dir<'static>),
+    /// No UI is available — an ordinary developer build with no
+    /// `--ui-dist`. The API still serves; only the static routes are
+    /// absent.
+    None,
+}
+
+/// Decide which [`UiSource`] a helm serves: an explicit `--ui-dist` wins
+/// over whatever this build embedded, which in turn wins over serving no UI
+/// at all.
+///
+/// `--ui-dist` outranks the embedded tree so a developer holding a
+/// release-shaped build (`FARHELM_UI_DIST` was set, D13) can still point at
+/// a freshly rebuilt `dx` output without recompiling `farhelm-helm` — the
+/// build-time embedding and the runtime flag are independent inputs, not
+/// one substituting for the other.
+pub fn select_ui_source(
+    flag: Option<PathBuf>,
+    embedded: Option<&'static include_dir::Dir<'static>>,
+) -> UiSource {
+    match (flag, embedded) {
+        (Some(dir), _) => UiSource::Dir(dir),
+        (None, Some(dir)) => UiSource::Embedded(dir),
+        (None, None) => UiSource::None,
+    }
+}
+
+/// Warn once, at startup, that this process has no web UI to serve at all.
+///
+/// Split out of [`run_with_ready`]'s call site rather than inlined there, so
+/// a test can drive it directly against all three [`UiSource`] variants —
+/// asserting both that `None` logs and that `Dir`/`Embedded` stay silent —
+/// without standing up a whole helm just to observe one log line.
+fn warn_if_no_ui(ui: &UiSource) {
+    if matches!(ui, UiSource::None) {
+        // Not fatal — SPEC_impl.md's developer-build contract (D12: a build
+        // without an embedded UI and without `--ui-dist` serves the API
+        // alone) makes this a real, supported arrangement — but silent here
+        // would leave "why is the browser getting nothing" to be
+        // rediscovered from scratch every time a developer forgets
+        // `--ui-dist` on a build with nothing embedded.
+        warn!(
+            "no web UI: this build embeds none and --ui-dist was not given; the API still serves"
+        );
+    }
+}
+
+/// Answer one request against the compiled-in UI tree, gating by method the
+/// way `ServeDir` does for [`UiSource::Dir`] (the embedded fallback has to
+/// replicate that gate itself, since it is a bare `axum` handler rather than
+/// a `tower_http` service).
+///
+/// Only `GET` and `HEAD` are static-content methods; any other method is
+/// `405 Method Not Allowed` with `Allow: GET,HEAD`, before any path lookup
+/// happens at all — matching what `ServeDir` returns for `Dir`, asserted
+/// directly against both sources below so the parity is checked rather than
+/// assumed. `HEAD` returns the exact `GET` response, body included: status
+/// and every header, content-type included, must match what `GET` would
+/// have returned, so a `HEAD` probe learns the truth about a resource
+/// without ever fetching it. The body is not dropped here — see the comment
+/// below on why that has to happen one layer up.
+fn serve_embedded(
+    dir: &'static include_dir::Dir<'static>,
+    method: &axum::http::Method,
+    path: &str,
+) -> axum::response::Response {
+    if *method != axum::http::Method::GET && *method != axum::http::Method::HEAD {
+        return (
+            axum::http::StatusCode::METHOD_NOT_ALLOWED,
+            [(axum::http::header::ALLOW, "GET,HEAD")],
+        )
+            .into_response();
+    }
+    // Deliberately the SAME response object for GET and HEAD, body and all.
+    // axum's router computes `Content-Length` from the body's exact size
+    // hint before it strips a HEAD response's body (see
+    // `axum::routing::route::RouteFuture::poll`, which calls
+    // `set_content_length` first and only then empties the body for
+    // `Method::HEAD`) — that happens one layer up, at the fallback
+    // dispatch this function's caller is wrapped in. Emptying the body
+    // ourselves here would run BEFORE that router step sees it, so the
+    // size hint it measures would already be zero and every HEAD response
+    // would falsely claim `Content-Length: 0` instead of the real asset
+    // size. Verified empirically for this axum version (0.8.9) by the HEAD
+    // parity tests below asserting `Content-Length` against the fixture
+    // file's actual length.
+    serve_embedded_get(dir, path)
+}
+
+/// The `GET` half of [`serve_embedded`]: look one path up in the compiled-in
+/// tree and apply [`UiSource::Embedded`]'s asset/SPA-route split (see that
+/// variant's docstring for why it differs from `UiSource::Dir`'s fallback).
+fn serve_embedded_get(
+    dir: &'static include_dir::Dir<'static>,
+    path: &str,
+) -> axum::response::Response {
+    // Every `include_dir!` entry is keyed by its path relative to the
+    // embedded root, with no leading slash — but every path axum hands a
+    // fallback handler starts with one, so it has to come off before a
+    // lookup can match anything.
+    let relative = path.trim_start_matches('/');
+    // Percent-decoding happens once, here, before the lookup below, the
+    // extension check that follows it, and the `mime_guess` call inside
+    // `serve_embedded_bytes` all run — every one of those steps must agree
+    // on the same literal characters the browser meant, or an asset whose
+    // real name needs escaping in a URL (a literal space, say) would 404
+    // even though `include_dir!` compiled it in under its actual name.
+    let relative = match percent_encoding::percent_decode_str(relative).decode_utf8() {
+        Ok(decoded) => decoded,
+        // Not valid UTF-8 once decoded: no `include_dir!` entry — every one
+        // is a Rust string literal — could ever match this, so it is a
+        // miss, not a case worth panicking over or resolving lossily
+        // against a path it might coincidentally collide with.
+        Err(_) => return axum::http::StatusCode::NOT_FOUND.into_response(),
+    };
+    let relative = relative.as_ref();
+    if relative.is_empty() {
+        return serve_embedded_file(dir, "index.html");
+    }
+    if let Some(file) = dir.get_file(relative) {
+        return serve_embedded_bytes(relative, file.contents());
+    }
+    // No exact file at this path: an extension means the browser asked for
+    // a concrete asset that simply is not there (404, matching `Embedded`'s
+    // contract); no extension means a path reserved for a client-side
+    // route, which only `index.html` can take over and render — the
+    // fallback a single-page-application router needs, for the current UI
+    // or a future one. Nothing in the UI as it exists today actually owns
+    // such a route; this rule just makes sure adding one later needs no
+    // change here.
+    match std::path::Path::new(relative).extension() {
+        Some(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+        None => serve_embedded_file(dir, "index.html"),
+    }
+}
+
+/// Serve one exact path from the embedded tree, or 404 if it is not there.
+///
+/// Split out of [`serve_embedded`] because it has two callers: the ordinary
+/// lookup, and both of that function's `index.html` fallbacks (the empty
+/// path and the extension-less miss).
+fn serve_embedded_file(
+    dir: &'static include_dir::Dir<'static>,
+    path: &str,
+) -> axum::response::Response {
+    match dir.get_file(path) {
+        Some(file) => serve_embedded_bytes(path, file.contents()),
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Wrap one embedded file's bytes in a response carrying its guessed
+/// content type — `mime_guess` maps `.js` to `text/javascript`, matching
+/// what `ServeDir` returns for [`UiSource::Dir`] so a browser sees the same
+/// type regardless of which source served it.
+fn serve_embedded_bytes(path: &str, bytes: &'static [u8]) -> axum::response::Response {
+    let content_type = mime_guess::from_path(path).first_or_octet_stream();
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            content_type.essence_str().to_string(),
+        )],
+        bytes,
+    )
+        .into_response()
+}
+
 /// Compose the protected API with the public static UI and the middleware
 /// that must stamp every response.
 ///
@@ -626,15 +836,21 @@ fn api_router(state: Arc<AppState>) -> Router {
 /// in-process (via `tower::ServiceExt::oneshot`) against a scripted fleet,
 /// instead of only exercising handlers directly and silently skipping the
 /// origin guard and its response headers.
-fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u16) -> Router {
+fn build_router(state: Arc<AppState>, ui: UiSource, port: u16) -> Router {
     let mut app = api_router(state);
 
-    if let Some(dist) = ui_dist {
-        let serve = tower_http::services::ServeDir::new(dist).fallback(
-            tower_http::services::ServeFile::new(dist.join("index.html")),
-        );
-        app = app.fallback_service(serve);
-    }
+    app = match ui {
+        UiSource::Dir(dist) => {
+            let serve = tower_http::services::ServeDir::new(&dist).fallback(
+                tower_http::services::ServeFile::new(dist.join("index.html")),
+            );
+            app.fallback_service(serve)
+        }
+        UiSource::Embedded(dir) => app.fallback(move |req: axum::extract::Request| async move {
+            serve_embedded(dir, req.method(), req.uri().path())
+        }),
+        UiSource::None => app,
+    };
 
     app.layer(axum::middleware::from_fn(
         move |req: axum::extract::Request, next: axum::middleware::Next| {
@@ -648,6 +864,435 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
     // mean every reply, or the one path that skips it is the one a
     // skewed client hits first.
     .layer(axum::middleware::from_fn(middleware::stamp_build))
+}
+
+/// [`UiSource`]'s decision function and its `Embedded` variant's actual
+/// serving behaviour — both against the tiny fixture tree committed at
+/// `tests/fixtures/ui` rather than a real `dx` build output, since nothing
+/// under test cares what a real UI looks like.
+#[cfg(test)]
+mod embedded_ui_tests {
+    use super::*;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Method, Request, StatusCode, header};
+    use tower::ServiceExt;
+
+    /// The committed fixture tree. A `static` rather than built per test:
+    /// `include_dir!` output is `const` data, and every test here wants the
+    /// same `&'static Dir<'static>` [`UiSource::Embedded`] itself requires.
+    static FIXTURE_UI: include_dir::Dir<'static> =
+        include_dir::include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/ui");
+
+    /// The fixture `index.html`'s exact bytes, for exact-body assertions
+    /// rather than a mere substring check — committed alongside
+    /// [`FIXTURE_UI`] so a change to one always shows up as a diff to the
+    /// other.
+    const FIXTURE_INDEX_HTML: &[u8] = include_bytes!("../tests/fixtures/ui/index.html");
+    /// The fixture `assets/app.js`'s exact bytes — see [`FIXTURE_INDEX_HTML`].
+    const FIXTURE_APP_JS: &[u8] = include_bytes!("../tests/fixtures/ui/assets/app.js");
+
+    /// The real router, serving [`FIXTURE_UI`] the way a release build's
+    /// `UiSource::Embedded` actually would — built over `rest_harness`'s
+    /// idle scripted fleet since nothing here is about sessions or hosts,
+    /// only about what answers a static-asset path.
+    async fn embedded_router() -> Router {
+        let harness = rest_harness::idle_helm().await;
+        // 7433 rather than reading it off the harness: `Harness::port` is
+        // private to `rest_harness`, and every other test in this crate
+        // that builds a request by hand already hardcodes the same
+        // default (see e.g. `auth::tests`) rather than plumbing it out.
+        build_router(
+            Arc::clone(&harness.state),
+            UiSource::Embedded(&FIXTURE_UI),
+            7433,
+        )
+    }
+
+    /// A `UiSource::Dir` router over a freshly written temp directory
+    /// holding the same two fixture files [`FIXTURE_UI`] compiles in —
+    /// built the way `auth.rs`'s `static_bundle_is_public` does — so a test
+    /// can assert `ServeDir`'s ACTUAL behaviour side by side with
+    /// `serve_embedded`'s, instead of assuming the two agree. Returns the
+    /// backing `TempDir` too: it must outlive every request the caller
+    /// makes against the router, or `ServeDir` reads a directory that no
+    /// longer exists.
+    async fn dir_router_over_fixtures() -> (Router, tempfile::TempDir) {
+        let harness = rest_harness::idle_helm().await;
+        let dist = tempfile::tempdir().unwrap();
+        std::fs::write(dist.path().join("index.html"), FIXTURE_INDEX_HTML).unwrap();
+        std::fs::create_dir(dist.path().join("assets")).unwrap();
+        std::fs::write(dist.path().join("assets").join("app.js"), FIXTURE_APP_JS).unwrap();
+        let router = build_router(
+            Arc::clone(&harness.state),
+            UiSource::Dir(dist.path().to_path_buf()),
+            7433,
+        );
+        (router, dist)
+    }
+
+    /// A loopback-origin-valid request for `method` and `path` — the Host
+    /// header `require_loopback_origin` demands of every request this
+    /// router answers, static UI included.
+    fn request(method: Method, path: &str) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "127.0.0.1:7433")
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    /// A loopback-origin-valid GET for `path` — the common case of
+    /// [`request`].
+    fn get(path: &str) -> Request<Body> {
+        request(Method::GET, path)
+    }
+
+    /// Spec: `/` serves the embedded tree's `index.html` verbatim, byte for
+    /// byte, as `text/html` — the content type a browser needs to actually
+    /// render it rather than offer it as a download.
+    #[tokio::test]
+    async fn root_serves_embedded_index() {
+        let response = embedded_router().await.oneshot(get("/")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html"
+        );
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(body.as_ref(), FIXTURE_INDEX_HTML);
+    }
+
+    /// Spec: a path matching a real embedded file serves it verbatim with
+    /// the `mime_guess`-derived content type — `.js` as `text/javascript`,
+    /// the same type `ServeDir` would return for `UiSource::Dir`, so a
+    /// browser sees identical types regardless of which source answered.
+    #[tokio::test]
+    async fn asset_path_serves_the_file_with_its_guessed_content_type() {
+        let response = embedded_router()
+            .await
+            .oneshot(get("/assets/app.js"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/javascript"
+        );
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(body.as_ref(), FIXTURE_APP_JS);
+    }
+
+    /// Spec: a percent-encoded path segment is decoded before the embedded
+    /// tree is consulted — `include_dir!` entries are keyed by their real,
+    /// unescaped names, so a request for the URL-escaped form of an asset
+    /// whose actual name needs escaping (a literal space, here) must still
+    /// resolve to it rather than 404.
+    #[tokio::test]
+    async fn percent_encoded_path_resolves_to_the_real_asset() {
+        let response = embedded_router()
+            .await
+            .oneshot(get("/assets/space%20name.js"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/javascript"
+        );
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(
+            body.as_ref(),
+            include_bytes!("../tests/fixtures/ui/assets/space name.js").as_slice()
+        );
+    }
+
+    /// Spec: percent-decoding runs before the asset/SPA-route extension
+    /// check too, not just before the `include_dir!` lookup. `%2E` decodes
+    /// to a literal `.`, so `app%2Ejs` names a file that DOES have an
+    /// extension once decoded — if the extension check ran on the raw,
+    /// still-encoded path instead, `app%2Ejs` would look extensionless and
+    /// wrongly fall back to `index.html` instead of resolving to the real
+    /// `app.js`.
+    #[tokio::test]
+    async fn percent_encoded_dot_resolves_to_the_real_asset() {
+        let response = embedded_router()
+            .await
+            .oneshot(get("/assets/app%2Ejs"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/javascript"
+        );
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(body.as_ref(), FIXTURE_APP_JS);
+    }
+
+    /// The missing-file counterpart to
+    /// [`percent_encoded_dot_resolves_to_the_real_asset`]: once `%2E` decodes
+    /// to `.`, `missing%2Ejs` names a path WITH an extension that matches no
+    /// compiled file, so it must take the extensioned-miss branch (a real
+    /// 404) rather than the extensionless SPA fallback to `index.html`.
+    #[tokio::test]
+    async fn percent_encoded_dot_missing_asset_is_404() {
+        let response = embedded_router()
+            .await
+            .oneshot(get("/assets/missing%2Ejs"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Spec: `%FF` is not a valid UTF-8 byte on its own, so decoding it must
+    /// answer a plain 404 — not panic, and not resolve against whatever byte
+    /// sequence it happens to produce. `percent_decode_str(...).decode_utf8()`
+    /// is exactly the fallible step `serve_embedded_get` guards for this; this
+    /// test exercises it through the real router rather than only trusting
+    /// that guard exists.
+    #[tokio::test]
+    async fn invalid_percent_encoding_is_404_not_a_panic() {
+        let response = embedded_router().await.oneshot(get("/%FF")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Spec: a path with no extension that matches no compiled file answers
+    /// with `index.html` — byte for byte, as `text/html` — rather than 404.
+    /// Locks down Step 1's agreed fallback rule for single-page-application
+    /// routes in general, not a claim that the UI as it exists today has
+    /// deep links or history-dependent routing of its own to depend on it.
+    #[tokio::test]
+    async fn extensionless_miss_falls_back_to_index_for_spa_routing() {
+        let response = embedded_router()
+            .await
+            .oneshot(get("/sessions/abc"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html"
+        );
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(body.as_ref(), FIXTURE_INDEX_HTML);
+    }
+
+    /// Spec: a path WITH an extension that matches no compiled file is a
+    /// genuine 404 — the divergence from `UiSource::Dir`'s ServeDir
+    /// fallback that `UiSource`'s own docstring calls out. A typo in an
+    /// asset URL must surface as a failed request, not silently render a
+    /// page that looks like it loaded.
+    #[tokio::test]
+    async fn extensioned_miss_is_a_404() {
+        let response = embedded_router()
+            .await
+            .oneshot(get("/assets/missing.js"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Spec: a non-`GET`/`HEAD` method against the embedded fallback is
+    /// `405 Method Not Allowed` naming the two methods that ARE allowed —
+    /// the same contract `ServeDir` enforces for `UiSource::Dir`, asserted
+    /// here for `Embedded` and below for `Dir` so the parity is checked
+    /// rather than assumed.
+    #[tokio::test]
+    async fn post_to_embedded_ui_is_405_with_allow_header() {
+        let response = embedded_router()
+            .await
+            .oneshot(request(Method::POST, "/"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET,HEAD");
+    }
+
+    /// Spec: `HEAD` against a real embedded asset returns exactly what
+    /// `GET` would have — status, content-type, AND `Content-Length`
+    /// included — with the body dropped. A `HEAD` probe exists precisely so
+    /// a caller can learn that much without paying for the body; getting the
+    /// headers wrong, `Content-Length` especially, would defeat the point of
+    /// asking.
+    ///
+    /// `Content-Length` is asserted two ways: against the fixture file's own
+    /// length (so the number is checked against ground truth, not just
+    /// self-consistency) and against the sibling `GET`'s `Content-Length`
+    /// (so a regression that moves both numbers together, but away from the
+    /// truth, still fails). This pins the round-2 review fix: `serve_embedded`
+    /// used to empty the body itself before returning, which ran ahead of
+    /// axum's own router-level `Content-Length` computation (see that
+    /// function's doc comment) and produced `Content-Length: 0` on every
+    /// `HEAD` response instead of the real size.
+    #[tokio::test]
+    async fn head_asset_returns_get_headers_with_empty_body() {
+        let router = embedded_router().await;
+        let get_response = router.clone().oneshot(get("/assets/app.js")).await.unwrap();
+        assert_eq!(get_response.status(), StatusCode::OK);
+        let get_content_length = get_response
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .expect("GET response must carry Content-Length")
+            .clone();
+        assert_eq!(get_content_length, FIXTURE_APP_JS.len().to_string());
+
+        let response = router
+            .oneshot(request(Method::HEAD, "/assets/app.js"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/javascript"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_LENGTH).unwrap(),
+            &get_content_length,
+            "HEAD's Content-Length must match GET's, not the emptied HEAD body"
+        );
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert!(body.is_empty(), "HEAD must not return a body, got {body:?}");
+    }
+
+    /// Spec: `UiSource::Dir`'s `ServeDir` gates by method exactly the way
+    /// `serve_embedded` now does for `Embedded` — the `Dir` half of the
+    /// method-parity pair started above (`post_to_embedded_ui_is_405_with_allow_header`,
+    /// `head_asset_returns_get_headers_with_empty_body`).
+    #[tokio::test]
+    async fn post_to_dir_ui_is_405_with_allow_header() {
+        let (router, _dist) = dir_router_over_fixtures().await;
+        let response = router.oneshot(request(Method::POST, "/")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET,HEAD");
+    }
+
+    /// The `Dir` half of `head_asset_returns_get_headers_with_empty_body` —
+    /// see that test's docstring, `Content-Length` assertions included.
+    /// `ServeDir` sets `Content-Length` itself (it has to, for range
+    /// requests), so this side was never at risk of the round-2 bug —
+    /// asserted anyway so the parity between the two `UiSource` variants is
+    /// checked, not assumed.
+    #[tokio::test]
+    async fn head_to_dir_ui_returns_get_headers_with_empty_body() {
+        let (router, _dist) = dir_router_over_fixtures().await;
+        let get_response = router.clone().oneshot(get("/assets/app.js")).await.unwrap();
+        assert_eq!(get_response.status(), StatusCode::OK);
+        let get_content_length = get_response
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .expect("GET response must carry Content-Length")
+            .clone();
+        assert_eq!(get_content_length, FIXTURE_APP_JS.len().to_string());
+
+        let response = router
+            .oneshot(request(Method::HEAD, "/assets/app.js"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/javascript"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_LENGTH).unwrap(),
+            &get_content_length,
+            "HEAD's Content-Length must match GET's"
+        );
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert!(body.is_empty(), "HEAD must not return a body, got {body:?}");
+    }
+
+    /// Spec: `--ui-dist` outranks whatever this build embedded, which in
+    /// turn outranks serving nothing — `select_ui_source`'s whole contract,
+    /// and pure enough to assert without a router at all.
+    #[test]
+    fn select_ui_source_prefers_flag_over_embedded_and_falls_back_to_none() {
+        let flag = std::path::PathBuf::from("/some/dev/ui-dist");
+
+        assert!(matches!(
+            select_ui_source(Some(flag.clone()), Some(&FIXTURE_UI)),
+            UiSource::Dir(dir) if dir == flag
+        ));
+        assert!(matches!(
+            select_ui_source(None, Some(&FIXTURE_UI)),
+            UiSource::Embedded(_)
+        ));
+        assert!(matches!(select_ui_source(None, None), UiSource::None));
+    }
+
+    /// Spec: [`warn_if_no_ui`] logs the exact missing-UI warning for
+    /// [`UiSource::None`], and stays silent for `Dir`/`Embedded` — the
+    /// assertion `run_with_ready`'s previously-inlined `if` made impossible
+    /// to drive directly. The message is a unique sentence found nowhere
+    /// else in this crate, so filtering the process-global capture buffer
+    /// (see `crate::test_capture`'s own docs on why it must be global) by
+    /// exact content is as good as filtering by this test's own identity.
+    #[test]
+    fn warn_if_no_ui_warns_only_for_none() {
+        const MESSAGE: &str =
+            "no web UI: this build embeds none and --ui-dist was not given; the API still serves";
+        let events = crate::test_capture::install();
+
+        warn_if_no_ui(&UiSource::Dir(std::path::PathBuf::from(
+            "/some/dev/ui-dist",
+        )));
+        warn_if_no_ui(&UiSource::Embedded(&FIXTURE_UI));
+        assert!(
+            crate::test_capture::matching(&events, MESSAGE).is_empty(),
+            "Dir and Embedded must not log the missing-UI warning"
+        );
+
+        warn_if_no_ui(&UiSource::None);
+        let hits = crate::test_capture::matching(&events, MESSAGE);
+        assert_eq!(
+            hits.len(),
+            1,
+            "None must log the missing-UI warning exactly once"
+        );
+        assert_eq!(hits[0].field("message"), Some(MESSAGE));
+        assert_eq!(hits[0].level, "WARN");
+    }
+
+    /// Spec: [`middleware::stamp_build`] is layered OUTSIDE the whole router
+    /// (see [`build_router`]'s own comment on why), so it must reach a
+    /// perfectly ordinary successful static-asset response too, not just the
+    /// API routes it was originally added for.
+    #[tokio::test]
+    async fn successful_embedded_response_carries_build_stamp_header() {
+        let response = embedded_router().await.oneshot(get("/")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(BUILD_STAMP_HEADER).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+
+    /// Spec: [`middleware::require_loopback_origin`] rejects a request whose
+    /// `Host` names a foreign origin — the DNS-rebinding defense
+    /// `middleware`'s own tests pin exhaustively for `origin_is_allowed` — and
+    /// [`middleware::stamp_build`]'s outer layering means even THAT rejection
+    /// carries the build stamp: a confused, DNS-rebound client asking why its
+    /// requests are failing needs the same skew signal a working one gets.
+    #[tokio::test]
+    async fn foreign_host_is_rejected_but_still_carries_build_stamp_header() {
+        let foreign_request = Request::builder()
+            .method(Method::GET)
+            .uri("/")
+            .header(header::HOST, "evil.example:7433")
+            .body(Body::empty())
+            .unwrap();
+        let response = embedded_router()
+            .await
+            .oneshot(foreign_request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.headers().get(BUILD_STAMP_HEADER).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
 }
 
 /// Run the helm until the process is killed: open helm.db, apply any
@@ -746,7 +1391,9 @@ async fn run_with_ready(
     // separate `token show` command.
     state.auth.token().await?;
     let mut token_control = token_control::serve(&state_dir, state.auth.clone()).await?;
-    let app = build_router(Arc::clone(&state), args.ui_dist.as_deref(), addr.port());
+    let ui = select_ui_source(args.ui_dist.clone(), embedded_ui());
+    warn_if_no_ui(&ui);
+    let app = build_router(Arc::clone(&state), ui, addr.port());
 
     if let Some(ready) = ready {
         let _ = ready.send(addr);

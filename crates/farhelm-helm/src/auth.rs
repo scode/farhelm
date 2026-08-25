@@ -599,10 +599,14 @@ mod tests {
             .header(header::HOST, "127.0.0.1:7433")
             .body(Body::empty())
             .unwrap();
-        let response = crate::build_router(Arc::clone(&harness.state), Some(dist.path()), 7433)
-            .oneshot(request)
-            .await
-            .unwrap();
+        let response = crate::build_router(
+            Arc::clone(&harness.state),
+            crate::UiSource::Dir(dist.path().to_path_buf()),
+            7433,
+        )
+        .oneshot(request)
+        .await
+        .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             to_bytes(response.into_body(), 1024).await.unwrap(),
