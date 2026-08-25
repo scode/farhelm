@@ -9,7 +9,7 @@ use super::http::{
     ProbeDestination, ProbeRequest, ProbeResponse, ProvisionRequest, ProvisioningRequestError,
     ProvisioningView, RunAccepted, RunStatus, StepStatus, UpdatePlanResponse,
 };
-use super::payloads::{PayloadSource, production_payloads};
+use super::payloads::{PayloadSelection, PayloadSource, production_payloads};
 use super::plan::{
     PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
 };
@@ -122,12 +122,16 @@ pub(crate) struct ProvisioningService {
 }
 
 impl ProvisioningService {
-    /// Production composition uses real process/file operations and the
-    /// deliberately empty development payload source item 8 will replace.
+    /// Production composition uses real process/file operations and
+    /// resolves `selection`/`release_build` (D13, D18) into a real payload
+    /// source via [`production_payloads`] — see that function for what each
+    /// [`PayloadSelection`] currently does and what Step 3b adds to it.
     pub(crate) fn production(
         store: HelmStore,
         manager: Arc<ConnectionManager>,
         helm_state_dir: PathBuf,
+        selection: PayloadSelection,
+        release_build: bool,
     ) -> anyhow::Result<Arc<Self>> {
         let local_farhelm =
             std::env::current_exe().context("locating the running farhelm binary")?;
@@ -153,9 +157,14 @@ impl ProvisioningService {
                 fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
             }));
         }
+        // The directory a RELATIVE `--payload-dir` is spelled against
+        // (F1, review round 3) — `production_payloads`'s legacy-cache alias
+        // guard needs it to resolve such a selection the same way the shell
+        // that launched this process would have.
+        let cwd = std::env::current_dir().context("reading the current working directory")?;
         Ok(Arc::new(Self {
             backend: Arc::new(SystemBackend::new(helm_state_dir.clone())),
-            payloads: production_payloads(&helm_state_dir)?,
+            payloads: production_payloads(selection, &helm_state_dir, release_build, &cwd)?,
             store,
             manager,
             layout: PlanLayout::production(helm_state_dir),
@@ -1072,6 +1081,7 @@ impl ProvisioningService {
             let source = self
                 .payloads
                 .path(*payload, *arch)
+                .await
                 .map_err(|error| (index, BackendFailure::new(format!("{error:#}"), "")))?;
             let staged = stage_payload(&source)
                 .await

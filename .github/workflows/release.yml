@@ -100,9 +100,7 @@ jobs:
           done
       - name: Build cached web bundle
         run: cd crates/farhelm-ui && dx build --platform web --release
-      - name: Build payload-carrying Linux helm
-        env:
-          FARHELM_PAYLOAD_DIR: ${{ github.workspace }}/release-stage/payloads
+      - name: Build Linux helm
         run: cargo build --release -p farhelm
       - name: Assemble Linux release
         run: |
@@ -178,8 +176,6 @@ jobs:
       - name: Install Dioxus CLI
         run: cargo install --locked dioxus-cli --version 0.7.10
       - name: Build bundled CLI and desktop app
-        env:
-          FARHELM_PAYLOAD_DIR: ${{ github.workspace }}/release-inputs/payloads
         run: |
           cargo build --release -p farhelm --target aarch64-apple-darwin
           cd crates/farhelm-ui

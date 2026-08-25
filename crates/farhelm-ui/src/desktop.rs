@@ -202,6 +202,8 @@ impl DesktopBootstrap {
                             state_dir: Some(helm_state),
                             ui_dist,
                             ensure_hosts: None,
+                            payload_dir: None,
+                            release_base_url: None,
                         },
                         ready_tx,
                         shutdown_rx,

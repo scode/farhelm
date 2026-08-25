@@ -240,6 +240,63 @@ pub struct HelmArgs {
     /// testing, where a fleet has to exist before anything can drive it.
     #[arg(long)]
     pub ensure_hosts: Option<PathBuf>,
+
+    /// Directory holding published release files (`farhelm-<target>.tar.gz`,
+    /// `tmux-<target>`) to use as "add host" provisioning payloads instead
+    /// of downloading them. For air-gapped installs and mirrors, and for
+    /// tests that would rather not reach GitHub. Must be writable: Farhelm
+    /// creates and reuses a hidden `.extracted` cache below it to hold the
+    /// materialized binaries. Farhelm does not verify files placed here —
+    /// this directory was explicitly supplied by the operator, so its
+    /// contents are trusted as given. Wins over `--release-base-url` when
+    /// both are given (see [`HelmArgs::payload_selection`]).
+    ///
+    /// `hide_env_values` (F5, review round 2, symmetry with
+    /// `--release-base-url`): a directory path is not a credential, but
+    /// clap would otherwise print whatever this variable currently holds
+    /// in `--help` output, and there is no reason to make an exception to
+    /// the same policy this flag's sibling needs for a real secret.
+    #[arg(long, env = "FARHELM_HELM_PAYLOAD_DIR", hide_env_values = true)]
+    pub payload_dir: Option<PathBuf>,
+
+    /// Base URL to download "add host" provisioning payloads from, in place
+    /// of the default GitHub release matching this build's own version.
+    /// Exists so tests and air-gapped mirrors can point at a server other
+    /// than github.com; selectable on any build, not only a release build.
+    ///
+    /// `hide_env_values` (F5, review round 2, security): a mirror URL can
+    /// legitimately carry credentials (HTTP basic auth in the userinfo
+    /// component, an access token in the query string). Clap's default
+    /// `--help` rendering prints an `env`-backed argument's CURRENT value
+    /// from the process environment; without this, running
+    /// `farhelm helm run --help` on a machine where the variable is
+    /// exported would print the secret to terminal scrollback, copied
+    /// support output, or a screen share. The variable's NAME still shows —
+    /// only the value is suppressed.
+    #[arg(long, env = "FARHELM_RELEASE_BASE_URL", hide_env_values = true)]
+    pub release_base_url: Option<url::Url>,
+}
+
+impl HelmArgs {
+    /// Resolve the two payload flags into the one selection
+    /// `production_payloads` acts on, applying D18's precedence: an
+    /// explicit `--payload-dir` is unambiguous and local, so it wins over
+    /// `--release-base-url` whenever both happen to be given.
+    ///
+    /// `pub(crate)` (F24, review round 1): `PayloadSelection` lives in the
+    /// private `provisioning` module, so no caller outside this crate could
+    /// ever name the type this method returns — a `pub` method returning an
+    /// unnameable type is not a usable external contract, just a wider
+    /// surface than the crate needs to expose.
+    pub(crate) fn payload_selection(&self) -> provisioning::PayloadSelection {
+        match (&self.payload_dir, &self.release_base_url) {
+            (Some(dir), _) => provisioning::PayloadSelection::Directory(dir.clone()),
+            (None, Some(base_url)) => provisioning::PayloadSelection::Release {
+                base_url: base_url.clone(),
+            },
+            (None, None) => provisioning::PayloadSelection::Default,
+        }
+    }
 }
 
 /// What the axum handlers share: the fleet, in its two halves.
@@ -351,11 +408,15 @@ impl AppState {
         manager: Arc<manager::ConnectionManager>,
         store: store::HelmStore,
         state_dir: PathBuf,
+        payload_selection: provisioning::PayloadSelection,
+        release_build: bool,
     ) -> anyhow::Result<AppState> {
         let provisioning = provisioning::ProvisioningService::production(
             store.clone(),
             Arc::clone(&manager),
             state_dir,
+            payload_selection,
+            release_build,
         )?;
         Ok(Self::with_provisioning(manager, store, provisioning))
     }
@@ -1389,7 +1450,16 @@ async fn run_with_ready(
     )
     .await?;
 
-    let state = Arc::new(AppState::new(manager, store, state_dir.clone())?);
+    let state = Arc::new(AppState::new(
+        manager,
+        store,
+        state_dir.clone(),
+        args.payload_selection(),
+        // D13: a release build is exactly a build that embedded a web UI.
+        // Read here, not at `HelmArgs::payload_selection`, because it is a
+        // fact about THIS BINARY, not about the argv the operator passed.
+        cfg!(farhelm_release_build),
+    )?);
     // First run owns token creation. Browser serving must never begin with a
     // database whose bootstrap secret exists only after somebody invokes the
     // separate `token show` command.
@@ -1582,6 +1652,275 @@ mod tests {
             parsed.args.ensure_hosts,
             Some(std::path::PathBuf::from("/etc/farhelm.json5"))
         );
+    }
+
+    /// A `HelmArgs` with every field at its argument-free default — the
+    /// base every payload-selection test below customizes exactly the
+    /// fields its case is about.
+    fn base_args() -> crate::HelmArgs {
+        crate::HelmArgs {
+            port: 7433,
+            state_dir: None,
+            ui_dist: None,
+            ensure_hosts: None,
+            payload_dir: None,
+            release_base_url: None,
+        }
+    }
+
+    /// Spec (D18): `--payload-dir` wins over `--release-base-url` when both
+    /// are given — asserted at `HelmArgs::payload_selection`'s own contract,
+    /// the type `production_payloads` actually consumes.
+    ///
+    /// F7 (review round 1): constructs `HelmArgs` directly rather than
+    /// parsing argv through clap. An earlier version of this test parsed
+    /// `--payload-dir`/`--release-base-url` as explicit CLI flags, which
+    /// clap's own precedence (argv over `env`) made safe from ambient
+    /// environment variables — but the SIBLING test below used to also
+    /// parse a NO-FLAGS invocation through clap to reach `Default`, and
+    /// that case had no such protection: this crate's test binary runs as
+    /// one process, so a developer or CI job that legitimately exports
+    /// `FARHELM_HELM_PAYLOAD_DIR` (say, to run the real helm alongside the
+    /// test suite) would silently flip that assertion. Building the struct
+    /// literal directly is immune to environment by construction — clap
+    /// never runs, so there is nothing for the environment to influence.
+    /// The `env = "..."` wiring itself is proven separately, in a CHILD
+    /// process, by
+    /// [`payload_selection_env_wiring_is_isolated_in_a_child_process`]
+    /// below.
+    #[test]
+    fn payload_selection_prefers_directory_over_release_base_url() {
+        let args = crate::HelmArgs {
+            payload_dir: Some(std::path::PathBuf::from("/opt/farhelm-payloads")),
+            release_base_url: Some(url::Url::parse("https://example.invalid/release/").unwrap()),
+            ..base_args()
+        };
+        assert!(matches!(
+            args.payload_selection(),
+            crate::provisioning::PayloadSelection::Directory(dir)
+                if dir == std::path::Path::new("/opt/farhelm-payloads")
+        ));
+    }
+
+    /// Spec: with no `--payload-dir`, `--release-base-url` alone selects the
+    /// `Release` variant, and neither flag falls back to `Default` — the two
+    /// remaining corners of `payload_selection`'s match that the precedence
+    /// test above does not cover. See that test's docstring (F7) for why
+    /// this constructs `HelmArgs` directly instead of parsing argv.
+    #[test]
+    fn payload_selection_falls_back_to_release_then_default() {
+        let with_url = crate::HelmArgs {
+            release_base_url: Some(url::Url::parse("https://example.invalid/release/").unwrap()),
+            ..base_args()
+        };
+        assert!(matches!(
+            with_url.payload_selection(),
+            crate::provisioning::PayloadSelection::Release { base_url }
+                if base_url.as_str() == "https://example.invalid/release/"
+        ));
+
+        assert!(matches!(
+            base_args().payload_selection(),
+            crate::provisioning::PayloadSelection::Default
+        ));
+    }
+
+    /// Marker set only in the child process
+    /// [`payload_selection_env_wiring_is_isolated_in_a_child_process`]
+    /// re-execs itself as — its presence is what tells that one test
+    /// invocation it is running as the child rather than as the top-level
+    /// test that spawned it.
+    const PAYLOAD_SELECTION_ENV_CHILD: &str = "FARHELM_HELM_PAYLOAD_SELECTION_TEST_CHILD";
+
+    /// Every line the child prints is prefixed with this so the parent can
+    /// find its one answer inside libtest's own `--nocapture` narration
+    /// (`running 1 test`, `test ... ok`, and so on) without having to
+    /// assume the child's stdout is exactly one line.
+    const PAYLOAD_SELECTION_TAG_PREFIX: &str = "PAYLOAD_SELECTION_TAG=";
+
+    /// The three payload-selecting variable names this crate ever reads or
+    /// deliberately does not — the two documented ones plus the retired
+    /// build-time name D18 forbids reusing.
+    const PAYLOAD_SELECTION_ENV_VARS: [&str; 3] = [
+        "FARHELM_HELM_PAYLOAD_DIR",
+        "FARHELM_RELEASE_BASE_URL",
+        "FARHELM_PAYLOAD_DIR",
+    ];
+
+    /// Re-exec this test binary as the env-wiring child with EXACTLY `vars`
+    /// set, and return the one tagged line it printed (see
+    /// [`PAYLOAD_SELECTION_TAG_PREFIX`]), panicking with the child's
+    /// stderr on a non-zero exit so a parse failure surfaces at the call
+    /// site rather than as a confusing empty string.
+    ///
+    /// F8 (review round 2): an earlier version only ADDED `vars` on top of
+    /// whatever this process's own environment already carried, so the
+    /// "retired variable alone" case could still inherit an ambient
+    /// `FARHELM_HELM_PAYLOAD_DIR` or `FARHELM_RELEASE_BASE_URL` from a
+    /// developer's shell or a CI runner and silently select `Directory` or
+    /// `Release` instead of the `Default` the case claims to prove — a
+    /// false pass that would not fail until someone's real environment
+    /// happened to carry one of those names. `env_remove`ing all three
+    /// known variable names before applying each case's own values closes
+    /// that: the child's view of these three names is fully determined by
+    /// what this function sets, never by what it merely forgot to unset.
+    fn run_payload_selection_child(vars: &[(&str, &str)]) -> String {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "tests::payload_selection_env_wiring_is_isolated_in_a_child_process",
+            "--nocapture",
+        ]);
+        command.env(PAYLOAD_SELECTION_ENV_CHILD, "1");
+        for name in PAYLOAD_SELECTION_ENV_VARS {
+            command.env_remove(name);
+        }
+        for (name, value) in vars {
+            command.env(name, value);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "payload selection child failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix(PAYLOAD_SELECTION_TAG_PREFIX))
+            .unwrap_or_else(|| panic!("child printed no tagged line:\n{stdout}"))
+            .to_string()
+    }
+
+    /// Spec (F7/F10, review round 1; F8, review round 2):
+    /// `--payload-dir`/`--release-base-url`'s `env = "..."` attributes, and
+    /// the retired `FARHELM_PAYLOAD_DIR` name's inertness (D18), are facts
+    /// about clap reading THIS PROCESS's real environment — untestable by
+    /// constructing a `HelmArgs` value directly (the two pure precedence
+    /// tests above prove `payload_selection`'s OWN precedence, nothing
+    /// about whether an env var actually reaches either field), and unsafe
+    /// to test by mutating this shared test binary's own environment (this
+    /// project's tests never do that). So this re-execs itself as a child
+    /// process with an EXACTLY-controlled environment (see
+    /// [`run_payload_selection_child`] for how ambient values are kept
+    /// out), covering every corner D18 makes a claim about:
+    ///
+    /// - `--payload-dir`'s variable alone selects `Directory`.
+    /// - `--release-base-url`'s variable alone selects `Release`.
+    /// - Both together select `Directory` — proving the documented
+    ///   precedence through the REAL env path, not merely through
+    ///   `payload_selection`'s match arms.
+    /// - The RETIRED `FARHELM_PAYLOAD_DIR` set ALONE selects `Default` —
+    ///   proving the old build-time variable was not silently reused as
+    ///   the new runtime one.
+    #[test]
+    fn payload_selection_env_wiring_is_isolated_in_a_child_process() {
+        if std::env::var_os(PAYLOAD_SELECTION_ENV_CHILD).is_some() {
+            use clap::Parser;
+            let parsed = Wrapper::parse_from(["farhelm"]);
+            let tag = match parsed.args.payload_selection() {
+                crate::provisioning::PayloadSelection::Default => "default",
+                crate::provisioning::PayloadSelection::Directory(_) => "directory",
+                crate::provisioning::PayloadSelection::Release { .. } => "release",
+            };
+            println!("{PAYLOAD_SELECTION_TAG_PREFIX}{tag}");
+            return;
+        }
+
+        assert_eq!(
+            run_payload_selection_child(&[("FARHELM_HELM_PAYLOAD_DIR", "/opt/farhelm-payloads")]),
+            "directory",
+            "--payload-dir's env var alone must select Directory"
+        );
+        assert_eq!(
+            run_payload_selection_child(&[(
+                "FARHELM_RELEASE_BASE_URL",
+                "https://example.invalid/release/"
+            )]),
+            "release",
+            "--release-base-url's env var alone must select Release"
+        );
+        assert_eq!(
+            run_payload_selection_child(&[
+                ("FARHELM_HELM_PAYLOAD_DIR", "/opt/farhelm-payloads"),
+                (
+                    "FARHELM_RELEASE_BASE_URL",
+                    "https://example.invalid/release/"
+                ),
+            ]),
+            "directory",
+            "--payload-dir's env var must win over --release-base-url's through real env wiring"
+        );
+        assert_eq!(
+            run_payload_selection_child(&[("FARHELM_PAYLOAD_DIR", "/should/never/be/read")]),
+            "default",
+            "the retired FARHELM_PAYLOAD_DIR name must stay inert at the new runtime flag"
+        );
+    }
+
+    /// Marker set only in the child process
+    /// [`cli_help_names_the_release_url_env_var_but_never_its_value`]
+    /// re-execs itself as.
+    const HELP_LEAK_CHILD: &str = "FARHELM_HELM_HELP_LEAK_TEST_CHILD";
+
+    /// Spec (F5, review round 2, security): `--release-base-url`'s
+    /// `hide_env_values = true` must actually suppress the value clap would
+    /// otherwise print for an `env`-backed argument in `--help` output — a
+    /// fact about clap's real help renderer, not provable by inspecting the
+    /// `#[arg(...)]` attribute text. Runs in a child process with a
+    /// sentinel-bearing URL set ONLY there (this project's tests never
+    /// mutate the shared test binary's own environment), so a leak can
+    /// never bleed into any other test's output either.
+    #[test]
+    fn cli_help_names_the_release_url_env_var_but_never_its_value() {
+        if std::env::var_os(HELP_LEAK_CHILD).is_some() {
+            use clap::Parser;
+            let error = Wrapper::try_parse_from(["farhelm", "--help"])
+                .expect_err("--help always exits through clap's error path");
+            let output_path =
+                std::env::var("FARHELM_HELM_HELP_LEAK_TEST_OUTPUT").expect("output path is set");
+            std::fs::write(output_path, error.to_string()).expect("writing help text");
+            return;
+        }
+
+        let output_file = tempfile::NamedTempFile::new().unwrap();
+        let sentinel_url =
+            "https://sentinel-user:sentinel-pass@example.invalid/leak?token=sentinel-token";
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::cli_help_names_the_release_url_env_var_but_never_its_value",
+                "--nocapture",
+            ])
+            .env(HELP_LEAK_CHILD, "1")
+            .env("FARHELM_RELEASE_BASE_URL", sentinel_url)
+            .env(
+                "FARHELM_HELM_HELP_LEAK_TEST_OUTPUT",
+                output_file.path().as_os_str(),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "help-leak child failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let help_text = std::fs::read_to_string(output_file.path()).unwrap();
+        assert!(
+            help_text.contains("FARHELM_RELEASE_BASE_URL"),
+            "help must still name the variable:\n{help_text}"
+        );
+        for secret in [
+            "sentinel-user",
+            "sentinel-pass",
+            "sentinel-token",
+            "example.invalid",
+        ] {
+            assert!(
+                !help_text.contains(secret),
+                "help leaked {secret:?} from the hidden env value:\n{help_text}"
+            );
+        }
     }
 
     /// `http_error`'s downcast must find a [`SupervisorError`] under a

@@ -337,8 +337,9 @@ impl ProvisioningBackend for E2eProvisioningBackend {
 /// the running debug executable for every simulated host.
 pub(super) struct E2ePayloads(pub(super) PathBuf);
 
+#[async_trait]
 impl PayloadSource for E2ePayloads {
-    fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+    async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
         Ok(self.0.clone())
     }
 }

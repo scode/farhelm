@@ -74,17 +74,20 @@ one supervisor per user per host, and adding a host is discovery-first: the helm
 user's supervisor. If one is already running — say one the user started interactively by hand — the helm uses it as-is;
 it never restarts or replaces a running supervisor. If none exists, the user is asked whether to set one up
 automatically, and on confirmation one action installs the supervisor binary, sets up the per-user systemd layer, and
-registers the host — no separate host-side setup. Passwordless SSH is the entire prerequisite: with it in place,
-provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no opened
-firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward story
-is separate; see Security.) Nothing the supervisor does requires root: install, updates, and operation all happen as the
-SSH user (user-level systemd, files in user-owned directories). If some optional step cannot be done without privileges
-on a given host, provisioning says so and continues without it rather than escalating. Before touching the host, the
-helm states exactly what it is about to do in concrete terms — the files it will place and where, the systemd units it
-will create, and that the supervisor will run persistently and start at boot — and proceeds only on confirmation. The
-same transparency applies to updates, which use the same mechanism. V1 provisioning targets Ubuntu only, and only
-architectures for which cross-compiled supervisor binaries exist; everything else falls back to the manual path (run the
-binary yourself), which always remains available.
+registers the host — no separate host-side setup. Passwordless SSH is the prerequisite on the HOST side, plus, on the
+helm's own machine, access to the configured release source (GitHub by default) or a staged payload directory. With that
+in place, provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no
+opened firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward
+story is separate; see Security.) Downloads go directly to that configured release-asset source — GitHub by default;
+neither GitHub nor a configured mirror is a relay or rendezvous service for Farhelm sessions or connections, and the
+no-relay guarantee below still holds. Nothing the supervisor does requires root: install, updates, and operation all
+happen as the SSH user (user-level systemd, files in user-owned directories). If some optional step cannot be done
+without privileges on a given host, provisioning says so and continues without it rather than escalating. Before
+touching the host, the helm states exactly what it is about to do in concrete terms — the files it will place and where,
+the systemd units it will create, and that the supervisor will run persistently and start at boot — and proceeds only on
+confirmation. The same transparency applies to updates, which use the same mechanism. V1 provisioning targets Ubuntu
+only, and only architectures for which cross-compiled supervisor binaries exist; everything else falls back to the
+manual path (run the binary yourself), which always remains available.
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -587,9 +590,10 @@ Further requirements:
 
 The first usable version is complete when all of the following pass:
 
-1. From the helm on the Mac (native app), given nothing but passwordless SSH to a fresh Ubuntu host, provision it in one
-   action: supervisor installed and started without root, host registered, sessions operable with no further network
-   setup. Also open the same helm's web UI from a browser (token-authenticated).
+1. From the helm on the Mac (native app) — with helm-side access to the configured release source (GitHub by default) or
+   a staged payload directory — given nothing but passwordless SSH to a fresh Ubuntu host, provision it in one action:
+   supervisor installed and started without root, host registered, sessions operable with no further network setup. Also
+   open the same helm's web UI from a browser (token-authenticated).
 2. Create and launch an official Claude Code session in one action, in an existing `jj` workspace where Git reports
    detached HEAD.
 3. Create a local (Mac) session the same way; both appear in one list.
