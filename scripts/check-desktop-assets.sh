@@ -37,7 +37,10 @@
 #
 # NOTE: that is a fact about the SHIPPED binary too, not just about this
 # check. Whatever produces the release artifact has to run dx over it, or the
-# app will ask for one nonsensical path fourteen times and load nothing.
+# app will ask for one nonsensical path fourteen times and load nothing. That
+# is why the release build goes through `scripts/build-desktop-binary.sh`
+# instead of cargo-dist's ordinary cargo build, and why that script repeats
+# the placeholder assertion below on the artifact it produces.
 #
 # ## Proving the gate can fail
 #
@@ -62,6 +65,11 @@
 # mutation automatically.
 #
 # Usage: scripts/check-desktop-assets.sh [--self-test]
+#        scripts/check-desktop-assets.sh --compare <ui-dist-dir> <requested-file>
+#
+# `--compare` is the same verdict over two sets somebody else built; it is how
+# the release desktop build (`scripts/build-desktop-binary.sh`) reuses this
+# gate instead of reimplementing it. It builds nothing.
 # Requires: dx (dioxus-cli, the version pinned in the workspace Cargo.toml),
 # the wasm32-unknown-unknown target, and a cargo toolchain.
 # Honors CARGO_TARGET_DIR, relative or absolute.
@@ -119,6 +127,27 @@ trap 'rm -rf "$work"' EXIT
 # an extra requested path is the 404 this gate exists for, and an extra
 # bundled file means an asset was removed from the code but is still shipping,
 # or that something declares an asset outside `declare_assets!`.
+# The set of application assets a web bundle actually ships, one `/assets/…`
+# path per line, sorted.
+#
+# The dist's `assets/` holds our own files plus dx's wasm-bindgen output: the
+# module `index.html` loads, and the `.wasm` that module fetches. Neither is an
+# `asset!()` and neither is ever requested over the desktop asset route, so
+# both are excluded rather than treated as a mismatch. They are identified by
+# what they ARE (referenced from index.html; a wasm module) instead of by a
+# name pattern, so a change to dx's naming does not quietly turn the exclusion
+# into a hole.
+#
+# Deliberately POSIX-portable — `sed` rather than `find -printf` — because
+# `scripts/build-desktop-binary.sh` calls this through `--compare` on a macOS
+# release runner, where find has no `-printf`.
+list_bundled_assets() {
+  local dist=$1
+  grep -o 'assets/[A-Za-z0-9._-]*' "$dist/index.html" | sed 's#^#/#' | sort -u >"$work/glue"
+  find "$dist/assets" -maxdepth 1 -type f | sed 's#.*/#/assets/#' |
+    grep -v '\.wasm$' | sort -u | comm -23 - "$work/glue"
+}
+
 compare_asset_sets() {
   local present=$1 requested=$2 diff_out="$work/diff"
   if diff -u "$present" "$requested" >"$diff_out"; then
@@ -132,6 +161,17 @@ compare_asset_sets() {
   return 1
 }
 
+# The same verdict, for a caller that has already built both sides.
+# `scripts/build-desktop-binary.sh` produces the RELEASE desktop binary on a
+# macOS runner and needs exactly this comparison against the bundle it is
+# about to embed; sharing the mode is what keeps the release path and the
+# per-change gate from drifting into two different definitions of "the assets
+# agree".
+#
+# Dispatched AFTER the self-test below, deliberately: the release path gets the
+# same proof-the-comparator-can-fail that every other invocation gets, and it
+# costs milliseconds.
+#
 # Prove `compare_asset_sets` still rejects a divergence, in each direction,
 # before anything trusts its silence. Runs on every invocation — the real
 # inputs below are equal whenever the repository is healthy, so nothing else
@@ -158,6 +198,20 @@ self_test
 
 if [ "${1:-}" = "--self-test" ]; then
   exit 0
+fi
+
+if [ "${1:-}" = "--compare" ]; then
+  compare_dist=${2:?usage: check-desktop-assets.sh --compare <ui-dist-dir> <requested-file>}
+  compare_requested=${3:?usage: check-desktop-assets.sh --compare <ui-dist-dir> <requested-file>}
+  test -f "$compare_dist/index.html" || {
+    echo "no web bundle at $compare_dist" >&2
+    exit 1
+  }
+  list_bundled_assets "$compare_dist" >"$work/present"
+  if compare_asset_sets "$work/present" "$compare_requested"; then
+    exit 0
+  fi
+  exit 1
 fi
 
 # dx never prunes: its output tree accumulates every generation it has ever
@@ -198,15 +252,6 @@ if grep -q 'replaced by dx' "$work/requested"; then
   exit 1
 fi
 
-# The dist's `assets/` holds our own files plus dx's wasm-bindgen output: the
-# module `index.html` loads, and the `.wasm` that module fetches. Neither is an
-# `asset!()` and neither is ever requested over the desktop asset route, so
-# both are excluded rather than treated as a mismatch. They are identified by
-# what they ARE (referenced from index.html; a wasm module) instead of by a
-# name pattern, so a change to dx's naming does not quietly turn the
-# exclusion into a hole.
-grep -o 'assets/[A-Za-z0-9._-]*' "$dist/index.html" | sed 's#^#/#' | sort -u >"$work/glue"
-find "$dist/assets" -maxdepth 1 -type f -printf '/assets/%f\n' |
-  grep -v '\.wasm$' | sort -u | comm -23 - "$work/glue" >"$work/present"
+list_bundled_assets "$dist" >"$work/present"
 
 compare_asset_sets "$work/present" "$work/requested"

@@ -19,12 +19,14 @@ use std::path::PathBuf;
 /// directory, so a release binary carries its own UI with no `--ui-dist`
 /// needed at runtime. Unset in an ordinary developer build.
 ///
-/// Release CI WILL set this once the cargo-dist release workflow lands (a
-/// later step in the distribution plan this crate is being built toward);
-/// it does not yet. Until then, a build made with it set locally is
-/// "release-shaped" only in the sense D13 defines — a developer opting into
-/// the same compile-time embedding a real release build will eventually get
-/// automatically.
+/// Release CI sets it: `.github/dist-build-setup.yml` builds the web bundle
+/// and exports this variable into every cargo-dist build job. (That file sits
+/// beside the workflows rather than among them — cargo-dist reaches it through
+/// a deliberately relative `../dist-build-setup.yml`, because GitHub would try
+/// to run a step list left in `.github/workflows/` as a workflow.) A
+/// developer who sets it locally is deliberately making a release-shaped
+/// build in the sense D13 defines, with the payload-download default that
+/// comes with it.
 ///
 /// MUST be an absolute path — `cargo` runs this build script from the crate
 /// directory (`crates/farhelm-helm`), not the workspace root, so a
@@ -66,10 +68,9 @@ fn main() {
 /// function has no way to tell "the generation this `index.html` actually
 /// references" from "leftover cruft" and embeds both. Whoever sets
 /// `FARHELM_UI_DIST` is therefore responsible for pointing it at a freshly
-/// produced `dx` output: the release workflow, once it sets this variable,
-/// must remove `target/dx` before running `dx build` for exactly this reason,
-/// and a developer producing a release-shaped build locally (D13) should do
-/// the same first.
+/// produced `dx` output: `dist-build-setup.yml` removes `target/dx` before
+/// running `dx build` for exactly this reason, and a developer producing a
+/// release-shaped build locally (D13) should do the same first.
 fn embed_ui(out: &std::path::Path) {
     println!("cargo:rerun-if-env-changed={UI_ENV}");
     // `farhelm_embedded_ui` is read via `#[cfg(...)]` in `embedded_ui.rs`, so

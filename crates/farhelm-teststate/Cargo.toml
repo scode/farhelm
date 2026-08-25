@@ -6,6 +6,11 @@ license.workspace = true
 repository.workspace = true
 description = "Shared /tmp naming, locking, and sweeping for Farhelm's test harnesses"
 
+# Test-harness support, never shipped; see `farhelm-helm/Cargo.toml` for why
+# every non-shipping member says so explicitly.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 # flock and geteuid. The lock protocol is flock-based on purpose: an flock
 # dies with its holder, which is what makes "is this run alive" answerable

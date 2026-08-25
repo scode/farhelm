@@ -57,6 +57,10 @@ default-members = [
 [workspace.package]
 version = "0.0.3"
 edition = "2024"
+# cargo-dist reads `repository` to know where to cut releases, and warns
+# without a `homepage` because the (deferred) Homebrew formula renders one.
+# The project has no site of its own, so both point at the repository.
+homepage = "https://github.com/scode/farhelm"
 license = "MIT"
 repository = "https://github.com/scode/farhelm"
 
@@ -226,3 +230,18 @@ farhelm-ui = { path = "crates/farhelm-ui" }
 [profile.wasm-release]
 inherits = "release"
 strip = "debuginfo"
+
+# The profile that 'dist' will build with
+#
+# Written by `dist init`, and used for the CARGO-built release artifact only —
+# that is, `farhelm` on all three targets. `farhelm-desktop` does not come
+# through cargo-dist's cargo build at all: it is a generic dist package whose
+# build command runs `dx build --release`, so it links under Cargo's ordinary
+# `release` profile. A change here (LTO, stripping, panic strategy) therefore
+# moves one of the two shipped binaries and not the other; make it in both
+# places, or say why not.
+#
+# Thin LTO is dist's own default rather than a measured choice of ours.
+[profile.dist]
+inherits = "release"
+lto = "thin"

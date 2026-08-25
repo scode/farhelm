@@ -2,9 +2,51 @@
 name = "farhelm"
 version.workspace = true
 edition.workspace = true
+homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The multi-call farhelm binary: helm, supervisor, internal commands"
+
+# The one package cargo-dist builds with cargo: three targets (D4), one bare
+# binary per archive. `dist = true` records this package's explicit intent to
+# ship rather than leaving it to inference.
+#
+# It does NOT protect the other members: cargo-dist 0.32 reads this key
+# per-package, and its default for a package it has not been told about is to
+# ship it if it has distributable binaries. So the rule is a repository
+# convention, not something the tooling enforces — EVERY new workspace member
+# states `dist = true` or `dist = false` in its own manifest. Skip that and a
+# new binary crate can reach a public release; the signing gate's inventory
+# would refuse the unfamiliar asset, but only after cargo-dist had already
+# created the release.
+[package.metadata.dist]
+dist = true
+
+# The two static tmux builds (D5) ride along as extra artifacts of this
+# package. They are not cargo output at all — `build-tmux-assets.sh`
+# cross-compiles them with zig — so dist runs that script and uploads what it
+# names, unpacked, next to the archives.
+#
+# Two placements matter here and are easy to get wrong:
+#
+# - `working-dir` defaults to the directory of the manifest that declares the
+#   artifacts, i.e. `crates/farhelm`. The script and the paths below are
+#   repository-relative, so it is pointed back at the repository root.
+# - dist builds extra artifacts in the GLOBAL job, which does NOT run the
+#   `github-build-setup` steps (those are per-target build jobs only). That is
+#   why the script provisions its own zig toolchain instead of relying on the
+#   build setup the way the cargo builds do.
+#
+# The artifact ID dist publishes is each path's BASENAME, so staging them
+# under `target/` keeps the working tree clean without changing the asset
+# names `assets.rs` promises.
+[[package.metadata.dist.extra-artifacts]]
+working-dir = "../.."
+artifacts = [
+  "target/tmux-assets/tmux-x86_64-unknown-linux-musl",
+  "target/tmux-assets/tmux-aarch64-unknown-linux-musl",
+]
+build = ["./scripts/build-tmux-assets.sh"]
 
 [dependencies]
 anyhow.workspace = true

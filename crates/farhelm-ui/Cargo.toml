@@ -6,6 +6,14 @@ license.workspace = true
 repository.workspace = true
 description = "The Dioxus UI, built for web (wasm) and desktop from one crate"
 
+# Not a release asset, and here that is load-bearing rather than a formality:
+# this crate has a `src/main.rs` (dx's entry point for the web and desktop
+# builds), so cargo-dist would otherwise see a binary target and publish a
+# `farhelm-ui-<target>.tar.gz` nobody asked for. What ships from this crate is
+# the web bundle dx produces, compiled into `farhelm-helm` (D12).
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 dioxus.workspace = true
 reqwest.workspace = true

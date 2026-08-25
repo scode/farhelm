@@ -1,0 +1,249 @@
+# cargo-dist's configuration: the single source of truth for what a release
+# contains and how CI builds it (D7).
+#
+# `.github/workflows/release.yml` is GENERATED from this file. Never hand-edit
+# that workflow — change a value here and run `dist init --yes && dprint fmt`
+# to regenerate it. The custom workflow it calls (`sign-sums.yml`) and the step
+# list it splices into every build job (`.github/dist-build-setup.yml`) are
+# ours to edit; the generated file is not.
+#
+# WHY THE RATIONALE IS ALL UP HERE: `dist init` rewrites the comment attached
+# to every setting it recognizes with its own one-line description, so a note
+# written next to a key survives only until the next regeneration. This header
+# and the comments on tables dist does not own (below) are what it leaves
+# alone.
+#
+# Almost every value departs from the `scode-dist-rust-setup` skill's defaults,
+# because that skill describes a Homebrew-first CLI while this project ships a
+# curl-installable pair of binaries plus a signed checksum file. Each departure
+# and the decision behind it (D-numbers are from the distribution plan):
+#
+# - `installers = []` (skill: `["homebrew"]`) — D7. The install path is
+#   `scripts/install.sh`, curled from `main`, reading the same asset names the
+#   helm does; dist's own shell/powershell installers would be a second,
+#   divergent description of the release. Homebrew is DEFERRED, not rejected:
+#   turning it on is `publish-jobs += "homebrew"` plus a `tap`, which is why
+#   this file otherwise keeps the skill's shape.
+# - `install-updater = false` (skill: true) — there is no self-update command
+#   (D11); re-running `install.sh` is the update path, so an updater binary
+#   would ship with nothing to do.
+# - `targets` — D4. Linux is static musl so one asset serves every distro AND
+#   doubles as the payload provisioning pushes to a host. No Intel Mac (D4),
+#   no Windows (D11).
+# - `checksum = "sha256"` — these per-archive `.sha256` files are dist's, not
+#   ours. What consumers verify against is `SHA256SUMS`, written and signed by
+#   the `sign-sums` job (D3); dist's ride along for anyone reading the release
+#   page by hand.
+# - `unix-archive = ".tar.gz"` — D14. The helm unpacks downloaded archives
+#   itself, and gzip means its extractor needs only `flate2` + `tar`.
+# - `source-tarball = false` — `SHA256SUMS` lists exactly the six
+#   binaries/archives the plan's asset table names. A source tarball would be
+#   a seventh asset no consumer knows about.
+# - `auto-includes = false` + `include = ["LICENSE"]` (dist default:
+#   auto-includes on) — the default sweeps in whatever README/LICENSE sits
+#   beside each package, which here would ship
+#   `crates/farhelm-desktop/README.md`, a developer note about placeholder
+#   assets, as if it were user documentation. It also makes each archive's
+#   member list depend on which files happen to exist where. These archives
+#   are read by machines (`install.sh` and the helm's extractor both locate
+#   the binary by basename), so a fixed two-member layout `sign-sums` can
+#   assert exactly is worth more than browsable extras. LICENSE stays because
+#   the binaries are MIT-licensed copies of this software.
+# - `precise-builds = true` (dist default: false) — NOT a preference. dist
+#   otherwise runs `cargo build --workspace`, and this workspace has a member
+#   that cannot be built for two of the three targets: `farhelm-desktop` pulls
+#   in gtk/webkit through `farhelm-ui`'s desktop feature, whose -sys crates
+#   resolve C libraries through pkg-config and fail outright when cross-
+#   compiling to musl ("pkg-config has not been configured to support
+#   cross-compilation"). It is excluded from `default-members` for the same
+#   reason, but `--workspace` does not honour that. With this on, dist builds
+#   `--package farhelm` and nothing else.
+# - `pr-run-mode = "skip"` — D19. CI is already heavy and the release workflow
+#   validates itself on the only event that matters, a tag push. Nothing about
+#   dist is exercised on a PR, which is why AGENTS.md's finishing battery has
+#   nothing to run for it.
+# - `publish-jobs = ["./sign-sums"]` (skill: `["homebrew"]`) — our own reusable
+#   workflow: it writes the one `SHA256SUMS` covering the six payloads, signs
+#   it with minisign, and refuses to overwrite one that already exists (D3).
+#   It is the only custom publish job. The static-linkage, architecture, and
+#   archive-shape checks the retired hand-written release workflow did live
+#   inside it, because that job is the point where the COMPLETE release
+#   inventory is known (it lists every published asset name and rejects one it
+#   does not recognize) and the payload bytes it signs are in hand. It does
+#   not download or hash cargo-dist's metadata; that metadata is required to
+#   exist but is not part of the signed set.
+# - `publish-prereleases = true` — NOT in the plan, and load-bearing. dist
+#   skips every publish job on a prerelease tag by default, which would
+#   produce a `vX.Y.Z-rc.N` release with no `SHA256SUMS` — and a release with
+#   no `SHA256SUMS` is one no helm and no `install.sh` will install from,
+#   since verification is not optional (D3). Prereleases are a supported way
+#   to reach a build (D15 lets `FARHELM_VERSION` name one), so they must be
+#   signed like any other release.
+# - NO `plan-jobs` (the skill's Phase G hook). The release test gate is real,
+#   but it lives in `.github/dist-build-setup.yml` instead, because dist 0.32's
+#   generated graph makes a plan job FAIL OPEN. `host` accepts a
+#   `build-local-artifacts` that is `success` OR `skipped`, and a failed plan
+#   job makes the build jobs skip — so a red test gate would have let `host`
+#   create the GitHub Release with none of its payloads, and the only thing to
+#   notice would have been `sign-sums` failing afterwards on assets that were
+#   never built. A failure inside a build job is a job FAILURE, which `host`
+#   does reject, so that is where the gate had to go.
+#
+# One thing dist 0.32 does NOT offer: holding the GitHub Release as a draft
+# until the publish jobs finish. `dist host --steps=release` creates the
+# release and uploads the archives before `sign-sums` runs, so for the couple
+# of minutes that job takes, a release exists with no `SHA256SUMS` beside it.
+# The only draft flow dist has (`create = false`) expects a human to have
+# drafted the release first, which a tag-push release has no place for. D17
+# covers the window instead: both the helm and `install.sh` answer a missing
+# `SHA256SUMS` with one message that does not try to distinguish "still
+# publishing" from "no such release".
+#
+# ## RECOVERY: a release that exists but was never signed
+#
+# Two ways to land there, and one procedure for both. dist's `host` job creates
+# the release and uploads every asset in a single `gh release create … *`,
+# whose creation and uploads are separate remote operations underneath — so a
+# network failure partway through leaves a public release missing assets, and
+# re-running the job fails immediately on the release that already exists.
+# Separately, `sign-sums` can fail on its own after the release is public.
+#
+# Recovery, for the maintainer, from a machine with `gh`:
+#
+#   1. Confirm the release is unsigned: `gh release view vX.Y.Z --json assets`
+#      must show NEITHER `SHA256SUMS` nor `SHA256SUMS.minisig`. If both are
+#      there, the release is complete and nothing below applies. If exactly one
+#      is there, do NOT delete anything — re-run the workflow, which reconciles
+#      that half by byte-comparison.
+#   2. Delete the RELEASE, never the tag: `gh release delete vX.Y.Z`. The tag
+#      is what names the version and what the signature will cover; deleting it
+#      would make the next attempt build from a re-created tag that may not
+#      point where the first one did.
+#   3. Re-run the `Release` workflow for that tag from the Actions UI.
+#
+# This is safe by construction rather than by care: `sign-sums` refuses to run
+# at all when a release already carries both signed files, so the procedure
+# cannot clobber a good release even if step 1 is skipped. It is deliberately a
+# documented human procedure and not a workflow — an automated release-deleting
+# job is a bigger weapon than the failure mode warrants.
+#
+# ## Residuals in the GENERATED workflow
+#
+# Three properties a security review would want in `release.yml` come from
+# cargo-dist's template, are not exposed as configuration in 0.32, and are
+# therefore NOT hand-patched — the file is regenerated, so a patch would
+# vanish at the next `dist init`. Checked against the 0.32.0 sources; each
+# would need an upstream change or a fork:
+#
+# - The tag is interpolated into shell text rather than passed as a quoted
+#   variable (`format('host --steps=create --tag={0}', github.ref_name)` in the
+#   plan job, and the unquoted `${{ needs.plan.outputs.tag-flag }}` fragment
+#   later). A tag containing shell metacharacters that still matches the
+#   workflow's version-like trigger pattern would be evaluated as shell. What
+#   bounds it: creating a tag on this repository requires write access, and
+#   anyone with that access can already run arbitrary workflow code. The gate
+#   in `dist-build-setup.yml` refuses every tag but `v<workspace version>`, so
+#   a malformed tag cannot reach a build or a release — but it runs after the
+#   plan job, so it does not bound this.
+# - dist installs itself by piping an unauthenticated remote script into `sh`
+#   (`cargo-dist-installer.sh`). The URL is pinned to the exact version above
+#   (`.../releases/download/v0.32.0/`) and the script authenticates the binary
+#   it fetches, but nothing pins a digest for the script itself; 0.32 offers no
+#   checksum setting, and its one alternative (`cargo-dist-version` with a
+#   `github-<branch>` prerelease suffix) installs from a MOVING branch, which
+#   is strictly worse.
+# - `permissions: contents: write` is emitted at WORKFLOW scope, so the plan
+#   and build jobs inherit release-write authority they never use.
+#   `github-custom-job-permissions` reaches custom jobs only (that is how
+#   `sign-sums` gets its `contents: write` below); the generated jobs'
+#   permissions are hardcoded in the template. What bounds it: those jobs run
+#   this repository's own scripts, its committed lockfile, and the pinned dx —
+#   nothing a contributor cannot already influence through `ci.yml`.
+
+[workspace]
+# A HYBRID workspace: the cargo workspace, plus one generic (non-cargo)
+# package for the desktop shell.
+#
+# The desktop binary cannot be produced by cargo alone. Its `asset!()` paths
+# are placeholders until `dx` rewrites them into the built binary AFTER the
+# link — a plain `cargo build` yields a window whose every asset request 404s
+# (see `crates/farhelm-desktop/README.md`). dist 0.32 has no post-build hook,
+# so the only way to get a dx-built binary into a dist-managed archive is to
+# declare it as a generic package whose `build-command` runs dx.
+# `packaging/farhelm-desktop/dist.toml` is that declaration; the cargo package
+# of the same name is marked `dist = false` so exactly one of the two ships.
+members = ["cargo:.", "dist:packaging/farhelm-desktop"]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = []
+# Whether to install an updater program
+install-updater = false
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]
+# Checksums to generate for each App
+checksum = "sha256"
+# The archive format to use for non-windows builds (defaults .tar.xz)
+unix-archive = ".tar.gz"
+# Generate and dist a source tarball
+source-tarball = false
+# Whether to auto-include files like READMEs, LICENSEs, and CHANGELOGs (default true)
+auto-includes = false
+# Extra static files to include in each App (path relative to this Cargo.toml's dir)
+include = ["LICENSE"]
+# Build only the required packages, and individually
+precise-builds = true
+# Which actions to run on pull requests
+pr-run-mode = "skip"
+# Publish jobs to run in CI
+publish-jobs = ["./sign-sums"]
+# Whether to publish prereleases to package managers
+publish-prereleases = true
+# Steps spliced into the top of every per-target build job. The path is
+# resolved relative to `.github/workflows/`, NOT to the repository root —
+# confirmed against dist 0.32.0, which joins this value onto its GitHub
+# workflow directory. The `../` is deliberate: the file is a bare YAML LIST of
+# steps, not a workflow, and GitHub tries to parse everything at the top level
+# of `.github/workflows/` as one. Keeping it in `.github/` instead avoids a
+# permanent "invalid workflow file" complaint about a file GitHub was never
+# meant to read.
+github-build-setup = "../dist-build-setup.yml"
+
+# `sign-sums` uploads to the release, which the default read-only token cannot
+# do. dist gives custom publish jobs no permissions unless they are named
+# here.
+[dist.github-custom-job-permissions.sign-sums]
+contents = "write"
+
+# DEVIATION from dist's defaults, which build both Linux targets on x86_64 and
+# would need a cross-compiler for the aarch64 one. Each target is built on its
+# own native runner instead: no cross toolchain, and the binary is linked
+# where it is meant to run.
+#
+# `ubuntu-24.04-arm` is a standard GitHub-hosted label (4 vCPU arm64), free
+# for public repositories and no longer carrying the public-preview note its
+# 26.04 sibling still does — checked against GitHub's runner documentation
+# when this landed. Should it ever go away, the fallback is to build that
+# target on `ubuntu-latest` through a cross-compiler installed in
+# `dist-build-setup.yml`, as the retired hand-written workflow did with
+# cargo-zigbuild.
+#
+# `macos-15` rather than `macos-14`, which GitHub began deprecating in July
+# 2026 and retires in November 2026 — brownouts before then would make Apple
+# tag builds fail intermittently. Both labels are arm64 (`macos-15-arm64` in
+# actions/runner-images), so this changes the image and not the target.
+#
+# `global` is where dist builds the extra artifacts (the two tmux binaries)
+# and assembles checksums. All GitHub-hosted, not the `ubicloud` runners
+# `ci.yml` uses: the release workflow runs a few times a year and must work
+# with nothing but a GitHub token.
+[dist.github-custom-runners]
+x86_64-unknown-linux-musl = "ubuntu-latest"
+aarch64-unknown-linux-musl = "ubuntu-24.04-arm"
+aarch64-apple-darwin = "macos-15"
+global = "ubuntu-latest"

@@ -1,0 +1,573 @@
+# The release's trust anchor: one `SHA256SUMS` over every payload Farhelm
+# itself consumes, signed with the project's minisign key (D3).
+#
+# cargo-dist calls this as a custom PUBLISH job — after `host` has created the
+# GitHub Release and uploaded the archives, before `announce`. So it works on
+# the assets as PUBLISHED (downloading them back from the release) rather than
+# on build outputs: what gets hashed is exactly what a user will fetch.
+#
+# ## Two jobs, because one of them runs the candidate and the other holds the key
+#
+# `validate` executes release-candidate bytes: it runs the published `farhelm`
+# to prove the binary actually serves its embedded UI. That is the only check
+# that can tell a release-shaped build from a developer one, and it is worth
+# having — but a runner that has executed an unsigned candidate is a runner
+# that candidate may have left something on: an altered PATH, a replaced tool,
+# a detached same-user process waiting for a key file to appear. Killing the
+# helm's PID does not contain what it may have forked.
+#
+# So the permanent signing key never touches that runner. `sign` is a separate
+# job on a fresh machine: it re-downloads the same six assets, checks them
+# against the digest inventory `validate` produced, signs those exact bytes,
+# and uploads. No product code runs in it — only `gh`, `sha256sum`, `sed`,
+# `grep`, and the checksum-pinned minisign. Isolation is the containment;
+# the private key path and the `unset` below are hygiene on top of it.
+#
+# ## What the signature does and does not cover
+#
+# `SUMS_MEMBERS` is the six payloads the helm and `install.sh` download: four
+# archives and two tmux builds. Those, and only those, are hashed into
+# `SHA256SUMS` and covered by `SHA256SUMS.minisig`. cargo-dist also publishes
+# metadata beside them — `dist-manifest.json`, a `.sha256` per archive, and its
+# own lowercase `sha256.sum` — and NONE of that is signed here, because nothing
+# in Farhelm reads it. `validate` is where the COMPLETE release inventory is
+# known: it requires every name Farhelm's release contract promises and rejects
+# any name outside the allowlist, so a seventh product artifact fails the
+# release rather than sitting on it outside the signed set.
+#
+# The published-payload list is duplicated from `assets.rs`'s `sums_members()`,
+# which is Rust and cannot be imported here. `assets.rs`'s test module parses
+# the block between the SUMS MEMBERS markers below and asserts the two lists
+# are identical, so the duplication is checked rather than trusted.
+#
+# ## If this workflow fails after the release exists
+#
+# `host` creates the GitHub Release before this runs, so a failure here leaves
+# a public release with no `SHA256SUMS` — which no helm and no `install.sh`
+# will install from. The recovery procedure is in `dist-workspace.toml`'s
+# header: delete the RELEASE (never the tag) and re-run. This workflow refuses
+# to overwrite an already-signed pair, so that procedure cannot clobber a good
+# release.
+name: sign-sums
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: dist's plan manifest, as JSON. Carries the tag being released.
+        required: true
+        type: string
+
+# Literals only. `TAG` is deliberately NOT here: it needs the `inputs` context,
+# and keeping context-bearing values at job scope keeps this block trivially
+# correct.
+env:
+  # The six names `SHA256SUMS` covers, sorted. Keep them sorted and keep the
+  # markers: `assets.rs`'s parity test reads this block verbatim.
+  # BEGIN SUMS MEMBERS
+  SUMS_MEMBERS: |
+    farhelm-aarch64-apple-darwin.tar.gz
+    farhelm-aarch64-unknown-linux-musl.tar.gz
+    farhelm-desktop-aarch64-apple-darwin.tar.gz
+    farhelm-x86_64-unknown-linux-musl.tar.gz
+    tmux-aarch64-unknown-linux-musl
+    tmux-x86_64-unknown-linux-musl
+  # END SUMS MEMBERS
+  # cargo-dist metadata the release contract PROMISES. Unsigned — Farhelm reads
+  # none of it — but required, because a future Homebrew formula is meant to be
+  # a config flip away and it consumes the manifest. The per-archive `.sha256`
+  # names are derived from SUMS_MEMBERS at use, so only the fixed name is here.
+  REQUIRED_METADATA: |
+    dist-manifest.json
+  # Metadata that may or may not appear, depending on what dist emits. Allowed,
+  # never required, never signed. `sha256.sum` is dist's own lowercase unified
+  # checksum file — easy to mistake for Farhelm's uppercase `SHA256SUMS`, and
+  # unrelated to it.
+  OPTIONAL_METADATA: |
+    sha256.sum
+  # Pinned by version and verified by checksum: this unpacks an executable and
+  # signs a release with it, so a mutable `latest` URL would be the weakest
+  # link in the chain everything else here is protecting.
+  MINISIGN_VERSION: "0.12"
+  MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+
+jobs:
+  # ------------------------------------------------------------------------
+  # Everything that inspects, unpacks, or RUNS the release candidate.
+  # Read-only token, no secrets: `secrets: inherit` reaches this job, but
+  # nothing here reads one, and the signing key is never written to this
+  # machine.
+  # ------------------------------------------------------------------------
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # dist passes the release tag inside the plan manifest; there is no
+      # separate tag input. The tag is `vX.Y.Z` — already carrying the `v`.
+      TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+    outputs:
+      # The `sha256sum` lines for the six payloads, exactly as they will be
+      # signed. This is the whole contract between the two jobs: `sign` proves
+      # the bytes it downloads hash to these, and signs nothing else.
+      digests: ${{ steps.digests.outputs.digests }}
+      have-sums: ${{ steps.inventory.outputs.have-sums }}
+      have-sig: ${{ steps.inventory.outputs.have-sig }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # For the archive validator and the ELF checker; this job never
+          # pushes.
+          persist-credentials: false
+
+      # cargo-dist accepts `0.0.3` and `farhelm-v0.0.3` for the same version,
+      # but `release_payloads.rs` verifies a trusted comment of exactly
+      # `farhelm v{CARGO_PKG_VERSION}` — so any other spelling produces a
+      # release no shipped helm can install. `.github/dist-build-setup.yml`
+      # refuses it before the build; this refuses it before the checks, and
+      # `sign` refuses it once more before the key.
+      - name: Assert the tag names this workspace's exact version
+        run: |
+          set -euo pipefail
+          matches=$(grep -c '^version = "' Cargo.toml)
+          test "$matches" = 1 || {
+            echo "expected exactly one top-level version in Cargo.toml, found $matches" >&2
+            exit 1
+          }
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)
+          if [ "$TAG" != "v$version" ]; then
+            echo "tag $TAG does not name this workspace's version" >&2
+            echo "  expected exactly: v$version" >&2
+            exit 1
+          fi
+          echo "ok: $TAG matches [workspace.package].version"
+
+      # Three questions at once, because all three are about the release's
+      # asset list as a whole:
+      #
+      # - is every promised asset there? The six payloads plus the cargo-dist
+      #   metadata the release contract names. A silently missing manifest
+      #   would break the deferred Homebrew path long after the release.
+      # - is anything published that this job would not sign? A new dist
+      #   output, or a stray upload, would otherwise sit on the release
+      #   outside the signed set, indistinguishable to a user from the assets
+      #   that are covered.
+      # - has a previous attempt already uploaded part of the pair? Both
+      #   present is the immutability refusal (D3: assets are never replaced).
+      #   Exactly one present is a legitimate half-finished retry — GitHub can
+      #   accept the first upload and fail the second — and wedging that
+      #   forever would leave a release nobody can fix.
+      - name: Take inventory of the release
+        id: inventory
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json assets --jq '.assets[].name' | sort >published
+          printf '%s\n' "$SUMS_MEMBERS" | grep -v '^$' | sort >payloads
+          {
+            cat payloads
+            grep '\.tar\.gz$' payloads | sed 's/$/.sha256/'
+            printf '%s\n' "$REQUIRED_METADATA" | grep -v '^$'
+          } | sort -u >required
+          {
+            cat required
+            printf '%s\n' "$OPTIONAL_METADATA" | grep -v '^$'
+            # Ours, and outside the requirement on purpose: this workflow may
+            # be completing an attempt that uploaded one of them already.
+            printf 'SHA256SUMS\nSHA256SUMS.minisig\n'
+          } | sort -u >allowed
+
+          missing=$(comm -23 required published)
+          if [ -n "$missing" ]; then
+            echo "$TAG is missing assets the release contract promises:" >&2
+            printf '%s\n' "$missing" | sed 's/^/  /' >&2
+            exit 1
+          fi
+          unexpected=$(comm -23 published allowed)
+          if [ -n "$unexpected" ]; then
+            echo "$TAG carries assets this job would not sign:" >&2
+            printf '%s\n' "$unexpected" | sed 's/^/  /' >&2
+            echo "add them to SUMS_MEMBERS if they are payloads, or to the metadata lists if they are not" >&2
+            exit 1
+          fi
+
+          have_sums=false
+          have_sig=false
+          if grep -Fxq SHA256SUMS published; then have_sums=true; fi
+          if grep -Fxq SHA256SUMS.minisig published; then have_sig=true; fi
+          if [ "$have_sums" = true ] && [ "$have_sig" = true ]; then
+            echo "$TAG already carries SHA256SUMS and its signature; assets are never replaced" >&2
+            exit 1
+          fi
+          echo "have-sums=$have_sums" >>"$GITHUB_OUTPUT"
+          echo "have-sig=$have_sig" >>"$GITHUB_OUTPUT"
+          echo "ok: $(wc -l <published) assets, all accounted for"
+
+      - name: Download the published payloads
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          while read -r name; do
+            [ -n "$name" ] || continue
+            # One download per name rather than a glob: a missing asset must
+            # fail here, naming itself, instead of yielding a shorter
+            # SHA256SUMS that verifies perfectly and covers less.
+            gh release download "$TAG" --pattern "$name" --dir assets
+            test -f "assets/$name"
+          done <<<"$SUMS_MEMBERS"
+
+      # Structure before contents. `scripts/check-release-archive.py` reads tar
+      # HEADERS rather than a `tar tzf` listing, so a symlink or hard link
+      # wearing the binary's name cannot pass as one and then redirect the
+      # architecture checks below; see that script's docstring. It also
+      # extracts the binary itself, which is why the checks that follow read
+      # `binaries/` rather than anything `tar x` produced.
+      - name: Validate each archive's structure and architecture
+        run: |
+          set -euo pipefail
+          mkdir -p binaries
+          for archive in assets/*.tar.gz; do
+            name=$(basename "$archive")
+            prefix=${name%.tar.gz}
+            case "$name" in
+              farhelm-desktop-*) binary=farhelm-desktop ;;
+              farhelm-*) binary=farhelm ;;
+              *)
+                echo "no expected binary known for $name" >&2
+                exit 1
+                ;;
+            esac
+            # `file`'s wording differs between GNU and BSD, so these are
+            # substrings, not an exact match. The `x86_64` rejection is what
+            # actually catches an Apple archive built for the wrong machine:
+            # a universal or Intel binary would still say "Mach-O".
+            case "$prefix" in
+              *-x86_64-unknown-linux-musl) expect=(--expect-file 'ELF 64-bit' --expect-file 'x86-64') ;;
+              *-aarch64-unknown-linux-musl) expect=(--expect-file 'ELF 64-bit' --expect-file 'ARM aarch64') ;;
+              *-aarch64-apple-darwin)
+                expect=(--expect-file 'Mach-O 64-bit' --expect-file 'arm64' --reject-file 'x86_64')
+                ;;
+              *)
+                echo "no expected architecture known for $prefix" >&2
+                exit 1
+                ;;
+            esac
+            python3 scripts/check-release-archive.py \
+              --archive "$archive" --prefix "$prefix" --binary "$binary" \
+              --extract-to "binaries/$prefix" "${expect[@]}"
+          done
+
+      # The Linux payloads are pushed to hosts we do not control and run
+      # against whatever libc is there — which is why they are static musl
+      # (D4). A dynamically linked one would install fine and fail at first
+      # exec on the host, far from anything that could explain it.
+      #
+      # `check-static-elf.sh` is the same script the tmux producer runs on what
+      # it built; here it runs on what was published. It fails when an
+      # inspection FAILS, not only when an inspection reports something bad.
+      - name: Assert the Linux payloads are static
+        run: |
+          set -euo pipefail
+          # The bare tmux binaries get the same treatment as the extracted
+          # ones: they travel the same path onto the same hosts, and the
+          # global job that built them is not the one that published them.
+          cp assets/tmux-*-unknown-linux-musl binaries/
+
+          for binary in binaries/*-unknown-linux-musl; do
+            case "$binary" in
+              *x86_64-unknown-linux-musl) target=x86_64-unknown-linux-musl ;;
+              *aarch64-unknown-linux-musl) target=aarch64-unknown-linux-musl ;;
+              *)
+                echo "no target triple derivable from $binary" >&2
+                exit 1
+                ;;
+            esac
+            scripts/check-static-elf.sh "$binary" "$target"
+          done
+
+      # The one check that RUNS the shipped artifact instead of inspecting it,
+      # and the reason this job is separated from `sign`.
+      #
+      # `FARHELM_UI_DIST` is what compiles the web UI into the binary AND what
+      # marks the build as a release build (D12/D13). A build job that lost it
+      # still produces a perfectly valid static executable — one whose `/`
+      # answers 404 and whose provisioning defaults to `NoPayloads`. Nothing
+      # else in this pipeline can tell those two binaries apart, so this asks
+      # the artifact directly: serve the UI, or do not ship.
+      - name: Prove the published farhelm is release-shaped
+        run: |
+          set -euo pipefail
+          binary=$PWD/binaries/farhelm-x86_64-unknown-linux-musl
+          version=${TAG#v}
+
+          reported=$("$binary" --version)
+          if [ "$reported" != "farhelm $version" ]; then
+            echo "the published binary reports '$reported', expected 'farhelm $version'" >&2
+            exit 1
+          fi
+
+          port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+          state=$(mktemp -d)
+          "$binary" helm run --state-dir "$state" --port "$port" >helm.log 2>&1 &
+          helm=$!
+          # Killed on every exit path: a leaked helm would hold the port and
+          # the state directory for the rest of the job.
+          trap 'kill "$helm" 2>/dev/null || true' EXIT
+
+          # Waits for the LISTENER, not for a particular answer: no `-f`, so a
+          # 404 counts as "up". A binary that lost its UI must reach the
+          # assertion below and fail there with a diagnosis, not time out here
+          # with a connection error.
+          for _ in $(seq 1 60); do
+            if curl -s -o /dev/null "http://127.0.0.1:$port/"; then
+              break
+            fi
+            sleep 1
+          done
+
+          status=$(curl -s -o body.html -D headers.txt -w '%{http_code}' "http://127.0.0.1:$port/")
+          kill "$helm" 2>/dev/null || true
+          if [ "$status" != 200 ]; then
+            echo "the published binary answered / with HTTP $status, not 200" >&2
+            echo "this is what a build that lost FARHELM_UI_DIST looks like:" >&2
+            cat helm.log >&2
+            exit 1
+          fi
+          if ! grep -iq '^content-type: *text/html' headers.txt; then
+            echo "the published binary served / as something other than text/html" >&2
+            cat headers.txt >&2
+            exit 1
+          fi
+          echo "ok: the published farhelm $version serves its embedded UI"
+
+      # What crosses the job boundary: the digests of the bytes every check
+      # above just passed. `sign` re-downloads and must reproduce exactly
+      # these, so a release re-uploaded between the two jobs cannot be signed
+      # on the strength of a validation it never went through.
+      - name: Record the validated digests
+        id: digests
+        run: |
+          set -euo pipefail
+          cd assets
+          # Sorted, so the file's contents are a function of the release and
+          # not of download order. `assets.rs` pins the same order.
+          printf '%s\n' "$SUMS_MEMBERS" | grep -v '^$' | sort | xargs sha256sum >../SHA256SUMS
+          cd ..
+          cat SHA256SUMS
+          {
+            echo 'digests<<VALIDATED_DIGESTS_EOF'
+            cat SHA256SUMS
+            echo 'VALIDATED_DIGESTS_EOF'
+          } >>"$GITHUB_OUTPUT"
+
+  # ------------------------------------------------------------------------
+  # The key-bearing job. Fresh runner, minimal steps, no product code.
+  # ------------------------------------------------------------------------
+  sign:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      # Uploading to the release needs more than the default read-only token;
+      # dist grants it through `github-custom-job-permissions` in
+      # dist-workspace.toml, and this restates it so the requirement is
+      # visible from the file that depends on it. `validate` deliberately
+      # declares `contents: read` instead.
+      contents: write
+    env:
+      TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+      VALIDATED_DIGESTS: ${{ needs.validate.outputs.digests }}
+      HAVE_SUMS: ${{ needs.validate.outputs.have-sums }}
+      HAVE_SIG: ${{ needs.validate.outputs.have-sig }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Only for reading `release_payloads.rs`'s public-key constant and
+          # the version; this job never pushes.
+          persist-credentials: false
+
+      # A third reading of the same invariant, in the job that owns the key.
+      # It costs a `sed`, and it is the last point at which a wrong tag can be
+      # refused before a permanent signature exists for it.
+      - name: Assert the tag names this workspace's exact version
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)
+          test -n "$version" || {
+            echo "could not read [workspace.package].version out of Cargo.toml" >&2
+            exit 1
+          }
+          if [ "$TAG" != "v$version" ]; then
+            echo "refusing to sign: tag $TAG does not name this workspace's version" >&2
+            echo "  expected exactly: v$version" >&2
+            exit 1
+          fi
+          echo "ok: $TAG matches [workspace.package].version"
+
+      - name: Download the payloads to sign
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets published-partial
+          while read -r name; do
+            [ -n "$name" ] || continue
+            gh release download "$TAG" --pattern "$name" --dir assets
+            test -f "assets/$name"
+          done <<<"$SUMS_MEMBERS"
+
+          # Whatever half of the pair a previous attempt managed to upload,
+          # fetched now so the reconcile step can prove the bytes it is about
+          # to complete are the bytes already published.
+          if [ "$HAVE_SUMS" = true ]; then
+            gh release download "$TAG" --pattern SHA256SUMS --dir published-partial
+            echo "note: SHA256SUMS is already published; it will be byte-compared, not replaced"
+          fi
+          if [ "$HAVE_SIG" = true ]; then
+            gh release download "$TAG" --pattern SHA256SUMS.minisig --dir published-partial
+            echo "note: SHA256SUMS.minisig is already published; it will be byte-compared, not replaced"
+          fi
+
+      # The join between the two jobs. `SHA256SUMS` is written from the
+      # digests `validate` produced — not recomputed here — and then those
+      # digests are checked against the bytes this job downloaded. So the file
+      # about to be signed is simultaneously the validated one and a true
+      # description of what is published right now; if the release changed
+      # between the jobs, this fails rather than signing the new bytes on the
+      # old bytes' evidence.
+      - name: Verify the payloads against the validated digests
+        run: |
+          set -euo pipefail
+          test -n "$VALIDATED_DIGESTS" || {
+            echo "the validate job produced no digest inventory" >&2
+            exit 1
+          }
+          printf '%s\n' "$VALIDATED_DIGESTS" >SHA256SUMS
+
+          expected=$(printf '%s\n' "$SUMS_MEMBERS" | grep -v '^$' | sort)
+          listed=$(awk '{print $2}' SHA256SUMS | sort)
+          if [ "$listed" != "$expected" ]; then
+            echo "the validated digest inventory does not name exactly the six payloads:" >&2
+            cat SHA256SUMS >&2
+            exit 1
+          fi
+
+          (cd assets && sha256sum -c --strict --quiet ../SHA256SUMS)
+          echo "ok: the published payloads hash to what validate checked"
+          cat SHA256SUMS
+
+      - name: Install the pinned minisign
+        run: |
+          set -euo pipefail
+          url="https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/minisign.tar.gz"
+          echo "$MINISIGN_SHA256  $RUNNER_TEMP/minisign.tar.gz" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$RUNNER_TEMP/minisign"
+
+      # The signature is what every helm's download path ultimately trusts, so
+      # this step both produces it and proves it is the right one: right key
+      # (recovered from the secret and compared against the constant compiled
+      # into the binaries) and right trusted comment.
+      - name: Sign SHA256SUMS
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MINISIGN_SECRET_KEY" || {
+            echo "the MINISIGN_SECRET_KEY repository secret is empty or absent" >&2
+            exit 1
+          }
+          # Private at creation (umask, not a later chmod), at a path nothing
+          # can have predicted, and gone from the environment before any other
+          # program starts: the tools below need the path, not the secret.
+          umask 077
+          key=$(mktemp "$RUNNER_TEMP/minisign-key.XXXXXXXXXX")
+          # Removed on every exit path, including the failing ones: an
+          # unencrypted signing key must not survive the step that used it.
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" >"$key"
+          unset MINISIGN_SECRET_KEY
+
+          # Identity check BEFORE signing, so a wrong key never produces a
+          # signature at all. `farhelm-release.pub` beside the source is the
+          # committed oracle, but the constant is what the shipped binaries
+          # actually verify against, so the constant is what gets compared:
+          # signing with a key those binaries do not know would produce a
+          # release every helm refuses.
+          "$RUNNER_TEMP/minisign" -R -s "$key" -p recovered.pub
+          expected=$(sed -n 's/^pub const MINISIGN_PUBKEY: &str = "\(.*\)";$/\1/p' \
+            crates/farhelm-helm/src/provisioning/release_payloads.rs)
+          test -n "$expected" || {
+            echo "could not read MINISIGN_PUBKEY out of release_payloads.rs" >&2
+            exit 1
+          }
+          # Line 1 of a minisign public key file is an untrusted comment; the
+          # key itself is line 2, and that is the form the constant holds.
+          recovered=$(sed -n '2p' recovered.pub)
+          if [ "$recovered" != "$expected" ]; then
+            echo "the signing key does not match MINISIGN_PUBKEY compiled into the binaries" >&2
+            echo "  compiled in: $expected" >&2
+            echo "  would sign with: $recovered" >&2
+            exit 1
+          fi
+
+          # `-t` is MANDATORY and its exact spelling is load-bearing. The
+          # signature authenticates only the CONTENTS of SHA256SUMS, which
+          # name no version — so without a version in the signed trusted
+          # comment, an older release's valid manifest and assets could be
+          # replayed at a newer release's URL and silently downgrade every
+          # host a helm provisions. `release_payloads.rs` requires the comment
+          # to read exactly `farhelm v{version}`; $TAG already begins with
+          # `v`, so `farhelm $TAG` is the only spelling that verifies.
+          "$RUNNER_TEMP/minisign" -S -t "farhelm $TAG" -s "$key" -m SHA256SUMS
+          rm -f "$key"
+
+          # Verify the way a helm will: signature plus the trusted comment it
+          # insists on. A typo in the `-t` argument above is otherwise
+          # invisible until an install fails in the field.
+          verified=$("$RUNNER_TEMP/minisign" -Vm SHA256SUMS -p recovered.pub)
+          printf '%s\n' "$verified"
+          printf '%s\n' "$verified" | grep -Fxq "Trusted comment: farhelm $TAG" || {
+            echo "the signature's trusted comment is not 'farhelm $TAG'" >&2
+            exit 1
+          }
+
+      # Only reached when a previous attempt uploaded exactly one of the two
+      # files. Byte comparison is a fair test of both: `SHA256SUMS` is a sorted
+      # hash list, and minisign signs with Ed25519, which is deterministic —
+      # the same key over the same message and trusted comment produces the
+      # same signature file every time. A difference therefore means the
+      # release's own bytes changed underneath us, which is exactly when this
+      # must stop rather than upload a mismatched half.
+      - name: Reconcile a partially uploaded pair
+        if: needs.validate.outputs.have-sums == 'true' || needs.validate.outputs.have-sig == 'true'
+        run: |
+          set -euo pipefail
+          for name in SHA256SUMS SHA256SUMS.minisig; do
+            [ -f "published-partial/$name" ] || continue
+            if ! cmp -s "published-partial/$name" "$name"; then
+              echo "the published $name differs from the one this run reproduced" >&2
+              echo "the release cannot be completed automatically; investigate before touching it" >&2
+              exit 1
+            fi
+            echo "ok: the published $name matches this run byte for byte"
+          done
+
+      - name: Upload SHA256SUMS to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Only the missing half, and never `--clobber`: an asset that is
+          # already published is left exactly as it is (D3).
+          upload=()
+          [ "$HAVE_SUMS" = true ] || upload+=(SHA256SUMS)
+          [ "$HAVE_SIG" = true ] || upload+=(SHA256SUMS.minisig)
+          test "${#upload[@]}" -gt 0 || {
+            echo "nothing to upload; the inventory step should have refused this run" >&2
+            exit 1
+          }
+          gh release upload "$TAG" "${upload[@]}"
