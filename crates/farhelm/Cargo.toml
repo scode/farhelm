@@ -26,6 +26,12 @@ libc.workspace = true
 # supervisor then parses; a hand-rolled escaper would make a fixture bug
 # look like a parser bug (fake_agent.rs).
 serde_json.workspace = true
+# `farhelm helm setup` publishes each unit file through a uniquely named,
+# exclusively created staging file in the unit directory (setup.rs). A
+# predictable staging name is a symlink target and a race between two
+# setups; tempfile is the same crate the tests already used, promoted to a
+# regular dependency so the product path can use it too.
+tempfile.workspace = true
 tokio.workspace = true
 # `tracing-subscriber` installs the subscriber (init_tracing); `tracing`
 # itself is here for the handful of diagnostics this binary emits on its
@@ -43,4 +49,3 @@ tracing-subscriber.workspace = true
 # needed and the workspace's default-feature-less reqwest is enough.
 reqwest.workspace = true
 shell-words.workspace = true
-tempfile.workspace = true

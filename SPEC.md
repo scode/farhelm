@@ -94,9 +94,12 @@ Connections are direct: the helm connects straight to each registered supervisor
 passwordless SSH from the helm's machine to the host is the requirement, and the helm handles connectivity itself,
 transparently. Supervisors listen on no network port. The helm's own machine is a host without registration: its
 supervisor (the app's bundled one, or one running beside a Linux helm) is reached locally, no SSH-to-self involved. The
-helm manages it through the same discovery-first flow as remote hosts, minus SSH: if none is running, the user is
-offered the same automatic setup (user-level systemd on Linux); until one exists, the local host appears with that
-offer, not as a phantom unreachable host. There is no relay, no supervisor-to-supervisor connection, and no transitive
+helm manages it through the same discovery-first flow as remote hosts, minus SSH: a supervisor that answers is
+discovered and registered like any other, and the panel never touches the unit file that runs it. What the panel does
+NOT do on the helm's own machine is install one. On Linux that job belongs to `farhelm helm setup`, which writes and
+owns the helm's and the supervisor's systemd user units; the local row says so instead of offering to install, so a
+machine has exactly one thing writing its units. Until a supervisor exists the local host appears with that instruction,
+not as a phantom unreachable host. There is no relay, no supervisor-to-supervisor connection, and no transitive
 aggregation — the helm sees exactly the hosts in its registry. The machine running the helm must therefore be able to
 reach every registered supervisor over the user's network fabric (Tailscale, SSH tunnel); a browser only needs to reach
 the helm — which in v1 means loopback on the helm's machine, tunneled when the browser is elsewhere (see Security).
@@ -128,14 +131,16 @@ starter profiles for Claude Code and Codex, each in a plain and a permission-ski
 from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that kind's status heuristics and
 conversation-identity capture; profiles without a kind get generic treatment.
 
-Standard operation must never require falling back to SSH or a separate command line, with three v1 carve-outs:
-transport, web-token bootstrap, and starting the v1 Mac supervisor by hand when a Linux helm drives Mac agents. Reaching
-a remote helm's web UI takes a user-managed SSH port forward, and obtaining or rotating that UI's token happens on the
-helm's machine (see Security) — accepted v1 friction, deliberately outside "standard operation". On provisionable hosts,
-install and updates are the helm's job (over the user's SSH access); the complete list of what may legitimately require
-manual host-side work is that same pair, on hosts provisioning does not cover. Everything else — session operations,
-profile management, directory browsing — must work from the client. SSH otherwise remains an escape hatch, never a
-requirement.
+Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
+transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
+Linux helm drives Mac agents. Reaching a remote helm's web UI takes a user-managed SSH port forward, and obtaining or
+rotating that UI's token happens on the helm's machine (see Security) — accepted v1 friction, deliberately outside
+"standard operation". Bringing up a Linux helm machine is `farhelm helm setup`, run once there: that machine's systemd
+units are written by one owner rather than by whichever surface got there first, which is why the hosts panel refers to
+it instead of installing a supervisor locally (see Topology). On provisionable hosts, install and updates are the helm's
+job (over the user's SSH access); what may legitimately require manual host-side work is that same transport and token
+pair, on hosts provisioning does not cover. Everything else — session operations, profile management, directory browsing
+— must work from the client. SSH otherwise remains an escape hatch, never a requirement.
 
 ## Sessions
 

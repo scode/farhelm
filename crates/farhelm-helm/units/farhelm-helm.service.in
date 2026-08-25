@@ -1,0 +1,9 @@
+[Unit]
+Description=Farhelm helm
+
+[Service]
+ExecStart=@FARHELM@ helm run@HELM_ARGS@
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

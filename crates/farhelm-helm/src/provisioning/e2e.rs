@@ -315,6 +315,15 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         self.action(target, "restart-supervisor").await
     }
 
+    /// The e2e fixture never stands in for a machine whose units
+    /// `farhelm helm setup` owns: the browser suite drives the hosts
+    /// panel, and a scripted refusal there would test the fixture rather
+    /// than the panel. Answering "no such unit" keeps the local row on the
+    /// path the suite exercises.
+    async fn read_user_unit(&self, _name: &str) -> Result<Option<String>, BackendFailure> {
+        Ok(None)
+    }
+
     async fn injected_attach(
         &self,
         target: &ProvisioningTarget,

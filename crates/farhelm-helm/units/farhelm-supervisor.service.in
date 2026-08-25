@@ -1,0 +1,13 @@
+[Unit]
+Description=Farhelm supervisor
+
+[Service]
+Type=simple
+ExecStart=@FARHELM@ supervisor run --state-dir @STATE_DIR@
+Environment="PATH=@PATH@"
+Environment="FARHELM_TMUX=@TMUX@"
+KillMode=process
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -106,23 +106,48 @@ pub fn default_state_dir() -> anyhow::Result<std::path::PathBuf> {
     default_state_dir_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
 }
 
+/// The state directory rule itself, for callers that resolved the two
+/// inputs themselves: `$XDG_STATE_HOME/farhelm` when that variable carries
+/// something, `~/.local/state/farhelm` otherwise.
+///
+/// The entry point for code that must not read the environment at all.
+/// `farhelm helm setup` captures both values once in `main` and computes
+/// every path from that capture, which is what lets its tests drive the
+/// whole command without touching the test process's environment — and,
+/// more importantly, what keeps the unit it writes pointing at the SAME
+/// directory a helm or supervisor started from those units would pick for
+/// itself. An empty value counts as unset, matching the shell's
+/// `${VAR:-default}` and [`default_state_dir`].
+pub fn default_state_dir_for(
+    xdg_state_home: Option<&std::ffi::OsStr>,
+    home: &std::path::Path,
+) -> std::path::PathBuf {
+    match xdg_state_home.filter(|value| !value.is_empty()) {
+        Some(xdg) => std::path::PathBuf::from(xdg).join("farhelm"),
+        None => home.join(".local").join("state").join("farhelm"),
+    }
+}
+
 /// The pure decision half of [`default_state_dir`], separated so tests
 /// can exercise missing and non-UTF-8 environment values without
 /// mutating the test runner's process environment.
+///
+/// Only the "neither is set" refusal lives here; the layout rule itself
+/// is [`default_state_dir_for`], so the environment-reading path and the
+/// injected one cannot come to disagree about where state belongs.
 fn default_state_dir_from(
     xdg: Option<std::ffi::OsString>,
     home: Option<std::ffi::OsString>,
 ) -> anyhow::Result<std::path::PathBuf> {
-    if let Some(xdg) = xdg.filter(|value| !value.is_empty()) {
-        return Ok(std::path::PathBuf::from(xdg).join("farhelm"));
+    let xdg = xdg.filter(|value| !value.is_empty());
+    let home = home.filter(|value| !value.is_empty());
+    if xdg.is_none() && home.is_none() {
+        anyhow::bail!("neither XDG_STATE_HOME nor HOME is set; use --state-dir");
     }
-    let home = home.filter(|value| !value.is_empty()).ok_or_else(|| {
-        anyhow::anyhow!("neither XDG_STATE_HOME nor HOME is set; use --state-dir")
-    })?;
-    Ok(std::path::PathBuf::from(home)
-        .join(".local")
-        .join("state")
-        .join("farhelm"))
+    Ok(default_state_dir_for(
+        xdg.as_deref(),
+        std::path::Path::new(home.as_deref().unwrap_or_default()),
+    ))
 }
 
 #[cfg(test)]
@@ -175,6 +200,43 @@ mod tests {
         assert_eq!(
             super::default_state_dir_from(None, Some(native_home.clone())).unwrap(),
             std::path::PathBuf::from(native_home).join(".local/state/farhelm")
+        );
+    }
+
+    /// An EMPTY `XDG_STATE_HOME` is unset, exactly as `${VAR:-default}`
+    /// reads it. A unit or profile that writes `XDG_STATE_HOME=` means "no
+    /// override" to whoever wrote it, and the alternative reading — a
+    /// relative `farhelm` directory under whatever the service's working
+    /// directory happens to be — would put the helm and its supervisor on
+    /// different state trees and hide their socket from each other.
+    ///
+    /// Both entry points are checked because `farhelm helm setup` computes
+    /// the path it PINS through the injected one while the running helm
+    /// computes its own through the environment one; they must agree.
+    #[test]
+    fn an_empty_xdg_state_home_falls_back_to_the_home_layout() {
+        let expected = std::path::PathBuf::from("/home/u/.local/state/farhelm");
+        assert_eq!(
+            super::default_state_dir_from(Some("".into()), Some("/home/u".into())).unwrap(),
+            expected
+        );
+        assert_eq!(
+            super::default_state_dir_for(
+                Some(std::ffi::OsStr::new("")),
+                std::path::Path::new("/home/u")
+            ),
+            expected
+        );
+        assert_eq!(
+            super::default_state_dir_for(None, std::path::Path::new("/home/u")),
+            expected
+        );
+        assert_eq!(
+            super::default_state_dir_for(
+                Some(std::ffi::OsStr::new("/xdg")),
+                std::path::Path::new("/home/u")
+            ),
+            std::path::PathBuf::from("/xdg/farhelm")
         );
     }
 }

@@ -43,6 +43,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tracing::warn;
@@ -547,8 +548,12 @@ fn parse_version_component(text: &str, which: &str) -> anyhow::Result<u32> {
 /// them also makes the policy testable without capturing log output, so
 /// "3.7c must not warn, 3.7d must" is an ordinary assertion instead of a
 /// tracing-subscriber fixture.
+///
+/// Public because `farhelm helm setup` decides the same question about a
+/// tmux it is about to pin into a unit file, and must reach that verdict
+/// through this policy rather than its own comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TmuxSupport {
+pub enum TmuxSupport {
     /// Older than the regression-tested build: refuse.
     BelowFloor,
     /// Exactly the pinned, regression-tested build: the silent, blessed
@@ -567,12 +572,316 @@ enum TmuxSupport {
 /// itself recommends installing; the warning its callers emit records
 /// that the combination is untested so a later bug report starts from the
 /// right place.
-fn classify_tmux_version(found: TmuxVersion) -> TmuxSupport {
+pub fn classify_tmux_version(found: TmuxVersion) -> TmuxSupport {
     match found.cmp(&TMUX_FLOOR) {
         std::cmp::Ordering::Less => TmuxSupport::BelowFloor,
         std::cmp::Ordering::Equal => TmuxSupport::AtFloor,
         std::cmp::Ordering::Greater => TmuxSupport::AbovePin,
     }
+}
+
+/// What running `<program> -V` proved about one candidate tmux.
+///
+/// `program` is echoed back because the caller's candidate may have come
+/// from a `PATH` search it did not do itself, and every message about a
+/// rejected tmux has to name which binary answered.
+#[derive(Debug, Clone)]
+pub struct TmuxProbe {
+    pub program: PathBuf,
+    pub version: TmuxVersion,
+    pub support: TmuxSupport,
+}
+
+/// The three ways a candidate tmux fails to produce a verdict, kept apart
+/// because they are different things to tell a user: one binary could not
+/// be run at all, one ran and said something this project cannot read, and
+/// one ran but would not shut up or finish.
+#[derive(Debug)]
+pub enum TmuxProbeError {
+    NotRunnable(std::io::Error),
+    Unparseable(String),
+    /// The candidate exceeded the probe's time or output budget. Carries a
+    /// human-readable statement of which.
+    Overran(String),
+}
+
+impl std::fmt::Display for TmuxProbeError {
+    /// The detail a refusal message appends after naming the candidate.
+    /// Deliberately a fragment, not a sentence: the caller supplies the
+    /// subject ("a tmux at /x/tmux that could not be run").
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotRunnable(error) => write!(formatter, "{error}"),
+            Self::Unparseable(printed) if printed.is_empty() => {
+                formatter.write_str("it printed nothing")
+            }
+            Self::Unparseable(printed) => write!(formatter, "it printed {printed:?}"),
+            Self::Overran(detail) => formatter.write_str(detail),
+        }
+    }
+}
+
+/// How long a candidate gets to answer `-V`.
+///
+/// Generous for a program whose whole job here is to print one line, and
+/// short enough that a wedged candidate cannot hold up a CLI command the
+/// operator is watching.
+const PROBE_DEADLINE: Duration = Duration::from_secs(5);
+
+/// How much of each stream the probe will read.
+///
+/// A version line is tens of bytes. Anything past this is not an answer,
+/// and reading it unbounded is how a hostile or broken candidate turns a
+/// version check into an out-of-memory kill.
+const PROBE_CAPTURE_LIMIT: usize = 4 * 1024;
+
+/// Ask a specific tmux binary what version it is.
+///
+/// Synchronous and side-effect free by design: `tmux -V` answers without
+/// touching the socket, the config, or any server, which is what lets
+/// `farhelm helm setup` — an ordinary CLI command with no async runtime —
+/// use the same floor policy the supervisor enforces at startup.
+///
+/// BOUNDED in both directions, because setup points this at whatever the
+/// operator named or `PATH` produced, which is not necessarily tmux: the
+/// candidate gets [`PROBE_DEADLINE`] to exit and [`PROBE_CAPTURE_LIMIT`]
+/// bytes per stream, and exceeding either is [`TmuxProbeError::Overran`]
+/// rather than a hang or an unbounded allocation. A candidate that spawns
+/// a descendant holding the captured pipes open cannot stall the probe
+/// either: the collection step has its own short budget and gives up on
+/// the readers rather than waiting for EOF.
+///
+/// A non-zero exit is [`TmuxProbeError::Unparseable`] carrying the trimmed
+/// STDERR — something ran under that name and did not answer as tmux,
+/// which is the same actionable fact as an unreadable version line, and
+/// stderr is where such a program says why. `program` is used verbatim, so
+/// a bare name is resolved by the OS against the caller's own `PATH`
+/// rather than this function's idea of one.
+pub fn probe_tmux(program: &Path) -> Result<TmuxProbe, TmuxProbeError> {
+    use std::os::unix::process::CommandExt as _;
+
+    let mut child = std::process::Command::new(program)
+        .arg("-V")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        // Its OWN process group. That is what makes the containment below
+        // possible at all: a candidate that forks before misbehaving
+        // otherwise leaves descendants this function has no handle on, no
+        // way to name, and no way to kill — and they inherited the pipes,
+        // so they can hold the reader threads open after the probe has
+        // returned. One group means one kill reaches everything the probe
+        // started.
+        .process_group(0)
+        .spawn()
+        .map_err(TmuxProbeError::NotRunnable)?;
+    // `process_group(0)` makes the leader's pid the group id.
+    let group = ProbeGroup(child.id());
+    let stdout = capture_bounded(child.stdout.take().expect("piped probe stdout"));
+    let stderr = capture_bounded(child.stderr.take().expect("piped probe stderr"));
+
+    let deadline = std::time::Instant::now() + PROBE_DEADLINE;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                return Err(group.retire(
+                    &mut child,
+                    stdout,
+                    stderr,
+                    format!(
+                        "it did not answer -V within {} seconds",
+                        PROBE_DEADLINE.as_secs()
+                    ),
+                ));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(error) => return Err(TmuxProbeError::NotRunnable(error)),
+        }
+    };
+
+    // The leader is gone, which does NOT mean the pipes are closed: a
+    // descendant it forked inherited them and can hold them open forever.
+    // Collection is bounded for that reason, and an expired budget is
+    // itself the evidence that something is still alive in the group.
+    let collected = match (
+        stdout.receiver.recv_timeout(PROBE_DRAIN_BUDGET),
+        stderr.receiver.recv_timeout(PROBE_DRAIN_BUDGET),
+    ) {
+        (Ok(Ok(out)), Ok(Ok(err))) => Ok((out, err)),
+        (Ok(Err(())), _) => Err(overflowed("stdout")),
+        (_, Ok(Err(()))) => Err(overflowed("stderr")),
+        (Err(_), _) => Err(still_held("stdout")),
+        (_, Err(_)) => Err(still_held("stderr")),
+    };
+    let (out, err) = match collected {
+        Ok(streams) => streams,
+        Err(detail) => return Err(group.retire(&mut child, stdout, stderr, detail)),
+    };
+    // Nothing is left to contain on this path: both readers reached EOF,
+    // which every writer had to close for. Join them so the probe owns no
+    // live thread when it returns.
+    stdout.finish();
+    stderr.finish();
+
+    if !status.success() {
+        return Err(TmuxProbeError::Unparseable(err.trim().to_string()));
+    }
+    let version = parse_tmux_version(&out)
+        .map_err(|_| TmuxProbeError::Unparseable(out.trim().to_string()))?;
+    Ok(TmuxProbe {
+        program: program.to_path_buf(),
+        version,
+        support: classify_tmux_version(version),
+    })
+}
+
+fn overflowed(which: &str) -> String {
+    format!("it printed more than {PROBE_CAPTURE_LIMIT} bytes on {which}")
+}
+
+fn still_held(which: &str) -> String {
+    format!("its {which} was still held open after it exited")
+}
+
+/// The process group one probe created, and the only handle that reaches
+/// everything that probe started.
+struct ProbeGroup(u32);
+
+impl ProbeGroup {
+    /// Kill the whole group, reap the leader, and join both reader
+    /// threads, then report the overrun that got us here.
+    ///
+    /// The order is load-bearing. The group is killed BEFORE the leader is
+    /// reaped where that is still possible, because a group whose members
+    /// have all been reaped no longer reserves its id. The joins come last
+    /// and are bounded by the kill: with every writer dead, the pipes are
+    /// closed and both readers see EOF.
+    ///
+    /// The residual risk is honest to state: if the leader was already
+    /// reaped and the group is now genuinely empty, its id could in
+    /// principle have been reused by an unrelated group, and this signals
+    /// that one. It takes a full pid-space wrap between the two moments,
+    /// and the alternative — leaving a hostile candidate's descendants
+    /// running with our pipes — is the worse trade.
+    fn retire(
+        &self,
+        child: &mut std::process::Child,
+        stdout: Capture,
+        stderr: Capture,
+        detail: String,
+    ) -> TmuxProbeError {
+        // SAFETY: `kill` with a negative pid signals a process group and
+        // touches no memory. A group that is already gone answers ESRCH,
+        // which is the outcome this wants anyway.
+        unsafe { libc::kill(-(self.0 as i32), libc::SIGKILL) };
+        let _ = child.kill();
+        let _ = child.wait();
+        stdout.finish();
+        stderr.finish();
+        TmuxProbeError::Overran(detail)
+    }
+}
+
+/// One child stream being read on its own thread, bounded.
+struct Capture {
+    receiver: std::sync::mpsc::Receiver<Result<String, ()>>,
+    reader: std::thread::JoinHandle<()>,
+}
+
+impl Capture {
+    /// Wait for the reader thread to end. Only safe to call once every
+    /// writer for its pipe is gone, which is why the callers either saw
+    /// EOF or killed the group first.
+    fn finish(self) {
+        let _ = self.reader.join();
+    }
+}
+
+/// Read at most [`PROBE_CAPTURE_LIMIT`] bytes from one child stream on a
+/// thread, reporting overflow rather than growing.
+///
+/// A thread rather than sequential reads because the child writes both
+/// streams and a single-threaded reader can deadlock against the pipe
+/// buffer of the one it is not reading. The result is SENT before the
+/// thread ends, so a caller can have the answer while the thread is still
+/// waiting for EOF on a pipe some descendant holds.
+fn capture_bounded(mut stream: impl std::io::Read + Send + 'static) -> Capture {
+    let (tx, receiver) = std::sync::mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        use std::io::Read as _;
+
+        let mut buffer = Vec::new();
+        // One byte past the limit is how overflow is detected without
+        // reading the rest of whatever the candidate is producing.
+        let read = stream
+            .by_ref()
+            .take(PROBE_CAPTURE_LIMIT as u64 + 1)
+            .read_to_end(&mut buffer);
+        let answer = match read {
+            Ok(_) if buffer.len() > PROBE_CAPTURE_LIMIT => Err(()),
+            Ok(_) => Ok(String::from_utf8_lossy(&buffer).into_owned()),
+            Err(_) => Ok(String::new()),
+        };
+        let _ = tx.send(answer);
+    });
+    Capture { receiver, reader }
+}
+
+/// How long the probe waits for a reader once the child is gone.
+///
+/// The child has exited by then, so this is only about a DESCENDANT it
+/// left holding the pipe. Waiting for that would reintroduce the hang the
+/// deadline exists to prevent, so an expired budget becomes an overrun —
+/// and, unlike before, the group kill that follows retires the descendant
+/// and the reader with it.
+const PROBE_DRAIN_BUDGET: Duration = Duration::from_millis(250);
+
+/// Find one program by name on a `PATH` value.
+///
+/// `path` is a parameter rather than a read of this process's environment
+/// so callers can search the environment they captured (and so tests never
+/// have to mutate their own). Returns `None` when nothing on `PATH` under
+/// that name looks executable — a caller that wants the OS's own error
+/// should spawn the bare name instead.
+///
+/// NOTE that "looks executable" is an approximation (see
+/// [`is_executable_file`]), so the first hit is not guaranteed to run. A
+/// caller that will actually SPAWN the result should walk
+/// [`candidates_on_path`] instead and skip the ones that fail to start,
+/// which is what `execvp` does and what this cannot do on its own.
+pub fn find_on_path(path: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
+    candidates_on_path(path, name).next()
+}
+
+/// Every `PATH` entry that plausibly holds this program, in `PATH` order.
+///
+/// Exists because [`find_on_path`]'s answer can be wrong in a way only
+/// spawning reveals: a `noexec` mount, an execute bit set for a group this
+/// process is not in, or an LSM denial all look executable to a metadata
+/// check. `execvp` skips such an entry and keeps walking, so a caller that
+/// spawns must be able to as well — otherwise one unusable shadow early on
+/// `PATH` hides a perfectly good tmux later.
+pub fn candidates_on_path<'a>(
+    path: &'a std::ffi::OsStr,
+    name: &'a str,
+) -> impl Iterator<Item = PathBuf> + 'a {
+    let program = Path::new(name);
+    std::env::split_paths(path)
+        // An empty PATH entry means the current directory to the shell.
+        // Skipping it here is deliberate: the result is going to be
+        // written into a systemd unit, and "whatever directory setup
+        // happened to run in" is never a defensible thing to pin.
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(move |dir| dir.join(program))
+        .filter(|candidate| is_executable_file(candidate))
+}
+
+/// The shared search behind [`find_on_path`] and [`program_display_path`].
+fn search_path(path_var: &std::ffi::OsStr, program: &Path) -> Option<PathBuf> {
+    std::env::split_paths(path_var)
+        .map(|dir| dir.join(program))
+        .find(|candidate| is_executable_file(candidate))
 }
 
 /// Enforce the version floor against the binary this driver will actually
@@ -683,31 +992,21 @@ pub fn resolve_tmux_program_from_env(flag: Option<&Path>) -> PathBuf {
 /// tmux 3.6 at /usr/bin/tmux is too old" tells the reader which entry to
 /// fix. `path_var` is a parameter so the search is testable without
 /// touching the test process's environment.
-///
-/// The search must match the OS's, not merely find a file by name: `execvp`
-/// SKIPS a non-executable candidate and keeps walking `PATH`. A plain
-/// `is_file` check stopped at the first shadow — a leftover `tmux` config
-/// fragment, a `noexec` copy, a root-owned unreadable stub — and named a
-/// file that was never run, which is a diagnostic that actively misleads.
 fn program_display_path(program: &Path, path_var: Option<&std::ffi::OsStr>) -> PathBuf {
     // A name with any separator is already a path; the OS would not
     // consult PATH for it either.
     if program.components().count() != 1 {
         return program.to_path_buf();
     }
-    let Some(path_var) = path_var else {
-        return program.to_path_buf();
-    };
-    std::env::split_paths(path_var)
-        .map(|dir| dir.join(program))
-        .find(|candidate| is_executable_file(candidate))
+    path_var
+        .and_then(|path_var| search_path(path_var, program))
         // Falling back to the bare name is right: the spawn that follows
         // will fail with the OS's own "no such file" and that error is
         // clearer than a path this function invented.
         .unwrap_or_else(|| program.to_path_buf())
 }
 
-/// Whether a `PATH` candidate is something the OS would actually execute.
+/// Whether a `PATH` candidate LOOKS like something the OS would execute.
 ///
 /// An approximation of `execvp`'s test, and knowingly so: it asks whether
 /// ANY execute bit is set rather than whether THIS process's uid/gid can
@@ -716,6 +1015,10 @@ fn program_display_path(program: &Path, path_var: Option<&std::ffi::OsStr>) -> P
 /// removes the shadows that actually occur (data files, unstripped
 /// permissions on a copied binary) without a permission model this code
 /// would then have to keep true.
+///
+/// Because it is an approximation, a caller that will SPAWN the result
+/// must be prepared for it to fail anyway and move on; that is what
+/// [`candidates_on_path`] is for.
 fn is_executable_file(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
@@ -3702,6 +4005,221 @@ mod tests {
             TMUX_FLOOR.to_string(),
             "TMUX_FLOOR and the pinned tmux release must be bumped together"
         );
+    }
+
+    /// Write one executable shell script fixture and hand back its path.
+    ///
+    /// `farhelm helm setup` points [`probe_tmux`] at whatever the operator
+    /// named or `PATH` produced, so the probe's behaviour against programs
+    /// that are NOT tmux is production behaviour and needs real child
+    /// processes to exercise.
+    #[cfg(unix)]
+    fn probe_fixture(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        let path = dir.join(name);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o755)
+            .open(&path)
+            .expect("fixture script");
+        // The warm-up guard is the first thing the script does, so the
+        // ETXTBSY check below costs nothing even for a fixture whose whole
+        // point is to sleep for two minutes or flood its stdout.
+        write!(
+            file,
+            "#!/bin/sh\ncase \"$1\" in --probe-warmup) exit 0;; esac\n{body}\n"
+        )
+        .expect("write fixture");
+        drop(file);
+        // Exec the fresh script once before returning it: writing an
+        // executable and immediately spawning it races ETXTBSY against any
+        // other thread's fork window, and every caller here spawns.
+        for _ in 0..200 {
+            match std::process::Command::new(&path)
+                .arg("--probe-warmup")
+                .output()
+            {
+                Ok(_) => return path,
+                Err(error) if error.raw_os_error() == Some(26) => {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(error) => panic!("fixture {name} is not runnable: {error}"),
+            }
+        }
+        panic!("fixture {name} stayed busy");
+    }
+
+    /// The probe is pointed at operator-supplied and PATH-supplied
+    /// executables, so a candidate that hangs or floods must produce a
+    /// refusal rather than wedging or killing the CLI. Both budgets are
+    /// exercised with real children.
+    #[cfg(unix)]
+    #[test]
+    fn a_candidate_that_hangs_or_floods_is_refused_within_the_budget() {
+        let dir = tempfile::tempdir().expect("fixture dir");
+
+        // Sleeps well past the deadline. The probe must return early, and
+        // the elapsed time proves it did not simply wait for the child.
+        let hanging = probe_fixture(dir.path(), "hangs", "sleep 120");
+        let started = std::time::Instant::now();
+        let error = probe_tmux(&hanging).expect_err("a hanging candidate is not an answer");
+        assert!(matches!(error, TmuxProbeError::Overran(_)), "{error:?}");
+        assert!(error.to_string().contains("did not answer -V"), "{error}");
+        assert!(
+            started.elapsed() < PROBE_DEADLINE + Duration::from_secs(5),
+            "the probe waited {:?}, past its own deadline",
+            started.elapsed()
+        );
+
+        // Writes far more than the capture limit. `head` keeps the fixture
+        // from depending on how the probe closes its end of the pipe.
+        let flooding = probe_fixture(dir.path(), "floods", "yes farhelm-flood | head -c 200000");
+        let error = probe_tmux(&flooding).expect_err("a flood is not a version");
+        assert!(matches!(error, TmuxProbeError::Overran(_)), "{error:?}");
+        assert!(error.to_string().contains("more than"), "{error}");
+    }
+
+    /// The probe must not leave anything of its own running.
+    ///
+    /// The nastiest shape is not a slow candidate but a fast one that
+    /// FORKS: the leader prints a perfectly good version line and exits,
+    /// while the descendant it left behind holds the inherited stdout open
+    /// for two minutes. The bounded collection alone would return an
+    /// overrun and walk away from both the descendant and the reader
+    /// thread blocked on that pipe, so a machine that probes such a
+    /// candidate repeatedly accumulates one of each per refusal.
+    ///
+    /// The whole probe therefore runs in its own process group, and an
+    /// overrun kills the group. This proves it: the descendant records its
+    /// pid, and after the probe returns that pid is gone.
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_holding_the_pipes_open_is_killed_with_the_group() {
+        let dir = tempfile::tempdir().expect("fixture dir");
+        let pidfile = dir.path().join("grandchild.pid");
+        // The `sleep` inherits stdout; the leader records its pid, prints
+        // a version, and exits immediately.
+        let forking = probe_fixture(
+            dir.path(),
+            "forks",
+            &format!(
+                "sleep 120 & printf '%s\\n' \"$!\" > {}; printf 'tmux {TMUX_FLOOR}\\n'",
+                pidfile.display()
+            ),
+        );
+
+        let started = std::time::Instant::now();
+        let error = probe_tmux(&forking).expect_err("a held-open pipe is not an answer");
+        assert!(matches!(error, TmuxProbeError::Overran(_)), "{error:?}");
+        assert!(error.to_string().contains("still held open"), "{error}");
+        assert!(
+            started.elapsed() < PROBE_DEADLINE,
+            "collection must be bounded by the drain budget, not the deadline: {:?}",
+            started.elapsed()
+        );
+
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .expect("the fixture recorded its descendant")
+            .trim()
+            .parse()
+            .expect("a pid");
+        // Reparenting and reaping are not instant, so allow a moment for
+        // the kill to be collected — but only a moment: the point is that
+        // the process is gone rather than merely doomed.
+        let gone = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            // SAFETY: signal 0 performs the permission and existence check
+            // without delivering anything.
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if !alive {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < gone,
+                "the descendant holding the probe's stdout survived the probe"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The probe's ordinary verdicts, each with the payload a refusal
+    /// message needs: which binary answered, what it printed, and where
+    /// its version sits against the floor.
+    #[cfg(unix)]
+    #[test]
+    fn a_probe_reports_the_program_version_and_what_a_non_tmux_printed() {
+        let dir = tempfile::tempdir().expect("fixture dir");
+        let root = dir.path().to_path_buf();
+
+        let at_floor = probe_fixture(&root, "at-floor", &format!("printf 'tmux {TMUX_FLOOR}\\n'"));
+        let probe = probe_tmux(&at_floor).expect("a floor build is an answer");
+        assert_eq!(probe.program, at_floor);
+        assert_eq!(probe.version, TMUX_FLOOR);
+        assert_eq!(probe.support, TmuxSupport::AtFloor);
+
+        let old = probe_fixture(&root, "old", "printf 'tmux 3.4\\n'");
+        let probe = probe_tmux(&old).expect("an old build still answers");
+        assert_eq!(probe.support, TmuxSupport::BelowFloor);
+        assert_eq!(probe.version.to_string(), "3.4");
+
+        // A non-zero exit reports STDERR, which is where a program that is
+        // not tmux says what it is.
+        let failing = probe_fixture(&root, "failing", "echo 'not a multiplexer' >&2; exit 3");
+        let error = probe_tmux(&failing).expect_err("a failing candidate is not a version");
+        assert!(
+            matches!(&error, TmuxProbeError::Unparseable(printed) if printed == "not a multiplexer"),
+            "{error:?}"
+        );
+
+        let decorated = probe_fixture(&root, "decorated", "printf 'tmux 3.7c vendor-patch\\n'");
+        let error = probe_tmux(&decorated).expect_err("a decorated line is not a release");
+        assert!(
+            error.to_string().contains("tmux 3.7c vendor-patch"),
+            "{error}"
+        );
+
+        assert!(matches!(
+            probe_tmux(Path::new("/nonexistent/tmux")),
+            Err(TmuxProbeError::NotRunnable(_))
+        ));
+    }
+
+    /// PATH discovery must behave like `execvp`: an entry that merely
+    /// LOOKS executable but cannot be spawned is skipped, not fatal. A
+    /// `noexec` mount or a group-only execute bit produces exactly that
+    /// shape, and stopping there would hide a perfectly good tmux later on
+    /// PATH. Empty entries are dropped as well — the current directory is
+    /// not something to pin into a unit file.
+    #[cfg(unix)]
+    #[test]
+    fn path_candidates_are_offered_in_order_without_empty_entries() {
+        let dir = tempfile::tempdir().expect("fixture dir");
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        // Looks executable, is not: a directory-less shebang is the
+        // cheapest reproduction of "spawns and fails".
+        probe_fixture(&first, "tmux", "true");
+        std::fs::write(first.join("tmux"), b"#!/nonexistent/interpreter\n").unwrap();
+        let usable = probe_fixture(&second, "tmux", &format!("printf 'tmux {TMUX_FLOOR}\\n'"));
+
+        let path = std::env::join_paths([std::path::PathBuf::new(), first.clone(), second.clone()])
+            .unwrap();
+        let candidates: Vec<_> = candidates_on_path(&path, "tmux").collect();
+        assert_eq!(candidates, [first.join("tmux"), usable.clone()]);
+        assert_eq!(find_on_path(&path, "tmux"), Some(first.join("tmux")));
+        // The first candidate is the one `find_on_path` reports and the
+        // one a spawning caller must be able to skip.
+        assert!(matches!(
+            probe_tmux(&candidates[0]),
+            Err(TmuxProbeError::NotRunnable(_))
+        ));
+        assert!(probe_tmux(&candidates[1]).is_ok());
     }
 
     /// The override's precedence is a user-facing contract: `--tmux` beats

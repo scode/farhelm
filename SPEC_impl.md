@@ -1126,6 +1126,19 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   creation is `POST /api/sessions`, which is where the host selection belongs. A release build compiles its own web UI
   in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at runtime, and an ordinary developer build with
   neither serves the API alone.
+- `farhelm helm setup [--state-dir DIR] [--port N] [--tmux PATH] [--no-supervisor] [--dry-run]`, and
+  `farhelm helm setup --uninstall [--dry-run]` — write, enable, and remove this machine's systemd user units for the
+  helm and its supervisor. Linux only (it exits 2 elsewhere, pointing macOS at the desktop app). One state directory is
+  resolved from setup's own environment and pinned into both units, so a shell-only `XDG_STATE_HOME` cannot leave the
+  two services on different trees, and both installing and uninstalling refuse when the running user manager reads units
+  from a different directory than the one this environment selects. The units are rendered from the templates in
+  `crates/farhelm-helm/units/`, the same ones remote provisioning fills in, and every file setup writes starts with
+  `# managed-by: farhelm helm setup`: setup overwrites or removes only files carrying that marker, and refuses anything
+  else rather than replacing it. It never installs tmux — a tmux below the floor, or none at all, is a refusal naming
+  what it found. The matching rule on the helm side is that the hosts panel never installs or updates a supervisor on
+  the helm's own machine at all: an absent one is answered with "run `farhelm helm setup` here", a unit already running
+  that same binary is named as setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and
+  registered exactly as a remote one is.
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
