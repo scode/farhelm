@@ -335,6 +335,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
 /// The E2E backend still exercises payload staging, but uses its small marker
 /// as inert content so browser tests measure provisioning rather than copying
 /// the running debug executable for every simulated host.
+#[derive(Debug)]
 pub(super) struct E2ePayloads(pub(super) PathBuf);
 
 #[async_trait]

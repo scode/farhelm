@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "farhelm fixture: tmux x86_64-unknown-linux-musl"

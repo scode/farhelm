@@ -1,0 +1,5 @@
+a8be0d0cb38f42bd1dfb8239a0db9e3f572d12c214f57a99fa35925f389232d5  farhelm-aarch64-apple-darwin.tar.gz
+06b7ccac80a5569b63ded094b895620e4cc4664e45ef523f456ffcb6d3cbcb79  farhelm-aarch64-unknown-linux-musl.tar.gz
+ef435551484fe93ff032dcbb470d9665645f9223e1c60dcb098ccc4efdae63e6  farhelm-desktop-aarch64-apple-darwin.tar.gz
+da6682e900984eff492fad5745763a78704748d3427dafeae2e302e771c1b181  farhelm-x86_64-unknown-linux-musl.tar.gz
+75bb376b208b88883bbd99562c58e48d17f0dcb569216c28725e19c9b92e408c  tmux-x86_64-unknown-linux-musl
