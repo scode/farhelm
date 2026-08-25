@@ -105,6 +105,25 @@ roadmap and carries no priorities unless an entry says so itself.
   `wait_real_run` shape) for the busy streak to return to 0 after the still pane qualifies, so a single stalled window
   recovers instead of failing the run.
 
+- Deflake `archive::deleting_an_archived_session_removes_its_row_and_attachments` on four-thread CI. One occurrence,
+  2026-08-25, `test` job of PR #256 (job 97658478803, a workflow-only change): `archive_session` failed with "archive:
+  killing process tree for archive: process-tree kill hit 1 error(s): quiesce did not converge within 5 passes; the
+  process tree may not be fully frozen" (sweep.rs, `kill_process_tree` step 3). 323/324 otherwise; I did not audit
+  earlier runs for it, and nothing in TODO.md or docs/ records it. The pane under test is `/bin/sh -c 'sleep 120'`, a
+  finite tree a few processes deep, so five consecutive passes each finding a pid absent the pass before should be
+  impossible once everything is SIGSTOPped. Candidate mechanism, visible in the code but unverified as the cause:
+  `enumerate_tree`'s PPID closure admits a child when `found.contains_key(&ppid)` — the parent's pid NUMBER, with no
+  check that the parent still has the starttime `found` recorded for it. Seeds themselves are starttime-validated, but
+  only on the pass after the death: a tree member that died (SIGTERMed in step 1) whose number the kernel handed to an
+  unrelated process makes every child of that unrelated process a "descendant" for as long as its number stays in
+  `found`, and on a four-vCPU runner hosting three other harnesses that fork continuously, that is a steady supply of
+  never-before-seen pids. First step is instrumentation either way: the error names no pids, so the next occurrence is
+  as opaque as this one — have the non-convergence message list each pass's newly-found
+  `(pid, ppid, starttime,
+  /proc/<pid>/cmdline)`. If the cmdlines are unrelated processes with a parent outside the
+  pane, close the hole by expanding the closure only through parents whose CURRENT starttime matches the one recorded in
+  `found`.
+
 - Fix `terminal-keys.spec.ts`'s four Shift+Enter tests (lines 212, 243, 269, 381: "Shift+Enter sends ESC then CR",
   "plain Enter sends bare CR", "Ctrl+Shift+Enter does not trigger this fix's own ESC injection", "a plain Enter after
   the chord stays bare"). They fail deterministically — every run, Chromium and WebKit alike — with the same transcript:
