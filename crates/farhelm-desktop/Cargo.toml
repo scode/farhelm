@@ -1,0 +1,35 @@
+[package]
+name = "farhelm-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Farhelm desktop window (webview shell around the helm)"
+
+# The whole reason this crate exists is to be a BINARY with no library half
+# (D6). Naming the bin explicitly pins the installed file name — `install.sh`
+# puts `farhelm` and `farhelm-desktop` side by side, and the shell finds its
+# CLI sibling by that exact name.
+[[bin]]
+name = "farhelm-desktop"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+# The `desktop` feature is not optional here: it is what this crate is. It
+# pulls in dioxus-desktop, wry, and WebKit, which is why the workspace's
+# `default-members` excludes this package.
+farhelm-ui = { workspace = true, features = ["desktop"] }
+
+# cargo-dist ships this package (Step 5 of the distribution plan turns dist
+# on); `dist = true` opts it in explicitly, since dist otherwise takes the
+# workspace's default members.
+#
+# macOS only. A Linux user runs `farhelm helm run` and opens a browser, so a
+# Linux desktop artifact would be a WebKitGTK dependency chain shipped for
+# nobody. `homepage.workspace` is deliberately absent: the workspace defines
+# no `homepage` yet (Step 5 adds it), and inheriting a key that does not
+# exist is a hard cargo error rather than an empty field.
+[package.metadata.dist]
+dist = true
+targets = ["aarch64-apple-darwin"]

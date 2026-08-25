@@ -868,139 +868,217 @@ pub struct Tab {
     pub id: String,
 }
 
-// Provenance for the three xterm.js files below (none carried one before —
-// the minified UMD bundles have no room for a header comment, so this is
-// where it lives): `xterm.js` and `xterm.css` are the unmodified `lib/xterm.js`
-// and `css/xterm.css` from the `@xterm/xterm` npm package, version 6.0.0
-// (https://registry.npmjs.org/@xterm/xterm/-/xterm-6.0.0.tgz), identified by
-// SHA-256 match against the published tarball — the bundle embeds no version
-// string of its own. `addon-fit.js` is `lib/addon-fit.js` from
-// `@xterm/addon-fit`, vendored alongside it. `addon-clipboard.js` (below) was
-// vendored later, against this same xterm version.
-const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
-const VENDOR_XTERM_JS: Asset = asset!("/assets/vendor/xterm.js");
-const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
-// OSC 52 support: an agent TUI (Claude Code, Codex) that owns mouse
-// reporting handles its OWN text selection and reports what it copies via
-// the OSC 52 escape sequence rather than through any DOM selection this page
-// can see (see terminal.js's module docs for the full plain-drag-vs-Shift-
-// drag duality this addon exists to cover). xterm.js parses OSC 52 as a
-// no-op unless something registers a handler for it, so without this addon
-// that sequence was silently dropped — the diagnosis this half of the fix
-// closes. WRITE-only in how terminal.js actually uses it: `mount()`
-// constructs the addon with a provider that refuses every READ/query
-// outright (never touches `navigator.clipboard.readText`) rather than
-// handing a terminal program the system clipboard on request — that refusal
-// is the security boundary, not an accident of the addon's own defaults.
-//
-// The unmodified `lib/addon-clipboard.js` UMD bundle from `@xterm/addon-clipboard`
-// version 0.2.0 (https://registry.npmjs.org/@xterm/addon-clipboard/-/addon-clipboard-0.2.0.tgz,
-// dist-tag `latest` at vendoring time), which declares xterm.js v4+
-// compatibility in its own README and is confirmed against the 6.0.0 vendored
-// above. It bundles `js-base64` internally (a webpack chunk, not a separate
-// vendor file) so it needs nothing else loaded to register its
-// `window.ClipboardAddon.ClipboardAddon` global, the same one-file-one-global
-// shape as `addon-fit.js`'s `window.FitAddon.FitAddon`.
-//
-// License notices: MIT (the addon itself) plus BSD-3-Clause (the bundled
-// js-base64), neither of which the minified bundle can carry inline —
-// copied verbatim from both packages' own LICENSE files into
-// `assets/vendor/addon-clipboard-LICENSES.txt`, alongside this asset the
-// same way `assets/fonts/OFL.txt` sits alongside the vendored font files.
-const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
-// The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
-// item 1) — a separate asset, registered ahead of terminal.js, purely so
-// `node --test` can load this exact file rather than a copy of its logic.
-// Registration order is not execution order (script injection is async);
-// terminal.js's mount readiness gate waits for the helper's global.
-// JetBrains Mono Nerd Font, embedded for the same self-contained reason
-// xterm.js itself is vendored (SPEC_impl.md, "Terminal widget: xterm.js
-// island" — no CDN, no reliance on whatever happens to be installed on the
-// host). Two consumers reference these bytes: `terminal.js` sets the family
-// as xterm.js's `fontFamily`, and `app.css`'s `--font-ui` token applies the
-// same family to the rest of the chrome (sidebar, titlebar, forms) — so
-// this is no longer a terminal-only asset, and both surfaces share the one
-// cached download.
-//
-// These two are declared differently from every other `Asset` constant in
-// this file: `app.css`'s `@font-face` `url()` needs a path it can write as
-// a plain string, but a static CSS file has no way to interpolate a Rust
-// value the way `document::Link`/`Script` do via `Display`. `manganis`'s
-// documented answer for an asset consumed outside Rust code, where the
-// caller must know the served path ahead of time, is `with_hash_suffix(false)`.
-// The macro argument below is the SOURCE path, not the served one — the
-// bundler serves every asset flat under `/assets/`, named from its
-// basename alone regardless of source subdirectory, so the served path
-// drops the `fonts/` segment. `app.css` hardcodes that served form
-// (verified against `dx build --platform web --release`'s actual output,
-// not assumed): `/assets/JetBrainsMonoNerdFont-Regular.woff2` and
-// `/assets/JetBrainsMonoNerdFont-Bold.woff2`. The cost of the fixed,
-// unhashed path is losing cache-busting for these two files specifically;
-// acceptable, since font bytes only change when someone deliberately
-// re-vendors them, unlike the app's own generated CSS/JS. `#[used]` is
-// required alongside it: unused by any Rust code (no Display call, no rsx
-// attribute — see above), these would otherwise be dead code the linker
-// could drop before the CLI's asset manifest scan ever sees them.
-//
-// Provenance: JetBrains Mono Nerd Font, from the nerd-fonts project's
-// `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed, re-encoded
-// as WOFF2 from the project's vendored TTF (fontTools, lossless — every
-// glyph survives) since chrome now fetches this file on pages that never
-// open a terminal at all. Full license text alongside the font files at
-// `assets/fonts/OFL.txt`.
-#[used]
-static FONT_JETBRAINS_MONO_REGULAR: Asset = asset!(
-    "/assets/fonts/JetBrainsMonoNerdFont-Regular.woff2",
-    AssetOptions::builder().with_hash_suffix(false)
-);
-#[used]
-static FONT_JETBRAINS_MONO_BOLD: Asset = asset!(
-    "/assets/fonts/JetBrainsMonoNerdFont-Bold.woff2",
-    AssetOptions::builder().with_hash_suffix(false)
-);
-const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
-// Clipboard fact capture, MIME-extension policy, and the pure filename
-// decision terminal.js calls. Kept as its own asset so node --test executes
-// the shipped functions rather than test-only copies; terminal.js also treats
-// this global as a mount prerequisite, so paste can never fall back to a
-// second naming rule while asynchronous scripts are still loading.
-const CLIPBOARD_NAME_JS: Asset = asset!("/assets/clipboard-name.js");
-// The pure Shift+Enter "insert newline" decision terminal.js's
-// `attachCustomKeyEventHandler` callback consults. Its own asset for the
-// same reason as term-bytes.js and clipboard-name.js above: `node --test`
-// must run the exact shipped function, and terminal.js treats this global
-// as a mount precondition (see its `mountWhenReady` docs) so the key
-// handler can never wire up half-loaded.
-const SHIFT_ENTER_KEY_JS: Asset = asset!("/assets/shift-enter-key.js");
-// The pure "does this mouseup end a LOCAL xterm selection worth copying"
-// decision terminal.js's herdr-style copy-on-select consults — the OTHER
-// half of the selection duality `VENDOR_CLIPBOARD_JS` above closes (a
-// selection this page's own DOM can see, as opposed to one an agent TUI made
-// for itself and reported over OSC 52). Its own asset for the same reason as
-// the three helpers above: `node --test` must run the exact shipped
-// function, and terminal.js treats this global as a mount precondition.
-const COPY_ON_SELECT_JS: Asset = asset!("/assets/copy-on-select.js");
-const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
-// The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
-// rather than a corner of terminal.js, because it has nothing to do with a
-// terminal: it outlives every island, carries no bytes, and is subscribed
-// once for the whole page. Registration order is not execution order here
-// either; `feed::FleetFeed`'s snippet waits for the global this file
-// assigns.
-const EVENTS_JS: Asset = asset!("/assets/events.js");
-const APP_CSS: Asset = asset!("/assets/app.css");
-// The webview console shim (PLAN_desktop_web_bug_triage.md; see that file's
-// own module docs for the loaded-first and desktop-only contracts). Behind
-// the same `#[cfg]` as the `desktop` module itself and referenced only from
-// `App`'s desktop branch below, rather than from `AppBody` alongside the
-// other page scripts: unlike those, this one is rendered with
-// `DesktopBootstrapGate` itself, before `AppBody` ever mounts, so it has
-// the earliest possible chance to capture what goes wrong during
-// authentication (a chance, not a guarantee — loading is async). A browser
-// build never references this constant, so `dx build --platform web` never
-// bundles the file at all.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-const CLIENT_LOG_SHIM_JS: Asset = asset!("/assets/client-log-shim.js");
+/// Declare an `asset!()` and enrol it in this crate's asset inventory in one
+/// step.
+///
+/// ## Why the declaration and the inventory are the same syntax
+///
+/// D6 serves the desktop window's `/assets/*` out of the UI tree embedded at
+/// build time — `dx build --platform web`'s output — so the set of files that
+/// tree contains and the set the desktop build requests must be identical.
+/// `scripts/check-desktop-assets.sh` compares them by asking a built binary,
+/// through the hidden `--print-assets` flag, what it is going to request.
+///
+/// A hand-maintained inventory can answer that question wrongly in the exact
+/// direction that matters. dx collects assets from the `__ASSETS__` link
+/// sections of the whole binary, not from any list of ours, so an `asset!()`
+/// that someone forgot to add to the inventory is still bundled and still
+/// requested at runtime — while `--print-assets` omits it. The gate would
+/// then compare two sets that agree about everything except the one file the
+/// native window is about to 404 on, and pass. Deriving the inventory from
+/// the declarations removes that gap by construction rather than by
+/// vigilance.
+///
+/// Declarations pass through unchanged, `const` and `static` alike (the two
+/// font assets need `static` for their `#[used]` attribute), as do any
+/// attributes written above them.
+///
+/// ## The fence, and what holds it
+///
+/// This macro is only a fence if every `asset!()` in the crate is inside it,
+/// which the unit test `asset_declarations_stay_inside_the_inventory_macro`
+/// enforces by walking every `.rs` file under `src` and reporting any
+/// occurrence outside the invocation.
+///
+/// It reads the FILES rather than this file's `include_str!`, because a
+/// desktop-only module is the case that actually matters. An `asset!()` in
+/// `desktop.rs` is compiled, bundled and requested only by the desktop
+/// build; the web build never compiles that module, so the file never
+/// reaches the embedded tree and both of `check-desktop-assets.sh`'s
+/// compared sets omit it together. The script cannot see that divergence.
+/// Reading the directory can, and does.
+macro_rules! declare_assets {
+    ($( $(#[$meta:meta])* $kind:ident $name:ident : Asset = $value:expr; )*) => {
+        $( $(#[$meta])* $kind $name: Asset = $value; )*
+
+        /// Every `asset!()` this crate declares, in declaration order.
+        ///
+        /// Generated by [`declare_assets`], so this cannot drift from the
+        /// declarations the way a hand-written list could — see that macro
+        /// for why that mattered enough to spend a macro on.
+        ///
+        /// Renderer-independent on purpose: the list is identical on web and
+        /// on desktop because the two builds' asset sets must be identical
+        /// (see `CLIENT_LOG_SHIM_JS`, which only the desktop build renders
+        /// and both builds bundle).
+        ///
+        /// The paths these resolve to depend on how the binary was BUILT and
+        /// how it is RUN, which is why `--print-assets` has a script wrapped
+        /// around it rather than being useful on its own — see
+        /// `desktop::print_assets`.
+        pub fn all_assets() -> Vec<Asset> {
+            vec![$($name),*]
+        }
+    };
+}
+
+declare_assets! {
+    // Provenance for the three xterm.js files below (none carried one before —
+    // the minified UMD bundles have no room for a header comment, so this is
+    // where it lives): `xterm.js` and `xterm.css` are the unmodified `lib/xterm.js`
+    // and `css/xterm.css` from the `@xterm/xterm` npm package, version 6.0.0
+    // (https://registry.npmjs.org/@xterm/xterm/-/xterm-6.0.0.tgz), identified by
+    // SHA-256 match against the published tarball — the bundle embeds no version
+    // string of its own. `addon-fit.js` is `lib/addon-fit.js` from
+    // `@xterm/addon-fit`, vendored alongside it. `addon-clipboard.js` (below) was
+    // vendored later, against this same xterm version.
+    const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
+    const VENDOR_XTERM_JS: Asset = asset!("/assets/vendor/xterm.js");
+    const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
+    // OSC 52 support: an agent TUI (Claude Code, Codex) that owns mouse
+    // reporting handles its OWN text selection and reports what it copies via
+    // the OSC 52 escape sequence rather than through any DOM selection this page
+    // can see (see terminal.js's module docs for the full plain-drag-vs-Shift-
+    // drag duality this addon exists to cover). xterm.js parses OSC 52 as a
+    // no-op unless something registers a handler for it, so without this addon
+    // that sequence was silently dropped — the diagnosis this half of the fix
+    // closes. WRITE-only in how terminal.js actually uses it: `mount()`
+    // constructs the addon with a provider that refuses every READ/query
+    // outright (never touches `navigator.clipboard.readText`) rather than
+    // handing a terminal program the system clipboard on request — that refusal
+    // is the security boundary, not an accident of the addon's own defaults.
+    //
+    // The unmodified `lib/addon-clipboard.js` UMD bundle from `@xterm/addon-clipboard`
+    // version 0.2.0 (https://registry.npmjs.org/@xterm/addon-clipboard/-/addon-clipboard-0.2.0.tgz,
+    // dist-tag `latest` at vendoring time), which declares xterm.js v4+
+    // compatibility in its own README and is confirmed against the 6.0.0 vendored
+    // above. It bundles `js-base64` internally (a webpack chunk, not a separate
+    // vendor file) so it needs nothing else loaded to register its
+    // `window.ClipboardAddon.ClipboardAddon` global, the same one-file-one-global
+    // shape as `addon-fit.js`'s `window.FitAddon.FitAddon`.
+    //
+    // License notices: MIT (the addon itself) plus BSD-3-Clause (the bundled
+    // js-base64), neither of which the minified bundle can carry inline —
+    // copied verbatim from both packages' own LICENSE files into
+    // `assets/vendor/addon-clipboard-LICENSES.txt`, alongside this asset the
+    // same way `assets/fonts/OFL.txt` sits alongside the vendored font files.
+    const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
+    // The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
+    // item 1) — a separate asset, registered ahead of terminal.js, purely so
+    // `node --test` can load this exact file rather than a copy of its logic.
+    // Registration order is not execution order (script injection is async);
+    // terminal.js's mount readiness gate waits for the helper's global.
+    // JetBrains Mono Nerd Font, embedded for the same self-contained reason
+    // xterm.js itself is vendored (SPEC_impl.md, "Terminal widget: xterm.js
+    // island" — no CDN, no reliance on whatever happens to be installed on the
+    // host). Two consumers reference these bytes: `terminal.js` sets the family
+    // as xterm.js's `fontFamily`, and `app.css`'s `--font-ui` token applies the
+    // same family to the rest of the chrome (sidebar, titlebar, forms) — so
+    // this is no longer a terminal-only asset, and both surfaces share the one
+    // cached download.
+    //
+    // These two are declared differently from every other `Asset` constant in
+    // this file: `app.css`'s `@font-face` `url()` needs a path it can write as
+    // a plain string, but a static CSS file has no way to interpolate a Rust
+    // value the way `document::Link`/`Script` do via `Display`. `manganis`'s
+    // documented answer for an asset consumed outside Rust code, where the
+    // caller must know the served path ahead of time, is `with_hash_suffix(false)`.
+    // The macro argument below is the SOURCE path, not the served one — the
+    // bundler serves every asset flat under `/assets/`, named from its
+    // basename alone regardless of source subdirectory, so the served path
+    // drops the `fonts/` segment. `app.css` hardcodes that served form
+    // (verified against `dx build --platform web --release`'s actual output,
+    // not assumed): `/assets/JetBrainsMonoNerdFont-Regular.woff2` and
+    // `/assets/JetBrainsMonoNerdFont-Bold.woff2`. The cost of the fixed,
+    // unhashed path is losing cache-busting for these two files specifically;
+    // acceptable, since font bytes only change when someone deliberately
+    // re-vendors them, unlike the app's own generated CSS/JS. `#[used]` is
+    // required alongside it: unused by any Rust code (no Display call, no rsx
+    // attribute — see above), these would otherwise be dead code the linker
+    // could drop before the CLI's asset manifest scan ever sees them.
+    // The generated [`all_assets`] does now name them, so the attribute is
+    // belt-and-braces rather than the only thing keeping them alive. Keep it
+    // anyway: the failure it guards — fonts silently absent from the bundle —
+    // shows up only as a wrongly-rendered page.
+    //
+    // Provenance: JetBrains Mono Nerd Font, from the nerd-fonts project's
+    // `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed, re-encoded
+    // as WOFF2 from the project's vendored TTF (fontTools, lossless — every
+    // glyph survives) since chrome now fetches this file on pages that never
+    // open a terminal at all. Full license text alongside the font files at
+    // `assets/fonts/OFL.txt`.
+    #[used]
+    static FONT_JETBRAINS_MONO_REGULAR: Asset = asset!(
+        "/assets/fonts/JetBrainsMonoNerdFont-Regular.woff2",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    #[used]
+    static FONT_JETBRAINS_MONO_BOLD: Asset = asset!(
+        "/assets/fonts/JetBrainsMonoNerdFont-Bold.woff2",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
+    // Clipboard fact capture, MIME-extension policy, and the pure filename
+    // decision terminal.js calls. Kept as its own asset so node --test executes
+    // the shipped functions rather than test-only copies; terminal.js also treats
+    // this global as a mount prerequisite, so paste can never fall back to a
+    // second naming rule while asynchronous scripts are still loading.
+    const CLIPBOARD_NAME_JS: Asset = asset!("/assets/clipboard-name.js");
+    // The pure Shift+Enter "insert newline" decision terminal.js's
+    // `attachCustomKeyEventHandler` callback consults. Its own asset for the
+    // same reason as term-bytes.js and clipboard-name.js above: `node --test`
+    // must run the exact shipped function, and terminal.js treats this global
+    // as a mount precondition (see its `mountWhenReady` docs) so the key
+    // handler can never wire up half-loaded.
+    const SHIFT_ENTER_KEY_JS: Asset = asset!("/assets/shift-enter-key.js");
+    // The pure "does this mouseup end a LOCAL xterm selection worth copying"
+    // decision terminal.js's herdr-style copy-on-select consults — the OTHER
+    // half of the selection duality `VENDOR_CLIPBOARD_JS` above closes (a
+    // selection this page's own DOM can see, as opposed to one an agent TUI made
+    // for itself and reported over OSC 52). Its own asset for the same reason as
+    // the three helpers above: `node --test` must run the exact shipped
+    // function, and terminal.js treats this global as a mount precondition.
+    const COPY_ON_SELECT_JS: Asset = asset!("/assets/copy-on-select.js");
+    const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
+    // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
+    // rather than a corner of terminal.js, because it has nothing to do with a
+    // terminal: it outlives every island, carries no bytes, and is subscribed
+    // once for the whole page. Registration order is not execution order here
+    // either; `feed::FleetFeed`'s snippet waits for the global this file
+    // assigns.
+    const EVENTS_JS: Asset = asset!("/assets/events.js");
+    const APP_CSS: Asset = asset!("/assets/app.css");
+    // The webview console shim (PLAN_desktop_web_bug_triage.md; see that file's
+    // own module docs for the loaded-first and desktop-only contracts).
+    // Rendered only from `App`'s desktop branch below, rather than from
+    // `AppBody` alongside the other page scripts: unlike those, this one is
+    // rendered with `DesktopBootstrapGate` itself, before `AppBody` ever
+    // mounts, so it has the earliest possible chance to capture what goes
+    // wrong during authentication (a chance, not a guarantee — loading is
+    // async).
+    //
+    // DECLARED UNCONDITIONALLY, unlike the `desktop` module whose `#[cfg]` it
+    // used to share. Only the desktop build RENDERS it, but the web build must
+    // still BUNDLE it: D6's desktop asset handler serves `/assets/*` out of the
+    // UI tree embedded from `dx build --platform web`'s output, so any file the
+    // desktop window asks for and the web dist does not contain is a guaranteed
+    // runtime 404 in the native app. `scripts/check-desktop-assets.sh` is the
+    // gate that holds those two sets equal, and a desktop-only `asset!()` is
+    // exactly the divergence it would report — it is what caught this one.
+    // The cost is a few unused kilobytes in the browser bundle, which no page
+    // ever requests.
+    static CLIENT_LOG_SHIM_JS: Asset = asset!("/assets/client-log-shim.js");
+}
 
 /// Root component: the sidebar's session list beside the selected
 /// session's terminal pane. No router crate (see the module docs) — just
@@ -1022,6 +1100,14 @@ const CLIENT_LOG_SHIM_JS: Asset = asset!("/assets/client-log-shim.js");
 pub fn App() -> Element {
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     {
+        // FIRST hook in the desktop branch, and that ordering is
+        // load-bearing: everything this component renders below —
+        // starting with the console shim — is fetched over
+        // `dioxus://index.html/assets/...`, and the handler must be in
+        // the registry before the webview asks. Registration happens
+        // during this render; the webview only sees the markup after the
+        // render's edits are applied, so "first hook" is early enough.
+        desktop::use_embedded_asset_handler();
         desktop::use_foreground_on_launch();
         desktop::use_preference_close_flush();
         webview_watchdog::use_webview_watchdog();
@@ -1251,6 +1337,236 @@ fn AppBody() -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The needle every scan below looks for, assembled at runtime.
+    ///
+    /// `concat!` rather than a literal so that this file — which the scan
+    /// reads — does not itself contain the pattern outside the fence. Same
+    /// trick for the fixtures further down, which have to write the pattern
+    /// to be worth anything.
+    fn asset_macro_needle() -> &'static str {
+        concat!("asset", "!(")
+    }
+
+    /// One `asset!()` the fence scan objects to: a declaration that would be
+    /// bundled and requested but never printed by `--print-assets`.
+    #[derive(Debug, PartialEq, Eq)]
+    struct StrayAsset {
+        file: String,
+        line: usize,
+        text: String,
+    }
+
+    /// Split every `asset!()` in the given sources into "inside the fence"
+    /// and "stray", over `(file name, source text)` pairs.
+    ///
+    /// Returns `(strays, fenced count)`. A pure function over strings so the
+    /// negative case can be proven with a fixture: a scanner nobody has seen
+    /// reject anything is indistinguishable from a scanner that always
+    /// passes, and this one guards the failure mode that motivated the whole
+    /// desktop asset gate.
+    ///
+    /// ## The rule
+    ///
+    /// `lib.rs` may declare assets, but only between the `declare_assets! {`
+    /// line and its closing brace, both at column 0. Every other file in the
+    /// crate may declare none at all. Comment lines are skipped throughout —
+    /// the prose around the fence naturally names the macro it fences, and
+    /// so do the docs in other modules.
+    ///
+    /// ## What it cannot see
+    ///
+    /// Line-oriented and comment-naive beyond `//`: an `asset!()` inside a
+    /// block comment counts, and one built by another macro is invisible.
+    /// Neither shape exists in this crate, and both would be perverse ways
+    /// to declare an asset.
+    fn scan_for_stray_assets(sources: &[(String, String)]) -> (Vec<StrayAsset>, usize) {
+        let needle = asset_macro_needle();
+        let mut strays = Vec::new();
+        let mut fenced = 0;
+        for (file, source) in sources {
+            let lines: Vec<&str> = source.lines().collect();
+            // Only lib.rs has a fence; anywhere else, every occurrence is
+            // stray by definition.
+            let fence = if file == "lib.rs" {
+                lines
+                    .iter()
+                    .position(|line| line.starts_with(concat!("declare_assets", "! {")))
+                    .map(|open| {
+                        let close = open
+                            + 1
+                            + lines[open + 1..]
+                                .iter()
+                                .position(|line| *line == "}")
+                                .expect(
+                                    "the asset inventory macro invocation is closed at \
+                                         column 0",
+                                );
+                        (open, close)
+                    })
+            } else {
+                None
+            };
+            for (index, line) in lines.iter().enumerate() {
+                if line.trim_start().starts_with("//") || !line.contains(needle) {
+                    continue;
+                }
+                match fence {
+                    Some((open, close)) if index > open && index < close => fenced += 1,
+                    _ => strays.push(StrayAsset {
+                        file: file.clone(),
+                        line: index + 1,
+                        text: line.trim().to_string(),
+                    }),
+                }
+            }
+        }
+        (strays, fenced)
+    }
+
+    /// Read every `.rs` file under this crate's `src`, recursively.
+    ///
+    /// `CARGO_MANIFEST_DIR` is a COMPILE-time constant cargo bakes in, not a
+    /// runtime environment read, so this needs no environment mutation and
+    /// works from whatever directory the test binary is run in. Names are
+    /// relative to `src` so failure messages read like the paths a person
+    /// would type.
+    fn crate_sources() -> Vec<(String, String)> {
+        fn walk(dir: &std::path::Path, prefix: &str, out: &mut Vec<(String, String)>) {
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|error| panic!("reading {}: {error}", dir.display()));
+            for entry in entries {
+                let entry = entry.expect("reading a directory entry");
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let relative = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{prefix}/{name}")
+                };
+                if path.is_dir() {
+                    walk(&path, &relative, out);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let source = std::fs::read_to_string(&path)
+                        .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
+                    out.push((relative, source));
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut out = Vec::new();
+        walk(&src, "", &mut out);
+        out.sort();
+        out
+    }
+
+    /// Every `asset!()` in the whole crate sits inside `declare_assets!`.
+    ///
+    /// ## Why a source scan and not a type-level guarantee
+    ///
+    /// The macro makes the inventory derive from the declarations, but Rust
+    /// offers no way to forbid a bare `asset!()` written next to it. That
+    /// omission is the one failure mode the whole desktop asset gate exists
+    /// to prevent: dx bundles an unlisted asset anyway (it reads link
+    /// sections, not our list), the desktop build requests it at runtime, and
+    /// `--print-assets` never mentions it — so
+    /// `scripts/check-desktop-assets.sh` would compare two sets that agree
+    /// about everything except the file about to 404.
+    ///
+    /// ## Why the whole crate and not just this file
+    ///
+    /// A DESKTOP-ONLY module is the case that makes this load-bearing rather
+    /// than tidy. An `asset!()` in `desktop.rs` is compiled — and so bundled
+    /// and requested — only by the desktop build; the web build never sees
+    /// the module, so the file never reaches the embedded tree, and both
+    /// compared sets omit it in lockstep. The script cannot notice that. This
+    /// walk is the only thing that can, which is why it reads the directory
+    /// rather than one `include_str!`.
+    #[test]
+    fn asset_declarations_stay_inside_the_inventory_macro() {
+        let sources = crate_sources();
+        // Prove the walk reached the files that make it worth doing before
+        // trusting what it did not find. `desktop.rs` is the desktop-only
+        // module this test exists for — reading it from DISK is what makes
+        // its `#[cfg]` irrelevant — and `list/row.rs` proves the recursion
+        // descends rather than reading only the top level.
+        for expected in ["lib.rs", "main.rs", "desktop.rs", "list/row.rs"] {
+            assert!(
+                sources.iter().any(|(file, _)| file == expected),
+                "the source walk did not reach {expected}, so a stray declaration there \
+                 would go unreported"
+            );
+        }
+        let (strays, fenced) = scan_for_stray_assets(&sources);
+        assert!(
+            strays.is_empty(),
+            "these asset declarations are outside declare_assets!, so they would be bundled \
+             and requested but never printed by --print-assets: {strays:#?}"
+        );
+        // A scan that matched nothing would pass for the wrong reason — a
+        // renamed macro, a moved block — so make the test prove it looked at
+        // the real declarations.
+        assert_eq!(
+            fenced,
+            all_assets().len(),
+            "the scan found {fenced} declarations but the inventory holds {}; the two are \
+             generated from the same syntax and cannot legitimately differ",
+            all_assets().len()
+        );
+    }
+
+    /// The scan reports an `asset!()` added to a desktop-only module.
+    ///
+    /// This is the shape review round 2 identified as still escaping the
+    /// gate, so it is asserted against a fixture rather than trusted: the
+    /// real test above can only ever prove the crate is currently clean,
+    /// which is exactly what a scanner that never reports anything also
+    /// proves. Includes a fenced declaration and a comment mentioning the
+    /// macro, so the fixture exercises the same discrimination the real
+    /// source demands.
+    #[test]
+    fn the_scan_reports_an_asset_declared_in_a_desktop_only_module() {
+        let needle = asset_macro_needle();
+        let lib = format!(
+            "declare_assets! {{\n    const A: Asset = {needle}\"/assets/a.js\");\n}}\n\
+             // prose mentioning {needle}) outside the fence\n"
+        );
+        let desktop = format!(
+            "#[cfg(feature = \"desktop\")]\n\
+             const SHIM: Asset = {needle}\"/assets/desktop-only.js\");\n"
+        );
+        let sources = vec![
+            ("lib.rs".to_string(), lib),
+            ("desktop.rs".to_string(), desktop),
+        ];
+        let (strays, fenced) = scan_for_stray_assets(&sources);
+        assert_eq!(fenced, 1, "the fenced declaration should have been counted");
+        assert_eq!(
+            strays,
+            vec![StrayAsset {
+                file: "desktop.rs".to_string(),
+                line: 2,
+                text: format!("const SHIM: Asset = {needle}\"/assets/desktop-only.js\");"),
+            }]
+        );
+    }
+
+    /// The scan also reports an `asset!()` written in `lib.rs` beside the
+    /// fence rather than inside it.
+    ///
+    /// The other half of the rule: being in the right FILE is not enough.
+    #[test]
+    fn the_scan_reports_an_asset_declared_beside_the_fence_in_lib_rs() {
+        let needle = asset_macro_needle();
+        let lib = format!(
+            "const OUTSIDE: Asset = {needle}\"/assets/outside.js\");\n\
+             declare_assets! {{\n    const A: Asset = {needle}\"/assets/a.js\");\n}}\n"
+        );
+        let (strays, fenced) = scan_for_stray_assets(&[("lib.rs".to_string(), lib)]);
+        assert_eq!(fenced, 1);
+        assert_eq!(strays.len(), 1);
+        assert_eq!(strays[0].line, 1);
+    }
 
     /// A tab with the given id — the whole of `Tab`, which is why this is
     /// a one-liner rather than a builder.

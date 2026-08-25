@@ -13,9 +13,17 @@
 # typed into the terminal) and is the starting point for making this a
 # broader interaction path on this host.
 #
-# Boots the dx-bundled Linux desktop app under Xvfb. The app itself owns the
-# embedded helm and managed local supervisor; starting either one here would
-# preserve the old thin-client shape this harness exists to retire.
+# Boots the dx-built Linux desktop app under Xvfb, in place, with its
+# `farhelm` sibling named through FARHELM_DESKTOP_FARHELM. The app itself owns
+# the embedded helm and managed local supervisor; starting either one here
+# would preserve the old thin-client shape this harness exists to retire.
+#
+# The subject is the `farhelm-ui` bin rather than `farhelm-desktop`, and that
+# costs nothing: both are one call to `farhelm_ui::desktop::run`, and this one
+# is what `dx build --platform desktop` produces with the asset names filled
+# in. `farhelm-desktop` itself is exercised by
+# `scripts/check-desktop-assets.sh` at build time and by the maintainer on a
+# real Mac (docs/manual-mac-checklist.md).
 # The one pixel-based check (ImageMagick, region-brightness) is an
 # interaction GATE, not an assertion: it only answers "has the create
 # form visibly opened yet, so it's safe to click into it" and retries
@@ -34,8 +42,10 @@
 #
 # Prereqs (apt): xvfb xdotool openbox imagemagick curl python3, plus the
 # webkit2gtk dev stack the desktop feature already needs, dioxus-cli
-# 0.7.10, and tmux.
-# Usage: scripts/desktop-smoke.sh   (from the repo root; ~3 min)
+# 0.7.10, the wasm32-unknown-unknown target (the run starts by building the
+# web bundle, which is then embedded in the desktop build), and tmux.
+# Usage: scripts/desktop-smoke.sh   (from the repo root; ~5 min)
+# Honors CARGO_TARGET_DIR, relative or absolute.
 #
 # Known handling quirks, learned the hard way:
 # - The window sometimes maps at 10x10 and stays black until a resize
@@ -179,38 +189,64 @@ teardown() {
 trap teardown EXIT
 trap 'exit 143' INT TERM
 
-echo "== building (cargo + web bundle + dx desktop bundle)"
-(cd "$REPO" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && cargo build --quiet') || fail "cargo build"
-(cd "$REPO/crates/farhelm-ui" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --platform web --release' >"$X/dx-web.log" 2>&1) || fail "dx web build (see $X/dx-web.log)"
-(cd "$REPO/crates/farhelm-ui" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --platform desktop' >"$X/dx.log" 2>&1) || fail "dx desktop build (see $X/dx.log)"
-BUILT_APP="$REPO/target/dx/farhelm-ui/debug/linux/app/farhelm-ui"
-[ -x "$BUILT_APP" ] || fail "bundled app missing at $BUILT_APP"
+# Honor CARGO_TARGET_DIR the way cargo does, resolved ONCE to an absolute
+# path and exported. The repo's own dev loop runs out of jj workspaces that
+# share one target directory, so this script has to follow it; CI leaves it
+# unset, where this is exactly the old `$REPO/target`.
+#
+# The normalization is not tidiness. A relative value is legal, and cargo
+# resolves it per process working directory — while this script runs cargo
+# from the repository root and both dx builds from `crates/farhelm-ui`, then
+# checks the resulting paths from wherever the caller stood. Left relative,
+# one setting would name three different trees. `FARHELM_UI_DIST` has a
+# harder requirement still: `farhelm-helm`'s build.rs rejects a relative
+# value outright, because build scripts run from their own crate directory.
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  mkdir -p "$CARGO_TARGET_DIR" || fail "creating CARGO_TARGET_DIR ($CARGO_TARGET_DIR)"
+  CARGO_TARGET_DIR="$(cd "$CARGO_TARGET_DIR" && pwd)" || fail "resolving CARGO_TARGET_DIR"
+else
+  CARGO_TARGET_DIR="$REPO/target"
+fi
+export CARGO_TARGET_DIR
+TARGET_DIR="$CARGO_TARGET_DIR"
+WEB_DIST="$TARGET_DIR/dx/farhelm-ui/release/web/public"
 
-# Stage the release shape. The bundle carries NO tmux (TODO.md's 2026-08-22
-# floor decision: the Mac app requires Homebrew's and hands it to its
-# supervisor through FARHELM_TMUX); the sentinel below is a wrapper around the
-# preflighted host binary staged OUTSIDE the bundle and named only through
-# that variable, so the marker proves the override reached the managed
+echo "== building (cargo + web bundle + dx desktop build)"
+(cd "$REPO" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && cargo build --quiet') || fail "cargo build"
+# `--package farhelm-ui` is not decoration. The workspace has `default-members`
+# (it excludes `farhelm-desktop` so ordinary builds never compile WebKit), and
+# dx 0.7.10 resolves those entries by canonicalizing each RELATIVE member path
+# against its own working directory — from `crates/farhelm-ui` that is
+# `crates/farhelm-ui/crates/farhelm`, which does not exist, and dx panics on
+# the `unwrap` (`packages/cli/src/workspace.rs`). Naming the package takes an
+# earlier return that never reads `default-members` at all.
+(cd "$REPO/crates/farhelm-ui" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --package farhelm-ui --platform web --release' >"$X/dx-web.log" 2>&1) || fail "dx web build (see $X/dx-web.log)"
+# FARHELM_UI_DIST makes this a release-SHAPED desktop build (D12/D13): the web
+# bundle built a moment ago is compiled into `farhelm-helm`, and it is that
+# embedded tree — not the `assets/` directory dx leaves beside the binary —
+# that the desktop asset handler serves to the window (D6). Building without
+# it would leave the handler with nothing to serve and every asset request
+# 404ing, which is precisely what the assertion further down checks for.
+(cd "$REPO/crates/farhelm-ui" && FARHELM_UI_DIST="$WEB_DIST" flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --package farhelm-ui --platform desktop' >"$X/dx.log" 2>&1) || fail "dx desktop build (see $X/dx.log)"
+APP="$TARGET_DIR/dx/farhelm-ui/debug/linux/app/farhelm-ui"
+[ -x "$APP" ] || fail "desktop app missing at $APP"
+
+# The app runs where dx built it, with both siblings named explicitly. D6
+# retired the `Farhelm.app/Contents` staging this used to do: there is no
+# bundle any more, just two bare binaries that a release installs side by side
+# — and relocating the dx output would only reintroduce the asset-resolution
+# trap that staging existed to work around.
+#
+# There is no bundled tmux (SPEC_impl.md, "Terminal substrate: private tmux
+# server" — it records the version floor, the `FARHELM_TMUX` override taking
+# precedence over the fixed-prefix probe, and the decision that the Mac app
+# ships none and requires Homebrew's);
+# the sentinel below wraps the preflighted host binary and is named only
+# through that variable, so the marker proves the override reached the managed
 # supervisor and that it ran this exact program rather than whatever `tmux`
 # the app's deliberately small PATH would have found.
-APP_CONTENTS="$X/Farhelm.app/Contents"
-mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Resources/web"
-cp "$BUILT_APP" "$APP_CONTENTS/MacOS/farhelm-ui"
-cp "$REPO/target/debug/farhelm" "$APP_CONTENTS/MacOS/farhelm"
-cp -R "$REPO/target/dx/farhelm-ui/release/web/public/." "$APP_CONTENTS/Resources/web/"
-# `dx build --platform desktop`'s Linux output puts every page script
-# (client-log-shim.js, terminal.js, xterm.js, ...) in an `assets/` directory
-# that is a SIBLING of the executable, not inside it — wry's `dioxus://`
-# asset scheme resolves them relative to the running binary's own path.
-# Relocating only the binary above and leaving `assets/` behind breaks that
-# resolution silently: every `<script src="dioxus://...">` tag still
-# appears in `document.scripts` and the page still reports
-# `readyState: "complete"`, but NONE of their content ever loads or runs, so
-# every `window.__farhelm*` global they install stays `undefined` — this is
-# exactly the class of failure the client-log leg below exists to catch, so
-# the harness must not itself reintroduce it by omission.
-cp -R "$(dirname "$BUILT_APP")/assets" "$APP_CONTENTS/MacOS/assets" || fail "staging desktop assets"
-APP="$APP_CONTENTS/MacOS/farhelm-ui"
+BUILT_FARHELM="$TARGET_DIR/debug/farhelm"
+[ -x "$BUILT_FARHELM" ] || fail "farhelm CLI missing at $BUILT_FARHELM"
 HOST_TMUX=$(command -v tmux)
 SENTINEL_TMUX="$X/sentinel-tmux/tmux"
 mkdir -p "$(dirname "$SENTINEL_TMUX")"
@@ -218,7 +254,7 @@ printf '%s\n' \
   '#!/bin/sh' \
   'printf used >"$FARHELM_SMOKE_TMUX_MARKER"' \
   "exec \"$HOST_TMUX\" \"\$@\"" >"$SENTINEL_TMUX"
-chmod 700 "$APP_CONTENTS/MacOS/farhelm" "$SENTINEL_TMUX"
+chmod 700 "$SENTINEL_TMUX"
 
 echo "== booting Xvfb, openbox, and the self-contained app"
 
@@ -246,9 +282,11 @@ DISPLAY=$DISP \
   FARHELM_TMUX="$SENTINEL_TMUX" \
   FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
-  RUST_LOG=info \
+  RUST_LOG="info,farhelm_ui::desktop=debug" \
   FARHELM_DESKTOP_PORT="$PORT" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
+  FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+  FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
   "$APP" >"$X/desktop.log" 2>&1 &
 echo $! >"$X/desktop.pid"
 
@@ -279,7 +317,7 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
 done
 [ -n "$LOCAL_READY" ] || fail "authenticated native API or managed local supervisor was not reachable"
 [ -s "$X/tmux-override-used" ] || fail "managed supervisor did not run the tmux named by FARHELM_TMUX"
-[ ! -e "$APP_CONTENTS/MacOS/tmux" ] || fail "the staged bundle must not carry a tmux of its own"
+[ ! -e "$(dirname "$APP")/tmux" ] || fail "the app directory must not carry a tmux of its own"
 for _ in $(seq 1 30); do
   WEBVIEW_SECRET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_device_secret") or "")' "$X/state/desktop-client.json")
   WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
@@ -346,6 +384,26 @@ wait_for_listing_request "$X/desktop.log" "sort=activity"
 
 echo "== waiting for the client-log marker: shim -> /api/client-log -> tracing"
 wait_for_client_log_marker "$X/desktop.log"
+
+# The asset handler is the whole of D6: a bare binary has no bundle to read
+# assets from, so every script, stylesheet and font the window loads has to
+# come out of the UI tree compiled into it (`desktop::serve_asset`). Two
+# assertions, and the second is the load-bearing one — "something was served"
+# is satisfied by a single lucky file, while "nothing was missing" is what
+# catches an asset present in the desktop build and absent from the embedded
+# web bundle, the exact divergence `scripts/check-desktop-assets.sh` guards at
+# build time. The marker above already proves the pipeline runs; this proves
+# it ran through the handler.
+#
+# The grep patterns are the log lines `serve_asset` emits verbatim. Keep them
+# in step with that function.
+grep -q 'desktop asset handler: served /assets/' "$X/desktop.log" ||
+  fail "no asset reached the desktop asset handler (see $X/desktop.log)"
+if grep -n 'desktop asset handler: missing ' "$X/desktop.log" >"$X/asset-misses"; then
+  cat "$X/asset-misses" >&2
+  fail "the desktop asset handler 404'd requests the embedded UI tree should have answered"
+fi
+echo "== asset handler served $(grep -c 'desktop asset handler: served ' "$X/desktop.log") requests, 0 missing"
 
 echo "== creating two bundle-substrate sessions before the hard restart"
 CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "zzz-remembered"}))' "$X/work") || fail "encoding remembered smoke session"
@@ -446,9 +504,11 @@ DISPLAY=$DISP \
   FARHELM_TMUX="$SENTINEL_TMUX" \
   FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
-  RUST_LOG=info \
+  RUST_LOG="info,farhelm_ui::desktop=debug" \
   FARHELM_DESKTOP_PORT="$PORT" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
+  FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+  FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
   "$APP" >"$X/desktop-restart.log" 2>&1 &
 echo $! >"$X/desktop.pid"
 for _ in $(seq 1 30); do
@@ -506,7 +566,7 @@ echo "== waiting for the restarted app's client-log marker"
 wait_for_client_log_marker "$X/desktop-restart.log"
 
 echo "== rotating the token and refreshing both client stacks on 401"
-"$APP_CONTENTS/MacOS/farhelm" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
+"$BUILT_FARHELM" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
 ROTATED=""
 for _ in $(seq 1 30); do
   NEXT_NATIVE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("native_device_secret") or "")' "$X/state/desktop-client.json")

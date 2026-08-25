@@ -39,6 +39,17 @@ gloo-timers.workspace = true
 anyhow.workspace = true
 farhelm-helm.workspace = true
 farhelm-supervisor.workspace = true
+# Content types for the desktop asset handler (`desktop::serve_asset`, D6).
+# The same crate `farhelm-helm` uses for the embedded tree it serves over
+# HTTP, on purpose: the native window and a browser must see the same type
+# for the same file, and two guessers would be two chances to disagree.
+mime_guess.workspace = true
+# Decodes an asset path before it is looked up in the embedded tree, for the
+# same reason `farhelm-helm`'s `serve_embedded_get` does: a file whose name
+# needs escaping in a URL must still resolve to the entry `include_dir!`
+# compiled in under its real name. Transitively present already, but a
+# transitive crate cannot be imported.
+percent-encoding.workspace = true
 # Non-wasm half of the list-view and session-detail poll sleep (src/list.rs,
 # src/session_view.rs). Not a new runtime dependency in practice:
 # `dioxus-desktop` already constructs and drives a multi-thread tokio

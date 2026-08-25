@@ -99,7 +99,10 @@ jobs:
             done
           done
       - name: Build cached web bundle
-        run: cd crates/farhelm-ui && dx build --platform web --release
+        # `--package` is load-bearing: the workspace has `default-members`,
+        # and dx 0.7.10 canonicalizes those relative paths against its own
+        # working directory, which panics from inside `crates/farhelm-ui`.
+        run: cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release
       - name: Build Linux helm
         run: cargo build --release -p farhelm
       - name: Assemble Linux release
@@ -179,7 +182,7 @@ jobs:
         run: |
           cargo build --release -p farhelm --target aarch64-apple-darwin
           cd crates/farhelm-ui
-          dx bundle --platform macos --release --package-types macos --target aarch64-apple-darwin --out-dir ../../release-stage/bundle
+          dx bundle --package farhelm-ui --platform macos --release --package-types macos --target aarch64-apple-darwin --out-dir ../../release-stage/bundle
       - name: Complete and archive app bundle
         run: |
           app=$(find release-stage/bundle -maxdepth 3 -type d -name '*.app' -print -quit)

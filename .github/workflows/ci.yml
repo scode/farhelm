@@ -236,6 +236,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
+          # The asset check below builds the web bundle, which is wasm.
+          target: wasm32-unknown-unknown
           cache: false
           rustflags: ""
       # The -sys crates in the desktop dependency tree (gtk-sys,
@@ -243,17 +245,36 @@ jobs:
       # pkg-config at build-script time; these packages are the minimal
       # additions the CI image needs for the check to pass.
       - name: Install desktop system deps
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
+          cargo install --locked dioxus-cli --version 0.7.10
       - run: cargo check -p farhelm-ui --features desktop
       - run: cargo test -p farhelm-ui --features desktop
+      # `farhelm-desktop` is outside the workspace's default members, so no
+      # ordinary workspace command compiles it and only this job touches it
+      # at all. The asset step below also builds it, through dx — this one
+      # stays because it fails in seconds with a compiler error rather than
+      # minutes into a dx build, and because a type error here should not be
+      # reported as an asset-gate failure.
+      - run: cargo check -p farhelm-desktop
+      # The Linux stand-in for the distribution plan's macOS asset gate: the
+      # native window serves `/assets/*` from the embedded web bundle, and
+      # nothing at compile time forces the desktop build's asset names and
+      # that bundle's files to be the same set. See the script's header for
+      # why it builds through dx rather than cargo.
+      - run: scripts/check-desktop-assets.sh
       # Disk headroom is what this job has actually run out of; make it
       # visible in the log so the next occurrence is diagnosable.
       - run: df -h
 
-  # The non-pixel phase boots the actual Dioxus desktop bundle under Xvfb and
-  # proves embedded-helm auth, the app-owned supervisor, the FARHELM_TMUX override reaching it,
-  # hard-exit lifetime tethering, restart reuse, and rotation recovery. The
-  # coordinate-driven terminal interaction remains an optional local leg.
+  # The non-pixel phase boots the dx-built Linux desktop shell in place under
+  # Xvfb — the same `desktop::run` the macOS release artifact calls, not that
+  # artifact itself — and proves embedded-helm auth, the app-owned supervisor,
+  # the FARHELM_TMUX override reaching it, every window asset going through
+  # the desktop asset handler, hard-exit lifetime tethering, restart reuse,
+  # and rotation recovery. The coordinate-driven terminal interaction remains
+  # an optional local leg.
   desktop-smoke:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -302,10 +323,9 @@ jobs:
       # until this upload existed, that evidence died with the runner,
       # which is why the gate's rare CI-only failures (the clean-exit
       # flake of 2026-08-16/17) stayed undiagnosable. An explicit
-      # allowlist rather than the whole directory, deliberately: the full
-      # tree also holds the staged app bundle (hundreds of megabytes of
-      # build output), unix sockets and the Xvfb display FIFO (non-regular
-      # files the uploader cannot archive), and live credential material
+      # allowlist rather than the whole directory, deliberately: the run dir
+      # also holds unix sockets and the Xvfb display FIFO (non-regular files
+      # the uploader cannot archive) and live credential material
       # (curl-auth.conf, desktop-client.json, helm.db) — none of it
       # evidence. The desktop/dx logs, the failure screenshot, and the
       # exit-leg state dump are.
@@ -398,7 +418,10 @@ jobs:
           cargo binstall -y dioxus-cli@0.7.10
       - run: cargo build
       - name: Build web UI
-        run: cd crates/farhelm-ui && dx build --platform web --release
+        # `--package` is load-bearing: the workspace has `default-members`,
+        # and dx 0.7.10 canonicalizes those relative paths against its own
+        # working directory, which panics from inside `crates/farhelm-ui`.
+        run: cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release
       - name: Install Playwright
         run: cd e2e && npm ci && npx playwright install --with-deps chromium webkit
       - name: Run e2e tests
