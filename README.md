@@ -1,3 +1,9 @@
+> [!WARNING]
+> **This repository is public, but you probably should not use it.** I use farhelm as my daily driver, and it is public
+> so that I can work on it in the open, not because it is ready for anyone else. It is not recommended for general use
+> at this time, for a variety of reasons. Do not expect user-friendliness, do not expect the documentation to be correct
+> or helpful, and do not expect anything else either. This notice goes away when that changes.
+
 # farhelm
 
 Run coding agents (Claude Code, Codex, other terminal agents) on machines you control and supervise all of them from one
@@ -5,8 +11,6 @@ interface, through their real TUIs. Two pieces: a per-host **supervisor** that o
 **helm** that connects to every supervisor — remote ones over your existing SSH access, the one on its own machine
 directly — and serves the UI. This README is the how; see SPEC.md for what the system is and is not, and SPEC_impl.md
 for how it is built and why.
-
-NOTE: This is early software. Usable for real work, minimal in everything else.
 
 NOTE: Every agent invocation entered through the GUI, whether typed into the create dialog or stored in a profile, is
 ordinary argv — visible to every local user via `ps`. Credentials do not belong in it.
