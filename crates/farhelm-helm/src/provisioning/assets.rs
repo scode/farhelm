@@ -229,6 +229,206 @@ mod tests {
         );
     }
 
+    /// Strictly parses the exact `ASSET_TABLE='...'` shell wrapper
+    /// `scripts/install.sh` carries between its `# BEGIN/END ASSET TABLE`
+    /// markers: a blank line, then `ASSET_TABLE='` (however indented — see
+    /// below), then one `TARGET|ARCHIVE|BINARY` row per line — each with
+    /// exactly three nonempty, UNINDENTED fields — then a closing `'`
+    /// (again, however indented) alone on its own line. Returns `Err`
+    /// describing what did not match, rather than panicking, so both the
+    /// real parity test below and the malformed-input tests can inspect
+    /// the failure directly instead of relying on `#[should_panic]`'s much
+    /// weaker "some panic happened somewhere" guarantee.
+    ///
+    /// The strictness is not pedantry: the shell reads this table with
+    /// `IFS='|' read -r target archive binary`, so a field this parser
+    /// would casually trim or a row it would silently drop means the shell
+    /// and this test stop agreeing on what the table says. A field with
+    /// leading whitespace still compares unequal to `uname`'s bare output
+    /// and permanently fails to match at runtime; a row with a missing or
+    /// extra `|` gets fields silently mis-assigned by `read` rather than
+    /// rejected. Order and multiplicity are preserved (`Vec`, not a
+    /// `HashSet`/`BTreeSet`): the shell reads this table top to bottom, so
+    /// a duplicated or reordered row is a real behavioral difference from
+    /// [`RELEASE_ARCHIVES`], not a cosmetic one a set-based comparison
+    /// would quietly absorb.
+    ///
+    /// The `ASSET_TABLE='` and closing `'` wrapper lines ARE trimmed before
+    /// comparison, unlike the row lines: they are ordinary shell statements
+    /// that pick up whatever indentation the surrounding code block is at
+    /// (install.sh's whole body lives inside a `{ ... }` group, so this is
+    /// indented two spaces in practice), and indentation there changes
+    /// nothing about how the shell reads them. The ROW lines are different:
+    /// they are literal bytes inside a multi-line single-quoted string, so
+    /// indenting one would inject that whitespace into `$row_target` and
+    /// break the shell's own `[ "$row_target" = "$TARGET" ]` comparison at
+    /// runtime — which is exactly the leading-whitespace case this parser
+    /// must keep rejecting.
+    fn parse_asset_table_rows(block: &str) -> Result<Vec<(String, String, String)>, String> {
+        let lines: Vec<&str> = block.lines().collect();
+        if lines.len() < 3 {
+            return Err(format!(
+                "ASSET TABLE block has only {} line(s); expected at least an opening blank \
+                 line, `ASSET_TABLE='`, and a closing `'`",
+                lines.len()
+            ));
+        }
+        if !lines[0].is_empty() {
+            return Err(format!(
+                "ASSET TABLE block's first line must be blank, got {:?}",
+                lines[0]
+            ));
+        }
+        if lines[1].trim() != "ASSET_TABLE='" {
+            return Err(format!(
+                "ASSET TABLE block's second line must be (possibly indented) `ASSET_TABLE='`, got {:?}",
+                lines[1]
+            ));
+        }
+        let last = lines[lines.len() - 1];
+        if last.trim() != "'" {
+            return Err(format!(
+                "ASSET TABLE block's last line must be (possibly indented) `'`, got {:?}",
+                last
+            ));
+        }
+
+        let mut rows = Vec::new();
+        for line in &lines[2..lines.len() - 1] {
+            let fields: Vec<&str> = line.split('|').collect();
+            if fields.len() != 3 {
+                return Err(format!(
+                    "ASSET TABLE row {line:?} has {} `|`-delimited field(s), expected exactly 3",
+                    fields.len()
+                ));
+            }
+            for field in &fields {
+                if field.is_empty() {
+                    return Err(format!("ASSET TABLE row {line:?} has an empty field"));
+                }
+                if field.trim() != *field {
+                    return Err(format!(
+                        "ASSET TABLE row {line:?} has leading or trailing whitespace in a field"
+                    ));
+                }
+            }
+            rows.push((
+                fields[0].to_string(),
+                fields[1].to_string(),
+                fields[2].to_string(),
+            ));
+        }
+        Ok(rows)
+    }
+
+    /// Spec: `scripts/install.sh`'s asset table is EXACTLY the same
+    /// sequence of (target, archive, binary) rows as [`RELEASE_ARCHIVES`]
+    /// — same rows, same order, same count, not merely "the same set".
+    ///
+    /// The script is not Rust and cannot `use` this module directly (plan
+    /// §1), so this equality check — riding on `parse_asset_table_rows`'s
+    /// strict validation of the table's shell-level shape — is the only
+    /// thing that keeps the two from drifting apart, the way
+    /// `sign_sums_workflow_lists_exactly_sums_members` keeps the release
+    /// workflow honest. The `parser_*` tests below exercise malformed and
+    /// duplicated input this equality check alone would not distinguish
+    /// from an already-passing table.
+    #[test]
+    fn install_sh_asset_table_matches_release_archives_exactly() {
+        const SCRIPT: &str = include_str!("../../../../scripts/install.sh");
+        const BEGIN: &str = "# BEGIN ASSET TABLE";
+        const END: &str = "# END ASSET TABLE";
+
+        let block = SCRIPT
+            .split_once(BEGIN)
+            .and_then(|(_, rest)| rest.split_once(END))
+            .map(|(block, _)| block)
+            .unwrap_or_else(|| {
+                panic!("install.sh has no {BEGIN}/{END} block; did the markers get renamed?")
+            });
+
+        let script_rows = parse_asset_table_rows(block).unwrap_or_else(|error| {
+            panic!("install.sh's ASSET TABLE block does not parse: {error}")
+        });
+
+        let expected_rows: Vec<(String, String, String)> = RELEASE_ARCHIVES
+            .iter()
+            .map(|a| (a.target.to_string(), archive_name(a), a.member.to_string()))
+            .collect();
+
+        assert_eq!(
+            script_rows, expected_rows,
+            "scripts/install.sh's ASSET TABLE block has drifted from RELEASE_ARCHIVES: install.sh reads this \
+             table top to bottom and installs one row per platform match, so order and exact row multiplicity \
+             both matter, not just which rows are present"
+        );
+    }
+
+    /// Spec: a row whose TARGET field carries leading indentation is
+    /// rejected rather than silently accepted — the shell's own `IFS='|'
+    /// read` would fold that whitespace into the compared value, so a
+    /// target like `" aarch64-apple-darwin"` never matches `uname`'s bare
+    /// output and the row becomes permanently unreachable at runtime.
+    #[test]
+    fn parser_rejects_leading_whitespace_in_a_field() {
+        let block = "\nASSET_TABLE='\n aarch64-apple-darwin|farhelm-aarch64-apple-darwin.tar.gz|farhelm\n'\n";
+        assert!(parse_asset_table_rows(block).is_err());
+    }
+
+    /// Spec: a row with too few `|`-delimited fields is rejected rather
+    /// than silently accepted with a blank trailing field — `read
+    /// row_target row_archive row_binary` would otherwise leave
+    /// `row_binary` empty and the row would try to install a binary named
+    /// "".
+    #[test]
+    fn parser_rejects_a_row_with_a_missing_field() {
+        let block =
+            "\nASSET_TABLE='\naarch64-apple-darwin|farhelm-aarch64-apple-darwin.tar.gz\n'\n";
+        assert!(parse_asset_table_rows(block).is_err());
+    }
+
+    /// Spec: a row with an extra `|`-delimited field is rejected rather
+    /// than silently absorbed into the last named variable — `IFS='|'
+    /// read -r a b c` assigns every field past the third onto `c`, which
+    /// would smuggle a fourth column into the binary name unnoticed.
+    #[test]
+    fn parser_rejects_a_row_with_an_extra_field() {
+        let block = "\nASSET_TABLE='\naarch64-apple-darwin|farhelm-aarch64-apple-darwin.tar.gz|farhelm|extra\n'\n";
+        assert!(parse_asset_table_rows(block).is_err());
+    }
+
+    /// Spec: a row with an empty field (e.g. two adjacent `|`s) is
+    /// rejected rather than producing an empty target, archive, or binary
+    /// name.
+    #[test]
+    fn parser_rejects_a_row_with_an_empty_field() {
+        let block = "\nASSET_TABLE='\naarch64-apple-darwin||farhelm\n'\n";
+        assert!(parse_asset_table_rows(block).is_err());
+    }
+
+    /// Spec: the parser preserves a duplicated row rather than quietly
+    /// deduplicating it — a `HashSet`/`BTreeSet`-based parser would fold
+    /// two identical rows into one and hide a table that downloads and
+    /// verifies the same archive twice for no benefit. Deduplication (or
+    /// any other multiplicity mismatch against [`RELEASE_ARCHIVES`]) is
+    /// what `install_sh_asset_table_matches_release_archives_exactly`'s
+    /// `Vec`-based equality check above actually catches; this test proves
+    /// the parser gives it real duplicate rows to catch in the first
+    /// place.
+    #[test]
+    fn parser_preserves_duplicate_rows_rather_than_deduplicating_them() {
+        let block = "\nASSET_TABLE='\n\
+             x86_64-unknown-linux-musl|farhelm-x86_64-unknown-linux-musl.tar.gz|farhelm\n\
+             x86_64-unknown-linux-musl|farhelm-x86_64-unknown-linux-musl.tar.gz|farhelm\n\
+             '\n";
+        let rows = parse_asset_table_rows(block).expect("well-formed rows should parse");
+        assert_eq!(
+            rows.len(),
+            2,
+            "the parser must preserve multiplicity, not deduplicate"
+        );
+    }
+
     /// Spec: the generic dist package that builds `farhelm-desktop` declares
     /// the same version as this workspace.
     ///

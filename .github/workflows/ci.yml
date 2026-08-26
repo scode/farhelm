@@ -340,6 +340,54 @@ jobs:
             ${{ runner.temp }}/desktop-smoke/*.png
             ${{ runner.temp }}/desktop-smoke/*.txt
 
+  # scripts/install.sh is the one file a fresh machine runs unread and
+  # unreviewed (`curl | sh`), so a syntax slip or a shellcheck-catchable
+  # bug in it gets its own job rather than waiting to be noticed inside
+  # the slower `test` job's Rust-side parity check (`assets.rs`'s
+  # `install_sh_asset_table_matches_release_archives_exactly`, which only
+  # checks the asset table, not that the script actually runs). The static
+  # checks (sh -n, shellcheck) run first and are near-instant; the real
+  # weight is test-install-sh.sh, which drives install.sh as a child
+  # process against a real HTTP server serving synthetic release fixtures
+  # — platform detection, download, checksum and archive verification,
+  # replacement (including a forced-failure rollback), and the exact
+  # closing-message contract, all without touching this runner's real
+  # $HOME or $PATH.
+  install-script:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubicloud
+    steps:
+      - uses: actions/checkout@v4
+      # python3 backs test-install-sh.sh's fixture HTTP server (stdlib
+      # only, no pip install needed).
+      - run: sudo apt-get install -y shellcheck python3
+      - run: sh -n scripts/install.sh
+      - run: shellcheck scripts/install.sh scripts/test-install-sh.sh
+      - run: bash scripts/test-install-sh.sh
+      # The steps above run install.sh under Ubuntu's GNU userland (glibc
+      # tar/sed/awk/grep/sha256sum). A distro-decorated GNU option or output
+      # format the script accidentally depended on would pass every one of
+      # them and still break on a genuinely different one — musl libc,
+      # BusyBox ash as /bin/sh, and BusyBox's own tar/sed/awk/grep/sha256sum
+      # (not GNU ones reinstalled over them, which would defeat the point).
+      # curl, bash (the harness itself is bash, not sh — see
+      # test-install-sh.sh's own docstring), and python3 (the fixture
+      # server) are the only things missing from a bare `alpine:3` image
+      # entirely; perl-utils and openssl exist there only to give the
+      # harness's own sha256sum/shasum/openssl fallback coverage something
+      # real to fall back to, not because install.sh itself needs them.
+      # Confirmed empirically before landing this: install.sh needed no
+      # changes at all to pass its full suite here.
+      - name: Alpine/BusyBox portability check
+        run: |
+          docker run --rm -v "$PWD":/w -w /w alpine:3 sh -c '
+            set -e
+            apk add --no-cache curl bash python3 perl-utils openssl
+            sh -n scripts/install.sh
+            bash scripts/test-install-sh.sh
+          '
+
   dprint:
     runs-on: ubicloud
     steps:
