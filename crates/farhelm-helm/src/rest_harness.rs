@@ -707,14 +707,14 @@ impl Harness {
     /// drives.
     pub(crate) fn router(&self) -> axum::Router {
         authenticated_router(
-            crate::build_router(Arc::clone(&self.state), None, self.port),
+            crate::build_router(Arc::clone(&self.state), crate::UiSource::None, self.port),
             self.device_secret.clone(),
         )
     }
 
     /// The real router without the harness's synthetic device secret.
     pub(crate) fn unauthenticated_router(&self) -> axum::Router {
-        crate::build_router(Arc::clone(&self.state), None, self.port)
+        crate::build_router(Arc::clone(&self.state), crate::UiSource::None, self.port)
     }
 
     /// Serve the real router on a loopback port, for the tests that need a
@@ -730,7 +730,7 @@ impl Harness {
             .expect("bind loopback");
         let addr = listener.local_addr().expect("local addr");
         let app = authenticated_router(
-            crate::build_router(Arc::clone(&self.state), None, addr.port()),
+            crate::build_router(Arc::clone(&self.state), crate::UiSource::None, addr.port()),
             self.device_secret.clone(),
         );
         self.served.push(ServerGuard(tokio::spawn(async move {
@@ -746,7 +746,7 @@ impl Harness {
             .await
             .expect("bind loopback");
         let addr = listener.local_addr().expect("local addr");
-        let app = crate::build_router(Arc::clone(&self.state), None, addr.port());
+        let app = crate::build_router(Arc::clone(&self.state), crate::UiSource::None, addr.port());
         self.served.push(ServerGuard(tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         })));

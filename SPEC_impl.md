@@ -1123,7 +1123,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`, `--remote-farhelm`, and `--remote-state-dir`
   were dropped with M6's registry (user decision 2026-08-04). A helm drives every registered host at once, so a flag
   naming one of them could only ever have meant the wrong thing; the last two live on as per-host registry fields, and
-  creation is `POST /api/sessions`, which is where the host selection belongs.
+  creation is `POST /api/sessions`, which is where the host selection belongs. A release build compiles its own web UI
+  in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at runtime, and an ordinary developer build with
+  neither serves the API alone.
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.

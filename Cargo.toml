@@ -68,12 +68,28 @@ getrandom = "0.3"
 # actually has for this. Non-wasm32 targets use `tokio::time::sleep`
 # instead — see farhelm-ui/Cargo.toml's target-dependency comment.
 gloo-timers = { version = "0.3", features = ["futures"] }
+# The web UI tree a release build compiles into `farhelm-helm`
+# (`FARHELM_UI_DIST` at build time, D12) — see build.rs and
+# `embedded_ui.rs`.
+include_dir = "0.7"
 # The `--ensure-hosts` file's format (PLAN_M6.md item 5). JSON5 rather than
 # JSON because the file is hand-edited: comments and trailing commas are
 # what make a checked-in fleet description survivable, and it is otherwise
 # ordinary serde.
 json5 = "1"
 libc = "0.2"
+# Content type for an embedded-UI asset response (`UiSource::Embedded`). A
+# transitive dependency already, through tower-http's own `ServeDir` — but a
+# transitive crate cannot be imported, so serving the embedded tree needs
+# its own direct dependency on the same crate.
+mime_guess = "2"
+# Decodes an embedded-UI request path (`UiSource::Embedded`) before it is
+# looked up, classified by extension, or handed to `mime_guess` — a percent-
+# escaped asset name (a literal space, say) must resolve to the same file an
+# ordinary filesystem `ServeDir` would find. Already in `Cargo.lock`
+# transitively (both `axum` and `tower-http` depend on it), but a transitive
+# crate cannot be imported directly.
+percent-encoding = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # `bundled` compiles SQLite from source rather than linking the host's
 # libsqlite3 — required for the musl-static supervisor artifacts
