@@ -28,6 +28,327 @@ const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const PREFERENCE_DEBOUNCE: Duration = Duration::from_millis(150);
 const PREFERENCE_EVAL_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// First path segment the desktop asset handler claims.
+///
+/// dioxus-desktop dispatches on exactly this: `desktop_handler` in
+/// dioxus-desktop 0.7.10's `protocol.rs` takes `uri.path().split('/').nth(1)`
+/// and, if a handler is registered under that name, calls it INSTEAD of
+/// `dioxus_asset_resolver::native::serve_asset`. So the name is not a label —
+/// it is the route, and it has to equal the first segment manganis puts in
+/// front of every bundled asset path (`/assets/<file>`; see
+/// `manganis_core::Asset::resolve`).
+const ASSET_ROUTE: &str = "assets";
+
+/// The hidden argv-1 flag that prints resolved asset paths instead of
+/// launching (see [`print_assets`]).
+const PRINT_ASSETS_FLAG: &str = "--print-assets";
+
+/// The desktop app's entire entry point, shared by both binaries that have
+/// one.
+///
+/// `crates/farhelm-desktop` (the bare binary a release ships, D6) and this
+/// crate's own `farhelm-ui` bin (what `dx build --platform desktop` and
+/// `scripts/desktop-smoke.sh` run) both call exactly this. That is the point:
+/// the shell exercised under Xvfb on every change is the same shell that
+/// ships, not a near-copy of it that can drift.
+///
+/// Blocks for the app's whole lifetime. The `Ok(())` is reached only after
+/// the event loop returns, i.e. once the last window closed; a bootstrap
+/// failure panics rather than returning, because there is no window yet in
+/// which to show an error and a silently-exiting GUI process is worse than a
+/// crash report.
+pub fn run() -> anyhow::Result<()> {
+    // Ahead of the tracing subscriber and the bootstrap both: this mode
+    // must start nothing, bind no port, and touch no state directory. It is
+    // a build-time question asked of a built binary (see `print_assets`).
+    if std::env::args().nth(1).as_deref() == Some(PRINT_ASSETS_FLAG) {
+        print_assets();
+        return Ok(());
+    }
+
+    // Before anything else: bootstrap itself can log, and the embedded helm
+    // it starts begins emitting the moment it does.
+    init_tracing();
+
+    let desktop = DesktopBootstrap::start()
+        .unwrap_or_else(|error| panic!("desktop bootstrap failed: {error:#}"));
+
+    let builder = dioxus::LaunchBuilder::new()
+        .with_context(crate::ApiBase(desktop.api_base().to_string()))
+        .with_context(desktop.webview_bootstrap());
+
+    // Desktop windows need an explicit WindowBuilder, and not only for the
+    // title: dioxus-desktop's `Config::new()` marks debug-build windows
+    // always-on-top whenever the app is NOT launched through `dx`
+    // (`dioxus_cli_config::always_on_top().unwrap_or(true)` — a
+    // convenience for `dx serve` development that misfires for a real app
+    // started via `cargo run`, leaving the window permanently above
+    // everything). `Config::with_window` replaces the default builder
+    // wholesale, which discards that always-on-top default along with the
+    // "Dioxus App" placeholder title.
+    // `with_disable_drag_drop_handler(true)` is the attachments feature's
+    // half of this (PLAN_M4.md item 7, SPEC_impl.md's "one concrete thing
+    // to check early rather than debug late: wry's own file-drop handling
+    // swallows DOM drop events unless configured not to"). Dropping a file
+    // into a terminal is intercepted in the PAGE — assets/terminal.js —
+    // so the DOM `drop` event has to reach it, and anything that consumes
+    // the drag first breaks the headline feature on the desktop build
+    // alone, where nothing in CI would notice.
+    //
+    // The audit trail behind this call, against dioxus-desktop 0.7.9 and
+    // wry 0.53.5, since "configured not to" means different things per
+    // platform:
+    //
+    // - Without this, dioxus installs its own `wry` drag-drop handler
+    //   (`webview.rs`, gated on `cfg.disable_file_drop_handler`) to feed
+    //   its native file-drop support. That handler returns `false`, which
+    //   wry reads as "not handled" and answers by invoking the OS default
+    //   — so on macOS (`wkwebview/drag_drop.rs` calling `super`) and on
+    //   GTK the DOM events do still fire. On Windows they do not: dioxus's
+    //   own comment says the WebView2 host blocks HTML-native drag events
+    //   whenever a drop handler is present, and its config doc says the
+    //   handler must be disabled for the HTML drag and drop APIs to work.
+    // - So the setting is not load-bearing on the two platforms Farhelm
+    //   targets today, and it is set anyway: it is the difference between
+    //   "the DOM path works because a handler we do not want happens to
+    //   decline every event" and "nothing is competing for the drag". The
+    //   cost is dioxus's native file-drop support, which this UI does not
+    //   use — no `ondrop` handler exists anywhere in the component tree,
+    //   and the attachment path deliberately reads `File` objects in JS
+    //   rather than paths in Rust (see src/attachments.rs).
+    //
+    // Verifying the CAPABILITY rather than the configuration is the
+    // manual desktop pass PLAN_M4.md acceptance 9 records; this call is
+    // what that pass is checking the effect of. The checklist that pass
+    // has to work through — including the one risk it is most likely to
+    // trip over — is written out in `attachments`' module header.
+    builder
+        .with_cfg(
+            dioxus::desktop::Config::new()
+                .with_window(dioxus::desktop::WindowBuilder::new().with_title("farhelm"))
+                .with_disable_drag_drop_handler(true),
+        )
+        .launch(crate::App);
+    Ok(())
+}
+
+/// Print every `asset!()` path this build will ask the webview for, one per
+/// line, and start nothing.
+///
+/// `scripts/check-desktop-assets.sh` is the only caller. It compares this set
+/// against the files `dx build --platform web` actually emitted, in both
+/// directions, and fails CI on any difference — the Linux stand-in for the
+/// plan's macOS asset-name gate. Hidden rather than a real CLI surface
+/// (no `clap`, no `--help` entry) because it exists for that script, and D6's
+/// binary otherwise takes no arguments at all.
+///
+/// What comes out depends on how the binary was built and how it is run,
+/// which is the whole reason the script is fussy about both:
+/// `manganis_core::Asset::resolve` returns the ABSOLUTE SOURCE path when
+/// `dioxus_core_types::is_bundled_app()` is false — and that is a runtime
+/// check of `CARGO_MANIFEST_DIR`, so `cargo run -- --print-assets` prints
+/// source paths while the same binary invoked directly prints `/assets/...`.
+/// The hashed names themselves are written into the binary by `dx` AFTER the
+/// link, by rewriting the `__ASSETS__` symbols rustc emitted; a plain
+/// `cargo build` leaves `BundledAsset::PLACEHOLDER_HASH` in their place. See
+/// that script's header for what it does about both.
+fn print_assets() {
+    for asset in crate::all_assets() {
+        println!("{asset}");
+    }
+}
+
+/// Install this process's `tracing` subscriber.
+///
+/// Load-bearing for `docs/desktop-web-triage.md`'s whole premise: without a
+/// subscriber, every `tracing::error!`/`warn!` this binary emits — including
+/// the embedded helm's forwarded webview console events (`farhelm-helm`'s
+/// `client_log.rs`), the eval-bridge watchdog's own health line
+/// (`webview_watchdog.rs`), and the asset handler's per-request debug lines
+/// below — reaches the default no-op dispatcher and simply vanishes.
+/// `crates/farhelm`'s CLI installs its own subscriber (`init_tracing` there)
+/// for `farhelm helm run` and `farhelm supervisor run`, but those are that
+/// OTHER binary's subcommands, running in a spawned subprocess; this desktop
+/// app embeds a helm directly in ITS OWN process ([`DesktopBootstrap::start`])
+/// and never goes through that code path, so it needs the same setup
+/// independently. Mirrors that function's filter default (`RUST_LOG`, else
+/// `info`) and its choice of stderr, which the smoke and the maintainer's dev
+/// loop both redirect into `desktop.log` alongside stdout either way.
+fn init_tracing() {
+    // Build-sensitive default, matching what dioxus's own launcher would
+    // have installed had this subscriber not claimed the global slot first:
+    // debug builds (the laptop dev flow's default) keep debug-level events
+    // in desktop.log, release stays at info. `RUST_LOG` overrides both.
+    let default_filter = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+}
+
+/// Claim `/assets/*` in the desktop window and serve it from the UI tree
+/// this build embedded (D6).
+///
+/// ## Why a handler at all
+///
+/// A bare binary has no bundle around it. Left to itself, dioxus resolves
+/// `asset!()` paths off the FILESYSTEM relative to the executable
+/// (`dioxus_asset_resolver::native::get_asset_root`: `<exe>/../Resources` on
+/// macOS, `<exe>/../lib/<product>` on Linux), so `farhelm-desktop` sitting in
+/// `~/.local/bin` would look for `~/.local/Resources/assets/...` and find
+/// nothing — a window that renders chrome and loads no terminal, no fonts, no
+/// scripts.
+/// The embedded tree (`farhelm_helm::embedded_ui()`, D12) is already in the
+/// binary for the helm's own sake; this hands the same bytes to the webview.
+///
+/// ## Why registration wins
+///
+/// dioxus-desktop 0.7.10 consults the handler registry BEFORE the filesystem
+/// resolver — `protocol.rs`'s `desktop_handler` matches the first path
+/// segment against registered names and returns early on a hit. Registering
+/// [`ASSET_ROUTE`] therefore takes `/assets/*` away from the resolver
+/// entirely, which is what makes the embedded tree authoritative rather than
+/// merely a fallback. Note what that costs: with a handler registered there
+/// is no filesystem fallback for `/assets/*` at all, so a file missing from
+/// the embedded tree is a hard 404 even when a copy happens to sit next to
+/// the binary.
+///
+/// (0.7.10 has no `Config::with_asset_handler`; `use_asset_handler` is the
+/// only public way in, which is why this is a hook and must run from a
+/// component rather than from [`run`].)
+pub(crate) fn use_embedded_asset_handler() {
+    dioxus::desktop::use_asset_handler(ASSET_ROUTE, |request, responder| {
+        responder.respond(serve_asset(request.method(), request.uri().path()));
+    });
+}
+
+/// What [`serve_asset_from`] is allowed to know about the embedded tree: a
+/// path in, the bytes out, nothing else.
+///
+/// The narrow shape is the point. `farhelm_helm::embedded_ui()` answers from
+/// a `static` that only a release-shaped build populates, so a test running
+/// against the real thing would be testing whichever build it happened to be
+/// compiled into. One function pointer's worth of indirection lets the
+/// response rules be tested against a fixture instead, with no environment
+/// mutation and no `include_dir!` fixture tree to maintain.
+type AssetLookup<'a> = dyn Fn(&str) -> Option<&'a [u8]> + 'a;
+
+/// Answer one `dioxus://` asset request out of the embedded UI tree.
+///
+/// Thin on purpose: it resolves whichever lookup this build has — including
+/// none — and hands the rest to [`serve_asset_from`], which is where the
+/// rules live and where the tests point.
+fn serve_asset(
+    method: &dioxus::desktop::wry::http::Method,
+    path: &str,
+) -> dioxus::desktop::wry::http::Response<Vec<u8>> {
+    match farhelm_helm::embedded_ui() {
+        Some(dir) => {
+            let lookup = move |relative: &str| dir.get_file(relative).map(|file| file.contents());
+            serve_asset_from(Some(&lookup), method, path)
+        }
+        None => serve_asset_from(None, method, path),
+    }
+}
+
+/// The response rules for one asset request, over any lookup.
+///
+/// Deliberately mirrors `farhelm-helm`'s `serve_embedded` for the rules that
+/// matter — the `GET`/`HEAD` method gate, percent-decoding before lookup, and
+/// `mime_guess` content types — so an asset behaves identically whether a
+/// browser fetched it from the helm or the native window fetched it from
+/// here. It does NOT mirror the SPA `index.html` fallback: this route only
+/// ever serves concrete files, and answering a miss with markup would hand
+/// the webview HTML where it asked for JavaScript. Nor does anything strip a
+/// `HEAD` response's body the way axum's router does for the helm — wry hands
+/// the response straight back — which costs nothing here, since the webview
+/// only ever issues `GET` for an asset.
+///
+/// Every outcome is logged at DEBUG with a stable prefix, because that log is
+/// the only evidence anyone has that the handler ran at all:
+/// `scripts/desktop-smoke.sh` asserts at least one `served` line and zero
+/// `missing` lines, which is what turns "the window looked fine" into a real
+/// gate. Do not reword these lines without updating that script.
+///
+/// `lookup` is `None` for a build that embedded no UI at all. That is not an
+/// error: D12 makes it a supported developer arrangement (`cargo build -p
+/// farhelm-desktop` with no `FARHELM_UI_DIST`), and it answers every request
+/// with the same empty 404 a miss gets — a window with no UI, whose one
+/// explanation is the log line below. Taking it as a parameter rather than
+/// reading `embedded_ui()` here is what lets that branch be tested at all:
+/// whether a tree is embedded is fixed when the test binary is compiled.
+fn serve_asset_from(
+    lookup: Option<&AssetLookup<'static>>,
+    method: &dioxus::desktop::wry::http::Method,
+    path: &str,
+) -> dioxus::desktop::wry::http::Response<Vec<u8>> {
+    use dioxus::desktop::wry::http::{Method, Response, StatusCode, header};
+
+    if *method != Method::GET && *method != Method::HEAD {
+        tracing::debug!("desktop asset handler: refused {method} {path} (405)");
+        return Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .header(header::ALLOW, "GET,HEAD")
+            .body(Vec::new())
+            .expect("a status-and-header response is always well-formed");
+    }
+    let Some(lookup) = lookup else {
+        tracing::debug!("desktop asset handler: no UI is embedded in this build, {path} (404)");
+        return not_found();
+    };
+    // `include_dir!` keys every entry by its path relative to the embedded
+    // root with no leading slash; every path wry hands a handler has one.
+    let relative = path.trim_start_matches('/');
+    // Decode once, before the lookup: an asset whose real name needs
+    // escaping in a URL must resolve to the file `include_dir!` compiled in
+    // under its actual name. Invalid UTF-8 cannot match any entry (they are
+    // all Rust string literals), so it is a miss rather than a panic.
+    let Ok(relative) = percent_encoding::percent_decode_str(relative).decode_utf8() else {
+        tracing::debug!("desktop asset handler: missing {path} (404)");
+        return not_found();
+    };
+    match lookup(relative.as_ref()) {
+        Some(bytes) => {
+            tracing::debug!("desktop asset handler: served {path} (200)");
+            Response::builder()
+                .header(
+                    header::CONTENT_TYPE,
+                    mime_guess::from_path(relative.as_ref())
+                        .first_or_octet_stream()
+                        .essence_str(),
+                )
+                // Matches what dioxus's own resolver stamps on every asset
+                // it serves. The page and its assets share the
+                // `dioxus://index.html` origin, so nothing here NEEDS it
+                // today; diverging from the responses the rest of the
+                // ecosystem produces is the larger risk.
+                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .body(bytes.to_vec())
+                .unwrap_or_else(|_| not_found())
+        }
+        None => {
+            tracing::debug!("desktop asset handler: missing {path} (404)");
+            not_found()
+        }
+    }
+}
+
+/// The one 404 shape [`serve_asset`] returns, built here so every miss looks
+/// the same to the webview regardless of which check rejected it.
+fn not_found() -> dioxus::desktop::wry::http::Response<Vec<u8>> {
+    dioxus::desktop::wry::http::Response::builder()
+        .status(dioxus::desktop::wry::http::StatusCode::NOT_FOUND)
+        .body(Vec::new())
+        .expect("a status-only response is always well-formed")
+}
+
 /// Values the webview needs to validate or mint its own device session.
 ///
 /// The bootstrap token crosses the native/webview boundary through Dioxus
@@ -155,8 +476,9 @@ impl DesktopBootstrap {
                     // The supervisor inherits this process's PATH unchanged.
                     // The bundle's own directory used to be prepended so a
                     // bundled tmux would win; there is no bundled tmux any
-                    // more (TODO.md's 2026-08-22 floor decision) — the
-                    // `FARHELM_TMUX` below is what names the substrate — and
+                    // more (SPEC_impl.md, "Terminal substrate: private tmux
+                    // server") — the `FARHELM_TMUX` below is what names the
+                    // substrate — and
                     // the supervisor is launched by absolute path while the
                     // launch shim prepends its own directory for the spawn
                     // CLI inside sessions, so nothing else needed it.
@@ -170,7 +492,10 @@ impl DesktopBootstrap {
                     command.env("FARHELM_TMUX", tmux);
                 }
                 command.spawn().with_context(|| {
-                    format!("starting bundled supervisor at {}", farhelm.display())
+                    format!(
+                        "starting the managed supervisor child through the sibling farhelm at {}",
+                        farhelm.display()
+                    )
                 })?
             }),
         };
@@ -186,7 +511,7 @@ impl DesktopBootstrap {
             .map(|value| value.parse::<u16>().context("parsing FARHELM_DESKTOP_PORT"))
             .transpose()?
             .unwrap_or(DEFAULT_DESKTOP_PORT);
-        let ui_dist = bundled_web_ui()?;
+        let ui_dist = bundled_web_ui();
         let (ready_tx, ready_rx) = mpsc::channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm_state = state_dir.clone();
@@ -870,9 +1195,9 @@ fn ensure_managed_supervisor_running(supervisor: &mut Option<Child>) -> anyhow::
     if let Some(child) = supervisor
         && let Some(status) = child
             .try_wait()
-            .context("monitoring the bundled supervisor during desktop startup")?
+            .context("monitoring the managed supervisor child during desktop startup")?
     {
-        bail!("bundled supervisor exited during desktop startup with {status}");
+        bail!("the managed supervisor child exited during desktop startup with {status}");
     }
     Ok(())
 }
@@ -1044,10 +1369,10 @@ fn is_executable_file(path: &Path) -> bool {
 /// Decide the `FARHELM_TMUX` value (if any) the managed supervisor should be
 /// launched with.
 ///
-/// Precedence, per TODO.md's 2026-08-22 tmux floor decision (part 3, "a
-/// simple, documented 'pick your own' override ... honored by every launch
-/// path, desktop app included"): an `ambient_override` already present in the
-/// app's own environment is passed through UNTOUCHED and the probe is
+/// Precedence, per SPEC_impl.md's "Terminal substrate: private tmux server"
+/// ("the desktop app takes an ambient `FARHELM_TMUX` as given, otherwise
+/// probes ..."): an `ambient_override` already present in the app's own
+/// environment is passed through UNTOUCHED and the probe is
 /// skipped entirely — the user's choice always wins, and probing anyway
 /// would risk silently overruling it with a different Homebrew install found
 /// first. Only absent an override does `prefixes` get searched (macOS only in
@@ -1082,31 +1407,73 @@ fn desktop_state_dir() -> anyhow::Result<PathBuf> {
     }
 }
 
+/// Locate the `farhelm` CLI this app spawns its supervisor from.
+///
+/// D6 ships two bare binaries that install side by side (`~/.local/bin`), so
+/// "next to me" is the whole contract — there is no bundle to look inside any
+/// more. `FARHELM_DESKTOP_FARHELM` overrides it for developers and for
+/// `scripts/desktop-smoke.sh`, which runs a `dx` build tree where the sibling
+/// does not exist.
+///
+/// The failure text names the exact path that was tried and both ways out,
+/// because the person hitting it is looking at a GUI app that refused to
+/// start with no other diagnostic.
 fn bundled_farhelm() -> anyhow::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("FARHELM_DESKTOP_FARHELM") {
-        return Ok(PathBuf::from(path));
-    }
     let current = std::env::current_exe().context("locating desktop executable")?;
-    let sibling = current.with_file_name("farhelm");
-    sibling
-        .is_file()
-        .then_some(sibling)
-        .context("the desktop bundle does not contain its Farhelm CLI sibling")
+    resolve_sibling_farhelm(
+        &current,
+        std::env::var_os("FARHELM_DESKTOP_FARHELM").as_deref(),
+    )
 }
 
-fn bundled_web_ui() -> anyhow::Result<Option<PathBuf>> {
-    if let Some(path) = std::env::var_os("FARHELM_DESKTOP_UI_DIST") {
-        return Ok(Some(PathBuf::from(path)));
+/// Decide where `farhelm` is, given this executable's path and the override.
+///
+/// Split from [`bundled_farhelm`] so the decision can be tested: the release
+/// contract is "the two binaries are installed side by side", and nothing
+/// else in this repository's automation exercises it — the smoke always sets
+/// `FARHELM_DESKTOP_FARHELM`, and the asset check exits through
+/// `--print-assets` before bootstrap runs. Reading `current_exe` and the
+/// environment stays in the caller so the rule itself needs neither.
+///
+/// The override wins unconditionally, INCLUDING over a sibling that exists
+/// and including when it names something that does not: a developer pointing
+/// at a specific build wants that build or a clear failure from it, not a
+/// silent fall back to whatever happens to be next to the running binary.
+/// The only filesystem question asked here is whether the sibling is a file.
+fn resolve_sibling_farhelm(
+    current_exe: &Path,
+    override_path: Option<&std::ffi::OsStr>,
+) -> anyhow::Result<PathBuf> {
+    if let Some(path) = override_path {
+        return Ok(PathBuf::from(path));
     }
-    let current = std::env::current_exe().context("locating desktop executable")?;
-    let resources = current
-        .parent()
-        .and_then(Path::parent)
-        .map(|contents| contents.join("Resources/web"));
-    match resources {
-        Some(path) if path.join("index.html").is_file() => Ok(Some(path)),
-        _ => bail!("the desktop bundle does not contain Resources/web/index.html"),
+    let sibling = current_exe.with_file_name("farhelm");
+    if sibling.is_file() {
+        return Ok(sibling);
     }
+    bail!(
+        "farhelm-desktop needs the farhelm binary next to it ({}) and did not find one; \
+         run the install script or set FARHELM_DESKTOP_FARHELM",
+        sibling.display()
+    )
+}
+
+/// The UI tree the EMBEDDED HELM serves over loopback, if a developer named
+/// one.
+///
+/// `None` is the normal answer, and it is not a failure: a release build
+/// carries the tree compiled in (D12) and the helm falls back to that, while
+/// a plain `cargo build -p farhelm-desktop` genuinely has no UI to serve and
+/// says so in its own log (`farhelm-helm`'s `warn_if_no_ui`).
+///
+/// Note the scope: this only decides what the loopback HELM answers with. The
+/// native window never loads that page — it renders the component tree in the
+/// webview and pulls its `/assets/*` from [`serve_asset`] instead — so an
+/// override here does NOT change what the window shows. The
+/// `Contents/Resources/web` lookup this used to perform is gone with the
+/// `.app` bundle it belonged to (D6).
+fn bundled_web_ui() -> Option<PathBuf> {
+    std::env::var_os("FARHELM_DESKTOP_UI_DIST").map(PathBuf::from)
 }
 
 fn read_state(path: &Path) -> anyhow::Result<PersistedState> {
@@ -1180,6 +1547,245 @@ mod tests {
 
     const PROXY_CHILD_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_CHILD";
     const PROXY_TARGET_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_TARGET";
+
+    // ---- the desktop asset handler (D6) ----
+    //
+    // These drive `serve_asset_from` against a fixture lookup rather than the
+    // real embedded tree, which only a release-shaped build populates. What
+    // is under test is the RESPONSE CONTRACT: with the handler registered,
+    // dioxus stops consulting its own filesystem resolver for `/assets/*`
+    // (see `use_embedded_asset_handler`), so whatever this function returns
+    // is the entire answer the webview gets — there is nothing behind it to
+    // paper over a wrong status, a wrong content type, or a body that is
+    // subtly not the file.
+
+    /// A two-entry embedded tree: one JavaScript asset and one whose name
+    /// needs percent-escaping in a URL.
+    fn fixture_lookup(relative: &str) -> Option<&'static [u8]> {
+        match relative {
+            "assets/terminal-dxhabc.js" => Some(b"console.log('hi')\n"),
+            "assets/a name with spaces.css" => Some(b"body{}"),
+            _ => None,
+        }
+    }
+
+    fn method(name: &str) -> dioxus::desktop::wry::http::Method {
+        dioxus::desktop::wry::http::Method::from_bytes(name.as_bytes())
+            .expect("test method is valid")
+    }
+
+    /// Serve against the fixture tree — the release-shaped configuration.
+    fn serve(method_name: &str, path: &str) -> dioxus::desktop::wry::http::Response<Vec<u8>> {
+        serve_asset_from(Some(&fixture_lookup), &method(method_name), path)
+    }
+
+    /// Serve against no embedded tree at all — the plain-`cargo build`
+    /// configuration.
+    fn serve_unembedded(
+        method_name: &str,
+        path: &str,
+    ) -> dioxus::desktop::wry::http::Response<Vec<u8>> {
+        serve_asset_from(None, &method(method_name), path)
+    }
+
+    /// A hit returns the file's exact bytes, a guessed content type, and the
+    /// permissive CORS header dioxus's own resolver stamps on assets.
+    ///
+    /// The content type is the load-bearing part: a webview that receives
+    /// `application/octet-stream` for a `<script src>` refuses to execute it,
+    /// which looks exactly like an asset that never loaded.
+    #[test]
+    fn a_hit_returns_the_bytes_with_a_guessed_content_type() {
+        let response = serve("GET", "/assets/terminal-dxhabc.js");
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/javascript"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "*"
+        );
+        assert_eq!(response.body().as_slice(), b"console.log('hi')\n");
+    }
+
+    /// A percent-escaped path resolves to the file whose real name contains
+    /// those characters.
+    ///
+    /// Decoding has to happen before BOTH the lookup and the `mime_guess`
+    /// call: an undecoded `%20` would miss the entry, and a path decoded
+    /// after the type guess would classify by the wrong extension.
+    #[test]
+    fn a_percent_escaped_path_is_decoded_once_before_lookup_and_typing() {
+        let response = serve("GET", "/assets/a%20name%20with%20spaces.css");
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/css");
+        assert_eq!(response.body().as_slice(), b"body{}");
+    }
+
+    /// `HEAD` returns exactly what `GET` would, body included.
+    ///
+    /// wry hands the response back untouched — there is no router layer here
+    /// to strip the body and recompute `Content-Length` the way axum does for
+    /// the helm — so returning the same response is both the simplest and the
+    /// only truthful option.
+    #[test]
+    fn head_is_answered_identically_to_get() {
+        let head = serve("HEAD", "/assets/terminal-dxhabc.js");
+        let get = serve("GET", "/assets/terminal-dxhabc.js");
+        assert_eq!(head.status(), get.status());
+        assert_eq!(head.headers(), get.headers());
+        assert_eq!(head.body(), get.body());
+    }
+
+    /// Anything other than `GET`/`HEAD` is refused before any lookup, with
+    /// the `Allow` header that makes the refusal actionable.
+    ///
+    /// Parity with `farhelm-helm`'s `serve_embedded`, so the same request
+    /// gets the same answer from the native window and from the browser.
+    #[test]
+    fn a_write_method_is_refused_with_the_allowed_set() {
+        let response = serve("POST", "/assets/terminal-dxhabc.js");
+        assert_eq!(response.status(), 405);
+        assert_eq!(response.headers().get("allow").unwrap(), "GET,HEAD");
+        assert!(response.body().is_empty());
+    }
+
+    /// A path with no entry is a 404, not an `index.html` fallback.
+    ///
+    /// The helm's embedded source answers an extension-less miss with
+    /// `index.html` so a single-page route can render. This route must NOT:
+    /// its only clients are `<script>`, `<link>` and font requests, and
+    /// handing one of those a page of HTML produces a parse error instead of
+    /// a legible failure.
+    #[test]
+    fn a_miss_is_a_plain_404_with_no_spa_fallback() {
+        for path in ["/assets/never-bundled.js", "/assets/looks-like-a-route"] {
+            let response = serve("GET", path);
+            assert_eq!(response.status(), 404, "{path}");
+            assert!(response.body().is_empty(), "{path}");
+        }
+    }
+
+    /// A percent escape that decodes to invalid UTF-8 is a miss, not a panic.
+    ///
+    /// Every embedded entry is keyed by a Rust string literal, so no such
+    /// path could ever match one. The webview is not a trusted input source
+    /// in the sense that matters here: this runs in the app's own process,
+    /// and a panic in the handler takes the window with it.
+    #[test]
+    fn an_undecodable_path_is_a_miss_rather_than_a_panic() {
+        let response = serve("GET", "/assets/%ff%fe.js");
+        assert_eq!(response.status(), 404);
+    }
+
+    /// A build with no embedded UI answers every asset with an empty 404.
+    ///
+    /// D12 makes that a supported arrangement, not a broken build: `cargo
+    /// build -p farhelm-desktop` without `FARHELM_UI_DIST` opens a window
+    /// with no UI in it. What must NOT happen is a panic, a partial
+    /// response, or a revived filesystem fallback — registering the handler
+    /// took `/assets/*` away from dioxus's resolver, so anything this
+    /// returns is the whole answer.
+    ///
+    /// Reachable as a test only because the lookup is a parameter: whether
+    /// this binary embedded a tree was decided when it was compiled.
+    #[test]
+    fn a_build_with_no_embedded_ui_answers_every_asset_with_an_empty_404() {
+        for path in ["/assets/terminal-dxhabc.js", "/assets/anything-at-all"] {
+            let response = serve_unembedded("GET", path);
+            assert_eq!(response.status(), 404, "{path}");
+            assert!(response.body().is_empty(), "{path}");
+        }
+    }
+
+    /// The method gate runs before the embedded-tree question.
+    ///
+    /// Both orderings answer honestly, but this one keeps the refusal
+    /// identical across build configurations: a client asking the wrong way
+    /// gets `405` and `Allow` whether or not this build has a UI, rather
+    /// than a 404 that suggests the path was the problem.
+    #[test]
+    fn a_write_method_is_refused_even_with_no_embedded_ui() {
+        let response = serve_unembedded("POST", "/assets/terminal-dxhabc.js");
+        assert_eq!(response.status(), 405);
+        assert_eq!(response.headers().get("allow").unwrap(), "GET,HEAD");
+    }
+
+    // ---- the release contract: two binaries, side by side (D6) ----
+
+    /// The override names the CLI outright, even when a sibling exists.
+    ///
+    /// `scripts/desktop-smoke.sh` depends on exactly this: it runs the dx
+    /// build tree, where no `farhelm` sibling exists at all, and names the
+    /// one it built.
+    #[test]
+    fn the_farhelm_override_wins_over_a_present_sibling() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let sibling = dir.path().join("farhelm");
+        std::fs::write(&sibling, b"#!/bin/sh\n").expect("writing the sibling");
+        let chosen = resolve_sibling_farhelm(
+            &dir.path().join("farhelm-desktop"),
+            Some(std::ffi::OsStr::new("/elsewhere/farhelm")),
+        )
+        .expect("an override is taken as given");
+        assert_eq!(chosen, PathBuf::from("/elsewhere/farhelm"));
+    }
+
+    /// With no override, the CLI is the file named `farhelm` in this
+    /// executable's own directory.
+    ///
+    /// This IS the installed shape (`~/.local/bin/farhelm` beside
+    /// `~/.local/bin/farhelm-desktop`) and nothing else in the repository's
+    /// automation exercises it — the smoke and the asset check both bypass
+    /// it — so a regression here would first be noticed by a user.
+    #[test]
+    fn the_sibling_beside_this_executable_is_found_without_an_override() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let sibling = dir.path().join("farhelm");
+        std::fs::write(&sibling, b"#!/bin/sh\n").expect("writing the sibling");
+        let chosen = resolve_sibling_farhelm(&dir.path().join("farhelm-desktop"), None)
+            .expect("a sibling next to the executable is found");
+        assert_eq!(chosen, sibling);
+    }
+
+    /// A missing sibling fails with the exact text the distribution plan
+    /// specifies, naming the path that was tried.
+    ///
+    /// Asserted verbatim because this string is the entire diagnostic a user
+    /// gets: a GUI binary that refuses to start has no window to explain
+    /// itself in, and the two ways out (the install script, the override)
+    /// have to be in the message or they are nowhere.
+    #[test]
+    fn a_missing_sibling_names_the_path_and_both_ways_out() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let exe = dir.path().join("farhelm-desktop");
+        let error = resolve_sibling_farhelm(&exe, None)
+            .expect_err("no sibling was created, so this must fail");
+        assert_eq!(
+            format!("{error}"),
+            format!(
+                "farhelm-desktop needs the farhelm binary next to it ({}) and did not find one; \
+                 run the install script or set FARHELM_DESKTOP_FARHELM",
+                dir.path().join("farhelm").display()
+            )
+        );
+    }
+
+    /// A DIRECTORY named `farhelm` next to the executable is not the CLI.
+    ///
+    /// The check is `is_file` rather than "exists" for this case. Spawning a
+    /// directory fails later and much less clearly than refusing here does.
+    #[test]
+    fn a_directory_named_farhelm_does_not_count_as_the_sibling() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir(dir.path().join("farhelm")).expect("creating the decoy directory");
+        resolve_sibling_farhelm(&dir.path().join("farhelm-desktop"), None)
+            .expect_err("a directory is not the CLI");
+    }
 
     fn selection(helm: &str, id: &str) -> crate::list::RememberedSelection {
         crate::list::RememberedSelection {

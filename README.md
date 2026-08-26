@@ -190,9 +190,9 @@ release files, or install a release build (see README, "Install")`.
 Either flag opts a source build back in: `--payload-dir <dir>` (or `FARHELM_HELM_PAYLOAD_DIR`) reads published release
 files from a directory unverified, and `--release-base-url <url>` (or `FARHELM_RELEASE_BASE_URL`) downloads them from
 any server with the full signature and checksum verification a release build performs. `--payload-dir` wins if both are
-given. Build the web UI with `(cd crates/farhelm-ui && dx build --platform web --release)` after `cargo build`, then run
-the supervisor and helm manually when working on the browser surface. The desktop smoke harness supplies those
-development paths while testing the app-owned bootstrap.
+given. Build the web UI with `(cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release)` after
+`cargo build`, then run the supervisor and helm manually when working on the browser surface. The desktop smoke harness
+supplies those development paths while testing the app-owned bootstrap.
 
 `AGENTS.md` has the conventions and the finish-work checks. End-to-end tests: `cargo test -- --show-output` (Rust,
 including real-tmux integration; `--show-output` is what surfaces the skip reasons from tests that need a systemd user

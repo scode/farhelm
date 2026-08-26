@@ -2,141 +2,84 @@
 //!
 //! Web (built by `dx build --platform web`, served by the helm): the API
 //! base is the page's own origin. Desktop (wry webview): the webview's
-//! origin is not the helm. The desktop bootstrap owns an embedded loopback
-//! helm and bundled local supervisor, then hands their stable loopback origin
-//! to the same component tree the browser uses.
+//! origin is not the helm, so the whole shell — the loopback helm embedded in
+//! this process, the managed local supervisor discovered or spawned beside
+//! it, and the asset handler that feeds the window — lives in
+//! [`farhelm_ui::desktop::run`], and this file is only the door to it.
+//!
+//! ## Why the desktop half is not written here
+//!
+//! D6 ships the desktop app as `crates/farhelm-desktop`, a bare binary that
+//! must behave identically to what `dx build --platform desktop` produces
+//! from THIS bin (the smoke script's subject, and the maintainer's dev loop).
+//! Two `main`s cannot be kept identical by discipline, so there is one body
+//! in the library and two callers of it.
 //!
 //! A renderer feature (`web` or `desktop`) selects the target. Plain
 //! `cargo build`/`clippy` compile with neither so the workspace checks
 //! stay one command; in that configuration this binary is inert and
 //! says so rather than failing to compile.
 
-/// Install this process's `tracing` subscriber.
-///
-/// Desktop-only, and load-bearing for PLAN_desktop_web_bug_triage.md's whole
-/// premise: without a subscriber, every `tracing::error!`/`warn!` this
-/// binary emits — including the embedded helm's forwarded webview console
-/// events (`farhelm-helm`'s `client_log.rs`) and the eval-bridge watchdog's
-/// own health line (`webview_watchdog.rs`) — reaches the default no-op
-/// dispatcher and simply vanishes. `crates/farhelm`'s CLI installs its own
-/// subscriber (`init_tracing` there) for `farhelm helm run` and
-/// `farhelm supervisor run`, but those are that OTHER binary's subcommands,
-/// running in a spawned subprocess; this desktop app embeds a helm directly
-/// in ITS OWN process (`desktop::DesktopBootstrap::start`) and never goes
-/// through that code path, so it needs the same setup independently. Mirrors
-/// that function's filter default (`RUST_LOG`, else `info`) and its choice
-/// of stderr, which `scripts/laptop-dev.sh` redirects into `desktop.log`
-/// alongside stdout either way.
+/// Desktop: hand off immediately. Everything this used to do inline now
+/// lives in `desktop::run`, which `crates/farhelm-desktop` calls too.
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-fn init_tracing() {
-    // Build-sensitive default, matching what dioxus's own launcher would
-    // have installed had this subscriber not claimed the global slot first:
-    // debug builds (the laptop dev flow's default) keep debug-level events
-    // in desktop.log, release stays at info. `RUST_LOG` overrides both.
-    let default_filter = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "info"
-    };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+fn main() -> anyhow::Result<()> {
+    farhelm_ui::desktop::run()
 }
 
-#[cfg(any(feature = "web", feature = "desktop"))]
+/// Web (wasm32): launch straight into the component tree.
+///
+/// The cfg subtracts the desktop arm's condition rather than testing `web`
+/// alone, so that whatever features are enabled, exactly one `main` is
+/// compiled for a given target: with both features on, a native build takes
+/// the desktop arm above and a wasm build takes this one, since the desktop
+/// arm excludes wasm outright.
+#[cfg(all(
+    feature = "web",
+    not(all(feature = "desktop", not(target_arch = "wasm32")))
+))]
 fn main() {
     use farhelm_ui::{ApiBase, App};
-
-    // Before anything else: bootstrap itself can log, and the embedded helm
-    // it starts begins emitting the moment it does.
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-    init_tracing();
-
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-    let desktop = farhelm_ui::desktop::DesktopBootstrap::start()
-        .unwrap_or_else(|error| panic!("desktop bootstrap failed: {error:#}"));
 
     // reqwest requires absolute URLs even on wasm, so the web build
     // derives its API base from the page's own origin rather than using
     // relative paths — same origin either way, since the helm serves
     // both the UI and the API.
+    //
+    // Deliberately defined only for wasm32, with no native arm: `web` is a
+    // wasm-only renderer, and `--features web` on a native target should
+    // keep failing to compile here (as it always has) rather than launch a
+    // window pointed at an empty origin.
     #[cfg(target_arch = "wasm32")]
     let base = web_sys::window()
         .and_then(|w| w.location().origin().ok())
         .unwrap_or_default();
-    #[cfg(all(not(target_arch = "wasm32"), feature = "desktop"))]
-    let base = desktop.api_base().to_string();
 
-    let builder = dioxus::LaunchBuilder::new().with_context(ApiBase(base));
-
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-    let builder = builder.with_context(desktop.webview_bootstrap());
-
-    // Desktop windows need an explicit WindowBuilder, and not only for the
-    // title: dioxus-desktop's `Config::new()` marks debug-build windows
-    // always-on-top whenever the app is NOT launched through `dx`
-    // (`dioxus_cli_config::always_on_top().unwrap_or(true)` — a
-    // convenience for `dx serve` development that misfires for a real app
-    // started via `cargo run`, leaving the window permanently above
-    // everything). `Config::with_window` replaces the default builder
-    // wholesale, which discards that always-on-top default along with the
-    // "Dioxus App" placeholder title.
-    // `with_disable_drag_drop_handler(true)` is the attachments feature's
-    // half of this (PLAN_M4.md item 7, SPEC_impl.md's "one concrete thing
-    // to check early rather than debug late: wry's own file-drop handling
-    // swallows DOM drop events unless configured not to"). Dropping a file
-    // into a terminal is intercepted in the PAGE — assets/terminal.js —
-    // so the DOM `drop` event has to reach it, and anything that consumes
-    // the drag first breaks the headline feature on the desktop build
-    // alone, where nothing in CI would notice.
-    //
-    // The audit trail behind this call, against dioxus-desktop 0.7.9 and
-    // wry 0.53.5, since "configured not to" means different things per
-    // platform:
-    //
-    // - Without this, dioxus installs its own `wry` drag-drop handler
-    //   (`webview.rs`, gated on `cfg.disable_file_drop_handler`) to feed
-    //   its native file-drop support. That handler returns `false`, which
-    //   wry reads as "not handled" and answers by invoking the OS default
-    //   — so on macOS (`wkwebview/drag_drop.rs` calling `super`) and on
-    //   GTK the DOM events do still fire. On Windows they do not: dioxus's
-    //   own comment says the WebView2 host blocks HTML-native drag events
-    //   whenever a drop handler is present, and its config doc says the
-    //   handler must be disabled for the HTML drag and drop APIs to work.
-    // - So the setting is not load-bearing on the two platforms Farhelm
-    //   targets today, and it is set anyway: it is the difference between
-    //   "the DOM path works because a handler we do not want happens to
-    //   decline every event" and "nothing is competing for the drag". The
-    //   cost is dioxus's native file-drop support, which this UI does not
-    //   use — no `ondrop` handler exists anywhere in the component tree,
-    //   and the attachment path deliberately reads `File` objects in JS
-    //   rather than paths in Rust (see src/attachments.rs).
-    //
-    // Verifying the CAPABILITY rather than the configuration is the
-    // manual desktop pass PLAN_M4.md acceptance 9 records; this call is
-    // what that pass is checking the effect of. The checklist that pass
-    // has to work through — including the one risk it is most likely to
-    // trip over — is written out in `attachments`' module header.
-    #[cfg(feature = "desktop")]
-    let builder = builder.with_cfg(
-        dioxus::desktop::Config::new()
-            .with_window(dioxus::desktop::WindowBuilder::new().with_title("farhelm"))
-            .with_disable_drag_drop_handler(true),
-    );
-
-    builder.launch(App);
+    dioxus::LaunchBuilder::new()
+        .with_context(ApiBase(base))
+        .launch(App);
 }
 
+/// No renderer: say how to get one, and be exact about it.
+///
+/// Every command below has a trap that cost real time to find, so none is the
+/// obvious spelling. dx needs `--package` because the workspace has
+/// `default-members` and dx resolves those relative paths against its own
+/// working directory. Cargo needs `-p` because the root manifest is a virtual
+/// workspace with several binaries, so `cargo run` alone stops at an
+/// ambiguity error. And even spelled correctly, `cargo run -p farhelm-ui
+/// --features desktop` opens a window with no assets in it — Cargo does not
+/// perform dx's post-link rewrite of the `asset!()` names — which is why the
+/// desktop line points at the two things that produce a working app rather
+/// than at a command that merely starts.
 #[cfg(not(any(feature = "web", feature = "desktop")))]
 fn main() {
     eprintln!(
         "farhelm-ui was built without a renderer feature.\n\
-         Web:     cd crates/farhelm-ui && dx build --platform web\n\
-         Desktop: cargo run -p farhelm-ui --features desktop"
+         Web:     cd crates/farhelm-ui && dx build --package farhelm-ui --platform web\n\
+         Desktop: scripts/desktop-smoke.sh runs one under Xvfb; see\n\
+        \x20        crates/farhelm-desktop/README.md to build one by hand.\n\
+         (cargo run -p farhelm-ui --features desktop builds, but opens a window with no assets.)"
     );
     std::process::exit(1);
 }

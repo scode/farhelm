@@ -2,6 +2,28 @@
 resolver = "3"
 members = [
   "crates/farhelm",
+  "crates/farhelm-desktop",
+  "crates/farhelm-helm",
+  "crates/farhelm-proto",
+  "crates/farhelm-supervisor",
+  "crates/farhelm-teststate",
+  "crates/farhelm-ui",
+]
+# Every member EXCEPT `farhelm-desktop`, so that a bare `cargo
+# build`/`test`/`clippy --all-targets` — the workspace checks CLAUDE.md's
+# "Finishing work" list runs on every change, and CI runs on an ordinary
+# runner — never compiles WebKit. `farhelm-desktop` unconditionally enables
+# `farhelm-ui`'s `desktop` feature, which pulls in wry and needs the
+# webkit2gtk/gtk development packages; only the `desktop` CI job installs
+# them, and that job reaches the crate through an explicit `-p
+# farhelm-desktop`.
+#
+# The cost of this line is that `-p farhelm-desktop` is the ONLY way the
+# crate gets compiled: nothing in the default battery will notice it break.
+# That is what the `desktop` job's `cargo check -p farhelm-desktop` step is
+# for, and why it is not optional.
+default-members = [
+  "crates/farhelm",
   "crates/farhelm-helm",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
@@ -184,6 +206,11 @@ farhelm-helm = { path = "crates/farhelm-helm" }
 farhelm-proto = { path = "crates/farhelm-proto" }
 farhelm-supervisor = { path = "crates/farhelm-supervisor" }
 farhelm-teststate = { path = "crates/farhelm-teststate" }
+# Only `farhelm-desktop` depends on this, and only with the `desktop`
+# feature on — see that crate's Cargo.toml and the `default-members` note
+# above for why the dependency is deliberately unreachable from the default
+# workspace battery.
+farhelm-ui = { path = "crates/farhelm-ui" }
 
 # `wasm-release` is the cargo profile dx compiles the web UI under; this
 # stanza merges into dx's own definition of it. The strip exists because

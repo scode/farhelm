@@ -50,9 +50,15 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   dev packages (see the CI job for the apt list).
 - `cargo test -p farhelm-ui --features desktop` — exercises the desktop-only persistence and IPC seams; needs the same
   webkit2gtk/gtk dev packages as the desktop compile check.
+- `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
+  compile WebKit), which means `-p` is the only thing that ever compiles it.
+- `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
+  set, in both directions. Needs `dx` and the wasm32 target; takes a few minutes, since it wipes `target/dx` and
+  rebuilds both bundles.
 - `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the non-pixel Xvfb integration gate for
   the embedded helm, managed supervisor, desktop authentication, the tmux override reaching the managed supervisor,
-  hard-exit tether, and restart persistence. The optional coordinate-driven leg is not part of CI.
+  hard-exit tether, restart persistence, and that every asset the window requested went through the desktop asset
+  handler. The optional coordinate-driven leg is not part of CI.
 - `dprint check`
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
@@ -60,11 +66,11 @@ These commands mirror `.github/workflows/ci.yml`; if CI changes, update this lis
 The browser end-to-end suite is deliberately NOT in that per-change list, and its CI job is disabled (`if: false` in
 ci.yml): it is far too slow to pay on every PR. It gates MERGING instead — before landing a PR stack on main, run
 `cd e2e && npx playwright test` (Chromium and WebKit; WebKit stands in for the desktop app's actual engine family). It
-needs `cargo build` and `cd crates/farhelm-ui && dx build --platform web --release` first (it drives the built web UI
-against a real helm and supervisor), plus a one-time `cd e2e && npm install && npx playwright install chromium webkit`.
-This split lets changes accumulate across a stack and surface bugs once, before merge, without each PR paying the
-suite's cost — but it also means NOTHING else runs it: CI green does not include e2e, so skipping it at merge time means
-shipping unexercised browser paths.
+needs `cargo build` and `cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first (it
+drives the built web UI against a real helm and supervisor), plus a one-time
+`cd e2e && npm install && npx playwright install chromium webkit`. This split lets changes accumulate across a stack and
+surface bugs once, before merge, without each PR paying the suite's cost — but it also means NOTHING else runs it: CI
+green does not include e2e, so skipping it at merge time means shipping unexercised browser paths.
 
 # TODO.md
 

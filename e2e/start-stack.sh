@@ -22,7 +22,7 @@
 #
 # Prerequisites (CI runs these; locally too):
 #   cargo build
-#   cd crates/farhelm-ui && dx build --platform web --release
+#   cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release
 #
 # Also needs `curl` and `python3` on PATH: the startup session is created
 # through the helm's own HTTP API now, and the two JSON documents involved

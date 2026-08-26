@@ -1737,6 +1737,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "farhelm-desktop"
+version = "0.0.3"
+dependencies = [
+ "anyhow",
+ "farhelm-ui",
+]
+
+[[package]]
 name = "farhelm-helm"
 version = "0.0.3"
 dependencies = [
@@ -1825,6 +1833,8 @@ dependencies = [
  "farhelm-helm",
  "farhelm-supervisor",
  "gloo-timers",
+ "mime_guess",
+ "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",

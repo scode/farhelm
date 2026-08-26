@@ -9,17 +9,57 @@ Run these eight steps against the same release candidate and record failures wit
 version, and remote Ubuntu version. A pass here is evidence about that exact candidate, not a substitute for the Linux
 and browser CI gates.
 
-1. Confirm the tmux discovery and floor (SPEC_impl.md's "Terminal substrate" section), in three controlled launches from
-   Finder with `FARHELM_TMUX` unset in the app's environment. (a) With Homebrew tmux installed, the app starts and a
-   local session runs. (b) With `FARHELM_TMUX` pointing at a tmux below the floor (a distro or older Homebrew build),
-   the supervisor refuses with `tmux <version> at <path> is below Farhelm's floor <floor> (see README: tmux)`; record
-   how — or whether — that text reached you in Finder (TODO.md's macOS entry records that today it goes to the
-   supervisor's stderr and the app exits before opening a window). (c) With no tmux in `/opt/homebrew/bin`,
-   `/usr/local/bin`, `/opt/local/bin`, or on Finder's PATH, the supervisor fails to start the program at all; record
-   that message the same way. Restore Homebrew tmux before the remaining steps.
+The release is two bare binaries in `~/.local/bin` (D6), so every step below starts `farhelm-desktop` from a terminal.
+That is not a compromise for the sake of the checklist — it is how the binaries are installed and how the maintainer
+runs them — but it does mean this pass says nothing about a Finder double-click, which was never validated either.
+
+1. Confirm the tmux discovery and floor (SPEC_impl.md's "Terminal substrate: private tmux server") in three controlled
+   launches.
+
+   These cases only mean anything if the app STARTS the supervisor rather than finding one. Bootstrap probes first and
+   reuses whatever already answers, and a reused supervisor inherited its tmux from whoever launched it — so a stray one
+   makes all three cases pass without exercising anything. Before each launch, quit the app fully and confirm no
+   supervisor is left:
+
+   ```
+   pgrep -fl 'farhelm supervisor run'   # must print nothing
+   ```
+
+   If it prints something, that is either a leftover child (wait for it, or kill it) or a supervisor you run yourself —
+   in which case stop it for the duration of this step. Discovering and reusing an existing supervisor is a separate
+   behaviour worth checking on its own; it is not a substitute for these three.
+
+   (a) With Homebrew tmux installed and no override, the app starts and a local session runs:
+
+   ```
+   unset FARHELM_TMUX; ~/.local/bin/farhelm-desktop
+   ```
+
+   (b) Below the floor. Point the override at a distro or older Homebrew build and confirm the supervisor refuses with
+   `tmux <version> at <path> is below Farhelm's floor <floor> (see README: tmux)`:
+
+   ```
+   FARHELM_TMUX=/path/to/old/tmux ~/.local/bin/farhelm-desktop
+   ```
+
+   (c) The configured tmux is missing. Name a path that does not exist:
+
+   ```
+   FARHELM_TMUX=/nonexistent/tmux ~/.local/bin/farhelm-desktop
+   ```
+
+   A nonempty override is what makes this case reachable at all. Shortening `PATH` does not: with no override the app
+   probes `/opt/homebrew/bin`, `/usr/local/bin` and `/opt/local/bin` by absolute path, finds the Homebrew tmux case (a)
+   just established, and starts normally. So this case tests a configured-but-absent binary, which is the realistic
+   version of "no tmux" for a Mac that has Homebrew — not an empty machine.
+
+   For (b) and (c), record where the refusal actually surfaced. Expected today, per TODO.md's entry: it reaches the
+   supervisor's log and nothing else, so the window opens with a local host missing and no stated reason. Write down
+   whether anything in the window explained it — that gap is what the TODO tracks, and this is the observation that
+   would close it. Drop the overrides before the remaining steps.
 2. Start the native app and provision a fresh Ubuntu host using only the account's existing passwordless SSH. Confirm
    that setup needs no root, the supervisor registers, and a session runs. Then use
-   `Farhelm.app/Contents/MacOS/farhelm helm token show` and open the same embedded helm's authenticated web UI.
+   `~/.local/bin/farhelm helm token show` and open the same embedded helm's authenticated web UI.
 3. In an existing `jj` workspace where Git reports detached HEAD, create an official Claude Code session in one action.
 4. Create a local Mac session the same way. Confirm the local and remote sessions appear together in one list.
 5. Paste a Mac screenshot into the remote terminal. Confirm the path appears at the active cursor and Claude can read
@@ -42,8 +82,9 @@ Close-out result: not run
 
 ## Clipboard file names
 
-- Create a test image with a deliberately non-sensitive name and timestamp, then start `Farhelm.app`, open a local or
-  remote terminal, and copy that file in Finder. Do not use an ordinary work or personal file for this check.
+- Create a test image with a deliberately non-sensitive name and timestamp, then start `~/.local/bin/farhelm-desktop`,
+  open a local or remote terminal, and copy that file in Finder. Do not use an ordinary work or personal file for this
+  check.
 - Paste it into the terminal. Expand `clipboard facts` below the terminal and copy the JSON dump here before navigating
   away. It records item order, kinds, MIME types, `File.name`, and `lastModified`. Before putting the dump in this
   tracked document, replace the test filename with `<test-file>` and every timestamp with `<timestamp>`; remove any

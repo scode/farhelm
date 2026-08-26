@@ -26,9 +26,15 @@ would justify anything else.
   destinations), SSH transport, aggregation, axum API, static UI serving.
 - `crates/farhelm-proto` — wire types and protocol version, shared by both ends and by tests.
 - `crates/farhelm-ui` — the Dioxus application, built for web (wasm32) and desktop from the same crate.
+- `crates/farhelm-desktop` — the macOS webview shell (D6): a `main` that calls farhelm-ui's desktop entry point and
+  nothing else. It exists as its own package because only a package can enable farhelm-ui's `desktop` feature
+  unconditionally, and it is excluded from the workspace's `default-members` so that no ordinary
+  `cargo
+  build`/`test`/`clippy` compiles WebKit. `-p farhelm-desktop` is consequently the only thing that compiles it.
 
 Motivation: the proto crate is the seam that keeps helm and supervisor honestly decoupled (they meet only over the wire,
-even in-process), and a single binary crate keeps provisioning to one artifact.
+even in-process). `farhelm` remains the single multi-call artifact provisioning ever has to move — farhelm-desktop is a
+second release binary for the Mac desktop alone, never provisioned to a host.
 
 ## GUI: Dioxus
 
@@ -1070,8 +1076,9 @@ remains that can never be represented on any page.
   script execution in the authenticated origin can read the secret, but such a script can already drive the same API,
   while port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The
   loopback Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
-- The native app embeds farhelm-helm in-process and manages the bundled local supervisor; the Linux helm is the same
-  code behind `farhelm helm run`.
+- The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
+  supervisor is a separate process either way — the app discovers one that already answers and leaves it alone, or
+  starts `farhelm supervisor run` from its sibling binary and owns that child for its own lifetime.
 
 ## Logging
 
@@ -1159,9 +1166,31 @@ declared next to the types.
 
 ## Native app packaging
 
-Dioxus desktop (wry) wrapping farhelm-ui, bundled via `dx bundle` into a Mac app that embeds helm + supervisor from the
-same workspace version. Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard
-note in the Dioxus risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
+Dioxus desktop (wry) wrapping farhelm-ui, shipped as a BARE BINARY rather than a `.app` bundle: `farhelm-desktop`, a
+thin crate (`crates/farhelm-desktop`) whose `main` is one call into farhelm-ui's desktop module, built by cargo-dist
+alongside `farhelm` and installed next to it. The two are one artifact pair, not one bundle — the shell embeds
+farhelm-helm from the same workspace version and reaches supervisor code by finding its CLI sibling next to its own
+executable, discovering a local supervisor that already answers or spawning `farhelm supervisor run` when none does.
+
+The bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's `asset!()` files
+were the only thing that needed one. They are served instead from the UI tree compiled into `farhelm-helm`, through a
+`dioxus-desktop` asset handler registered on `/assets/*`, handed to the webview over the `dioxus://` scheme. By default
+— and in every release build — those are the same bytes the helm serves to a browser, since both read the compiled-in
+tree; `FARHELM_DESKTOP_UI_DIST` breaks that identity deliberately, pointing only the loopback helm at a directory on
+disk while the window keeps rendering from the embedded tree. Registering a handler for a path prefix takes precedence
+over dioxus's own filesystem resolver, so there is no bundle-directory fallback at all; the price is that the desktop
+build's asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on every
+change.
+
+A releasable `farhelm-desktop` must be produced by `dx`, not by Cargo alone. The `asset!()` macro emits a placeholder
+into a `__ASSETS__` link section and dx rewrites those symbols with content-hashed names after linking; a plain
+`cargo build` links and launches but requests placeholder paths, so every asset 404s even with the web bundle embedded.
+Release production therefore has to run or consume `dx build --package farhelm-desktop --platform desktop --release`
+with `FARHELM_UI_DIST` set. How that is wired into cargo-dist is Step 5's business; that it must happen is not
+negotiable, because the failure is invisible to a build that succeeds.
+
+Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard note in the Dioxus
+risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
 
 ## Provisioning
 
@@ -1226,10 +1255,13 @@ or rendezvous point sessions or connections pass through.
 ## Cross-compilation and targets
 
 Supervisor-side artifacts: `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, static, built with
-cargo-zigbuild in CI (audited: rusqlite-bundled static musl builds work for both). The Mac app (`aarch64-apple-darwin`)
-is built and bundled on a macOS CI runner with the native toolchain — cross-building it from Linux was audited and
-rejected: zig cannot link the Apple frameworks wry needs (WebKit, AppKit) without a licensed macOS SDK, cross ships no
-darwin images, `dx bundle` produces .app bundles only on the native platform, and codesigning wants macOS regardless.
+cargo-zigbuild in CI (audited: rusqlite-bundled static musl builds work for both). The Mac artifacts
+(`aarch64-apple-darwin`: `farhelm` and `farhelm-desktop`) are built on a macOS runner with the native toolchain —
+cross-building them from Linux was audited and rejected: zig cannot link the Apple frameworks wry needs (WebKit, AppKit)
+without a licensed macOS SDK, and cross ships no darwin images. Dropping the `.app` bundle removed a third reason
+(`dx bundle` produces bundles only on the native platform) but not those two, so the macOS runner stays. Signing and
+notarization are deferred (D11) and the artifacts ship unsigned, so signing is not among today's reasons — it would
+become one if that changes.
 
 Motivation: musl-static sidesteps glibc version skew across Ubuntu releases, which matters because provisioning drops
 binaries on machines we do not control; "predicated on whatever cross-compiled binaries are available" in SPEC.md

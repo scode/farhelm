@@ -4,31 +4,8 @@ A running list of things the maintainer wants fixed or built, in no particular o
 entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
 roadmap and carries no priorities unless an entry says so itself.
 
-- Finish the macOS release bundle. The release workflow's `macos` job (workflow_dispatch-gated; builds an
-  aarch64-apple-darwin `Farhelm.app` with embedded helm, managed supervisor, and the CLI at `Contents/MacOS/farhelm`)
-  has never completed, which means the README's primary quickstart references an artifact that does not exist. The tmux
-  floor decision (SPEC_impl.md's "Terminal substrate" section) already dropped the job's private darwin tmux build, its
-  cache, and the bundle-assembly copy — the app now requires Homebrew's tmux and probes for it
-  (`crates/farhelm-ui/src/desktop.rs`) — so what remains is dispatching a run and seeing the never-run darwin steps
-  through for the first time: `dx bundle` and the bundle assembly's `find` for dx's `.app` output. One product gap found
-  in review and not yet closed: when the managed supervisor refuses its tmux (missing, or below the floor), its message
-  goes to inherited stderr and the app exits before a window exists, so a Finder launch shows nothing — the refusal the
-  quickstart promises needs capturing and presenting (an alert or a minimal startup-error window) before the Mac build
-  is called done. Both prior failures (23 minutes spent of a standing 180-minute macOS-runner budget) were inside that
-  now-removed tmux build: attempt 1 died on ncurses terminfo installation under case-insensitive APFS (fixed —
-  `--disable-db-install` + system terminfo); attempt 2 died because tmux's darwin configure demands an explicit utf8proc
-  decision — deliberate upstream and still present in 3.7c/master, which auto-tries utf8proc on darwin and falls back to
-  the same error. Should the private darwin build ever come back (a bundled fallback, say), the decisions already made
-  for it stand: `--disable-jemalloc` (3.7c's darwin configure refuses to guess about it, as it already did about
-  utf8proc; the build links nothing but its own prefix), `--disable-utf8proc` (macOS's stale `wcwidth(3)` may draw newer
-  Unicode a cell off in Mac-local sessions; enabling means a fourth pinned static source, installed as an archive only
-  and linked by path), plus an `otool -L` assertion that every load command is under `/usr/lib/`, because macOS cannot
-  link a fully static executable, `ld` prefers a `.dylib` over a `.a` in the same directory, and a leaked dynamic
-  library yields a tmux that works on the runner and dies on every user's Mac with `dyld: Library
-  not loaded` — the
-  darwin leg of the script's prefix isolation has never executed on a Mac. Then tag the release commit and
-  `gh workflow run release.yml --ref <tag> -f release_tag=<tag>`, counting the job against the remaining 157 minutes.
-  Unblocks the manual Mac checklist (`docs/manual-mac-checklist.md`) and the README quickstart.
+- Show the managed supervisor's tmux refusal in a window on macOS. Today it reaches only the supervisor's log (README's
+  tmux NOTE), so a Mac without an acceptable tmux shows no reason for the missing local host.
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
   supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
@@ -203,5 +180,5 @@ roadmap and carries no priorities unless an entry says so itself.
   residual" should not quietly become "permanent".
 
 - Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
-  state, all "not run"). Blocked on the macOS release bundle above and a human with a real Mac. Not covered by any CI:
-  Playwright's WebKit is not WKWebView.
+  state, all "not run"). Blocked on a human with a real Mac. Not covered by any CI: Playwright's WebKit is not
+  WKWebView.

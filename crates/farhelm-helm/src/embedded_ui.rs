@@ -23,13 +23,25 @@ include!(concat!(env!("OUT_DIR"), "/embedded_ui.rs"));
 /// This build's compiled-in UI tree, or `None` for an ordinary developer
 /// build that left `FARHELM_UI_DIST` unset.
 ///
+/// ## Two consumers, one tree
+///
 /// [`crate::select_ui_source`] combines this with the runtime `--ui-dist`
-/// flag to pick what [`crate::build_router`] actually serves — see that
-/// function for the precedence. `farhelm-desktop` links `farhelm-helm` and
-/// will call this too once its shell is wired up (a later step in the
-/// distribution plan this crate is being built toward), so it carries the
-/// same embedded tree rather than shipping its own copy; it does not call it
-/// yet.
+/// flag to pick what [`crate::build_router`] serves to a browser — see that
+/// function for the precedence.
+///
+/// The desktop app is the other consumer, and the demanding one.
+/// `farhelm-desktop` links this crate and its `/assets/*` handler
+/// (`farhelm-ui`'s `desktop::serve_asset`) answers EVERY native asset
+/// request from this tree: D6 ships a bare binary with no `Resources/`
+/// directory beside it, and registering that handler takes the path prefix
+/// away from dioxus's own filesystem resolver, so there is no bundle
+/// directory and no filesystem fallback behind it. A file missing here is a
+/// hard 404 in the native window. `scripts/check-desktop-assets.sh` exists
+/// to keep the desktop build's asset set and this tree's contents identical
+/// for exactly that reason.
+///
+/// `--ui-dist` and `FARHELM_DESKTOP_UI_DIST` redirect only the HTTP side;
+/// neither changes what the native window renders.
 pub fn embedded_ui() -> Option<&'static include_dir::Dir<'static>> {
     #[cfg(farhelm_embedded_ui)]
     {
