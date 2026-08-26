@@ -37,7 +37,7 @@ mod tests {
     use crate::AppState;
     use crate::manager::{ConnectionManager, HostState};
     use crate::rest_harness::{FleetBuilder, Harness, HostScript};
-    use crate::store::{DialedAs, HelmStore, HostId};
+    use crate::store::{DialedAs, HelmStore, HostId, HostKind};
     use anyhow::{Context as _, bail};
     use async_trait::async_trait;
     use axum::body::{Body, to_bytes};
@@ -307,6 +307,16 @@ mod tests {
     struct FakeBackend {
         probe: Mutex<Option<Result<ProbeObservation, BackendFailure>>>,
         reach: Mutex<ReachOutcome>,
+        /// What this machine's `systemd/user` directory holds for the unit
+        /// the local-row rule asks about. `Ok(None)` is "no such file",
+        /// which is the only state most tests care about; `Err` stands in
+        /// for the lookup failures — permission, undecodable contents, an
+        /// unlocatable directory — that must never read as absence.
+        user_unit: Mutex<Result<Option<String>, String>>,
+        /// Every unit name the service asked for, in order. Lets a test
+        /// prove WHICH unit the ownership rule consults, and that paths
+        /// which have no business reading local state never do.
+        unit_reads: Mutex<Vec<String>>,
         inspect_failure: Mutex<Option<String>>,
         operations: Mutex<Vec<String>>,
         fail: Mutex<Option<String>>,
@@ -330,6 +340,8 @@ mod tests {
                     needs_tmux: false,
                     host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
                 })),
+                user_unit: Mutex::new(Ok(None)),
+                unit_reads: Mutex::new(Vec::new()),
                 inspect_failure: Mutex::new(None),
                 operations: Mutex::new(Vec::new()),
                 fail: Mutex::new(None),
@@ -525,6 +537,28 @@ mod tests {
         ) -> Result<ActionOutcome, BackendFailure> {
             self.record("restart-supervisor")
         }
+
+        async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure> {
+            self.unit_reads.lock().unwrap().push(name.to_string());
+            self.user_unit
+                .lock()
+                .unwrap()
+                .clone()
+                .map_err(|message| BackendFailure::new(message, ""))
+        }
+    }
+
+    /// The reserved local registry row, which every store mints on open.
+    async fn local_row(harness: &Harness) -> HostId {
+        harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.kind == HostKind::Local)
+            .expect("the reserved local row always exists")
+            .id
     }
 
     /// Build an isolated scripted helm whose local actor can reconnect after
@@ -783,7 +817,9 @@ mod tests {
         for attempt in 0..2 {
             let response = service
                 .probe(ProbeRequest {
-                    target: ProbeDestination::Local,
+                    target: ProbeDestination::Ssh {
+                        destination: "payloads.example".to_string(),
+                    },
                     remote_farhelm: None,
                     remote_state_dir: None,
                 })
@@ -839,7 +875,9 @@ mod tests {
         );
         let response = service
             .probe(ProbeRequest {
-                target: ProbeDestination::Local,
+                target: ProbeDestination::Ssh {
+                    destination: "preflight.example".to_string(),
+                },
                 remote_farhelm: None,
                 remote_state_dir: None,
             })
@@ -1097,7 +1135,14 @@ mod tests {
     async fn update_planning_failures_release_the_host_for_retry() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
-        let host = harness.store.list_hosts().await.unwrap()[0].id;
+        // An SSH row: UPDATE on the reserved LOCAL row is refused outright
+        // now, which would mask the retry behaviour under test.
+        let host = harness
+            .store
+            .add_ssh_host("retry.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
         let backend = FakeBackend::manual(root.path().to_path_buf(), "manual only");
         let service = service(&harness, backend.clone(), root.path());
 
@@ -1395,7 +1440,9 @@ mod tests {
         let service = service(&harness, backend.clone(), root.path());
         let response = service
             .probe(ProbeRequest {
-                target: ProbeDestination::Local,
+                target: ProbeDestination::Ssh {
+                    destination: "failing-step.example".to_string(),
+                },
                 remote_farhelm: None,
                 remote_state_dir: None,
             })
@@ -1442,7 +1489,9 @@ mod tests {
         *backend.fail.lock().unwrap() = None;
         let retry = service
             .probe(ProbeRequest {
-                target: ProbeDestination::Local,
+                target: ProbeDestination::Ssh {
+                    destination: "failing-step.example".to_string(),
+                },
                 remote_farhelm: None,
                 remote_state_dir: None,
             })
@@ -1477,7 +1526,9 @@ mod tests {
             let service = service(&harness, backend, root.path());
             let response = service
                 .probe(ProbeRequest {
-                    target: ProbeDestination::Local,
+                    target: ProbeDestination::Ssh {
+                        destination: "linger.example".to_string(),
+                    },
                     remote_farhelm: None,
                     remote_state_dir: None,
                 })
@@ -1521,7 +1572,9 @@ mod tests {
                     .uri("/api/hosts/probe")
                     .header("host", "127.0.0.1:7433")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"target":{"kind":"local"}}"#))
+                    .body(Body::from(
+                        r#"{"target":{"kind":"ssh","destination":"rest.example"}}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -1632,7 +1685,14 @@ mod tests {
         ));
         harness.state = Arc::clone(&state);
         let router = harness.router();
-        let host = harness.store.list_hosts().await.unwrap()[0].id;
+        // An SSH row: the reserved LOCAL row has no UPDATE action at all
+        // now (D1), and this test is about the handshake, not that rule.
+        let host = harness
+            .store
+            .add_ssh_host("update-route.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
 
         async fn plan(router: &axum::Router, host: HostId) -> String {
             let response = router
@@ -2276,7 +2336,9 @@ mod tests {
         );
         let response = service
             .probe(ProbeRequest {
-                target: ProbeDestination::Local,
+                target: ProbeDestination::Ssh {
+                    destination: "tmux-fixture.example".to_string(),
+                },
                 remote_farhelm: None,
                 remote_state_dir: None,
             })
@@ -2338,96 +2400,332 @@ mod tests {
         assert!(service.consume_plan(ids.last().unwrap()).await.is_ok());
     }
 
-    /// Systemd specifiers are escaped literally and unrepresentable paths
-    /// fail before a plan can be offered.
-    #[test]
-    fn systemd_rendering_is_fallible_and_escapes_percent() {
-        let unit = supervisor_unit(
-            Path::new("/tmp/%h/farhelm"),
-            Path::new("/tmp/state"),
-            Path::new("/tmp/%h"),
-            Path::new("/tmp/%h/tmux"),
-            None,
-        )
-        .unwrap();
-        assert!(unit.contains("/tmp/%%h/farhelm"));
-        assert!(unit.contains("PATH=/tmp/%%h:"));
-        // FARHELM_TMUX goes through the same escaping as PATH; a `%h` that
-        // reached systemd unexpanded would name a different binary.
-        assert!(
-            unit.contains("Environment=\"FARHELM_TMUX=/tmp/%%h/tmux\""),
-            "{unit}"
-        );
-        assert!(unit.contains("KillMode=process"));
-        assert!(!unit.contains("After=default.target"));
-        assert!(!unit.contains("@FARHELM@"));
-        assert!(!unit.contains("@STATE_DIR@"));
-        assert!(!unit.contains("@PATH@"));
-        assert!(!unit.contains("@TMUX@"));
-        assert!(
-            supervisor_unit(
-                Path::new("/tmp/farhelm"),
-                Path::new("/tmp/state\nother"),
-                Path::new("/tmp"),
-                Path::new("/tmp/tmux"),
-                None,
-            )
-            .is_err()
-        );
-        assert!(
-            supervisor_unit(
-                Path::new("/tmp/farhelm"),
-                Path::new("/tmp/state"),
-                Path::new("/tmp/with:colon"),
-                Path::new("/tmp/tmux"),
-                None,
-            )
-            .is_err()
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStringExt;
-            let non_utf8 = PathBuf::from(std::ffi::OsString::from_vec(vec![
-                b'/', b't', b'm', b'p', b'/', 0xff,
-            ]));
-            assert!(
-                supervisor_unit(
-                    Path::new("/tmp/farhelm"),
-                    &non_utf8,
-                    Path::new("/tmp"),
-                    Path::new("/tmp/tmux"),
-                    None,
-                )
-                .is_err()
+    /// A supervisor unit on the helm's own machine that runs this farhelm
+    /// belongs to whoever wrote it, and the panel says so with the
+    /// remedy that fits (D9). Both wordings are asserted whole because
+    /// they are the entire user-facing answer.
+    ///
+    /// The two differ on purpose: a unit `farhelm helm setup` wrote can be
+    /// driven with `systemctl --user restart`, while a hand-written one is
+    /// its author's to manage and is only reported as off limits to the
+    /// panel — Farhelm has no idea what that author intended.
+    ///
+    /// Both the ADD path (which reaches this only after discovery finds
+    /// nothing answering) and the UPDATE path produce it.
+    #[tokio::test]
+    async fn a_local_supervisor_unit_running_this_farhelm_is_off_limits_to_the_panel() {
+        for managed in [true, false] {
+            let harness = harness().await;
+            let root = tempfile::tempdir().unwrap();
+            let farhelm = root.path().join("farhelm");
+            std::fs::write(&farhelm, b"#!/bin/sh\n").unwrap();
+            let unit = crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
+                farhelm: &farhelm,
+                state_dir: &root.path().join("state"),
+                tmux: Path::new("/usr/bin/tmux"),
+            })
+            .unwrap();
+            let backend = FakeBackend::absent(root.path().to_path_buf());
+            *backend.user_unit.lock().unwrap() = Ok(Some(if managed {
+                crate::units::managed(unit)
+            } else {
+                unit
+            }));
+            let service = ProvisioningService::injected(
+                harness.store.clone(),
+                Arc::clone(&harness.manager),
+                backend.clone(),
+                Arc::new(NoPayloads),
+                layout(root.path()),
+                farhelm.clone(),
             );
-            // The tmux executable crosses the same text-only plan
-            // boundary as every other path and must fail there too,
-            // rather than being rendered lossily into the unit.
-            assert!(
-                supervisor_unit(
-                    Path::new("/tmp/farhelm"),
-                    Path::new("/tmp/state"),
-                    Path::new("/tmp"),
-                    &non_utf8,
-                    None,
-                )
-                .is_err()
+
+            let response = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Local,
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                })
+                .await
+                .unwrap();
+            let ProbeResponse::Manual { reason } = response else {
+                panic!("a setup-owned local supervisor must not be provisionable")
+            };
+            if managed {
+                assert_eq!(
+                    reason,
+                    "farhelm-supervisor.service on this machine is managed by farhelm helm setup; \
+                     it is not touched from the hosts panel. Start or restart it with: systemctl \
+                     --user restart farhelm-supervisor.service"
+                );
+            } else {
+                assert_eq!(
+                    reason,
+                    "farhelm-supervisor.service on this machine already runs this farhelm and was \
+                     written by hand; it is not touched from the hosts panel"
+                );
+            }
+
+            let error = service
+                .plan_update(local_row(&harness).await)
+                .await
+                .expect_err("UPDATE is the path that would overwrite the unit");
+            assert_eq!(error.to_string(), reason);
+            // The ownership question is only ever asked about the
+            // supervisor unit; the helm's own unit is none of the panel's
+            // business.
+            assert_eq!(
+                backend.unit_reads.lock().unwrap().as_slice(),
+                ["farhelm-supervisor.service", "farhelm-supervisor.service"]
             );
         }
     }
 
-    /// Systemd argument escaping handles each special character in its own
-    /// grammar rather than borrowing shell quoting rules.
-    #[test]
-    fn systemd_argument_rendering_covers_every_supported_escape() {
-        for (path, expected) in [
-            ("/tmp/a b", "\"/tmp/a b\""),
-            ("/tmp/a\"b", "\"/tmp/a\\\"b\""),
-            ("/tmp/a\\b", "\"/tmp/a\\\\b\""),
-            ("/tmp/%h", "\"/tmp/%%h\""),
+    /// With nothing answering on the helm's own machine, the panel stops
+    /// offering to install a supervisor and hands the operator to
+    /// `farhelm helm setup` instead (D1) — on the ADD path AFTER discovery
+    /// has found nothing, and on the UPDATE path before any probe at all.
+    /// This is what an ordinary first-time helm machine sees, so the
+    /// wording is asserted whole.
+    ///
+    /// A unit for some OTHER farhelm falls through to this same generic
+    /// answer: it is not this helm's supervisor, so there is no owner to
+    /// name. A unit whose command cannot be parsed does NOT — see the
+    /// unclassifiable case below.
+    #[tokio::test]
+    async fn an_absent_local_supervisor_is_answered_with_run_setup_here() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let other = root.path().join("other-farhelm");
+        std::fs::write(&other, b"#!/bin/sh\n").unwrap();
+        for unit in [
+            None,
+            Some(crate::units::managed(
+                crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
+                    farhelm: &other,
+                    state_dir: &root.path().join("state"),
+                    tmux: Path::new("/usr/bin/tmux"),
+                })
+                .unwrap(),
+            )),
         ] {
-            assert_eq!(systemd_arg(Path::new(path)).unwrap(), expected);
+            let backend = FakeBackend::absent(root.path().to_path_buf());
+            *backend.user_unit.lock().unwrap() = Ok(unit);
+            let service = service(&harness, backend.clone(), root.path());
+            let response = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Local,
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                })
+                .await
+                .unwrap();
+            let ProbeResponse::Manual { reason } = response else {
+                panic!("the local row no longer installs a supervisor")
+            };
+            assert_eq!(
+                reason,
+                "this is the helm's own machine; run farhelm helm setup here instead of \
+                 provisioning from the panel"
+            );
+            // Discovery ran first: this answer reports what the probe
+            // found, and a supervisor that ANSWERS is registered instead.
+            assert!(backend.probe.lock().unwrap().is_none());
         }
+    }
+
+    /// UPDATE on the local row is refused for EVERY local row, with no
+    /// unit file present and before any transport work — the alternate
+    /// route to the install the ADD path stopped offering.
+    ///
+    /// This is the regression the narrower rule missed: a local row whose
+    /// supervisor unit was absent (or unrecognizable) went straight on to
+    /// the ordinary UPDATE planner, which installs the binary and the unit
+    /// from nothing. That is precisely what D1 removed from the panel.
+    #[tokio::test]
+    async fn an_absent_local_supervisor_cannot_be_installed_through_update() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let error = service
+            .plan_update(local_row(&harness).await)
+            .await
+            .expect_err("UPDATE must not install a supervisor on the helm's own machine");
+        assert_eq!(
+            error.to_string(),
+            "this is the helm's own machine; run farhelm helm setup here instead of provisioning \
+             from the panel"
+        );
+        // Refused before probing: the transport is never touched, and no
+        // plan is retained for a later confirmation to execute.
+        assert!(backend.probe.lock().unwrap().is_some());
+        assert!(backend.operations.lock().unwrap().is_empty());
+        assert!(service.memory.lock().await.plans.is_empty());
+    }
+
+    /// A unit file that exists but names no command this parser can
+    /// classify must fail CLOSED. "I cannot tell what this runs" is not
+    /// "there is nothing here": answering the generic run-setup message
+    /// would invite the operator to have setup overwrite a file whose
+    /// contents nobody understood.
+    #[tokio::test]
+    async fn an_unclassifiable_local_unit_is_reported_as_somebody_elses() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.user_unit.lock().unwrap() = Ok(Some(
+            "[Service]\nType=oneshot\nExecStop=/bin/true\n".to_string(),
+        ));
+        let service = service(&harness, backend, root.path());
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Local,
+                remote_farhelm: None,
+                remote_state_dir: None,
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Manual { reason } = response else {
+            panic!("an unreadable local unit is not permission to install")
+        };
+        assert_eq!(
+            reason,
+            "farhelm-supervisor.service on this machine already runs this farhelm and was written \
+             by hand; it is not touched from the hosts panel"
+        );
+    }
+
+    /// A supervisor that is actually running on the helm's machine is
+    /// discovered and registered, its unit untouched — including the case
+    /// that matters most, where `farhelm helm setup` wrote that unit and
+    /// it names this very binary. The ownership rule exists to stop the
+    /// panel INSTALLING here, and must never stop it from adopting what
+    /// is already running; a helm machine set up with `farhelm helm setup`
+    /// joins its own fleet exactly this way.
+    #[tokio::test]
+    async fn a_running_local_supervisor_is_still_discovered() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let farhelm = root.path().join("farhelm");
+        std::fs::write(&farhelm, b"#!/bin/sh\n").unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        *backend.user_unit.lock().unwrap() = Ok(Some(crate::units::managed(
+            crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
+                farhelm: &farhelm,
+                state_dir: &root.path().join("state"),
+                tmux: Path::new("/usr/bin/tmux"),
+            })
+            .unwrap(),
+        )));
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            backend.clone(),
+            Arc::new(NoPayloads),
+            layout(root.path()),
+            farhelm.clone(),
+        );
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Local,
+                remote_farhelm: None,
+                remote_state_dir: None,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(response, ProbeResponse::Discovered { .. }));
+        // Discovery answered without ever consulting the unit file.
+        assert!(backend.unit_reads.lock().unwrap().is_empty());
+    }
+
+    /// An ownership lookup that FAILS must stop both panel paths before
+    /// any transport work. A permission error or an undecodable unit file
+    /// is not evidence that the machine is free to provision — treating
+    /// it as absence is how a protected unit gets overwritten by a helm
+    /// that merely could not read it.
+    #[tokio::test]
+    async fn an_unreadable_local_unit_stops_both_panel_paths() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.user_unit.lock().unwrap() = Err("permission denied".to_string());
+        let service = service(&harness, backend.clone(), root.path());
+
+        let add = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Local,
+                remote_farhelm: None,
+                remote_state_dir: None,
+            })
+            .await
+            .expect_err("an unreadable unit is not permission to install");
+        assert!(add.to_string().contains("permission denied"), "{add}");
+
+        let update = service
+            .plan_update(local_row(&harness).await)
+            .await
+            .expect_err("an unreadable unit is not permission to update");
+        assert!(update.to_string().contains("permission denied"), "{update}");
+        // The update path refuses before probing; the add path probes
+        // first and fails on the lookup that follows, so neither one
+        // reached the executor.
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// An SSH probe must never consult this machine's unit directory: the
+    /// local ownership seam answers a question about the HELM's machine,
+    /// and a remote host's supervisor has nothing to do with it.
+    #[tokio::test]
+    async fn an_ssh_probe_never_reads_a_local_unit() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: "remote.example".to_string(),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(response, ProbeResponse::Provisionable { .. }));
+        assert!(backend.unit_reads.lock().unwrap().is_empty());
+    }
+
+    /// The unit provisioning pushes to a host carries the reviewed
+    /// lifecycle policy, stays free of the setup ownership marker (D9:
+    /// remote units belong to the provisioning workflow, and a marked one
+    /// would invite `farhelm helm setup` on that host to rewrite it), and
+    /// refuses a path it cannot represent before any plan is offered.
+    ///
+    /// The escaping and PATH-composition rules themselves are exercised in
+    /// `crate::units`, which owns them.
+    #[test]
+    fn the_provisioned_unit_carries_policy_and_no_ownership_marker() {
+        let unit = supervisor_unit(
+            Path::new("/tmp/%h/farhelm"),
+            Path::new("/tmp/state"),
+            Path::new("/tmp/%h/tmux"),
+        )
+        .unwrap();
+        assert!(unit.contains("/tmp/%%h/farhelm"));
+        assert!(unit.contains("PATH=/tmp/%%h:"));
+        assert!(unit.contains("KillMode=process"));
+        assert!(!unit.contains("After=default.target"));
+        assert!(!unit.contains('@'), "{unit}");
+        assert!(!crate::units::is_managed(&unit), "{unit}");
+        assert!(
+            supervisor_unit(
+                Path::new("/tmp/farhelm"),
+                Path::new("/tmp/state\nother"),
+                Path::new("/tmp/tmux"),
+            )
+            .is_err()
+        );
     }
 
     /// Remote shell words round-trip hostile but representable paths and
@@ -2681,7 +2979,9 @@ mod tests {
         let initial_revision = *revisions.borrow_and_update();
         let response = provisioner
             .probe(ProbeRequest {
-                target: ProbeDestination::Local,
+                target: ProbeDestination::Ssh {
+                    destination: "per-step.example".to_string(),
+                },
                 remote_farhelm: None,
                 remote_state_dir: None,
             })
@@ -2730,7 +3030,9 @@ mod tests {
         let failing_service = service(&harness, failing, root.path());
         let response = failing_service
             .probe(ProbeRequest {
-                target: ProbeDestination::Local,
+                target: ProbeDestination::Ssh {
+                    destination: "per-step-failing.example".to_string(),
+                },
                 remote_farhelm: None,
                 remote_state_dir: None,
             })
@@ -3273,6 +3575,11 @@ mod tests {
     /// simulated action. The unit file stays below the fixture root and the
     /// user manager sees it only through a nonce-scoped runtime link removed
     /// by [`UnitGuard`] on every exit.
+    ///
+    /// The two cases enter through different panel actions since D1 —
+    /// SSH through ADD, local through UPDATE — because the local row no
+    /// longer offers to install anything. See the comment at the entry
+    /// point below; everything after it is shared.
     async fn real_provisioning_case(use_ssh: bool, update: bool) {
         let test_name = if use_ssh {
             "provisioning_over_ssh_to_localhost"
@@ -3351,46 +3658,79 @@ mod tests {
             },
             payload.clone(),
         );
-        let request = ProbeRequest {
-            target: if use_ssh {
-                ProbeDestination::Ssh {
-                    destination: "localhost".to_string(),
-                }
-            } else {
-                ProbeDestination::Local
-            },
-            remote_farhelm: use_ssh.then(|| {
-                probe_farhelm
-                    .to_str()
-                    .expect("temp path is UTF-8")
-                    .to_string()
-            }),
-            remote_state_dir: use_ssh.then(|| {
-                probe_state
-                    .to_str()
-                    .expect("temp path is UTF-8")
-                    .to_string()
-            }),
-        };
-
-        let response = service.probe(request).await.unwrap();
-        let ProbeResponse::Provisionable { probe_id, plan, .. } = response else {
-            panic!("an absent isolated supervisor must produce a plan")
+        // The two transports enter through different actions now. ADD is
+        // the SSH path; the local row has no ADD any more (D1: the panel
+        // never installs a supervisor on the helm's own machine, and an
+        // absent one is answered with "run farhelm helm setup here"), so
+        // the local case enters through the UPDATE action the panel still
+        // offers on that row. UPDATE converges the same install from
+        // nothing, which is what keeps the direct-local executor — file
+        // operations and process spawns with no ssh anywhere — under a
+        // real user manager.
+        let (accepted, plan) = if use_ssh {
+            let response = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Ssh {
+                        destination: "localhost".to_string(),
+                    },
+                    remote_farhelm: Some(
+                        probe_farhelm
+                            .to_str()
+                            .expect("temp path is UTF-8")
+                            .to_string(),
+                    ),
+                    remote_state_dir: Some(
+                        probe_state
+                            .to_str()
+                            .expect("temp path is UTF-8")
+                            .to_string(),
+                    ),
+                })
+                .await
+                .unwrap();
+            let ProbeResponse::Provisionable { probe_id, plan, .. } = response else {
+                panic!("an absent isolated supervisor must produce a plan")
+            };
+            let accepted = service
+                .start_add(ProvisionRequest { probe_id })
+                .await
+                .unwrap();
+            (accepted, plan)
+        } else {
+            let local = store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.kind == HostKind::Local)
+                .expect("the reserved local row always exists");
+            let planned = service
+                .plan_update_for_local_executor_tests(local.id)
+                .await
+                .unwrap();
+            let accepted = service
+                .start_update(
+                    local.id,
+                    ProvisionRequest {
+                        probe_id: planned.probe_id,
+                    },
+                )
+                .await
+                .unwrap();
+            (accepted, planned.plan)
         };
         assert_eq!(
             matches!(plan.target, ProvisioningTarget::Ssh { .. }),
             use_ssh,
             "the local case must never silently become SSH-to-self"
         );
-        let accepted = service
-            .start_add(ProvisionRequest { probe_id })
-            .await
-            .unwrap();
         let completed = match wait_real_run(&service, accepted.host_id).await {
             Ok(completed) => completed,
             Err(error) => {
                 service.abort_run(accepted.host_id).await;
-                guard.cleanup().expect("cleanup after timed-out ADD");
+                guard
+                    .cleanup()
+                    .expect("cleanup after the timed-out install");
                 panic!("{error:#}");
             }
         };
@@ -3432,8 +3772,11 @@ mod tests {
             );
         }
 
-        // ADD reruns discovery and uses the answering supervisor as-is. It
-        // does not reinterpret an explicit retry as permission to update.
+        // A rerun of discovery uses the answering supervisor as-is. It does
+        // not reinterpret an explicit retry as permission to update — and
+        // for the local row this is also the proof that a supervisor which
+        // ANSWERS still discovers normally, rather than being swallowed by
+        // the refusal an absent one now gets.
         let previous_run = completed.run_id;
         let rerun = service
             .probe(ProbeRequest {
@@ -3469,7 +3812,16 @@ mod tests {
             tokio::fs::write(&newer, &bytes).await.unwrap();
             set_mode(&newer, 0o755).await.unwrap();
             *payloads.farhelm.lock().unwrap() = newer;
-            let update_plan = service.plan_update(accepted.host_id).await.unwrap();
+            // The SSH row plans through the panel's own action; the local
+            // row has no panel action left and uses the executor seam.
+            let update_plan = if use_ssh {
+                service.plan_update(accepted.host_id).await.unwrap()
+            } else {
+                service
+                    .plan_update_for_local_executor_tests(accepted.host_id)
+                    .await
+                    .unwrap()
+            };
             let update_run = service
                 .start_update(
                     accepted.host_id,
@@ -3531,6 +3883,12 @@ mod tests {
 
     /// The local path performs no SSH, and the explicit UPDATE replaces the
     /// payload, restarts only the supervisor, and preserves its tmux session.
+    ///
+    /// Both of this case's runs are UPDATEs now: the hosts panel's local
+    /// row stopped offering to install a supervisor (D1), so UPDATE is the
+    /// only entry point left into the direct-local executor — and it is a
+    /// real one, since a local row whose supervisor unit was not written
+    /// by `farhelm helm setup` is still the panel's to converge.
     #[tokio::test]
     async fn local_provisioning_and_update_preserve_a_running_session() {
         real_provisioning_case(false, true).await;

@@ -13892,7 +13892,30 @@ pub(crate) mod tests {
         let listener = UnixListener::bind(&socket).expect("bind");
         drop(listener);
         assert!(socket.exists(), "the stale socket file must remain");
-        let refused = connect(dir.path()).await.unwrap_err();
+        // Retried, briefly, and the reason is a real race rather than
+        // flakiness insurance: this is a multi-threaded test binary whose
+        // other tests spawn processes constantly, and a `fork` that lands
+        // between the `bind` above and its `drop` gives the child a
+        // duplicate of the listening descriptor. Close-on-exec closes it
+        // the instant that child execs, but until then the socket still
+        // has a listener and `connect` legitimately SUCCEEDS. Waiting out
+        // that window costs nothing; asserting on the first answer made
+        // the whole suite fail about one run in three.
+        // Bounded, so a genuine regression fails loudly instead of hanging.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let refused = loop {
+            match connect(dir.path()).await {
+                Err(error) => break error,
+                Ok(stream) => {
+                    drop(stream);
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "a socket whose listener is gone kept accepting connections"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
+        };
 
         for (err, expected_kind) in [
             (missing, std::io::ErrorKind::NotFound),

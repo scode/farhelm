@@ -194,6 +194,22 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         unit: &str,
     ) -> Result<ActionOutcome, BackendFailure>;
 
+    /// Read one unit file out of THIS machine's systemd user directory,
+    /// or `None` when no such file exists.
+    ///
+    /// Takes no target on purpose: the only question it answers is about
+    /// the helm's own machine, where `farhelm helm setup` — not the hosts
+    /// panel — owns the units (D9). The local row consults it before
+    /// probing so a supervisor unit setup wrote can never be overwritten
+    /// from the panel.
+    ///
+    /// `None` means one thing only: no such file. Every other outcome —
+    /// an unreadable file, contents that are not UTF-8, a unit directory
+    /// that cannot be located — is an error, because the caller reads
+    /// `None` as "there is nothing here to protect" and would go on to
+    /// install over whatever it could not read.
+    async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure>;
+
     /// Let a deliberately injected backend complete attachment without a
     /// real manager transport. Production returns `None`, preserving the
     /// manager-owned attach path below.
@@ -1465,6 +1481,46 @@ impl ProvisioningBackend for SystemBackend {
         .await?;
         Ok(ActionOutcome::Completed)
     }
+
+    /// The helm's own process environment is the authority here, which is
+    /// the one place in this file where that is true rather than a
+    /// shortcut: this method asks about the machine the helm itself runs
+    /// on, so the manager that would load the unit is the helm's own user
+    /// manager. Remote hosts are asked over SSH by `inspect` instead, and
+    /// the derivation is shared with it through
+    /// [`crate::units::user_unit_dir`].
+    ///
+    /// Everything short of a confirmed absence is an error. A missing
+    /// `HOME` with no absolute `XDG_CONFIG_HOME`, a file this process may
+    /// not read, contents that are not UTF-8 — none of those mean "no
+    /// protected unit exists", and answering `None` for them would let
+    /// the panel install over a unit it merely failed to inspect.
+    async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure> {
+        let home = std::env::var_os("HOME").filter(|value| !value.is_empty());
+        let directory = crate::units::user_unit_dir_for(
+            std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+            home.as_ref().map(Path::new),
+        )
+        .map_err(|error| BackendFailure::new(format!("{error:#}"), ""))?;
+        let path = directory.join(name);
+        match tokio::fs::read(&path).await {
+            Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| {
+                BackendFailure::new(
+                    format!(
+                        "the unit file {} is not valid UTF-8, so it cannot be checked for \
+                         ownership",
+                        path.display()
+                    ),
+                    "",
+                )
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(BackendFailure::new(
+                format!("reading the unit file {}", path.display()),
+                error.to_string(),
+            )),
+        }
+    }
 }
 
 /// Encode a path as one remote shell word, refusing bytes that cannot cross
@@ -1476,20 +1532,13 @@ pub(super) fn shell_path(path: &Path) -> Result<String, BackendFailure> {
 /// Preserve a path exactly at every text-only SSH, registry, and systemd
 /// boundary. Rejecting before confirmation is safer than displaying one path
 /// and later mutating a lossy approximation of it.
+///
+/// Provisioning's failure type over [`crate::units::path_text`], which owns
+/// the rule so that unit rendering and remote command lines cannot come to
+/// disagree about which paths are representable. No host ran anything, so
+/// there is no host stderr to carry.
 pub(super) fn path_text(path: &Path) -> Result<String, BackendFailure> {
-    let text = path.to_str().ok_or_else(|| {
-        BackendFailure::new(
-            format!("path {} is not valid UTF-8", path.to_string_lossy()),
-            "ssh and systemd command paths are text",
-        )
-    })?;
-    if text.chars().any(char::is_control) {
-        return Err(BackendFailure::new(
-            format!("path {text:?} contains a control character"),
-            "",
-        ));
-    }
-    Ok(text.to_string())
+    crate::units::path_text(path).map_err(|error| BackendFailure::new(format!("{error:#}"), ""))
 }
 
 /// Encode one batch-mode sftp path. Sftp has its own quoting grammar and

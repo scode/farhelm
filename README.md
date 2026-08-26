@@ -100,10 +100,11 @@ account, and offers `loginctl enable-linger` as an optional step so the supervis
 offers an update action with the same plan-then-confirm handshake.
 
 Hosts the automatic path does not support keep a manual fallback: run `farhelm supervisor run` in a terminal (with a
-tmux at or above the floor on `PATH`, or named with `--tmux`), or adapt `units/farhelm-supervisor.service.in` from the
-Linux archive by filling in its `@…@` placeholders — `@FARHELM@`, `@STATE_DIR@`, `@PATH@`, and `@TMUX@`, the last being
-the exact tmux executable the unit pins through `FARHELM_TMUX`. A supervisor set up either way is found by "add host"
-like any other.
+tmux at or above the floor on `PATH`, or named with `--tmux`), or write a systemd user unit by hand. For the unit,
+`farhelm helm setup --dry-run` on that host prints both units Farhelm would install — take the
+`farhelm-supervisor.service` one and ignore the helm unit, which belongs on the helm's machine rather than a host. The
+templates behind them are in `crates/farhelm-helm/units/`. A supervisor set up either way is found by "add host" like
+any other.
 
 ### macOS hosts
 
@@ -134,13 +135,19 @@ NOTE for coding agents: these steps modify the operator's live install. They are
 AGENTS.md forbids agents from running them — or from restarting the helm's units — unless the user explicitly asks.
 
 - Extract `farhelm-linux-x86_64.tar.gz` into `~/.local/lib/farhelm/`.
-- Run `mkdir -p ~/.config/systemd/user`, then copy `~/.local/lib/farhelm/units/farhelm-helm.service` into that
-  directory.
-- Run `systemctl --user daemon-reload && systemctl --user enable --now farhelm-helm.service`.
+- Run `~/.local/lib/farhelm/farhelm helm setup`. It writes the helm and supervisor systemd user units, enables and
+  starts both, and prints the two hints below. `--dry-run` prints the units it would write and the commands it would
+  run, and changes nothing; `--uninstall` removes the units it wrote. It owns only the files it wrote — a unit you wrote
+  yourself makes it refuse rather than replace it — and it never installs tmux. The helm unit it writes serves the web
+  UI out of the binary, so it expects a release build with the UI embedded. Beside the units it keeps two dot-files
+  systemd ignores: a lock, so two setups cannot run at once, and a short-lived `.<unit>.restart-pending` marker that
+  makes a rerun finish a restart an interrupted run still owed.
 - Run `loginctl enable-linger "$USER"` so the helm can start at boot and survive logout, where the machine allows it.
 - Open `http://127.0.0.1:7433/` and paste the token printed by `~/.local/lib/farhelm/farhelm helm token show`.
-- In the hosts panel, the local row offers supervisor setup when none is present; remote hosts are added exactly as in
-  the quickstart above.
+- In the hosts panel, remote hosts are added exactly as in the quickstart above. The panel never installs a supervisor
+  on the helm's own machine: with none running there it tells you to run `farhelm helm setup`, and with one this setup
+  installed it says so and points at `systemctl --user`. A running local supervisor is discovered and used like any
+  other host.
 
 ## Development
 

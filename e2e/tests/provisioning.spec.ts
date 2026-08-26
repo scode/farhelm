@@ -483,85 +483,40 @@ test("a malformed accepted ADD closes the form and warns without retrying", asyn
   await expect(page.locator(".add-host-warning")).toContainText("accepted");
 });
 
-test("local setup waits for idle progress and reacts down, connected, then down again", async ({
+// The helm's own machine is `farhelm helm setup`'s to own (plan D1), so an
+// absent local supervisor is answered with that instruction instead of an
+// install plan. What still has to work is the state machine around it: the
+// answer arrives on the down transition, clears when the supervisor comes
+// back, and one probe is spent per transition rather than per render.
+test("local setup answers an absent supervisor with run-setup, and reacts down, connected, then down again", async ({
   page,
 }) => {
   const state = { down: false };
   const feed = await controlLocalState(page, state);
   await page.goto("/");
   await openHostsPanel(page);
-  await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toHaveCount(0);
+  await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toHaveCount(0);
 
   state.down = true;
   await notifyFeed(feed, 2);
-  await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toBeVisible();
-  await expect(page.locator('[data-host-kind="local"] .provisioning-manual.secondary')).toContainText(
+  await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toContainText(
+    "run farhelm helm setup here instead of provisioning from the panel",
+  );
+  await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toHaveCount(0);
+  await expect(page.locator('[data-host-kind="local"] .provisioning-manual')).toContainText(
     "farhelm supervisor run",
   );
   state.down = false;
   await notifyFeed(feed, 3);
-  await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toHaveCount(0);
+  await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toHaveCount(0);
   state.down = true;
   await notifyFeed(feed, 4);
   await expect.poll(async () =>
     (await backendEvents()).filter((event) => event.target === "local" && event.event === "probe").length,
   ).toBe(2);
-  await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toBeVisible();
-});
-
-// Acceptance starts the operation before its first progress GET. The manual
-// escape hatch must stay visually subordinate throughout that gap, not invite
-// a second supervisor start while automatic setup is already executing.
-test("accepted local setup keeps its manual command secondary before progress arrives", async ({
-  page,
-}) => {
-  const state = { down: true };
-  await controlLocalState(page, state);
-  let accepted = false;
-  let releaseProgress = () => {};
-  const progressGate = new Promise<void>((resolve) => {
-    releaseProgress = resolve;
-  });
-  await page.route("**/api/hosts/provision", async (route) => {
-    accepted = true;
-    await route.fulfill({
-      status: 202,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
-      body: JSON.stringify({ host_id: 1, run_id: "accepted-local-gap" }),
-    });
-  });
-  await page.route("**/api/hosts/1/provisioning", async (route) => {
-    if (!accepted) return route.continue();
-    await progressGate;
-    await route.fulfill({
-      status: 200,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
-      body: JSON.stringify({
-        host_id: 1,
-        run_id: "accepted-local-gap",
-        operation: "add",
-        status: "running",
-        steps: [],
-        message: null,
-      }),
-    });
-  });
-  await page.goto("/");
-  await openHostsPanel(page);
-  const local = page.locator('[data-host-kind="local"]');
-  await expect(local.locator(".provisioning-plan")).toBeVisible();
-
-  await local.locator(".provisioning-confirm").click();
-  await expect(local.locator(".provisioning-manual.secondary")).toContainText(
-    "farhelm supervisor run",
+  await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toContainText(
+    "run farhelm helm setup here instead of provisioning from the panel",
   );
-
-  releaseProgress();
-  await expect(local.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
-  await expect(local.locator(".provisioning-manual.secondary")).toBeVisible();
 });
 
 // Step status is a forward-compatible string even though aggregate run state
@@ -590,30 +545,10 @@ test("an unknown future progress-step status renders verbatim", async ({ page })
   await expect(step.locator(".provisioning-step-status")).toHaveText("awaiting-reboot");
 });
 
-// Cancel withdraws one plan, not SPEC's automatic-setup capability. The local
-// row needs an explicit way to request a fresh one-use plan after that choice.
-test("canceling local setup leaves the automatic offer available", async ({ page }) => {
-  const state = { down: true };
-  await controlLocalState(page, state);
-  await page.goto("/");
-  await openHostsPanel(page);
-  const local = page.locator('[data-host-kind="local"]');
-  await expect(local.locator(".provisioning-plan")).toBeVisible();
-
-  await local.locator(".provisioning-cancel").click();
-  await expect(local.locator(".provisioning-plan")).toHaveCount(0);
-  await expect(local.locator(".provisioning-auto-setup")).toBeVisible();
-  await local.locator(".provisioning-auto-setup").click();
-
-  await expect(local.locator(".provisioning-plan")).toBeVisible();
-  await expect.poll(async () =>
-    (await backendEvents()).filter((event) => event.target === "local" && event.event === "probe").length,
-  ).toBe(2);
-});
-
-// A transport failure did not classify the local target as manual-only. Keep
-// retry available so a temporary failure cannot strand setup until reload.
-test("a transient local probe error can return to the automatic offer", async ({ page }) => {
+// A transport failure is not the same answer as "this machine is the helm's
+// own". Keep retry available so a temporary failure cannot strand the row
+// until reload, and let the retry reach the real answer.
+test("a transient local probe error can be retried into the run-setup answer", async ({ page }) => {
   const state = { down: true };
   await controlLocalState(page, state);
   await configureBackend({
@@ -629,7 +564,10 @@ test("a transient local probe error can return to the automatic offer", async ({
 
   await configureBackend();
   await local.locator(".provisioning-auto-setup").click();
-  await expect(local.locator(".provisioning-plan")).toBeVisible();
+  await expect(local.locator(".provisioning-error")).toContainText(
+    "run farhelm helm setup here instead of provisioning from the panel",
+  );
+  await expect(local.locator(".provisioning-plan")).toHaveCount(0);
 });
 
 test("local automatic discovery does not start before the authoritative idle view", async ({
@@ -651,28 +589,30 @@ test("local automatic discovery does not start before the authoritative idle vie
   expect((await backendEvents()).some((event) => event.target === "local")).toBe(false);
 
   release();
-  await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toBeVisible();
+  await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toContainText(
+    "run farhelm helm setup here instead of provisioning from the panel",
+  );
   expect((await backendEvents()).some((event) => event.target === "local" && event.event === "probe")).toBe(true);
 });
 
+// A manual-only answer must not leave the row half-offering automation: no
+// plan, and no "set up automatically" button whose only outcome would be the
+// same refusal again. Every helm machine WITHOUT a local supervisor reaches
+// this state, so its rendering is the one most users see first; the state
+// clears as soon as a supervisor is running, which the tail of this test
+// checks.
 test("manual-only local setup leaves the manual command primary", async ({ page }) => {
   const state = { down: true };
   const feed = await controlLocalState(page, state);
-  await configureBackend({
-    targets: {
-      local: {
-        inspect: "manual",
-        message: "automatic provisioning requires a usable systemd user manager",
-      },
-    },
-  });
   await page.goto("/");
   await openHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-manual:not(.secondary)")).toContainText(
     "farhelm supervisor run",
   );
-  await expect(local.locator(".provisioning-error")).toContainText("usable systemd user manager");
+  await expect(local.locator(".provisioning-error")).toContainText(
+    "this is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel",
+  );
   await expect(local.locator(".provisioning-plan")).toHaveCount(0);
   await expect(local.locator(".provisioning-auto-setup")).toHaveCount(0);
 
@@ -703,7 +643,9 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-rerun")).toBeVisible();
   await local.locator(".provisioning-rerun").click();
-  await expect(local.locator(".provisioning-plan")).toBeVisible();
+  await expect(local.locator(".provisioning-error")).toContainText(
+    "run farhelm helm setup here instead of provisioning from the panel",
+  );
 
   // A feed notification only starts reconciliation. Register its request
   // boundary first, then publish the marker and revision without yielding;
@@ -720,7 +662,9 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
   try {
     await refresh;
     await expect(local.locator(".provisioning-manual")).toContainText(refreshedError);
-    await expect(local.locator(".provisioning-plan")).toBeVisible();
+    await expect(local.locator(".provisioning-error")).toContainText(
+      "run farhelm helm setup here instead of provisioning from the panel",
+    );
   } finally {
     // Feed and fallback refreshes can coalesce after the visible assertion.
     // Drain and remove their handlers here so context teardown never disposes

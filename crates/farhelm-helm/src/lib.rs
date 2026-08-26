@@ -183,6 +183,10 @@ pub use token_control::{rotate as rotate_token, show as show_token};
 /// Local and SSH transport implementations behind the connection manager's seam.
 mod transport;
 
+/// The systemd user units Farhelm writes, shared by `farhelm helm setup`
+/// and remote provisioning so the two cannot render different policy.
+pub mod units;
+
 /// `POST /api/sessions/{id}/attachments` — the streaming attachment
 /// upload.
 mod uploads;

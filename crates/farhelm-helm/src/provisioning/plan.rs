@@ -1,8 +1,9 @@
 //! The confirmed plan is the only description of the work: confirmation and
 //! execution walk the same frozen actions.
 
-use super::backend::{BackendFailure, Reach, path_text};
+use super::backend::{BackendFailure, Reach};
 use crate::store::{HostKind, HostRow};
+use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -293,13 +294,7 @@ impl PlanLayout {
                 .clone()
                 .expect("reach accepted the host tmux, so it recorded which one")
         };
-        let content = supervisor_unit(
-            &farhelm_path,
-            &state_dir,
-            &lib_dir,
-            &tmux_program,
-            reach.host_tmux.as_deref().and_then(Path::parent),
-        )?;
+        let content = supervisor_unit(&farhelm_path, &state_dir, &tmux_program)?;
         actions.extend([
             ProvisioningAction::WriteUnit {
                 unit: self.unit_name.clone(),
@@ -360,127 +355,55 @@ impl PlanLayout {
     }
 }
 
-/// Quote one path for systemd's ExecStart grammar.
-pub(super) fn systemd_arg(path: &Path) -> Result<String, BackendFailure> {
-    Ok(format!(
-        "\"{}\"",
-        path_text(path)?
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('%', "%%")
-    ))
-}
-
-const SUPERVISOR_UNIT_TEMPLATE: &str =
-    include_str!("../../../../release/farhelm-supervisor.service.in");
-
-/// Substitute the reviewed unit-template fields without rescanning
-/// inserted path text as template syntax.
+/// Carry a unit-rendering refusal into provisioning's failure type.
 ///
-/// A path may legally contain strings such as `@STATE_DIR@`. Appending each
-/// replacement directly, instead of chaining `str::replace`, keeps that text
-/// literal and preserves the path contract provisioning already accepts.
-fn render_supervisor_unit_template(
-    farhelm: &str,
-    state_dir: &str,
-    search: &str,
-    tmux: &str,
-) -> String {
-    let values = [
-        ("@FARHELM@", farhelm),
-        ("@STATE_DIR@", state_dir),
-        ("@PATH@", search),
-        ("@TMUX@", tmux),
-    ];
-    let mut rendered = String::with_capacity(SUPERVISOR_UNIT_TEMPLATE.len() + 128);
-    let mut rest = SUPERVISOR_UNIT_TEMPLATE;
-    while let Some((offset, token, value)) = values
-        .iter()
-        .filter_map(|(token, value)| rest.find(token).map(|offset| (offset, *token, *value)))
-        .min_by_key(|(offset, _, _)| *offset)
-    {
-        rendered.push_str(&rest[..offset]);
-        rendered.push_str(value);
-        rest = &rest[offset + token.len()..];
-    }
-    rendered.push_str(rest);
-    rendered
-}
-
-/// Escape one value for the body of a systemd `Environment="…"` line.
-///
-/// Shared by PATH and `FARHELM_TMUX` so the two cannot drift: systemd
-/// unescapes backslashes and double quotes inside the quoted form, and
-/// expands `%` specifiers anywhere in the value, so all three have to be
-/// doubled or the unit means something other than the path provisioning
-/// chose.
-fn environment_value(text: &str) -> String {
-    text.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('%', "%%")
+/// Rendering never touches the host, so there is no host stderr to
+/// preserve: the whole explanation is in the message.
+fn unit_failure(error: anyhow::Error) -> BackendFailure {
+    BackendFailure::new(format!("{error:#}"), "")
 }
 
 /// Render the supervisor unit from the paths carried by the plan.
 ///
-/// `release/farhelm-supervisor.service.in` is the canonical unit. Keeping its
-/// fixed policy in one reviewed file prevents release packaging and remote
-/// provisioning from quietly shipping different lifecycle behavior.
+/// A thin adapter over [`crate::units::render_supervisor_unit`], which
+/// `farhelm helm setup` shares: one renderer means remote provisioning and
+/// local setup cannot ship different lifecycle behaviour. Release
+/// packaging is NOT yet in that set — `release/` still holds its own
+/// copies of these files, and the distribution plan's Step 5 is what
+/// deletes them and makes packaging consume the shared templates. Until
+/// then the two have to be changed together.
+///
+/// The unit is deliberately left UNMARKED — the managed-by marker means
+/// "setup owns this file", and provisioning's remote units are owned by
+/// the provisioning workflow instead.
 ///
 /// `tmux_program` is pinned into the unit as `FARHELM_TMUX`, and that is
 /// the load-bearing part: PATH alone was not enough to express which tmux
-/// provisioning approved. Farhelm's own lib directory comes first on that
-/// PATH so a host where Farhelm supplies tmux finds the payload, which
-/// means an OBSOLETE private tmux left by an earlier install shadowed an
-/// accepted host tmux — provisioning would report success, skip the
-/// payload because the host binary cleared the floor, and then restart the
-/// supervisor onto the below-floor leftover it had just declined to
-/// replace. Naming the executable outright removes the ambiguity, on both
-/// branches: the host binary when it was accepted, the freshly installed
-/// payload when it was not.
+/// provisioning approved. An OBSOLETE private tmux left by an earlier
+/// install used to shadow an accepted host tmux — provisioning would
+/// report success, skip the payload because the host binary cleared the
+/// floor, and then restart the supervisor onto the below-floor leftover it
+/// had just declined to replace. Naming the executable outright removes
+/// the ambiguity, on both branches: the host binary when it was accepted,
+/// the freshly installed payload when it was not.
 ///
-/// `host_tmux_dir` still joins PATH after the lib directory, for the
-/// separate reason that a systemd user-manager process does not
-/// necessarily inherit the login shell PATH the reach check ran under, and
-/// anything the supervisor or a session shells out to should still find
-/// tmux by name. `KillMode=process` is equally deliberate: tmux owns the
-/// durable sessions, so restarting their manager must stop only the
-/// supervisor process rather than systemd's default whole control group.
+/// The unit's PATH now follows from those two executables (see the shared
+/// renderer) rather than from a separately supplied lib and host-tmux
+/// directory. That is the same set in every case provisioning produces —
+/// the layout puts `farhelm` in the lib directory, and an ACCEPTED host
+/// tmux is the program being pinned — with one deliberate difference: when
+/// provisioning installs its own tmux payload, the directory of the host's
+/// REJECTED tmux no longer joins PATH. Nothing needs it there; the payload
+/// answers `tmux` by name from the lib directory that comes first anyway.
 pub(super) fn supervisor_unit(
     farhelm: &Path,
     state_dir: &Path,
-    lib_dir: &Path,
     tmux_program: &Path,
-    host_tmux_dir: Option<&Path>,
 ) -> Result<String, BackendFailure> {
-    let mut search = vec![lib_dir.to_path_buf()];
-    if let Some(tmux_dir) = host_tmux_dir
-        && !search.iter().any(|path| path == tmux_dir)
-    {
-        search.push(tmux_dir.to_path_buf());
-    }
-    search.extend([
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-    ]);
-    let search = search
-        .iter()
-        .map(|path| {
-            let text = path_text(path)?;
-            if text.contains(':') {
-                return Err(BackendFailure::new(
-                    format!("PATH component {text:?} contains ':'"),
-                    "systemd Environment PATH cannot represent that component faithfully",
-                ));
-            }
-            Ok(text)
-        })
-        .collect::<Result<Vec<_>, BackendFailure>>()?
-        .join(":");
-    Ok(render_supervisor_unit_template(
-        &systemd_arg(farhelm)?,
-        &systemd_arg(state_dir)?,
-        &environment_value(&search),
-        &environment_value(&path_text(tmux_program)?),
-    ))
+    render_supervisor_unit(&SupervisorUnitInputs {
+        farhelm,
+        state_dir,
+        tmux: tmux_program,
+    })
+    .map_err(unit_failure)
 }

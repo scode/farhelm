@@ -23,6 +23,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// What the hosts panel says about the helm's own machine when nothing
+/// there is already somebody's supervisor.
+///
+/// The local row stopped installing supervisors in the distribution plan's
+/// D1: a helm machine's units are `farhelm helm setup`'s to write, and the
+/// panel's job is to say so rather than to build a second, differently
+/// shaped installation beside it.
+const LOCAL_SETUP_HANDOFF: &str = "this is the helm's own machine; run farhelm helm setup here instead of provisioning from \
+     the panel";
+
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_PENDING_PLANS: usize = 64;
 const MAX_CONCURRENT_RUNS: usize = 4;
@@ -229,6 +239,64 @@ impl ProvisioningService {
         }
     }
 
+    /// What to tell the operator instead of installing or updating a
+    /// supervisor on the helm's own machine.
+    ///
+    /// The panel does neither of those here any more (D1/D9): the
+    /// helm-machine layout belongs to `farhelm helm setup`, which is the
+    /// only thing that knows how to write units for the binary this helm
+    /// is running. Every caller therefore gets a reason, never a
+    /// permission — the only question this answers is WHICH reason:
+    ///
+    /// - A `farhelm-supervisor.service` whose `ExecStart=` resolves to
+    ///   this helm's own binary means somebody already owns the
+    ///   supervisor here. `farhelm helm setup` wrote it (marked) or a
+    ///   person did, and the two get different advice: the first can be
+    ///   driven with `systemctl --user restart`, while the second is its
+    ///   author's to manage and is only reported as off limits.
+    /// - Anything else — no unit, or one running some OTHER farhelm — is
+    ///   the ordinary first-run answer: run setup here.
+    ///
+    /// Resolution is by canonical path on both sides, so a symlinked
+    /// `~/.local/bin/farhelm` and the binary it points at are recognized
+    /// as the same program. A unit that exists but names no classifiable
+    /// program FAILS CLOSED into the hand-written wording: something is
+    /// there, this code cannot tell what it runs, and the one answer that
+    /// must never come out of that is "there is nothing here".
+    async fn local_handoff_reason(&self) -> anyhow::Result<String> {
+        let unit = crate::units::SUPERVISOR_UNIT_NAME;
+        let handwritten = format!(
+            "{unit} on this machine already runs this farhelm and was written by hand; it is not \
+             touched from the hosts panel"
+        );
+        let text = self
+            .backend
+            .read_user_unit(unit)
+            .await
+            .map_err(anyhow::Error::new)?;
+        let Some(text) = text else {
+            return Ok(LOCAL_SETUP_HANDOFF.to_string());
+        };
+        let Some(program) = crate::units::exec_start_program(&text) else {
+            return Ok(handwritten);
+        };
+        let resolved = (
+            std::fs::canonicalize(&program),
+            std::fs::canonicalize(&self.local_farhelm),
+        );
+        if !matches!(resolved, (Ok(unit_program), Ok(ours)) if unit_program == ours) {
+            return Ok(LOCAL_SETUP_HANDOFF.to_string());
+        }
+        Ok(if crate::units::is_managed(&text) {
+            format!(
+                "{unit} on this machine is managed by farhelm helm setup; it is not touched from \
+                 the hosts panel. Start or restart it with: systemctl --user restart {unit}"
+            )
+        } else {
+            handwritten
+        })
+    }
+
     /// Complete discovery before either registering an answer or retaining a
     /// non-mutating plan for later confirmation.
     pub(super) async fn probe(&self, mut request: ProbeRequest) -> anyhow::Result<ProbeResponse> {
@@ -254,6 +322,12 @@ impl ProvisioningService {
             request.remote_state_dir = request.remote_state_dir.or(row.remote_state_dir);
         }
         let (target, registration) = self.target(&request)?;
+        // Discovery comes FIRST, on every transport including the local
+        // one. Reading a unit file is not what decides whether a
+        // supervisor is there — a running one answers the protocol hello
+        // and gets registered and used as-is, with its unit untouched.
+        // The local handoff below is about INSTALLING, and only an absent
+        // supervisor raises that question.
         match self
             .backend
             .probe(&target)
@@ -286,6 +360,16 @@ impl ProvisioningService {
                 })
             }
             ProbeObservation::Absent => {
+                // Nothing answered on the helm's OWN machine, so the next
+                // step would have been to install one — which is exactly
+                // what the panel no longer does here. Hand the operator to
+                // `farhelm helm setup`, naming whoever already owns the
+                // supervisor unit if anybody does.
+                if matches!(target.transport, ProvisioningTarget::Local) {
+                    return Ok(ProbeResponse::Manual {
+                        reason: self.local_handoff_reason().await?,
+                    });
+                }
                 let reach = match self
                     .backend
                     .inspect(&target)
@@ -452,7 +536,52 @@ impl ProvisioningService {
 
     /// Inspect an existing row and retain one exact UPDATE plan without
     /// changing either the registry or the host.
+    ///
+    /// A LOCAL row never gets that far. UPDATE is the path that writes the
+    /// unit file and the binary beside it, and on the helm's own machine
+    /// that is `farhelm helm setup`'s job whether or not a supervisor unit
+    /// happens to be there right now (D1). Refusing every local row —
+    /// rather than only the ones already carrying a recognizable unit —
+    /// is what closes the alternate route to the install the ADD path
+    /// stopped offering.
+    ///
+    /// Refusing before the probe also removes a time-of-check problem the
+    /// narrower rule had: a plan retained here is confirmed later, under
+    /// the host write claim, and nothing re-read the unit file in between.
+    /// With no local plan reachable at all, there is no stale local plan
+    /// for a newly written unit to lose a race against — see the note in
+    /// [`Self::start_update`].
     pub(super) async fn plan_update(&self, host: HostId) -> anyhow::Result<UpdatePlanResponse> {
+        let row = self.host_row(host).await?;
+        if row.kind == HostKind::Local {
+            bail!(self.local_handoff_reason().await?);
+        }
+        self.plan_update_unguarded(host).await
+    }
+
+    /// [`Self::plan_update`] without the local-row refusal, for the tests
+    /// that must still drive the direct-local executor.
+    ///
+    /// The executor's local branch — file operations and process spawns
+    /// with no ssh anywhere — is still production code reached by SSH
+    /// planning's shared action vocabulary, and the real-systemd
+    /// integration test is the only thing that exercises it end to end
+    /// against a live user manager. That test used to enter through the
+    /// panel's own ADD, then through its UPDATE; both are now closed for
+    /// local rows on purpose, so it enters here instead. This seam
+    /// deliberately exposes no HTTP surface and no production caller: the
+    /// panel cannot reach it, which is the whole point of the rule above.
+    #[cfg(test)]
+    pub(super) async fn plan_update_for_local_executor_tests(
+        &self,
+        host: HostId,
+    ) -> anyhow::Result<UpdatePlanResponse> {
+        self.plan_update_unguarded(host).await
+    }
+
+    /// The UPDATE planner itself. See [`Self::plan_update`] for the local
+    /// row's refusal, which is deliberately NOT part of this.
+    async fn plan_update_unguarded(&self, host: HostId) -> anyhow::Result<UpdatePlanResponse> {
         let _slot = self
             .plan_slots
             .acquire()
@@ -540,6 +669,16 @@ impl ProvisioningService {
     }
 
     /// Consume one host-bound UPDATE plan and only then claim the run.
+    ///
+    /// Confirmation revalidates the registry row, update trust, and the
+    /// supervisor identity, but deliberately does NOT re-read this
+    /// machine's supervisor unit. It has nothing to re-read: a plan can
+    /// only exist for a row [`Self::plan_update`] accepted, and it accepts
+    /// no local row at all. A unit appearing between planning and
+    /// confirmation therefore cannot be overwritten by a stale local plan,
+    /// because no such plan can be minted. If a local plan ever becomes
+    /// reachable again, the ownership check has to be repeated HERE, under
+    /// the host write claim — planning-time evidence is stale by then.
     pub(super) async fn start_update(
         self: &Arc<Self>,
         host: HostId,
