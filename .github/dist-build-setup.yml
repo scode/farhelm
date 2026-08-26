@@ -1,0 +1,245 @@
+# Steps cargo-dist splices into the top of EVERY per-target build job
+# (`build-local-artifacts` in the generated `release.yml`), before it installs
+# dist or runs a single cargo command.
+#
+# This file is NOT a workflow. It is a bare YAML list of GitHub Actions steps
+# that only dist reads, at `dist generate` time, inlining them into the
+# generated workflow — so a change here does nothing until `dist init --yes`
+# regenerates `release.yml`, the same rule as every other dist setting.
+#
+# It sits in `.github/` rather than `.github/workflows/` because GitHub tries
+# to parse everything at the top level of the workflows directory as a
+# workflow, and a top-level YAML list is not one.
+# `github-build-setup` in `dist-workspace.toml` resolves its value relative to
+# `.github/workflows/`, which is why the configured path starts with `../`.
+#
+# ## Why the release test gate lives here rather than in a plan job
+#
+# These steps are the ONLY place a pre-build gate can fail loudly. dist 0.32's
+# generated graph treats a skipped artifact job as acceptable — `host` runs
+# when `build-local-artifacts` is `success` OR `skipped` — so a failed
+# dependency UPSTREAM of the build jobs (a `plan-jobs` entry, which is what
+# this project used first) makes them skip, and the release is then created
+# with none of its payloads. A failure INSIDE a build job is a job failure,
+# which `host` does reject. So the gate runs here, in the job whose result
+# actually gates publication.
+#
+# The steps are ordered cheapest-refusal-first: the tag shape, then the tests,
+# then the things only a release build needs.
+#
+# What a red gate does and does not undo. The boundary it enforces is
+# PUBLICATION: no GitHub Release is created and nothing downstream of `host`
+# runs. It is not a stop-everything switch — the build matrix is
+# `fail-fast: false` and only the x86_64 Linux leg runs the suite, so the arm64
+# Linux and macOS legs can finish and leave their outputs as temporary Actions
+# artifacts. Those expire with the run and never reach a release. The TAG that
+# triggered the run is also already pushed and stays pushed, so a failed
+# rehearsal needs an explicit `git push --delete origin <tag>` before the same
+# version can be tried again.
+#
+# ## What the rest of it is for
+#
+# Every build job has to be handed a web bundle and told where it is.
+# `farhelm` and `farhelm-desktop` compile the UI tree named by
+# `FARHELM_UI_DIST` into themselves (D12), and that same variable is what
+# marks the result as a RELEASE build (D13) — a build job that skipped these
+# steps would produce a binary that serves nothing and defaults to refusing to
+# download provisioning payloads.
+#
+# ## Two deliberate departures from `ci.yml`'s `test` job
+#
+# The gate below is that job's commands, but not its scaffolding:
+#
+# - NO caching, anywhere in the release path. `ci.yml` caches `target/` and
+#   the pinned tmux build because it runs on every push; this runs a few times
+#   a year, and a cache is a mutable input to the one build whose output gets
+#   signed. Cold builds cost minutes and remove the question. (It also
+#   sidesteps the disk-exhaustion failure that made `ci.yml`'s desktop job
+#   drop its `restore-keys`.)
+# - NO `setup-rust-toolchain`. dist's build jobs use the runner image's
+#   preinstalled stable toolchain and add target triples with rustup
+#   themselves; introducing a second toolchain manager ahead of them would be
+#   a new failure mode in the release path for no gain on a hosted runner.
+#
+# These steps do NOT run in the global job, which is where dist builds the
+# `extra-artifacts` tmux binaries. `scripts/build-tmux-assets.sh` therefore
+# provisions its own toolchain; see the extra-artifacts comment in
+# `crates/farhelm/Cargo.toml`.
+
+- name: Assert the tag names this workspace's exact version
+  # cargo-dist accepts several tag spellings for the same version — `0.0.3`,
+  # `v0.0.3`, `farhelm-v0.0.3` — but Farhelm's download path accepts exactly
+  # one. `release_payloads.rs` requires the signed trusted comment to read
+  # `farhelm v{CARGO_PKG_VERSION}` and builds its default release URL with the
+  # same leading `v`, so a bare `0.0.3` tag would sail through dist and
+  # produce a correctly signed release that no shipped helm can install.
+  #
+  # Refusing here means the mistake costs a deleted tag instead of a
+  # published, signed, unusable release. `sign-sums.yml` asserts the same
+  # thing again before it touches the key, since these are separate jobs and
+  # only one of them holds the secret.
+  run: |
+    set -euo pipefail
+    # `[workspace.package].version` is the only bare `version = "…"` at the
+    # start of a line in the root manifest; workspace dependencies spell
+    # theirs inline. Requiring exactly one match keeps that assumption from
+    # rotting silently.
+    matches=$(grep -c '^version = "' Cargo.toml)
+    test "$matches" = 1 || {
+      echo "expected exactly one top-level version in Cargo.toml, found $matches" >&2
+      exit 1
+    }
+    version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)
+    if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+      echo "tag $GITHUB_REF_NAME does not name this workspace's version" >&2
+      echo "  expected exactly: v$version" >&2
+      echo "  bump [workspace.package].version, or delete and re-push the tag" >&2
+      exit 1
+    fi
+    echo "ok: $GITHUB_REF_NAME matches [workspace.package].version"
+
+# ---------------------------------------------------------------------------
+# The gate: `ci.yml`'s `test` job, on the x86_64 Linux build job only.
+#
+# One job runs it, and the choice is about COST, not capability. The suite is
+# architecture-independent and takes ten minutes; running it on the arm64 job
+# too would buy a second copy of the same verdict for a second ten minutes.
+# (`scripts/build-pinned-tmux-ci.sh` handles `Linux/aarch64` natively, so that
+# job could run it — if arm-specific coverage ever becomes worth paying for,
+# widening the `if` below is the whole change.) macOS is the one that genuinely
+# cannot: the suite wants a systemd user manager and the tests' ssh loopback,
+# neither of which that runner has, which is why its leg is a compile instead.
+#
+# Rationale for each command lives on `ci.yml`'s copy; only what differs is
+# explained here.
+# ---------------------------------------------------------------------------
+
+- name: Install pinned tmux build dependencies
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: sudo apt-get update && sudo apt-get install -y python3-venv
+
+- name: Build pinned tmux
+  # Built from the checksummed source pins, not restored from a cache: the
+  # tests must run on the tmux the product actually supports. The version
+  # floor is SPEC_impl.md's tmux policy — the floor IS the release the
+  # teardown regression suite runs against — and the exact release is pinned
+  # in `.github/release/source-pins.env`, which the build script asserts
+  # against what it produced.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: scripts/build-pinned-tmux-ci.sh
+
+- name: Provision passwordless ssh to localhost
+  # The ssh transport is under test, not just a deployment detail: the
+  # connection manager's ssh-row test dials a real supervisor through the
+  # user's own ssh, and skips loudly where passwordless self-ssh is missing.
+  # Provisioning it here keeps that skip a local-only affordance instead of
+  # permanently uncovered ssh coverage in the one run that gates a release.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: |
+    sudo apt-get install -y openssh-server
+    sudo systemctl enable --now ssh || sudo service ssh start
+    mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+    # `from=` restricts this passphrase-less key to loopback, which is the
+    # only place anything uses it.
+    printf 'from="127.0.0.1,::1" ' >> ~/.ssh/authorized_keys
+    cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+    chmod 600 ~/.ssh/authorized_keys
+    # BatchMode makes an unknown host key a hard failure rather than a
+    # prompt, so known_hosts has to be seeded before anything dials.
+    ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+    # Fail here, loudly, rather than letting the test fall back to its skip
+    # and report green on coverage that never ran.
+    ssh -o BatchMode=yes localhost true
+
+- name: Run the test suite against the pinned tmux
+  # `--show-output` keeps a loudly-skipped test's reason visible (the cgroup
+  # tests skip themselves where no systemd user manager exists, and libtest
+  # hides a passing test's output otherwise). `--test-threads=4` matches the
+  # runner's vCPU count: these binaries spawn real tmux servers and
+  # supervisors per test, so it keeps process and memory pressure
+  # predictable. PATH puts the pinned build first for this process tree only.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: PATH="$PWD/.ci-tmux:$PATH" cargo test -- --show-output --test-threads=4
+
+- name: Regress safe output-client teardown on the pinned tmux
+  # Its own step after the full suite: each scenario gets a fresh test
+  # process, so a surviving client or server cannot contaminate the next.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: scripts/test-tmux-pinned-shutdown.sh
+
+- name: Run the JS unit harness
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: cd crates/farhelm-ui/js-tests && node --test
+
+# ---------------------------------------------------------------------------
+# The macOS half of the gate.
+#
+# `ci.yml` runs nothing on macOS at all (deliberately — see AGENTS.md), so
+# without this the first compile of the Apple-target code would be the release
+# build itself. This does not prevent a partial publication — an artifact job
+# that runs and FAILS is already rejected by `host` — it catches Apple-only
+# breakage a few minutes earlier and reports it as a focused compile failure
+# rather than as a failure buried in a dist build.
+#
+# Not the full suite: it needs a real tmux at the version floor and an ssh
+# loopback, neither of which this runner has, and the Linux leg covers the
+# behaviour. What is unique here is the compile.
+# ---------------------------------------------------------------------------
+
+- name: Compile the CLI half of the Mac release
+  # `--locked` because a release must build from the committed lockfile and
+  # nothing else.
+  if: runner.os == 'macOS'
+  run: cargo build -p farhelm --locked
+
+- name: Compile and test the window half of the Mac release
+  # The WebKit-linked code that has no Linux equivalent in CI, where the same
+  # crate is built against WebKitGTK instead.
+  if: runner.os == 'macOS'
+  run: cargo test -p farhelm-ui --features desktop
+
+# ---------------------------------------------------------------------------
+# Release-build prerequisites, on every build job.
+# ---------------------------------------------------------------------------
+
+- name: Install the wasm target for the web bundle
+  # dx compiles the UI crate to wasm32; dist's own `rustup target add` only
+  # covers the triples it is building for, which never include wasm.
+  run: rustup target add wasm32-unknown-unknown
+
+- name: Install musl build tools
+  # The Linux targets are static musl (D4), and rusqlite's `bundled` feature
+  # compiles SQLite from C source — so the build needs a musl-targeting C
+  # toolchain, not just the Rust std for the triple. macOS builds natively and
+  # needs none of this.
+  if: runner.os == 'Linux'
+  run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+- name: Install the pinned Dioxus CLI
+  # Pinned to the `dioxus` version in the ROOT Cargo.toml's
+  # `[workspace.dependencies]`; dx refuses to build against a dioxus crate at
+  # a different version, so the two numbers move together (as do CI's own
+  # `dx` installs in ci.yml).
+  run: cargo install --locked dioxus-cli --version 0.7.10
+
+- name: Build the web bundle
+  # `rm -rf target/dx` is not hygiene theater: dx never prunes that directory,
+  # so it accumulates every generation it has ever built, and a stale
+  # content-hashed asset there is indistinguishable from a current one once
+  # `FARHELM_UI_DIST` sweeps the tree into the binary. `farhelm-helm`'s
+  # build.rs documents the same trap.
+  #
+  # `--package` is load-bearing: the workspace has `default-members`, and dx
+  # 0.7.10 canonicalizes those relative paths against its own working
+  # directory, which panics from inside `crates/farhelm-ui`.
+  run: |
+    rm -rf target/dx
+    cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release
+
+- name: Point the release build at the web bundle
+  # Absolute, because cargo runs build scripts from their own crate
+  # directory: `farhelm-helm`'s build.rs refuses a relative value outright
+  # rather than resolve it under `crates/farhelm-helm` and embed whatever it
+  # finds there.
+  run: echo "FARHELM_UI_DIST=$GITHUB_WORKSPACE/target/dx/farhelm-ui/release/web/public" >> "$GITHUB_ENV"

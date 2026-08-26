@@ -2,6 +2,7 @@
 name = "farhelm-desktop"
 version.workspace = true
 edition.workspace = true
+homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Farhelm desktop window (webview shell around the helm)"
@@ -21,15 +22,13 @@ anyhow.workspace = true
 # `default-members` excludes this package.
 farhelm-ui = { workspace = true, features = ["desktop"] }
 
-# cargo-dist ships this package (Step 5 of the distribution plan turns dist
-# on); `dist = true` opts it in explicitly, since dist otherwise takes the
-# workspace's default members.
-#
-# macOS only. A Linux user runs `farhelm helm run` and opens a browser, so a
-# Linux desktop artifact would be a WebKitGTK dependency chain shipped for
-# nobody. `homepage.workspace` is deliberately absent: the workspace defines
-# no `homepage` yet (Step 5 adds it), and inheriting a key that does not
-# exist is a hard cargo error rather than an empty field.
+# The shipped `farhelm-desktop` binary IS built from this crate, but not by
+# cargo-dist's cargo build — dx has to rewrite the `asset!()` paths into it
+# after the link, or the window renders nothing (see this crate's README).
+# dist reaches it through a generic package instead
+# (`packaging/farhelm-desktop/dist.toml`), whose build command runs dx over
+# this crate. `dist = false` here is what keeps the two descriptions from
+# both producing an asset: cargo-dist would otherwise see a binary target and
+# publish a placeholder-ridden archive under the same name.
 [package.metadata.dist]
-dist = true
-targets = ["aarch64-apple-darwin"]
+dist = false

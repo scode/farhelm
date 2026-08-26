@@ -6,6 +6,14 @@ license.workspace = true
 repository.workspace = true
 description = "The control plane: host registry, SSH transport, aggregation, HTTP/WS API"
 
+# A library: it reaches users linked into `farhelm` (and `farhelm-desktop`),
+# never as an asset of its own. Stated explicitly so that adding a binary
+# target here later — a debugging tool, a one-off — cannot quietly grow the
+# release's asset list, which `assets.rs` and `install.sh` treat as a fixed
+# contract.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true

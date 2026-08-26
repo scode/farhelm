@@ -169,17 +169,22 @@ AGENTS.md forbids agents from running them — or from restarting the helm's uni
 Interim section — a fuller installation chapter (Step 6) replaces this. For the desktop app see "Quickstart: desktop app
 plus one remote host" above; for a Linux helm see "Running the helm on Linux" above.
 
-Provisioning payloads (the per-target `farhelm-*.tar.gz` archives and `tmux-*` binaries) are not yet published as
-individual release assets on the [releases page](https://github.com/scode/farhelm/releases) — the release workflow this
-repo currently runs ships one aggregate `farhelm-linux-x86_64.tar.gz` in the old layout instead. Publishing the
-per-target files is Step 5's job, once cargo-dist replaces that workflow. Until then, stage `--payload-dir` by hand:
-each archive is named `<package>-<target>.tar.gz` (e.g. `farhelm-x86_64-unknown-linux-musl.tar.gz`) and holds one binary
-nested a level down, at `<package>-<target>/<binary>` — the layout `dist` itself produces — and each tmux build is a
-bare, unarchived executable named `tmux-<target>` alongside them. `crates/farhelm-helm/src/provisioning/assets.rs` is
-the exact name list. Point `--payload-dir <dir>` (or set `FARHELM_HELM_PAYLOAD_DIR`) at that directory to provision
-hosts from it instead of downloading. `--payload-dir` trusts the files it finds there without any verification (D3): the
-release's `SHA256SUMS` may sit alongside them in the same directory, but this path never reads it — checksum and
-signature verification is only the download source's job.
+Provisioning payloads (the per-target `farhelm-*.tar.gz` archives and `tmux-*` binaries) are published as individual
+assets by the cargo-dist release workflow, but only from the next release onward: releases already on the
+[releases page](https://github.com/scode/farhelm/releases) predate it and carry one aggregate
+`farhelm-linux-x86_64.tar.gz` in the old layout. Against those, stage `--payload-dir` by hand. Each archive is named
+`<package>-<target>.tar.gz` (e.g. `farhelm-x86_64-unknown-linux-musl.tar.gz`) and holds one binary nested a level down,
+at `<package>-<target>/<binary>` — the layout `dist` itself produces — and each tmux build is a bare, unarchived
+executable named `tmux-<target>` alongside them. `crates/farhelm-helm/src/provisioning/assets.rs` is the exact name
+list. Point `--payload-dir <dir>` (or set `FARHELM_HELM_PAYLOAD_DIR`) at that directory to provision hosts from it
+instead of downloading. `--payload-dir` trusts the files it finds there without any verification (D3): the release's
+`SHA256SUMS` may sit alongside them in the same directory, but this path never reads it — checksum and signature
+verification is only the download source's job.
+
+A release also carries files Farhelm does not use: `dist-manifest.json`, a `.sha256` beside each archive, and a
+lowercase `sha256.sum` — cargo-dist's own metadata, none of it signed. Do not mistake `sha256.sum` for `SHA256SUMS`: the
+uppercase one, covering the six payloads and signed as `SHA256SUMS.minisig`, is the only checksum file Farhelm verifies
+against.
 
 ## Development
 

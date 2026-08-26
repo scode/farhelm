@@ -1186,8 +1186,19 @@ A releasable `farhelm-desktop` must be produced by `dx`, not by Cargo alone. The
 into a `__ASSETS__` link section and dx rewrites those symbols with content-hashed names after linking; a plain
 `cargo build` links and launches but requests placeholder paths, so every asset 404s even with the web bundle embedded.
 Release production therefore has to run or consume `dx build --package farhelm-desktop --platform desktop --release`
-with `FARHELM_UI_DIST` set. How that is wired into cargo-dist is Step 5's business; that it must happen is not
-negotiable, because the failure is invisible to a build that succeeds.
+with `FARHELM_UI_DIST` set; that it must happen is not negotiable, because the failure is invisible to a build that
+succeeds.
+
+How that is wired: cargo-dist cannot be asked to run dx over a package it built, and it has no post-build hook — so the
+shell is declared to it TWICE, and exactly one of the two descriptions ships. `crates/farhelm-desktop` (the Cargo
+package) carries `[package.metadata.dist] dist = false`, which is what stops cargo-dist from publishing its own
+placeholder-bearing Cargo output. `packaging/farhelm-desktop/dist.toml` declares a generic (non-Cargo) dist package of
+the same name in the hybrid workspace `dist-workspace.toml` defines, and its `build-command` is
+`scripts/build-desktop-binary.sh`, which runs dx, refuses a binary still carrying placeholder asset names, checks the
+requested set against the bundle it embedded, and hands the result back for archiving. Neither half is redundant: delete
+the generic package and the Mac loses its window; delete the `dist = false` and the release grows a second
+`farhelm-desktop` archive that renders nothing. The cost of the arrangement is a version number duplicated into that
+`dist.toml`, which a unit test in `assets.rs` holds to the workspace's.
 
 Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard note in the Dioxus
 risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
@@ -1252,14 +1263,27 @@ skips all of this — nothing there is downloaded, so nothing there is checked. 
 rendezvous service" line still holds: GitHub is a download source the helm's own machine reaches directly, never a relay
 or rendezvous point sessions or connections pass through.
 
+A release also carries cargo-dist's own metadata, none of which is signed and none of which Farhelm reads:
+`dist-manifest.json`, a `<archive>.tar.gz.sha256` beside each of the four archives, and a lowercase `sha256.sum` over
+what dist built. That last one is worth naming explicitly because it looks like the file that matters and is not it:
+`SHA256SUMS` — uppercase, six entries, the one `SHA256SUMS.minisig` authenticates — is what the helm and `install.sh`
+verify against. The metadata is nonetheless part of the release contract rather than incidental: the signing job
+REQUIRES the manifest and the four per-archive checksums to be present (a future Homebrew formula, deferred but meant to
+be a config flip, consumes the manifest) and treats `sha256.sum` as optional. Anything else appearing on a release fails
+it, so no published asset can sit outside both the signed set and that list.
+
 ## Cross-compilation and targets
 
-Supervisor-side artifacts: `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, static, built with
-cargo-zigbuild in CI (audited: rusqlite-bundled static musl builds work for both). The Mac artifacts
-(`aarch64-apple-darwin`: `farhelm` and `farhelm-desktop`) are built on a macOS runner with the native toolchain —
-cross-building them from Linux was audited and rejected: zig cannot link the Apple frameworks wry needs (WebKit, AppKit)
-without a licensed macOS SDK, and cross ships no darwin images. Dropping the `.app` bundle removed a third reason
-(`dx bundle` produces bundles only on the native platform) but not those two, so the macOS runner stays. Signing and
+Supervisor-side artifacts: `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, static, built by cargo-dist on
+a native runner per architecture with `musl-tools` for the C half of the link (audited: rusqlite-bundled static musl
+builds work for both). Cross-compiling them with cargo-zigbuild, which the retired hand-written release workflow did, is
+no longer necessary now that GitHub's arm64 Linux runners are generally available; zig remains the toolchain for the
+private tmux builds, which are C and cross-compile cleanly. The Mac artifacts (`aarch64-apple-darwin`: `farhelm` and
+`farhelm-desktop`) are built on a macOS runner with the native toolchain — cross-building them from Linux was audited
+and rejected: zig cannot link the Apple frameworks wry needs (WebKit, AppKit) without a licensed macOS SDK, and cross
+ships no darwin images. Dropping the `.app` bundle removed a third reason (`dx bundle` produces bundles only on the
+native platform) but not those two, and it added one: `farhelm-desktop` is built through `dx build`, which patches the
+asset names into the linked binary and so has to run where that binary is linked. The macOS runner stays. Signing and
 notarization are deferred (D11) and the artifacts ship unsigned, so signing is not among today's reasons — it would
 become one if that changes.
 

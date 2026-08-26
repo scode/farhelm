@@ -28,6 +28,12 @@ enforces this and explains it at length.
 So `cargo check -p farhelm-desktop` (what CI runs) tells you the crate still compiles. It does not produce something you
 can run.
 
+This is also why the release artifact does not come from cargo-dist's ordinary cargo build. The shell is declared to
+dist as a generic package (`packaging/farhelm-desktop/dist.toml`) whose build command is
+`scripts/build-desktop-binary.sh` — that script runs dx, refuses a binary that still carries placeholder names, and
+hands the result back for archiving. The cargo package here is marked `dist = false` so the two descriptions cannot both
+produce an asset.
+
 ## Building a runnable one locally
 
 Run from the repository root:

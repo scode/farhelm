@@ -1,0 +1,55 @@
+# cargo-dist's description of the desktop shell as a GENERIC (non-cargo)
+# package.
+#
+# This directory holds no source. It exists because the shipped
+# `farhelm-desktop` binary cannot come out of cargo: dx rewrites the
+# `asset!()` paths into the binary after the link, so a cargo-built one asks
+# for placeholder paths and renders nothing (`crates/farhelm-desktop/README.md`
+# has the mechanism). dist 0.32 offers no post-build hook, but it does support
+# hybrid workspaces — `dist-workspace.toml` lists this directory beside the
+# cargo workspace — and a generic package may name its own `build-command`.
+# That command is `scripts/build-desktop-binary.sh`, which runs dx and drops
+# the result where `out-dir` says.
+#
+# The cargo package `crates/farhelm-desktop` is marked `dist = false` for the
+# same reason, so exactly one description of `farhelm-desktop` produces a
+# release asset. Everything else about the crate — how it is compiled,
+# checked, and depended on — still lives in its Cargo.toml; only the release
+# artifact comes from here.
+#
+# ## The version is duplicated, and a test guards it
+#
+# A generic package carries its own version, and dist announces a tag by
+# matching versions: if this number and `[workspace.package].version` in the
+# root Cargo.toml disagree, a `vX.Y.Z` tag quietly announces only `farhelm`
+# and the desktop archive silently vanishes from the release — dist reports
+# this as a note about "multiple version numbers", not an error. Because a
+# silent missing asset is exactly the failure mode nobody notices until a Mac
+# user runs `install.sh`, `assets.rs`'s test module parses this file and
+# asserts the two versions are equal.
+
+[package]
+name = "farhelm-desktop"
+version = "0.0.3"
+description = "Farhelm desktop window (webview shell around the helm)"
+repository = "https://github.com/scode/farhelm"
+homepage = "https://github.com/scode/farhelm"
+license = "MIT"
+# Run from THIS directory (dist sets the package root as the working
+# directory), hence the climb to the repository root.
+build-command = ["../../scripts/build-desktop-binary.sh"]
+# What dist expects to find in `out-dir` once the command has run, and the
+# name of the single member inside
+# `farhelm-desktop-aarch64-apple-darwin.tar.gz`. `install.sh` puts it next to
+# `farhelm` in `~/.local/bin`, where the shell finds its CLI sibling by this
+# exact name (D6).
+binaries = ["farhelm-desktop"]
+# Under `target/` so the build leaves nothing untracked in the working tree.
+out-dir = "../../target/dist-desktop"
+
+[dist]
+dist = true
+# macOS only (D6). A Linux user runs `farhelm helm run` and opens a browser,
+# so a Linux desktop artifact would be a WebKitGTK dependency chain shipped
+# for nobody.
+targets = ["aarch64-apple-darwin"]

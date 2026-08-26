@@ -6,6 +6,11 @@ license.workspace = true
 repository.workspace = true
 description = "Wire types and protocol version shared by helm and supervisor"
 
+# A library; see `farhelm-helm/Cargo.toml` for why every non-shipping member
+# says so explicitly instead of relying on having no binary target.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

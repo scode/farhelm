@@ -6,6 +6,13 @@ license.workspace = true
 repository.workspace = true
 description = "Per-host session management: tmux driver, agent integrations, state"
 
+# A library; see `farhelm-helm/Cargo.toml` for why every non-shipping member
+# says so explicitly instead of relying on having no binary target. The
+# supervisor reaches a host as the `farhelm` multi-call binary, not as an
+# artifact of its own.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true

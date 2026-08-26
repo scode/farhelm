@@ -1,9 +1,28 @@
+# dx's configuration for this crate. All that is left is the application's
+# DISPLAY name — dx's own description of the key, and in the pinned dx (0.7.10)
+# its only consumer is the Windows resource `ProductName`, a target this
+# project does not build.
+#
+# What it does NOT control, all of which is easy to assume it does:
+#
+# - the browser tab title. The web build takes `<title>` from `[web.app] title`,
+#   which this file does not set, so the served page carries dx's own default.
+#   A title contract, if this project ever wants one, belongs in that key.
+# - the bundled application name. dx PascalCases the EXECUTABLE TARGET's name
+#   for that (`bundled_app_name`), so a `.app` would be `FarhelmUi`, not
+#   `Farhelm` — moot here, since D6 ships bare binaries and nothing runs
+#   `dx bundle`.
+# - output paths and executable names, which follow the selected Cargo package
+#   and target (`target/dx/<package>/<profile>/<platform>/`).
+#
+# So editing the name below changes nothing this project currently builds, and
+# neither would removing it (the key is optional, and dx falls back to the
+# executable name). It stays because it is the correct display name to hand dx
+# if a target that shows one is ever added.
+#
+# The `[bundle]` section and its per-platform tables are gone with the `.app`
+# bundle they described (D1/D6): the Mac release is two bare binaries built by
+# cargo-dist, and nothing runs `dx bundle` any more. Reintroducing a bundle
+# would mean reintroducing the packaging decision, not just this file.
 [application]
 name = "Farhelm"
-
-[bundle]
-identifier = "dev.scode.farhelm"
-publisher = "scode"
-
-[bundle.macos]
-bundle_name = "Farhelm"
