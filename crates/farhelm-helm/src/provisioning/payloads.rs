@@ -11,7 +11,7 @@
 
 use super::assets;
 use super::plan::{PayloadArch, PayloadKind};
-use super::release_payloads::{MINISIGN_PUBKEY, ReleasePayloadSource};
+use super::release_payloads::{self, MINISIGN_PUBKEY, ReleasePayloadSource};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 #[cfg(unix)]
@@ -884,6 +884,12 @@ pub(super) fn production_payloads(
         helm_state_dir,
         release_build,
         cwd,
+        // The ONE production call site release_payloads::VERSION's
+        // docstring points at: everything downstream of `ReleasePayloadSource`
+        // learns the expected version from this argument, never from reading
+        // a constant of its own, so this is the only line a future refactor
+        // could get wrong and stop shipping `CARGO_PKG_VERSION`.
+        release_payloads::VERSION,
         MINISIGN_PUBKEY,
         release_client()?,
     )
@@ -910,11 +916,21 @@ pub(super) fn production_payloads(
 ///
 /// `cwd` means exactly what it does on [`production_payloads`]; it is
 /// threaded through unchanged.
+///
+/// `version` is likewise named explicitly rather than read from
+/// [`release_payloads::VERSION`] internally, for the same reason `pubkey`
+/// and `client` are: the end-to-end provisioning test drives real fixtures
+/// signed for `release_payloads::test_support::FIXTURE_VERSION`, a
+/// deliberately different value from whatever the workspace version
+/// happens to be (see that constant's docstring for why re-signing the
+/// fixtures on every release bump is not acceptable). Production always
+/// passes [`release_payloads::VERSION`].
 pub(super) fn production_payloads_with_key(
     selection: PayloadSelection,
     helm_state_dir: &Path,
     release_build: bool,
     cwd: &Path,
+    version: impl Into<String>,
     pubkey: &'static str,
     client: reqwest::Client,
 ) -> anyhow::Result<Arc<dyn PayloadSource>> {
@@ -943,6 +959,7 @@ pub(super) fn production_payloads_with_key(
     Ok(Arc::new(ReleasePayloadSource::new(
         base_url,
         helm_state_dir.join("payloads"),
+        version,
         pubkey,
         client,
     )))

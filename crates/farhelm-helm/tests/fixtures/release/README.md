@@ -26,9 +26,17 @@ The comment is `farhelm` followed by the release TAG, and a tag is `vX.Y.Z` — 
 flag is `-t "farhelm $TAG"` and never `-t "farhelm v$TAG"`, which would render `farhelm vv0.0.3`. The Step 5 `sign-sums`
 job follows the same rule; a release signed without `-t`, or with the doubled `v`, is refused by every helm.
 
-**Fixtures signed for the current version are pinned to workspace version `0.0.3`.** The tests derive the expected
-comment from `env!("CARGO_PKG_VERSION")`, so bumping the workspace version means re-signing them with the new
-`-t "farhelm v<new version>"`. That is deliberate friction: it is the same step the release pipeline must not forget.
+**Fixtures signed for the current version are pinned to workspace version `0.0.3`, permanently.** They are never
+re-signed when the workspace version bumps, and that is the point: the first real release tag bumped the workspace
+version away from `0.0.3` and broke every test in this module in one go, because at the time `ReleasePayloadSource` read
+`env!("CARGO_PKG_VERSION")` for the version it expected, and that constant moves with every release while these
+committed signatures cannot. `ReleasePayloadSource` now takes the version it expects as a constructor argument instead
+of reading that constant itself — production passes `CARGO_PKG_VERSION` (one call site, in `payloads.rs`), and the tests
+here pass `FIXTURE_VERSION` (`"0.0.3"`, defined beside this fixture's other helpers), which never changes. Two tests
+hold the two ends of that contract together: `production_wiring_binds_the_cache_to_the_crate_version` (in
+`provisioning.rs`) is the oracle that production still passes the real crate version, and
+`signing_and_verification_agree_on_the_tag_convention` (in `release_payloads.rs`) is the oracle that the trusted-comment
+convention itself — `farhelm v$TAG`, never `farhelm vv$TAG` — still matches what `sign-sums` produces.
 
 **`variants/other-version/` is the exception and must stay signed for a different version** (`farhelm v0.0.2`). It is a
 correctly signed manifest for the wrong release — the replay condition itself — so re-signing it for the current version
@@ -66,7 +74,7 @@ would fail — quietly, if the script does not stop on error.
 set -eu
 
 FIXTURES=<path to this directory>
-VERSION=0.0.3   # must equal the workspace version
+VERSION=0.0.3   # FIXTURE_VERSION, permanently — NOT the workspace version
 TAG="v$VERSION" # a release tag carries the leading v; the comment appends nothing
 FIXTURE_MTIME='2026-01-01 00:00:00Z'
 

@@ -4689,6 +4689,40 @@ mod tests {
         }
     }
 
+    /// Spec: the ONE production call site really does pass
+    /// `env!("CARGO_PKG_VERSION")` into `ReleasePayloadSource`, not some
+    /// other value a future refactor could substitute by accident.
+    ///
+    /// `release_payloads::VERSION`'s docstring names the incident this
+    /// guards against: every method on that type used to read a
+    /// module-level constant directly, so bumping the workspace version
+    /// broke every fixture-backed test in the module at once — the
+    /// committed fixtures are permanently signed for
+    /// `test_support::FIXTURE_VERSION`, not whatever the crate version
+    /// happens to be. The fix makes the version a constructor argument
+    /// threaded all the way from `production_payloads`; this test is the
+    /// oracle that PRODUCTION still threads through the real crate version.
+    /// The version is part of the cache directory's name, so its presence
+    /// in the `Debug` rendering is enough to check without a real download.
+    #[test]
+    fn production_wiring_binds_the_cache_to_the_crate_version() {
+        let state_dir = tempfile::tempdir().unwrap();
+        let payloads = production_payloads(
+            PayloadSelection::Release {
+                base_url: url::Url::parse("http://127.0.0.1:1/").unwrap(),
+            },
+            state_dir.path(),
+            true,
+            state_dir.path(),
+        )
+        .unwrap();
+        let described = format!("{payloads:?}");
+        assert!(
+            described.contains(&format!("v{}-", env!("CARGO_PKG_VERSION"))),
+            "the cache directory must be keyed by exactly CARGO_PKG_VERSION: {described}"
+        );
+    }
+
     /// Spec: pointing the helm at a release URL provisions a host with the
     /// VERIFIED downloaded bytes — the acceptance condition plan Step 3
     /// names, end to end.
@@ -4725,9 +4759,10 @@ mod tests {
             host_tmux: None,
         });
 
-        // The fixture release is signed with the throwaway test key, so this
-        // names that trust anchor explicitly; everything else — the arms,
-        // the cache root, the HTTP client — is the production policy.
+        // The fixture release is signed with the throwaway test key for
+        // FIXTURE_VERSION, so this names both that trust anchor and that
+        // version explicitly; everything else — the arms, the cache root,
+        // the HTTP client — is the production policy.
         let payloads = production_payloads_with_key(
             PayloadSelection::Release {
                 base_url: release.base_url.clone(),
@@ -4735,6 +4770,7 @@ mod tests {
             state_dir.path(),
             false,
             state_dir.path(),
+            super::release_payloads::test_support::FIXTURE_VERSION,
             super::release_payloads::test_support::test_pubkey(),
             // Production settings plus `no_proxy()`: without it an ambient
             // proxy variable would route this loopback fixture request off

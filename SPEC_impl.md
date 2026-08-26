@@ -1263,6 +1263,24 @@ skips all of this — nothing there is downloaded, so nothing there is checked. 
 rendezvous service" line still holds: GitHub is a download source the helm's own machine reaches directly, never a relay
 or rendezvous point sessions or connections pass through.
 
+Release signing key. The key pair behind that chain is the project's one long-lived secret, and its handling is
+deliberately minimal. The public half is committed twice — `MINISIGN_PUBKEY` in `release_payloads.rs` and
+`crates/farhelm-helm/src/provisioning/farhelm-release.pub`, with a test that they agree. The secret half exists only as
+the `MINISIGN_SECRET_KEY` repository secret: it was generated locally, stored with `gh secret set`, and the file
+destroyed; it is never committed, never printed, and never present on a developer machine. Only the `sign` job of
+`sign-sums.yml` receives it, after a secretless `validate` job has already checked the assets, so the generated dist
+workflow and the build jobs never see it. Neither minisign keys nor repository secrets expire; rotation happens when the
+maintainer chooses. Rotating is one PR: `minisign -G` a fresh pair, `gh secret set MINISIGN_SECRET_KEY` from the new
+secret file, shred it, replace both committed copies of the public key, and cut the next release. Nothing in the field
+notices, because under D2 a helm only downloads the release built from the same commit as itself, which is signed by the
+key that commit compiled in; old helms keep verifying their old releases with the old key. The one future feature that
+changes this is a cross-version download such as an auto-updater: it would verify the next release with the key it
+already carries, so a rotation would then need a transition release signed by the old key but carrying the new one.
+Sequencing rotation before shipping such a feature, never in the same release, is the whole rule. Note also what the key
+does not protect: `install.sh` runs on a machine with nothing to pin a key in, so installing trusts GitHub over TLS and
+the `SHA256SUMS` served beside the archive; the signature guards what a running helm provisions onto other hosts, not
+the first download of the helm itself.
+
 A release also carries cargo-dist's own metadata, none of which is signed and none of which Farhelm reads:
 `dist-manifest.json`, a `<archive>.tar.gz.sha256` beside each of the four archives, and a lowercase `sha256.sum` over
 what dist built. That last one is worth naming explicitly because it looks like the file that matters and is not it:

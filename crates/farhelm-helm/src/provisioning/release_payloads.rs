@@ -73,11 +73,17 @@ use url::Url;
 /// release that was ever signed with it, including releases cut long after
 /// that helm was built.
 ///
-/// That property is also what makes rotation awkward, and it is deliberate:
-/// a new key can only sign NEW releases, so rotating means first shipping a
-/// release whose binary carries the new key, and only then signing with it.
-/// Swapping the key here without that ordering strands every helm already in
-/// the field.
+/// Rotation is cheap TODAY because of D2: a helm only ever downloads the
+/// release matching its own version, and that release is signed by whatever
+/// key the same commit compiled in here. So a rotation is one PR that swaps
+/// this constant and `farhelm-release.pub` together with the repository
+/// secret, and the next release simply uses the new key; nothing already in
+/// the field looks at it. The ordering problem only appears with a
+/// cross-version download — an auto-updater verifying the NEXT release with
+/// the CURRENT key — which nothing does yet. Whoever adds one must first
+/// ship a release carrying the new key (signed with the old), and only then
+/// sign with the new; see SPEC_impl.md's "Release signing key" for the
+/// recipe and that constraint.
 ///
 /// The key is only half the contract. Signing must ALSO pass
 /// `-t "farhelm $TAG"` — the tag already begins with `v`, so there is no
@@ -87,10 +93,24 @@ use url::Url;
 /// oracle for this constant.
 pub const MINISIGN_PUBKEY: &str = "RWSNQaVU+WXJm29s7DRqwrHGbzMgOJck6kLPfVU4Gvk1uCnwgdlzp/U/";
 
-/// The release this build asks for. A helm downloads the payloads matching
+/// The release THIS build asks for. A helm downloads the payloads matching
 /// its OWN version and no other, which is what keeps a provisioned host
 /// running exactly what the helm that provisioned it expects (D2).
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+///
+/// `ReleasePayloadSource` does not read this constant itself — it takes the
+/// version it expects as a constructor argument instead, and this is the
+/// only value the ONE production call site
+/// (`payloads::production_payloads_with_key`) ever passes. That split
+/// exists because of a real incident: the fixtures under
+/// `tests/fixtures/release/` are signed once, permanently, for version
+/// `0.0.3` (see that directory's `README.md`), and the first real release
+/// tag bumped the workspace version away from `0.0.3` and broke every test
+/// in this module — they were all reading this same constant to know what
+/// version to expect, so the bump and the fixtures disagreed. Tests inject
+/// `test_support::FIXTURE_VERSION` instead, and `production_wiring_...` (in
+/// `provisioning.rs`'s test module) is the oracle that production really
+/// does pass this constant and nothing else.
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Size ceiling for `SHA256SUMS` and its signature. Both are a few hundred
 /// bytes by construction (six lines, one signature), so anything larger is
@@ -102,25 +122,28 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SUMS_MAX_BYTES: usize = 64 * 1024;
 
 /// The exact trusted comment a release's signature must carry: `farhelm `
-/// followed by this build's release TAG, which is `v` + the crate version.
+/// followed by `version`'s release TAG, which is `v` + the version.
 ///
-/// Rendered rather than stored so it cannot drift from the version the rest
-/// of the module reports, and derived from `CARGO_PKG_VERSION` so a version
-/// bump automatically stops accepting the previous release's signature.
-/// The producing half of this contract is `sign-sums`' `-t "farhelm $TAG"`;
-/// see the module header, and the parity test that pins them together.
-fn required_trusted_comment() -> String {
-    format!("farhelm {}", release_tag())
+/// Rendered rather than stored so it cannot drift from the version the
+/// caller supplies, and taking that version as a parameter (rather than
+/// reading a module constant) so a bump automatically stops accepting the
+/// previous release's signature IN PRODUCTION, without also demanding the
+/// test fixtures be re-signed — see [`VERSION`]'s docstring for the
+/// incident that made this a parameter. The producing half of this contract
+/// is `sign-sums`' `-t "farhelm $TAG"`; see the module header, and the
+/// parity test that pins them together.
+fn required_trusted_comment(version: &str) -> String {
+    format!("farhelm {}", release_tag(version))
 }
 
-/// The git tag this build's release is published under (`vX.Y.Z`, D15).
+/// The git tag one release is published under (`vX.Y.Z`, D15).
 ///
 /// Split out from [`required_trusted_comment`] so the tag convention has one
 /// definition that a test can compare against the signing command's `$TAG`,
 /// rather than a `v` hidden inside a format string that reads correctly
 /// whether or not the signer adds one of their own.
-fn release_tag() -> String {
-    format!("v{VERSION}")
+fn release_tag(version: &str) -> String {
+    format!("v{version}")
 }
 
 /// The HTTP seam every request goes through.
@@ -221,6 +244,18 @@ pub(super) struct ReleasePayloadSource {
     cache_root: PathBuf,
     /// This source's private generation directory (see [`Self::new`]).
     cache_dir: PathBuf,
+    /// The release version this source will accept — the version its
+    /// signed manifest must be signed for, the version its cache directory
+    /// is keyed by, and the version named in every refusal it renders.
+    ///
+    /// A constructor argument rather than a read of [`VERSION`] so this
+    /// type has no built-in opinion about `CARGO_PKG_VERSION`: production
+    /// passes [`VERSION`] (the one call site is
+    /// `payloads::production_payloads_with_key`), and tests pass
+    /// `test_support::FIXTURE_VERSION`, the version the committed fixtures
+    /// are permanently signed for. See [`VERSION`]'s docstring for why that
+    /// split exists.
+    version: String,
     /// The minisign public key `SHA256SUMS.minisig` must verify against.
     /// Injected rather than read from [`MINISIGN_PUBKEY`] directly so tests
     /// can drive the real verification path with a throwaway test key
@@ -291,15 +326,21 @@ impl ReleasePayloadSource {
     /// (`HelmArgs::release_base_url`), because a base URL carrying them
     /// cannot survive [`Url::join`] intact and would silently address a
     /// different endpoint than every error message names.
+    ///
+    /// `version` is the release this source will accept (see the field's
+    /// docstring); production passes [`VERSION`], tests pass
+    /// `test_support::FIXTURE_VERSION`.
     pub(super) fn new(
         base_url: Url,
         cache_root: PathBuf,
+        version: impl Into<String>,
         pubkey: &'static str,
         client: reqwest::Client,
     ) -> Self {
         Self::with_transport(
             base_url,
             cache_root,
+            version,
             pubkey,
             Arc::new(HttpTransport::new(client)),
         )
@@ -310,18 +351,21 @@ impl ReleasePayloadSource {
     pub(super) fn with_transport(
         base_url: Url,
         cache_root: PathBuf,
+        version: impl Into<String>,
         pubkey: &'static str,
         transport: Arc<dyn Transport>,
     ) -> Self {
+        let version = version.into();
         let base_url = normalise_base_url(base_url);
         let mut hasher = Sha256::new();
         hasher.update(base_url.as_str().as_bytes());
         let digest = hex(&hasher.finalize());
-        let cache_dir = cache_root.join(format!("v{VERSION}-{}", &digest[..12]));
+        let cache_dir = cache_root.join(format!("v{version}-{}", &digest[..12]));
         Self {
             base_url,
             cache_root,
             cache_dir,
+            version,
             pubkey,
             transport,
             sums: OnceCell::new(),
@@ -357,7 +401,8 @@ impl ReleasePayloadSource {
             .get_or_try_init(|| async {
                 let cache_root = self.cache_root.clone();
                 let cache_dir = self.cache_dir.clone();
-                tokio::task::spawn_blocking(move || housekeeping(&cache_root, &cache_dir))
+                let version = self.version.clone();
+                tokio::task::spawn_blocking(move || housekeeping(&cache_root, &cache_dir, &version))
                     .await
                     .context("the payload cache housekeeping task panicked")?
             })
@@ -390,11 +435,12 @@ impl ReleasePayloadSource {
     async fn fetch_sums(&self) -> anyhow::Result<ReleaseSums> {
         let sums_bytes = self.fetch_capped("SHA256SUMS").await?;
         let signature_bytes = self.fetch_capped("SHA256SUMS.minisig").await?;
-        verify_sums(self.pubkey, &sums_bytes, &signature_bytes)?;
+        verify_sums(self.pubkey, &self.version, &sums_bytes, &signature_bytes)?;
 
-        let text =
-            std::str::from_utf8(&sums_bytes).map_err(|_| malformed_sums_refusal(&self.base_url))?;
-        let entries = parse_sums(text).ok_or_else(|| malformed_sums_refusal(&self.base_url))?;
+        let text = std::str::from_utf8(&sums_bytes)
+            .map_err(|_| malformed_sums_refusal(&self.version, &self.base_url))?;
+        let entries = parse_sums(text)
+            .ok_or_else(|| malformed_sums_refusal(&self.version, &self.base_url))?;
 
         // Published only after verification, so the cache can never hold a
         // checksum file that was not signed for this version. Both writes
@@ -434,17 +480,18 @@ impl ReleasePayloadSource {
     /// so both consumers of this URL (here and `install.sh`) say the same
     /// thing rather than guessing.
     async fn fetch_capped(&self, name: &str) -> anyhow::Result<Vec<u8>> {
+        let version = &self.version;
         let response = self.get(name).await?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             bail!(
-                "no SHA256SUMS for v{VERSION} at {} (HTTP 404): the release is not published or \
+                "no SHA256SUMS for v{version} at {} (HTTP 404): the release is not published or \
                  is still publishing; retry in a few minutes, or pass --payload-dir",
                 self.base_url
             );
         }
         if !response.status().is_success() {
             bail!(
-                "fetching {name} for v{VERSION} from {} failed: HTTP {}",
+                "fetching {name} for v{version} from {} failed: HTTP {}",
                 self.base_url,
                 response.status()
             );
@@ -499,8 +546,9 @@ impl ReleasePayloadSource {
     /// problem with one fix, and the underlying error is appended for the
     /// detail.
     fn unreachable(&self, error: anyhow::Error) -> anyhow::Error {
+        let version = &self.version;
         anyhow!(
-            "add host needs farhelm's v{VERSION} release assets from {}, and this machine could \
+            "add host needs farhelm's v{version} release assets from {}, and this machine could \
              not reach it: {error:#}",
             self.base_url
         )
@@ -508,8 +556,9 @@ impl ReleasePayloadSource {
 
     /// The refusal for a control file that exceeds [`SUMS_MAX_BYTES`].
     fn oversized_refusal(&self, name: &str) -> anyhow::Error {
+        let version = &self.version;
         anyhow!(
-            "refusing v{VERSION} assets: {name} at {} is larger than 64 KiB and cannot be a \
+            "refusing v{version} assets: {name} at {} is larger than 64 KiB and cannot be a \
              checksum file",
             self.base_url
         )
@@ -585,9 +634,11 @@ impl ReleasePayloadSource {
     async fn cached_controls_verified(&self) -> anyhow::Result<bool> {
         let cache_dir = self.cache_dir.clone();
         let pubkey = self.pubkey;
-        let verified = tokio::task::spawn_blocking(move || cached_sums_verify(&cache_dir, pubkey))
-            .await
-            .context("the cached checksum verification task panicked")?;
+        let version = self.version.clone();
+        let verified =
+            tokio::task::spawn_blocking(move || cached_sums_verify(&cache_dir, pubkey, &version))
+                .await
+                .context("the cached checksum verification task panicked")?;
         if verified {
             return Ok(true);
         }
@@ -636,13 +687,14 @@ impl ReleasePayloadSource {
     /// its final name before the comparison passes, so a mismatch cannot
     /// leave something that a later run mistakes for a verified download.
     async fn download_verified(&self, asset: &str, expected: &str) -> anyhow::Result<PathBuf> {
+        let version = &self.version;
         let response = self.get(asset).await?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            bail!("release v{VERSION} has no asset named {asset} (HTTP 404)");
+            bail!("release v{version} has no asset named {asset} (HTTP 404)");
         }
         if !response.status().is_success() {
             bail!(
-                "fetching {asset} for v{VERSION} from {} failed: HTTP {}",
+                "fetching {asset} for v{version} from {} failed: HTTP {}",
                 self.base_url,
                 response.status()
             );
@@ -721,10 +773,11 @@ impl PayloadSource for ReleasePayloadSource {
         std::fs::create_dir_all(&self.cache_dir)
             .with_context(|| format!("creating {}", self.cache_dir.display()))?;
         let sums = self.sums().await?;
+        let version = &self.version;
         let expected = sums
             .entries
             .get(&asset)
-            .ok_or_else(|| anyhow!("SHA256SUMS for v{VERSION} has no entry for {asset}"))?;
+            .ok_or_else(|| anyhow!("SHA256SUMS for v{version} has no entry for {asset}"))?;
         let downloaded = self.download_verified(&asset, expected).await?;
 
         // Everything from here is blocking work on whole-binary-sized files
@@ -798,21 +851,21 @@ const MARKER_MAX_BYTES: u64 = 128;
 /// an attacker which guess was closer. The VERSION mismatch is separate,
 /// because that one is an operator-actionable fact about a real, correctly
 /// signed release.
-fn verify_sums(pubkey: &str, sums: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+fn verify_sums(pubkey: &str, version: &str, sums: &[u8], signature: &[u8]) -> anyhow::Result<()> {
     let key = minisign_verify::PublicKey::from_base64(pubkey).map_err(|error| {
         anyhow!("farhelm's built-in minisign public key is not decodable: {error}")
     })?;
     let signature = std::str::from_utf8(signature)
         .ok()
         .and_then(|text| minisign_verify::Signature::decode(text).ok())
-        .ok_or_else(signature_refusal)?;
+        .ok_or_else(|| signature_refusal(version))?;
     key.verify(sums, &signature, false)
-        .map_err(|_| signature_refusal())?;
+        .map_err(|_| signature_refusal(version))?;
 
     let comment = signature.trusted_comment();
-    if comment != required_trusted_comment() {
+    if comment != required_trusted_comment(version) {
         bail!(
-            "refusing v{VERSION} assets: SHA256SUMS.minisig was signed for {comment}, not this \
+            "refusing v{version} assets: SHA256SUMS.minisig was signed for {comment}, not this \
              version"
         );
     }
@@ -822,9 +875,9 @@ fn verify_sums(pubkey: &str, sums: &[u8], signature: &[u8]) -> anyhow::Result<()
 /// The refusal for a `SHA256SUMS` that does not verify against the key this
 /// binary carries. See [`verify_sums`] for why the three distinguishable
 /// causes deliberately produce one message.
-fn signature_refusal() -> anyhow::Error {
+fn signature_refusal(version: &str) -> anyhow::Error {
     anyhow!(
-        "refusing v{VERSION} assets: SHA256SUMS.minisig does not verify with farhelm's built-in \
+        "refusing v{version} assets: SHA256SUMS.minisig does not verify with farhelm's built-in \
          key"
     )
 }
@@ -834,8 +887,8 @@ fn signature_refusal() -> anyhow::Error {
 /// it cannot happen against a release CI produced — it exists so a
 /// hand-edited or truncated file fails loudly instead of parsing to an empty
 /// entry set that then reports every asset as missing.
-fn malformed_sums_refusal(base_url: &Url) -> anyhow::Error {
-    anyhow!("refusing v{VERSION} assets: SHA256SUMS at {base_url} is not in sha256sum format")
+fn malformed_sums_refusal(version: &str, base_url: &Url) -> anyhow::Error {
+    anyhow!("refusing v{version} assets: SHA256SUMS at {base_url} is not in sha256sum format")
 }
 
 /// Prune what this source has outgrown, once per process, before its first
@@ -861,7 +914,15 @@ fn malformed_sums_refusal(base_url: &Url) -> anyhow::Error {
 /// failing disk) would disable cleanup indefinitely while provisioning
 /// carried on and the cache grew without bound — with nothing anywhere to
 /// say why.
-fn housekeeping(cache_root: &Path, cache_dir: &Path) -> anyhow::Result<()> {
+///
+/// `current_version` is the calling source's injected `version` field, not
+/// a read of the module-level [`VERSION`] constant: `cache_dir` is itself
+/// keyed by that same injected version, so a generation belonging to it
+/// must be judged "current" by the same yardstick, or a test source built
+/// with `FIXTURE_VERSION` would find its own generation misclassified as
+/// foreign the moment the crate's real version diverges from the
+/// fixtures'.
+fn housekeeping(cache_root: &Path, cache_dir: &Path, current_version: &str) -> anyhow::Result<()> {
     let current = cache_dir.file_name();
     let entries = match std::fs::read_dir(cache_root) {
         Ok(entries) => entries,
@@ -880,7 +941,7 @@ fn housekeeping(cache_root: &Path, cache_dir: &Path) -> anyhow::Result<()> {
         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        if !is_stale_generation(&name) {
+        if !is_stale_generation(&name, current_version) {
             continue;
         }
         // `symlink_metadata`, not `metadata`: a symlink named like a
@@ -952,7 +1013,11 @@ fn housekeeping(cache_root: &Path, cache_dir: &Path) -> anyhow::Result<()> {
 /// foreign one. Anything that does not parse is left alone: this predicate
 /// guards a recursive delete inside the helm's state directory, so every name
 /// it is unsure about must survive.
-fn is_stale_generation(name: &str) -> bool {
+///
+/// `current_version` is supplied by the caller rather than read from a
+/// module constant, so this predicate has no built-in notion of "this
+/// build's version" — see [`housekeeping`] for why that matters.
+fn is_stale_generation(name: &str, current_version: &str) -> bool {
     let Some(split) = name.len().checked_sub(12) else {
         return false;
     };
@@ -968,7 +1033,7 @@ fn is_stale_generation(name: &str) -> bool {
     };
     let (Ok(parsed), Ok(current)) = (
         semver::Version::parse(version),
-        semver::Version::parse(VERSION),
+        semver::Version::parse(current_version),
     ) else {
         return false;
     };
@@ -1127,7 +1192,7 @@ fn publish_controls(cache_dir: &Path, sums: &[u8], signature: &[u8]) -> anyhow::
 }
 
 /// Re-verify the cached `SHA256SUMS` — signature AND version — against
-/// `pubkey`.
+/// `pubkey` and `version`.
 ///
 /// Returns false, never an error, for every failure including "not cached
 /// yet": the only consequence is that the caller takes the miss path, which
@@ -1137,7 +1202,7 @@ fn publish_controls(cache_dir: &Path, sums: &[u8], signature: &[u8]) -> anyhow::
 /// Both files are read through [`read_capped`], so a restored or corrupted
 /// cache cannot make this allocate more than the network path would have
 /// accepted in the first place. Synchronous; callers use `spawn_blocking`.
-fn cached_sums_verify(cache_dir: &Path, pubkey: &str) -> bool {
+fn cached_sums_verify(cache_dir: &Path, pubkey: &str, version: &str) -> bool {
     let limit = u64::try_from(SUMS_MAX_BYTES).expect("64 KiB fits in u64");
     let Some(sums) = read_capped(&cache_dir.join("SHA256SUMS"), limit) else {
         return false;
@@ -1145,7 +1210,7 @@ fn cached_sums_verify(cache_dir: &Path, pubkey: &str) -> bool {
     let Some(signature) = read_capped(&cache_dir.join("SHA256SUMS.minisig"), limit) else {
         return false;
     };
-    verify_sums(pubkey, &sums, &signature).is_ok()
+    verify_sums(pubkey, version, &sums, &signature).is_ok()
 }
 
 /// Whether `<asset>.bin` in `cache_dir` is a regular file whose SHA-256
@@ -1226,6 +1291,19 @@ pub(super) mod test_support {
     /// its trusted comment. See that directory's `README.md`.
     pub(in crate::provisioning) const FIXTURE_DIR: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/release");
+
+    /// The version every committed fixture is signed for, PERMANENTLY —
+    /// re-signing on every release bump is exactly the friction this
+    /// module's tests must not impose (see [`VERSION`]'s docstring for the
+    /// incident). Every test that builds a `ReleasePayloadSource`, or that
+    /// asserts a rendered `v{version}` string, uses this constant instead of
+    /// [`VERSION`] so the suite stays correct regardless of what the
+    /// workspace version happens to be.
+    ///
+    /// `variants/other-version/` is signed for `v0.0.2` and must NEVER be
+    /// changed to match this constant: it is the downgrade-replay fixture,
+    /// and its entire point is to disagree with `FIXTURE_VERSION`.
+    pub(in crate::provisioning) const FIXTURE_VERSION: &str = "0.0.3";
 
     /// The throwaway key the fixtures are signed with, read out of the
     /// committed `.pub` file rather than pasted here, so regenerating the
@@ -1370,11 +1448,13 @@ pub(super) mod test_support {
         }
 
         /// A source pointed at this release, caching under `cache_root`,
-        /// verifying with the fixture key and using the test client.
+        /// expecting [`FIXTURE_VERSION`], verifying with the fixture key and
+        /// using the test client.
         pub(in crate::provisioning) fn source(&self, cache_root: &Path) -> ReleasePayloadSource {
             ReleasePayloadSource::new(
                 self.base_url.clone(),
                 cache_root.to_path_buf(),
+                FIXTURE_VERSION,
                 test_pubkey(),
                 test_client(),
             )
@@ -1525,7 +1605,10 @@ mod tests {
     fn generation(cache_root: &Path, base_url: &Url) -> PathBuf {
         let mut hasher = Sha256::new();
         hasher.update(normalise_base_url(base_url.clone()).as_str().as_bytes());
-        cache_root.join(format!("v{VERSION}-{}", &hex(&hasher.finalize())[..12]))
+        cache_root.join(format!(
+            "v{FIXTURE_VERSION}-{}",
+            &hex(&hasher.finalize())[..12]
+        ))
     }
 
     /// A transport that answers from a fixed script and counts attempts.
@@ -1588,6 +1671,7 @@ mod tests {
         let source = ReleasePayloadSource::with_transport(
             Url::parse("http://127.0.0.1:9/").unwrap(),
             cache_root.to_path_buf(),
+            FIXTURE_VERSION,
             test_pubkey(),
             transport,
         );
@@ -1656,6 +1740,7 @@ mod tests {
         let sums_bytes = fixture_bytes("SHA256SUMS");
         verify_sums(
             test_pubkey(),
+            FIXTURE_VERSION,
             &sums_bytes,
             &fixture_bytes("SHA256SUMS.minisig"),
         )
@@ -1962,6 +2047,7 @@ mod tests {
         let source = ReleasePayloadSource::new(
             base_url.clone(),
             cache.path().to_path_buf(),
+            FIXTURE_VERSION,
             test_pubkey(),
             test_client(),
         );
@@ -1974,8 +2060,8 @@ mod tests {
         .expect("a hung-up connection must fail promptly, not wait out a timeout")
         .unwrap_err();
         let expected = format!(
-            "add host needs farhelm's v{VERSION} release assets from {base_url}, and this machine \
-             could not reach it: "
+            "add host needs farhelm's v{FIXTURE_VERSION} release assets from {base_url}, and this \
+             machine could not reach it: "
         );
         assert!(
             format!("{error:#}").starts_with(&expected),
@@ -1999,8 +2085,8 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             format!(
-                "no SHA256SUMS for v{VERSION} at {} (HTTP 404): the release is not published or \
-                 is still publishing; retry in a few minutes, or pass --payload-dir",
+                "no SHA256SUMS for v{FIXTURE_VERSION} at {} (HTTP 404): the release is not \
+                 published or is still publishing; retry in a few minutes, or pass --payload-dir",
                 release.base_url
             )
         );
@@ -2065,8 +2151,8 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             format!(
-                "refusing v{VERSION} assets: SHA256SUMS.minisig does not verify with farhelm's \
-                 built-in key"
+                "refusing v{FIXTURE_VERSION} assets: SHA256SUMS.minisig does not verify with \
+                 farhelm's built-in key"
             )
         );
     }
@@ -2098,8 +2184,8 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             format!(
-                "refusing v{VERSION} assets: SHA256SUMS.minisig does not verify with farhelm's \
-                 built-in key"
+                "refusing v{FIXTURE_VERSION} assets: SHA256SUMS.minisig does not verify with \
+                 farhelm's built-in key"
             )
         );
     }
@@ -2136,8 +2222,8 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             format!(
-                "refusing v{VERSION} assets: SHA256SUMS.minisig was signed for farhelm v0.0.2, \
-                 not this version"
+                "refusing v{FIXTURE_VERSION} assets: SHA256SUMS.minisig was signed for farhelm \
+                 v0.0.2, not this version"
             )
         );
     }
@@ -2250,7 +2336,7 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             format!(
-                "SHA256SUMS for v{VERSION} has no entry for {}",
+                "SHA256SUMS for v{FIXTURE_VERSION} has no entry for {}",
                 assets::tmux_name(PayloadArch::Aarch64)
             )
         );
@@ -2273,7 +2359,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
-            format!("release v{VERSION} has no asset named {asset} (HTTP 404)")
+            format!("release v{FIXTURE_VERSION} has no asset named {asset} (HTTP 404)")
         );
     }
 
@@ -2377,8 +2463,8 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             format!(
-                "refusing v{VERSION} assets: SHA256SUMS at {} is larger than 64 KiB and cannot be \
-                 a checksum file",
+                "refusing v{FIXTURE_VERSION} assets: SHA256SUMS at {} is larger than 64 KiB and \
+                 cannot be a checksum file",
                 release.base_url
             )
         );
@@ -2603,7 +2689,7 @@ mod tests {
         };
         let stale = plant("v0.0.1-0123456789ab");
         let stale_prerelease = plant("v0.0.1-rc.1-0123456789ab");
-        let same_version_other_url = plant(&format!("v{VERSION}-ffffffffffff"));
+        let same_version_other_url = plant(&format!("v{FIXTURE_VERSION}-ffffffffffff"));
         let not_a_generation = plant("scratch");
         // A symlink WEARING a generation name, pointing at a directory that
         // must survive. Following it would delete somebody else's tree; the
@@ -2663,7 +2749,7 @@ mod tests {
         let mut hasher = Sha256::new();
         hasher.update(release.base_url.as_str().as_bytes());
         let digest = hex(&hasher.finalize());
-        let expected = format!("v{VERSION}-{}", &digest[..12]);
+        let expected = format!("v{FIXTURE_VERSION}-{}", &digest[..12]);
 
         let entries: Vec<String> = std::fs::read_dir(cache_root.path())
             .unwrap()
@@ -2744,6 +2830,16 @@ mod tests {
     /// the empty string, as something to delete recursively.
     #[test]
     fn only_foreign_version_generation_names_are_prunable() {
+        // A fixed stand-in for "current", deliberately NOT the crate's own
+        // `VERSION`: this predicate takes its notion of current from the
+        // caller now (see its docstring), precisely so a unit test like
+        // this one cannot collide with whatever the real workspace version
+        // happens to be. It very nearly did: proving the fixture-version
+        // fix means bumping the workspace to `9.9.9`, and this test used to
+        // hardcode `9.9.9` below as an example of "some OTHER version" —
+        // reading `VERSION` for "current" would have made that literal
+        // equal to current instead of foreign the moment the proof ran.
+        let current = "5.5.5";
         for stale in [
             "v0.0.1-0123456789ab",
             "v9.9.9-ffffffffffff",
@@ -2752,13 +2848,16 @@ mod tests {
             "v9.9.9-alpha.2+build.7-0123456789ab",
             // A prerelease of THIS version is not this version (SemVer says
             // `1.2.3-rc.1 != 1.2.3`), so its generation is prunable too.
-            &format!("v{VERSION}-rc.1-0123456789ab"),
+            &format!("v{current}-rc.1-0123456789ab"),
         ] {
-            assert!(is_stale_generation(stale), "{stale} must be prunable");
+            assert!(
+                is_stale_generation(stale, current),
+                "{stale} must be prunable"
+            );
         }
 
         assert!(
-            !is_stale_generation(&format!("v{VERSION}-0123456789ab")),
+            !is_stale_generation(&format!("v{current}-0123456789ab"), current),
             "this build's own generations belong to other base URLs"
         );
         for kept in [
@@ -2775,7 +2874,7 @@ mod tests {
             "..",
             "",
         ] {
-            assert!(!is_stale_generation(kept), "{kept} must be kept");
+            assert!(!is_stale_generation(kept, current), "{kept} must be kept");
         }
     }
 
@@ -2818,19 +2917,23 @@ mod tests {
     /// compared against the string verification actually demands.
     #[test]
     fn signing_and_verification_agree_on_the_tag_convention() {
-        let tag = release_tag();
+        // Deliberately the real production constant, not `FIXTURE_VERSION`:
+        // this test pins the tag convention CI's `sign-sums` job and this
+        // module's own verification actually agree on, which is a fact
+        // about `VERSION`, not about whatever the fixtures are signed for.
+        let tag = release_tag(VERSION);
         assert!(
             tag.starts_with('v') && tag[1..] == *VERSION,
             "a release tag is v + the crate version, not something else: {tag}"
         );
         // What `minisign -S -t "farhelm $TAG"` puts in the trusted comment.
         let produced = format!("farhelm {tag}");
-        assert_eq!(produced, required_trusted_comment());
+        assert_eq!(produced, required_trusted_comment(VERSION));
         // The mistake this exists to catch, spelled out so it cannot be
         // reintroduced by "fixing" the convention in only one place.
         assert_ne!(
             format!("farhelm v{tag}"),
-            required_trusted_comment(),
+            required_trusted_comment(VERSION),
             "`farhelm v$TAG` doubles the v and must never be what we document"
         );
     }
@@ -3119,7 +3222,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
 
         let cache_root = tempfile::tempdir().unwrap();
-        let cache_dir = cache_root.path().join(format!("v{VERSION}-0123456789ab"));
+        let cache_dir = cache_root
+            .path()
+            .join(format!("v{FIXTURE_VERSION}-0123456789ab"));
         std::fs::create_dir_all(&cache_dir).unwrap();
         // A stale generation whose removal will fail: the parent is
         // read-only, so `remove_dir_all` cannot unlink it.
@@ -3127,7 +3232,7 @@ mod tests {
         std::fs::set_permissions(cache_root.path(), std::fs::Permissions::from_mode(0o500))
             .unwrap();
 
-        let error = housekeeping(cache_root.path(), &cache_dir).unwrap_err();
+        let error = housekeeping(cache_root.path(), &cache_dir, FIXTURE_VERSION).unwrap_err();
         let rendered = format!("{error:#}");
 
         std::fs::set_permissions(cache_root.path(), std::fs::Permissions::from_mode(0o700))
