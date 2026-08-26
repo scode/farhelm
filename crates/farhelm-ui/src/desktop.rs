@@ -2443,6 +2443,16 @@ mod tests {
             return;
         }
 
+        // Both fake servers poll a non-blocking LISTENER so the deadline loop
+        // can give up, but each accepted stream is put back into blocking
+        // mode explicitly. Linux hands out blocking sockets from a
+        // non-blocking listener; macOS (BSD semantics) makes the accepted
+        // socket inherit O_NONBLOCK, so a read on it returns WouldBlock
+        // straight away, the 200 goes out before the request has arrived,
+        // and hyper refuses a response that precedes its request
+        // (`UnexpectedMessage`). That is exactly how this test failed the
+        // first Mac release gate while every Linux run stayed green — the
+        // release workflow is the only place this test runs on macOS.
         let target = TcpListener::bind("127.0.0.1:0").unwrap();
         let target_addr = target.local_addr().unwrap();
         target.set_nonblocking(true).unwrap();
@@ -2451,8 +2461,22 @@ mod tests {
             while Instant::now() < deadline {
                 match target.accept() {
                     Ok((mut stream, _)) => {
-                        let mut request = [0_u8; 1024];
-                        let _ = stream.read(&mut request);
+                        stream.set_nonblocking(false).unwrap();
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(3)))
+                            .unwrap();
+                        // Read the whole request head before answering, so
+                        // the response can never overtake the request even
+                        // on a platform that delivers it in several reads.
+                        let mut request = Vec::new();
+                        let mut chunk = [0_u8; 1024];
+                        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                            match stream.read(&mut chunk) {
+                                Ok(0) => break,
+                                Ok(n) => request.extend_from_slice(&chunk[..n]),
+                                Err(error) => panic!("target read failed: {error}"),
+                            }
+                        }
                         stream
                             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect")
                             .unwrap();
