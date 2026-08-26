@@ -61,8 +61,8 @@ clap = { version = "4", features = ["derive", "env"] }
 dioxus = "0.7.10"
 # Decompresses a downloaded/staged release `.tar.gz` archive (D14) before
 # `tar` reads the archive layer — the provisioning payload extractor
-# (`provisioning/payloads.rs`) and, in Step 3b, the download source share
-# this one unpacking path.
+# (`provisioning/payloads.rs`) and the verified download source
+# (`provisioning/release_payloads.rs`) share this one unpacking path.
 flate2 = "1"
 futures-util = { version = "0.3", default-features = false }
 # Browser bootstrap tokens and device cookies are credentials, not identifiers:
@@ -88,6 +88,12 @@ libc = "0.2"
 # transitive crate cannot be imported, so serving the embedded tree needs
 # its own direct dependency on the same crate.
 mime_guess = "2"
+# Verifies a release's `SHA256SUMS.minisig` against the public key compiled
+# into the binary (D3) — the whole trust anchor of download-based
+# provisioning. A verify-only crate on purpose: nothing in farhelm ever
+# signs, so the signing half of minisign stays out of the binary and out of
+# the audit surface.
+minisign-verify = "0.2"
 # Decodes an embedded-UI request path (`UiSource::Embedded`) before it is
 # looked up, classified by extension, or handed to `mime_guess` — a percent-
 # escaped asset name (a literal space, say) must resolve to the same file an
@@ -95,12 +101,44 @@ mime_guess = "2"
 # transitively (both `axum` and `tower-http` depend on it), but a transitive
 # crate cannot be imported directly.
 percent-encoding = "2"
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# Feature set chosen by D3/plan Step 3, not by convenience. Two separate
+# decisions that are easy to conflate:
+#
+# - BUNDLED webpki roots rather than the destination machine's trust store,
+#   because one static binary is meant to run on any distro and a
+#   minimal/container/embedded image may have no CA bundle installed, or one
+#   in a location the binary would have to go looking for. Bundling makes the
+#   trust set a property of the release instead of a property of wherever it
+#   was copied to.
+# - RUSTLS rather than native-tls, which is the separate reason `openssl-sys`
+#   stays out of the release binary (`cargo tree -i openssl-sys` must stay
+#   empty for `farhelm`) — OpenSSL is what makes a static musl link painful,
+#   not the choice of root store.
+# - NO `gzip`: the download source hashes response bytes exactly as they
+#   arrive and compares them to `SHA256SUMS`, so transparent decompression
+#   would hash something other than the signed artifact.
+# - `stream` for the byte-at-a-time download loop (a release archive is tens
+#   of megabytes; it is never buffered whole in memory).
+# - `json` is not used by the download source at all — it is farhelm's and
+#   farhelm-ui's, and stays for them.
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls-webpki-roots",
+  "stream",
+] }
 # `bundled` compiles SQLite from source rather than linking the host's
 # libsqlite3 — required for the musl-static supervisor artifacts
 # SPEC_impl.md's cross-compilation plan ships (audited there: builds fine
 # for both target triples under cargo-zigbuild).
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Compares a payload-cache generation directory's version against this
+# build's before deleting it recursively (`provisioning/release_payloads.rs`).
+# A hand-rolled comparison got prereleases wrong in both directions — a
+# `-rc.N` generation was never pruned, and an empty version parsed as a
+# deletable one — and this predicate guards an `rm -rf` inside helm state, so
+# it uses the real grammar. Already in `Cargo.lock` transitively; this only
+# makes it a direct dependency.
+semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Device credentials are stored as fixed-size SHA-256 digests, and both those
@@ -136,8 +174,8 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Parses/validates `--release-base-url` (D2/D18) and, in Step 3b, builds the
-# asset URLs the download payload source fetches from it.
+# Parses/validates `--release-base-url` (D2/D18) and builds the asset URLs
+# the download payload source fetches from it.
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 web-sys = { version = "0.3", features = ["Window", "Location"] }

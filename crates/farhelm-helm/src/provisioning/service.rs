@@ -125,7 +125,7 @@ impl ProvisioningService {
     /// Production composition uses real process/file operations and
     /// resolves `selection`/`release_build` (D13, D18) into a real payload
     /// source via [`production_payloads`] — see that function for what each
-    /// [`PayloadSelection`] currently does and what Step 3b adds to it.
+    /// [`PayloadSelection`] resolves to.
     pub(crate) fn production(
         store: HelmStore,
         manager: Arc<ConnectionManager>,
@@ -1069,26 +1069,81 @@ impl ProvisioningService {
     /// Resolve and stage every payload before the first plan action runs.
     /// A missing release artifact is a planning/execution boundary failure,
     /// not permission to leave newly created directories on the host.
+    ///
+    /// The payload actions are prepared CONCURRENTLY. A cold host needs both
+    /// a `farhelm` and a `tmux`, the download source locks per asset so
+    /// those two never contend, and a serial walk would make cold-provision
+    /// latency the sum of two multi-megabyte downloads while holding one of
+    /// only `MAX_CONCURRENT_RUNS` fleet-wide slots. The fan-out is bounded
+    /// by the plan itself — a plan carries at most one action per
+    /// [`PayloadKind`] — so no explicit limit is needed here; if that ever
+    /// stops being true this needs a semaphore rather than a bigger fan-out.
+    ///
+    /// Each future carries its own action index so a failure still names the
+    /// plan step the user is looking at. Nothing on the host is touched until
+    /// every payload is prepared.
+    ///
+    /// `join_all`, NOT `try_join_all`, and the difference matters (F6, review
+    /// round 2). `try_join_all` drops the remaining futures the moment one
+    /// fails — but a dropped future does not stop the `spawn_blocking` task a
+    /// sibling may have running, and tokio keeps that closure alive to
+    /// completion. Dropping the future DOES release the per-asset mutex and
+    /// abandon the `OnceCell` initialisation that were the only guarantee of
+    /// a single writer, so an immediate retry could start deleting and
+    /// rewriting the same fixed staging, marker, and binary paths while the
+    /// detached publication was still writing them. Awaiting every future and
+    /// only then returning the first error costs one extra download on a
+    /// failing run and keeps cache-write ownership single at all times.
+    ///
+    /// Not covered by a test of its own: reproducing it needs a failure
+    /// injected between a sibling's entry into `spawn_blocking` and its exit,
+    /// which is not reachable through any seam the service exposes today.
+    /// This comment is the record of why the cheaper `try_join_all` is wrong
+    /// here.
     async fn prepare_payloads(
         &self,
         plan: &ProvisioningPlan,
     ) -> Result<HashMap<usize, PreparedPayload>, (usize, BackendFailure)> {
+        let preparations =
+            plan.actions
+                .iter()
+                .enumerate()
+                .filter_map(|(index, action)| match action {
+                    ProvisioningAction::InstallPayload { payload, arch, .. } => {
+                        Some((index, *payload, *arch))
+                    }
+                    _ => None,
+                })
+                .map(|(index, payload, arch)| async move {
+                    let source =
+                        self.payloads.path(payload, arch).await.map_err(|error| {
+                            (index, BackendFailure::new(format!("{error:#}"), ""))
+                        })?;
+                    let staged = stage_payload(&source)
+                        .await
+                        .map_err(|error| (index, error))?;
+                    Ok::<_, (usize, BackendFailure)>((index, staged))
+                });
         let mut prepared = HashMap::new();
-        for (index, action) in plan.actions.iter().enumerate() {
-            let ProvisioningAction::InstallPayload { payload, arch, .. } = action else {
-                continue;
-            };
-            let source = self
-                .payloads
-                .path(*payload, *arch)
-                .await
-                .map_err(|error| (index, BackendFailure::new(format!("{error:#}"), "")))?;
-            let staged = stage_payload(&source)
-                .await
-                .map_err(|error| (index, error))?;
-            prepared.insert(index, staged);
+        // Reported in plan order rather than completion order, so two
+        // failures in one run always name the same step.
+        let mut failure: Option<(usize, BackendFailure)> = None;
+        for outcome in futures_util::future::join_all(preparations).await {
+            match outcome {
+                Ok((index, staged)) => {
+                    prepared.insert(index, staged);
+                }
+                Err((index, error)) => {
+                    if failure.as_ref().is_none_or(|(first, _)| index < *first) {
+                        failure = Some((index, error));
+                    }
+                }
+            }
         }
-        Ok(prepared)
+        match failure {
+            Some(failure) => Err(failure),
+            None => Ok(prepared),
+        }
     }
 
     /// Retain one failed action and release the host claim without undoing

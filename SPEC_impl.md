@@ -1200,18 +1200,28 @@ from the GitHub release matching its own version, verifies them, and caches them
 over SSH exactly as before. A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a
 download, and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead —
 files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build,
-developer or release. Motivation for reversing the embedding: bundling every target's binaries inside every platform's
-own artifact cost tens of MB per download and coupled a payload's presence to whichever platform happened to embed it; a
+developer or release. The downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`), which
+caches one release's assets, their extracted binaries, and the signed checksum file under
+`<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` — keyed by version so an upgraded helm never
+reuses the previous release's binaries, and by base URL so a mirror or test server can neither read nor poison what the
+real release wrote. Motivation for reversing the embedding: bundling every target's binaries inside every platform's own
+artifact cost tens of MB per download and coupled a payload's presence to whichever platform happened to embed it; a
 download keeps the size cost where it belongs (paid once, by the host actually being provisioned) while keeping the same
 "provisioned host runs exactly what the provisioning helm expects" property, because the default download always names
 the provisioning helm's own version.
 
 Verification chain (D3): CI writes one `SHA256SUMS` covering the six release binaries/archives and signs it with an
-unencrypted minisign secret key held as a repository secret; the `farhelm` binary embeds the matching public key and
-refuses any download whose `SHA256SUMS.minisig` does not verify, or whose per-file SHA-256 does not match.
-`--payload-dir` is the one path that skips this — nothing there is downloaded, so nothing there is checked. SPEC.md's
-"no public relay, no third-party rendezvous service" line still holds: GitHub is a download source the helm's own
-machine reaches directly, never a relay or rendezvous point sessions or connections pass through.
+unencrypted minisign secret key held as a repository secret, passing `-t "farhelm $TAG"` so the release version lands in
+the signature's trusted comment; the `farhelm` binary embeds the matching public key and refuses any download whose
+`SHA256SUMS.minisig` does not verify, whose trusted comment names a version other than the helm's own, or whose per-file
+SHA-256 does not match. The trusted comment is not decoration: the signature otherwise authenticates only the CONTENTS
+of `SHA256SUMS`, which name no version, so whoever serves the release URL could replay an older release's valid manifest
+and assets at a newer version's URL and downgrade every host that helm provisions. A release tag is `vX.Y.Z` and already
+carries the `v`, so the comment is `farhelm` plus the tag verbatim: signing without `-t`, or with a second `v`
+(`farhelm v$TAG` → `farhelm vv1.2.3`), produces a release no helm can install. `--payload-dir` is the one path that
+skips all of this — nothing there is downloaded, so nothing there is checked. SPEC.md's "no public relay, no third-party
+rendezvous service" line still holds: GitHub is a download source the helm's own machine reaches directly, never a relay
+or rendezvous point sessions or connections pass through.
 
 ## Cross-compilation and targets
 

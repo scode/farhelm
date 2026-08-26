@@ -20,6 +20,7 @@ mod e2e;
 mod http;
 mod payloads;
 mod plan;
+mod release_payloads;
 mod service;
 
 pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
@@ -39,6 +40,10 @@ mod tests {
     use super::http::*;
     use super::payloads::*;
     use super::plan::*;
+    // The loopback release fixture lives with the download source it was
+    // built for; this module borrows it for the one end-to-end test that
+    // drives a real download through a real provisioning run.
+    use super::release_payloads::test_support::{FixtureRelease, expected_member};
     #[allow(unused_imports)]
     use super::service::*;
     use crate::AppState;
@@ -62,6 +67,7 @@ mod tests {
     use tower::ServiceExt;
 
     /// A payload source whose bytes are irrelevant to the fake executor.
+    #[derive(Debug)]
     struct FixedPayloads(PathBuf);
 
     #[async_trait]
@@ -73,6 +79,7 @@ mod tests {
 
     /// A release fixture with Farhelm present but the required tmux artifact
     /// missing, used to prove whole-plan payload preflight.
+    #[derive(Debug)]
     struct MissingTmuxPayload {
         farhelm: PathBuf,
         requested: Mutex<Vec<PayloadKind>>,
@@ -496,11 +503,23 @@ mod tests {
     ) -> Arc<ProvisioningService> {
         let payload = root.join("payload");
         std::fs::write(&payload, b"farhelm test payload").expect("write fixed payload fixture");
+        service_with_payloads(harness, backend, root, Arc::new(FixedPayloads(payload)))
+    }
+
+    /// The same wiring as [`service`] with the payload source supplied —
+    /// for the one test that drives a REAL source (the verified downloader)
+    /// through the service instead of a double.
+    fn service_with_payloads(
+        harness: &Harness,
+        backend: Arc<FakeBackend>,
+        root: &Path,
+        payloads: Arc<dyn PayloadSource>,
+    ) -> Arc<ProvisioningService> {
         ProvisioningService::injected(
             harness.store.clone(),
             Arc::clone(&harness.manager),
             backend,
-            Arc::new(FixedPayloads(payload)),
+            payloads,
             layout(root),
             PathBuf::from("/test/farhelm"),
         )
@@ -2961,6 +2980,7 @@ mod tests {
     /// Per-kind sources prevent a private-tmux plan from ever substituting
     /// the supervisor executable merely because both artifacts share an
     /// architecture.
+    #[derive(Debug)]
     struct MutablePayload {
         farhelm: Mutex<PathBuf>,
         tmux: PathBuf,
@@ -3873,8 +3893,8 @@ mod tests {
 
     /// Build a tiny but real `.tar.gz` archive at `<dir>/<package>-<target>.tar.gz`,
     /// nesting one member under `<package>-<target>/` — the dist archive
-    /// layout `DirectoryPayloads` (and, in Step 3b, the download source)
-    /// must locate `member` inside by basename rather than by an exact path.
+    /// layout both `DirectoryPayloads` and `ReleasePayloadSource` must
+    /// locate `member` inside by basename rather than by an exact path.
     fn write_release_archive(
         dir: &Path,
         package: &str,
@@ -4547,96 +4567,75 @@ mod tests {
         );
     }
 
-    /// Spec (F4, review round 2, security): the temporary `Release`
-    /// refusal must never write a mirror URL's credentials to logs —
-    /// exercised with sentinel secrets in both the userinfo and the query
-    /// string, neither of which may appear in the captured warning.
+    /// Spec: `production_payloads` resolves every `PayloadSelection` ×
+    /// `release_build` combination the way D13 and plan lines 418–433
+    /// describe — `Directory` always yields a working `DirectoryPayloads`;
+    /// `Release` always yields a `ReleasePayloadSource` at the given URL,
+    /// on a developer build as much as on a release build; `Default` splits
+    /// on `release_build`, downloading from this build's own GitHub release
+    /// when it is set and refusing with the `NoPayloads` message when it is
+    /// not.
+    ///
+    /// This wiring is the one place D13's policy is expressed, and getting
+    /// it wrong is silent: a release build that fell back to `NoPayloads`
+    /// would look like a working helm right up until somebody added a host.
+    ///
+    /// `Directory` is exercised under BOTH values of `release_build` (F8,
+    /// review round 1: an earlier version tried `release_build == false`
+    /// only, which would have missed a regression letting the release-build
+    /// download default override an explicitly selected local directory —
+    /// exactly the case an air-gapped operator depends on).
+    ///
+    /// The concrete source is identified through `PayloadSource`'s `Debug`
+    /// supertrait — an erased `Arc<dyn PayloadSource>` offers nothing else
+    /// to match on, and the alternative (a `source_kind()` method that only
+    /// tests call) would be production surface existing solely for this
+    /// assertion. Nothing here performs a request: the `Release` arms are
+    /// only inspected, never driven.
     #[tokio::test]
-    async fn release_refusal_never_logs_url_userinfo_or_query() {
-        let events = crate::test_capture::install();
+    async fn production_payloads_selects_by_payload_selection_and_release_build() {
         let state_dir = tempfile::tempdir().unwrap();
-        let url = url::Url::parse(
-            "https://sentinel-user:sentinel-pass@example.invalid/release/path?token=sentinel-token",
-        )
-        .unwrap();
-        let result = production_payloads(
-            PayloadSelection::Release { base_url: url },
+        let payloads = production_payloads(
+            PayloadSelection::Default,
             state_dir.path(),
             false,
             state_dir.path(),
-        );
-        assert!(result.is_err(), "Release must still refuse");
-
-        // `matching` returns every event from the WHOLE process-global
-        // buffer whose message contains this substring — including, since
-        // this exact message fires from every `Release`-refusal test that
-        // runs concurrently with this one (e.g.
-        // `production_payloads_selects_by_payload_selection_and_release_build`,
-        // which uses its own unrelated URL). Filtering to the event whose
-        // `base_url` field actually names THIS test's host is what makes
-        // the assertion below about this test's own URL rather than
-        // whichever concurrent test's event happened to land in the buffer
-        // first.
-        let matches = crate::test_capture::matching(&events, "refusing --release-base-url");
-        let mine = matches
-            .iter()
-            .find(|event| {
-                event
-                    .field("base_url")
-                    .is_some_and(|value| value.contains("example.invalid"))
-            })
-            .unwrap_or_else(|| panic!("no logged refusal named this test's own host: {matches:?}"));
-        let base_url_field = mine.field("base_url").unwrap_or_default();
+        )
+        .unwrap();
+        let error = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
         assert!(
-            !base_url_field.contains("sentinel-user"),
-            "logged base_url leaked userinfo: {base_url_field}"
+            format!("{error:#}").contains("this farhelm was built from source"),
+            "a developer build must refuse rather than download: {error:#}"
+        );
+
+        let state_dir = tempfile::tempdir().unwrap();
+        let payloads = production_payloads(
+            PayloadSelection::Default,
+            state_dir.path(),
+            true,
+            state_dir.path(),
+        )
+        .unwrap();
+        let described = format!("{payloads:?}");
+        assert!(
+            described.starts_with("ReleasePayloadSource"),
+            "a release build must download by default: {described}"
         );
         assert!(
-            !base_url_field.contains("sentinel-pass"),
-            "logged base_url leaked userinfo: {base_url_field}"
+            described.contains(&format!(
+                "https://github.com/scode/farhelm/releases/download/v{}/",
+                env!("CARGO_PKG_VERSION")
+            )),
+            "the default source must name THIS build's release: {described}"
         );
-        assert!(
-            !base_url_field.contains("sentinel-token"),
-            "logged base_url leaked the query string: {base_url_field}"
-        );
-        assert_eq!(
-            base_url_field, "https://example.invalid/release/path",
-            "logged base_url must be sanitized to scheme://host/path only"
-        );
-    }
 
-    /// Spec: `production_payloads` resolves each `PayloadSelection` the way
-    /// plan lines 418–433 (this PR's staged subset) describe — `Directory`
-    /// always yields a working `DirectoryPayloads`, under BOTH values of
-    /// `release_build` (F8, review round 1: an earlier version tried
-    /// `release_build == false` only, which would have missed a regression
-    /// letting the release-build default override an explicitly selected
-    /// local directory); `Default` yields `NoPayloads` regardless of
-    /// `release_build` FOR NOW (Step 3b changes only the
-    /// `release_build == true` half); `Release` refuses with the "not
-    /// supported yet" placeholder on either `release_build` value, since
-    /// Step 3b's download source does not exist yet.
-    #[tokio::test]
-    async fn production_payloads_selects_by_payload_selection_and_release_build() {
-        for release_build in [false, true] {
-            let state_dir = tempfile::tempdir().unwrap();
-            let payloads = production_payloads(
-                PayloadSelection::Default,
-                state_dir.path(),
-                release_build,
-                state_dir.path(),
-            )
-            .unwrap();
-            let error = payloads
-                .path(PayloadKind::Farhelm, PayloadArch::X86_64)
-                .await
-                .unwrap_err();
-            assert!(
-                format!("{error:#}").contains("this farhelm was built from source"),
-                "Default with release_build={release_build} must still yield NoPayloads in this PR"
-            );
-        }
-
+        // Both `release_build` values for `Directory`, because the case that
+        // matters is the release-shaped one: `--payload-dir` has to keep
+        // overriding download-by-default, which is the whole point of the
+        // flag for an air-gapped operator.
         for release_build in [false, true] {
             let dir_state = tempfile::tempdir().unwrap();
             let payload_dir = tempfile::tempdir().unwrap();
@@ -4662,17 +4661,14 @@ mod tests {
             assert_eq!(
                 std::fs::read(path).unwrap(),
                 b"directory-selection-bytes",
-                "an explicit Directory selection must win regardless of release_build={release_build}"
+                "an explicit Directory selection must win regardless of \
+                 release_build={release_build}"
             );
         }
 
         for release_build in [false, true] {
             let state_dir = tempfile::tempdir().unwrap();
-            // `Arc<dyn PayloadSource>` carries no `Debug` impl, so
-            // `unwrap_err()` cannot be used directly; `Result::err()`
-            // discards the `Ok` type instead of requiring it be `Debug`
-            // (F27, review round 1).
-            let error = production_payloads(
+            let payloads = production_payloads(
                 PayloadSelection::Release {
                     base_url: url::Url::parse("http://127.0.0.1:1/").unwrap(),
                 },
@@ -4680,13 +4676,110 @@ mod tests {
                 release_build,
                 state_dir.path(),
             )
-            .err()
-            .expect("Release must refuse until Step 3b lands a download source");
-            assert_eq!(
-                format!("{error:#}"),
-                "--release-base-url is not supported by this build yet"
+            .unwrap();
+            let described = format!("{payloads:?}");
+            assert!(
+                described.starts_with("ReleasePayloadSource"),
+                "--release-base-url must select a download source on any build: {described}"
+            );
+            assert!(
+                described.contains("http://127.0.0.1:1/"),
+                "the explicit base URL must win over the default: {described}"
             );
         }
+    }
+
+    /// Spec: pointing the helm at a release URL provisions a host with the
+    /// VERIFIED downloaded bytes — the acceptance condition plan Step 3
+    /// names, end to end.
+    ///
+    /// Everything above and below the download is real: production source
+    /// selection resolves the URL, `ProvisioningService` runs a real plan,
+    /// and the executor installs whatever the source handed it. The seams
+    /// this covers are the ones unit tests structurally cannot — selection
+    /// dropping the URL, payload preparation staging the wrong file,
+    /// `install-tmux` receiving the farhelm binary — each of which would
+    /// leave the downloader and the executor both passing their own tests
+    /// while "add host" installed the wrong thing.
+    ///
+    /// `needs_tmux` is on so BOTH payload kinds travel the download path,
+    /// and the fixture bytes differ per kind, so a crossed payload fails
+    /// loudly rather than installing a plausible file. Everything is
+    /// injected: a loopback fixture server, a temporary state directory, and
+    /// the recording backend — no environment variable is read or written.
+    #[tokio::test]
+    async fn a_release_url_provisions_a_host_with_verified_downloaded_payloads() {
+        let release = FixtureRelease::start(Vec::new()).await;
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        backend
+            .stateful
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *backend.reach.lock().unwrap() = ReachOutcome::Supported(Reach {
+            user_unit_dir: root.path().join(".config/systemd/user"),
+            home: root.path().to_path_buf(),
+            arch: PayloadArch::X86_64,
+            needs_tmux: true,
+            host_tmux: None,
+        });
+
+        // The fixture release is signed with the throwaway test key, so this
+        // names that trust anchor explicitly; everything else — the arms,
+        // the cache root, the HTTP client — is the production policy.
+        let payloads = production_payloads_with_key(
+            PayloadSelection::Release {
+                base_url: release.base_url.clone(),
+            },
+            state_dir.path(),
+            false,
+            state_dir.path(),
+            super::release_payloads::test_support::test_pubkey(),
+            // Production settings plus `no_proxy()`: without it an ambient
+            // proxy variable would route this loopback fixture request off
+            // the machine, which no test here may do.
+            super::release_payloads::test_support::test_client(),
+        )
+        .unwrap();
+        let service = service_with_payloads(&harness, backend.clone(), root.path(), payloads);
+
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: "downloads.example".to_string(),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Provisionable { probe_id, .. } = response else {
+            panic!("expected a plan")
+        };
+        let accepted = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let view = wait_finished(&service, accepted.host_id).await;
+        assert_eq!(view.status, RunStatus::Completed, "{:?}", view.message);
+
+        let operations = backend.operations.lock().unwrap().clone();
+        assert!(
+            operations.contains(&"install-farhelm".to_string())
+                && operations.contains(&"install-tmux".to_string()),
+            "both payloads must have been installed: {operations:?}"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("lib/farhelm")).unwrap(),
+            expected_member("farhelm", "x86_64-unknown-linux-musl"),
+            "the host must receive the verified farhelm from the release"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("lib/tmux")).unwrap(),
+            expected_member("tmux", "x86_64-unknown-linux-musl"),
+            "the host must receive the verified tmux from the release"
+        );
     }
 
     /// Spec: a leftover `<state_dir>/embedded-payloads/` cache from a

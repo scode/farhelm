@@ -1,15 +1,17 @@
 //! Host-architecture-specific payload sources own release retrieval and
 //! materialization so the provisioning executor does not.
 //!
-//! Three sources exist after Step 3a: [`NoPayloads`] for an ordinary
-//! developer build (D13), [`DirectoryPayloads`] for an operator-staged
-//! directory (`--payload-dir`), and — Step 3b — a verified download over
-//! HTTP for a release build's default. [`production_payloads`] is the one
-//! place that turns a [`PayloadSelection`] plus D13's release-build fact
-//! into the `Arc<dyn PayloadSource>` the rest of provisioning drives.
+//! Three sources exist: [`NoPayloads`] for an ordinary developer build
+//! (D13), [`DirectoryPayloads`] for an operator-staged directory
+//! (`--payload-dir`), and [`ReleasePayloadSource`] — a verified download
+//! over HTTP, which is what a release build uses by default (D2).
+//! [`production_payloads`] is the one place that turns a
+//! [`PayloadSelection`] plus D13's release-build fact into the
+//! `Arc<dyn PayloadSource>` the rest of provisioning drives.
 
 use super::assets;
 use super::plan::{PayloadArch, PayloadKind};
+use super::release_payloads::{MINISIGN_PUBKEY, ReleasePayloadSource};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 #[cfg(unix)]
@@ -24,12 +26,18 @@ use tracing::{info, warn};
 /// Supplies host-architecture-specific artifacts without coupling
 /// provisioning to how they are obtained.
 ///
-/// `async` (D16): Step 3b's download source performs network I/O and awaits
-/// a per-asset lock, and every source — including the two here that touch
+/// `async` (D16): the download source performs network I/O and awaits a
+/// per-asset lock, and every source — including the two here that touch
 /// neither — implements the same signature so `prepare_payloads` never has
 /// to know which kind of source it is holding.
+///
+/// `Debug` is a supertrait so that a source, once erased behind
+/// `Arc<dyn PayloadSource>`, can still say which one it is: the wiring in
+/// [`production_payloads`] is a policy decision (D13) worth logging and
+/// worth testing, and the erased handle carries no other way to ask.
+/// Implementations should render their identity, not their contents.
 #[async_trait]
-pub trait PayloadSource: Send + Sync {
+pub trait PayloadSource: std::fmt::Debug + Send + Sync {
     async fn path(&self, payload: PayloadKind, arch: PayloadArch) -> anyhow::Result<PathBuf>;
 }
 
@@ -58,6 +66,7 @@ pub enum PayloadSelection {
 /// Development helms intentionally carry no cross-compiled install
 /// payloads (D13): a build without an embedded web UI is not release-shaped,
 /// so "add host" has nothing to offer beyond the paths this message names.
+#[derive(Debug)]
 pub(super) struct NoPayloads;
 
 #[async_trait]
@@ -81,6 +90,7 @@ impl PayloadSource for NoPayloads {
 /// with tiny fixtures — works with no renaming. Verifies nothing: files in
 /// an explicitly selected local directory are treated as operator-trusted
 /// and are not verified (D3).
+#[derive(Debug)]
 pub(super) struct DirectoryPayloads {
     dir: PathBuf,
 }
@@ -134,8 +144,10 @@ impl PayloadSource for DirectoryPayloads {
     /// redoing cheap extraction/copy work every time costs nothing worth
     /// optimizing away, and it is what lets a same-named replacement asset
     /// take effect immediately (round 1) without teaching this source the
-    /// content-addressed invalidation machinery Step 3b's download source
-    /// needs for its own, genuinely expensive, cache.
+    /// content-addressed invalidation machinery [`ReleasePayloadSource`]
+    /// needs for its own, genuinely expensive, cache — that source pays a
+    /// network round trip a cache hit is worth avoiding, and this one does
+    /// not.
     ///
     /// Because every call's output is private, nothing here ever expires it
     /// on the caller's behalf — see [`prune_stale_generations`], run
@@ -360,7 +372,7 @@ fn require_regular_file(path: &Path, what: &str) -> anyhow::Result<()> {
 /// Extract the single REGULAR-FILE member whose basename is `member` from
 /// the `.tar.gz` at `archive` into `dest`, setting mode 0755.
 ///
-/// Shared by [`DirectoryPayloads`] today and Step 3b's download source —
+/// Shared by [`DirectoryPayloads`] and [`ReleasePayloadSource`] —
 /// both extract one binary out of a dist-produced archive that also nests
 /// it under a `<package>-<target>/` directory entry (VALIDATE, plan Step
 /// 5), so both need this exact "match by basename, refuse unless there is
@@ -466,7 +478,13 @@ pub(super) fn extract_single_member(
 /// kind D5/D14 ship unarchived (tmux). Staged under `dest`'s own directory
 /// and renamed into place, matching [`extract_single_member`]'s atomicity so
 /// a reader can never observe a partially written binary.
-fn copy_executable(source: &Path, dest: &Path) -> anyhow::Result<()> {
+///
+/// Shared with the download source for the same reason
+/// [`extract_single_member`] is: both sources put every payload kind through
+/// one cache shape, so tmux takes this path where a farhelm archive takes
+/// the extractor. Synchronous — callers MUST run it through
+/// `spawn_blocking`.
+pub(super) fn copy_executable(source: &Path, dest: &Path) -> anyhow::Result<()> {
     let mut staged = tempfile::NamedTempFile::new_in(
         dest.parent()
             .expect("extraction destinations always have a parent"),
@@ -717,78 +735,215 @@ fn remove_leftover_embedded_payloads(
     }
 }
 
-/// Render `url` for logging with credentials and query parameters stripped
-/// — `scheme://host[:port]/path` only.
+/// Where a release-shaped build looks for its payloads when nothing on the
+/// command line says otherwise: the GitHub release tagged with this build's
+/// own version (D2).
 ///
-/// F4 (review round 2, security): `url::Url`'s `Display` (what `%base_url`
-/// in a `tracing` call uses) serializes the WHOLE url verbatim, userinfo
-/// and query string included. A mirror URL carrying a password or an
-/// access token in either position would otherwise be copied into stderr,
-/// and any tracing sink configured to collect it, the moment an operator's
-/// `--release-base-url` reached this refusal — defeating the entire benefit
-/// of having supplied it through the environment instead of argv.
-fn sanitized_url_for_logging(url: &url::Url) -> String {
-    let mut sanitized = format!("{}://", url.scheme());
-    if let Some(host) = url.host_str() {
-        sanitized.push_str(host);
+/// Built from `CARGO_PKG_VERSION` rather than written out, so a version bump
+/// cannot leave the default pointing at the previous release's assets — the
+/// failure that would silently provision hosts with a mismatched binary.
+fn default_release_base_url() -> anyhow::Result<url::Url> {
+    let version = env!("CARGO_PKG_VERSION");
+    url::Url::parse(&format!(
+        "https://github.com/scode/farhelm/releases/download/v{version}/"
+    ))
+    .context("building the default release download URL")
+}
+
+/// Every setting the release download client is built with.
+///
+/// The timeouts are the shape of the workload (plan Step 3): a connect
+/// either happens quickly or is not going to, so 15 s is generous; a body
+/// read that makes no progress for 60 s is stalled rather than slow. There
+/// is deliberately NO overall deadline — a release archive is tens of
+/// megabytes and a genuinely slow link must be allowed to finish, since the
+/// alternative is an "add host" that fails at the same point every time.
+///
+/// `retry(never())` is load-bearing, not tidiness. reqwest 0.12 retries safe
+/// protocol nacks on its own, up to twice per `send()`, which would make the
+/// download source's documented "exactly one connect retry" a statement
+/// about only one of two retry layers. Disabling reqwest's leaves
+/// `ReleasePayloadSource::get` the single place attempts are decided.
+/// Deliberately UNTESTED: reqwest only retries at a protocol layer an
+/// in-process fixture server cannot reach into, so a test would have to
+/// assert on reqwest's internals rather than on farhelm's behaviour. The
+/// scripted transport covers farhelm's own retry; this line is a settled
+/// decision recorded here rather than a claim a test defends.
+///
+/// A BUILDER rather than a finished client so tests can add `no_proxy()` —
+/// reqwest honours the ambient proxy variables, so a loopback fixture URL is
+/// not by itself a guarantee that no socket leaves the machine — without
+/// forking the settings and letting them drift from production.
+pub(super) fn release_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .retry(reqwest::retry::never())
+        .redirect(release_redirect_policy())
+        .user_agent(concat!("farhelm/", env!("CARGO_PKG_VERSION")))
+}
+
+/// Redirects must be followed — GitHub answers every release asset URL with
+/// one, pointing at its object store — but not unconditionally.
+///
+/// Two bounds, and deliberately only two:
+///
+/// - At most five hops. reqwest's default is ten; one hop is the real case,
+///   and a chain longer than five is a loop or a game, not a CDN.
+/// - No https → http DOWNGRADE. A redirect is chosen by the server, so
+///   without this an operator who carefully typed an `https://` base URL
+///   could be walked onto a plaintext connection where anything on the path
+///   can see and rewrite the response. The signature check would still refuse
+///   the result, but the request has already been made by then, and "we
+///   refused the answer" is not the same as "we did not ask".
+///
+/// What is NOT blocked: loopback, private, and link-local destinations. That
+/// is a considered choice rather than an oversight — `--release-base-url`
+/// exists precisely so a helm can be pointed at an internal mirror or a test
+/// fixture on `127.0.0.1`, and a policy that refused those would break the
+/// supported case in order to narrow an unsupported one. The SSRF surface
+/// that remains is a GET whose response can never become a payload: it must
+/// still hash to an entry in a manifest signed for this version.
+fn release_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        // `previous()[0]` is the URL farhelm actually asked for, so the
+        // scheme comparison is against the operator's own base URL rather
+        // than against whatever the previous hop happened to be.
+        match release_redirect_decision(
+            attempt.previous().first(),
+            attempt.url(),
+            attempt.previous().len(),
+        ) {
+            RedirectDecision::Follow => attempt.follow(),
+            RedirectDecision::TooManyHops => {
+                attempt.error("too many redirects for a release asset")
+            }
+            RedirectDecision::Downgrade => attempt
+                .error("refusing a release redirect that downgrades https to a plaintext scheme"),
+        }
+    })
+}
+
+/// What [`release_redirect_policy`] does with one hop.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RedirectDecision {
+    Follow,
+    TooManyHops,
+    Downgrade,
+}
+
+/// The redirect policy as a pure decision, separated from reqwest's types so
+/// it can be tested at all: `reqwest::redirect::Attempt` has no public
+/// constructor, so a test cannot drive `Policy::redirect` directly. The
+/// end-to-end loopback redirect test covers the wiring; this covers the rule.
+pub(super) fn release_redirect_decision(
+    origin: Option<&url::Url>,
+    next: &url::Url,
+    hops: usize,
+) -> RedirectDecision {
+    if hops >= 5 {
+        return RedirectDecision::TooManyHops;
     }
-    if let Some(port) = url.port() {
-        sanitized.push(':');
-        sanitized.push_str(&port.to_string());
+    let asked_for_https = origin.is_some_and(|url| url.scheme() == "https");
+    if asked_for_https && next.scheme() != "https" {
+        return RedirectDecision::Downgrade;
     }
-    sanitized.push_str(url.path());
-    sanitized
+    RedirectDecision::Follow
+}
+
+/// The HTTP client every production download goes through.
+pub(super) fn release_client() -> anyhow::Result<reqwest::Client> {
+    release_client_builder()
+        .build()
+        .context("building the release download HTTP client")
 }
 
 /// Select the payload source production wiring builds, from a
 /// [`PayloadSelection`] and D13's release-build fact.
 ///
+/// This function IS the policy (D13): a release-shaped build downloads by
+/// default and a developer build refuses by default, while
+/// `--release-base-url` selects a download source on either kind of build
+/// so tests, mirrors, and prerelease checks have a way in that does not
+/// require faking a release build.
+///
 /// `cwd` (F1, review round 3) is the directory a relative `--payload-dir`
 /// is spelled against — production wiring passes the real
 /// `std::env::current_dir()`; tests pass a tempdir so a relative selection
 /// can be exercised without ever mutating this process's actual working
-/// directory. It exists solely for
-/// [`remove_leftover_embedded_payloads`]'s alias guard; nothing else this
-/// function does depends on it.
-///
-/// STAGING (Step 3b): `Release { .. }` and `Default` while `release_build`
-/// is true both currently refuse — see the two marked arms below — because
-/// this PR ships no verified download source yet. The match is shaped so
-/// 3b's `ReleasePayloadSource` only has to replace those two arms' bodies;
-/// nothing else in this function, or in its callers, needs to change.
+/// directory. It exists solely for [`remove_leftover_embedded_payloads`]'s
+/// alias guard; nothing else this function does depends on it.
 pub(super) fn production_payloads(
     selection: PayloadSelection,
     helm_state_dir: &Path,
     release_build: bool,
     cwd: &Path,
 ) -> anyhow::Result<Arc<dyn PayloadSource>> {
+    production_payloads_with_key(
+        selection,
+        helm_state_dir,
+        release_build,
+        cwd,
+        MINISIGN_PUBKEY,
+        release_client()?,
+    )
+}
+
+/// [`production_payloads`] with the trust anchor and HTTP client named
+/// explicitly.
+///
+/// The split exists so the end-to-end provisioning test can drive this
+/// EXACT policy — the same arms, cache root and leftover cleanup — against a
+/// loopback release signed with a throwaway key. Two things have to be
+/// injected for that to be honest:
+///
+/// - `pubkey`, because the production secret key lives only as a repository
+///   secret, so no test can produce a signature [`MINISIGN_PUBKEY`] accepts.
+///   That the shipped binary passes the real constant is covered separately,
+///   by the key's own oracle test.
+/// - `client`, because reqwest honours the ambient proxy variables: a
+///   loopback fixture URL alone does not guarantee the socket stays on this
+///   machine, and no test in this repository may mutate the environment to
+///   arrange that. Tests pass `release_client_builder().no_proxy()`;
+///   production passes [`release_client`], and everything else about the
+///   client is shared so the two cannot drift.
+///
+/// `cwd` means exactly what it does on [`production_payloads`]; it is
+/// threaded through unchanged.
+pub(super) fn production_payloads_with_key(
+    selection: PayloadSelection,
+    helm_state_dir: &Path,
+    release_build: bool,
+    cwd: &Path,
+    pubkey: &'static str,
+    client: reqwest::Client,
+) -> anyhow::Result<Arc<dyn PayloadSource>> {
+    // Only `Directory` can collide with the retired embedded-payloads cache,
+    // and the guard needs the exact directory to compare against — see
+    // [`remove_leftover_embedded_payloads`] for why deleting staged release
+    // files out from under an operator is the failure it exists to prevent.
     let selected_directory = match &selection {
         PayloadSelection::Directory(dir) => Some(dir.as_path()),
         PayloadSelection::Default | PayloadSelection::Release { .. } => None,
     };
     remove_leftover_embedded_payloads(cwd, helm_state_dir, selected_directory)?;
-    Ok(match selection {
-        PayloadSelection::Directory(dir) => Arc::new(DirectoryPayloads::new(dir)),
-        PayloadSelection::Release { base_url } => {
-            // Step 3b: ReleasePayloadSource
-            //
-            // `base_url` is logged in SANITIZED form (never interpolated
-            // into the bail message below, which is a settled exact string
-            // several tests pin) so an operator who reached this refusal
-            // from `--release-base-url` can see which SOURCE was rejected
-            // without any credential it carried leaking into logs (F4).
-            // This is also the field's only production-code read until
-            // Step 3b's download source consumes it for real.
-            warn!(
-                base_url = %sanitized_url_for_logging(&base_url),
-                "refusing --release-base-url: not supported by this build yet"
-            );
-            bail!("--release-base-url is not supported by this build yet");
-        }
-        PayloadSelection::Default if release_build => {
-            // Step 3b: ReleasePayloadSource
-            Arc::new(NoPayloads)
-        }
-        PayloadSelection::Default => Arc::new(NoPayloads),
-    })
+    // The two selections that never download are answered first; what
+    // remains differs only in WHICH base URL to read, so the release source
+    // is constructed exactly once and a future change to its constructor has
+    // one call site to keep right.
+    let base_url = match selection {
+        PayloadSelection::Directory(dir) => return Ok(Arc::new(DirectoryPayloads::new(dir))),
+        PayloadSelection::Default if !release_build => return Ok(Arc::new(NoPayloads)),
+        PayloadSelection::Release { base_url } => base_url,
+        PayloadSelection::Default => default_release_base_url()?,
+    };
+    // All release sources share one cache parent; `ReleasePayloadSource`
+    // then keys a directory below it by version and base URL, so a fixture
+    // or mirror URL can never read what a real release wrote.
+    Ok(Arc::new(ReleasePayloadSource::new(
+        base_url,
+        helm_state_dir.join("payloads"),
+        pubkey,
+        client,
+    )))
 }

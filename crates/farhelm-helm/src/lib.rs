@@ -264,17 +264,110 @@ pub struct HelmArgs {
     /// Exists so tests and air-gapped mirrors can point at a server other
     /// than github.com; selectable on any build, not only a release build.
     ///
-    /// `hide_env_values` (F5, review round 2, security): a mirror URL can
-    /// legitimately carry credentials (HTTP basic auth in the userinfo
-    /// component, an access token in the query string). Clap's default
-    /// `--help` rendering prints an `env`-backed argument's CURRENT value
-    /// from the process environment; without this, running
-    /// `farhelm helm run --help` on a machine where the variable is
-    /// exported would print the secret to terminal scrollback, copied
-    /// support output, or a screen share. The variable's NAME still shows —
-    /// only the value is suppressed.
-    #[arg(long, env = "FARHELM_RELEASE_BASE_URL", hide_env_values = true)]
+    /// Validated at parse time rather than at use (see
+    /// [`parse_release_base_url`]): a URL this flag accepted but the
+    /// downloader could not honour verbatim would fail much later, from
+    /// inside a provisioning run, with a message naming a URL that was never
+    /// requested.
+    ///
+    /// `hide_env_values` (F5, review round 2, security) is NOT made
+    /// redundant by that validation, because the two act at different
+    /// moments. Clap's default `--help` rendering prints an `env`-backed
+    /// argument's CURRENT value from the process environment, and it does
+    /// so WITHOUT running the value parser — so on a machine where someone
+    /// exported a URL carrying HTTP basic-auth userinfo or a token in the
+    /// query string, `farhelm helm run --help` would print that secret to
+    /// terminal scrollback, copied support output, or a screen share, even
+    /// though actually running with it is refused. The variable's NAME
+    /// still shows; only the value is suppressed.
+    #[arg(
+        long,
+        env = "FARHELM_RELEASE_BASE_URL",
+        hide_env_values = true,
+        value_parser = ReleaseBaseUrlParser
+    )]
     pub release_base_url: Option<url::Url>,
+}
+
+/// The one message a rejected `--release-base-url` produces, whatever was
+/// wrong with it.
+///
+/// Deliberately says nothing about the input (F10, review round 2, security).
+/// The value being rejected is frequently the one carrying a secret — a
+/// basic-auth password in the userinfo, a signed-URL token in the query —
+/// and a diagnostic that quoted it back would print that secret to stderr,
+/// into CI logs and support pastes, from the very check that exists to keep
+/// it out. Naming the accepted SHAPE tells the operator everything they can
+/// act on without repeating what they typed.
+const RELEASE_BASE_URL_REFUSAL: &str =
+    "--release-base-url must be an http(s) URL without credentials, query or fragment";
+
+/// A `clap` value parser for `--release-base-url` whose errors never echo the
+/// rejected value.
+///
+/// A plain `value_parser = fn` cannot do this: clap renders those failures as
+/// `invalid value '<the raw argument>' for '--release-base-url': <message>`,
+/// so the value is quoted back no matter how careful the message is.
+/// Implementing [`clap::builder::TypedValueParser`] lets the parser return a
+/// finished [`clap::Error`] instead, and clap prints that verbatim.
+#[derive(Clone)]
+struct ReleaseBaseUrlParser;
+
+impl clap::builder::TypedValueParser for ReleaseBaseUrlParser {
+    type Value = url::Url;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        value
+            .to_str()
+            .and_then(parse_release_base_url)
+            .ok_or_else(|| {
+                clap::Error::raw(
+                    clap::error::ErrorKind::ValueValidation,
+                    format!("{RELEASE_BASE_URL_REFUSAL}\n"),
+                )
+                .with_cmd(cmd)
+            })
+    }
+}
+
+/// Validate `--release-base-url`, accepting only what the download source can
+/// address faithfully. `None` means refused; the caller renders
+/// [`RELEASE_BASE_URL_REFUSAL`], which never quotes the input.
+///
+/// Four rejections, each for a concrete reason rather than tidiness:
+///
+/// - anything but `http`/`https`, because that is all reqwest can fetch. A
+///   `file:` or `ftp:` base URL parses as a perfectly good `Url` and then
+///   fails deep inside a provisioning run, where it is reported as the
+///   release server being unreachable — a diagnosis pointing at the network
+///   for a URL that could never have worked.
+/// - a QUERY, because asset URLs are built with `Url::join`, which REPLACES
+///   the base's query. A signed-URL or query-routed mirror would therefore be
+///   accepted here and then silently fetched from a different endpoint than
+///   every error message, and the cache key, would name.
+/// - a FRAGMENT, because fragments are never sent to a server at all, so one
+///   here can only mislead.
+/// - a USERNAME or PASSWORD, because this is by design an unauthenticated
+///   download model (D3): credentials in argv are visible in process
+///   listings, and this URL is rendered verbatim into provisioning errors
+///   that travel to the browser. Accepting them would leak them.
+fn parse_release_base_url(value: &str) -> Option<url::Url> {
+    let url: url::Url = value.parse().ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return None;
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    Some(url)
 }
 
 impl HelmArgs {
@@ -1919,6 +2012,130 @@ mod tests {
             assert!(
                 !help_text.contains(secret),
                 "help leaked {secret:?} from the hidden env value:\n{help_text}"
+            );
+        }
+    }
+
+    /// Every `--release-base-url` shape refused at parse time, and why each
+    /// one has to be caught here rather than later.
+    const REFUSED_RELEASE_BASE_URLS: [&str; 7] = [
+        // A query survives `HelmArgs` but not `Url::join`, which replaces it
+        // when asset URLs are built — so a query-routed or signed-URL mirror
+        // would be accepted and then fetched from somewhere other than the
+        // cache key and every error message name.
+        "https://example.invalid/release/?token=abc",
+        // Fragments are never sent to a server at all.
+        "https://example.invalid/release/#frag",
+        // Credentials in argv show up in process listings, and the URL is
+        // rendered into provisioning errors that reach the browser (D3:
+        // release downloads are unauthenticated by design).
+        "https://user:secret@example.invalid/release/",
+        "https://user@example.invalid/release/",
+        // Schemes reqwest cannot fetch. These parse as perfectly good `Url`s
+        // and would otherwise fail deep inside a provisioning run, reported
+        // as the release server being unreachable — a diagnosis pointing at
+        // the network for a URL that could never have worked.
+        "file:///srv/release/",
+        "ftp://example.invalid/release/",
+        "farhelm://example.invalid/release/",
+        // Not a URL at all.
+    ];
+
+    /// Spec: `--release-base-url` refuses every unusable URL shape at PARSE
+    /// time, with one message that names the accepted shape and NEVER quotes
+    /// what was rejected.
+    ///
+    /// The no-echo half is the security-relevant half (F10, review round 2):
+    /// the values most likely to be refused are exactly the ones carrying a
+    /// secret, and clap's ordinary invalid-value diagnostic quotes the raw
+    /// argument back. A validator that printed `invalid value
+    /// 'https://user:hunter2@…'` would leak the password from the check
+    /// written to keep it out.
+    ///
+    /// This does NOT make the flag's `hide_env_values` redundant: `--help`
+    /// renders an env-backed value without ever running this parser, so a
+    /// secret exported into the variable would still print. The two cover
+    /// different moments — see the flag's own docs.
+    ///
+    /// Asserted through the parser rather than by calling the validator
+    /// directly, so the `value_parser` wiring is covered too: a validator
+    /// nothing is wired to would pass its own unit test forever.
+    #[test]
+    fn release_base_url_refuses_unusable_shapes_without_echoing_them() {
+        use clap::Parser;
+
+        for url in REFUSED_RELEASE_BASE_URLS {
+            let error = Wrapper::try_parse_from(["farhelm", "--release-base-url", url])
+                .expect_err(&format!("{url} must be refused"));
+            let rendered = error.to_string();
+            assert!(
+                rendered.contains(super::RELEASE_BASE_URL_REFUSAL),
+                "{url} must be refused with the settled message: {rendered}"
+            );
+            assert!(
+                !rendered.contains("example.invalid") && !rendered.contains("/srv/release"),
+                "the refusal must not echo the rejected value: {rendered}"
+            );
+        }
+
+        for url in [
+            "https://example.invalid/release/",
+            "http://127.0.0.1:8080/release/",
+        ] {
+            Wrapper::try_parse_from(["farhelm", "--release-base-url", url])
+                .unwrap_or_else(|error| panic!("{url} must parse: {error}"));
+        }
+    }
+
+    /// Marker set only in the child process
+    /// [`a_rejected_release_url_never_reaches_stderr`] re-execs itself as.
+    const URL_LEAK_CHILD: &str = "FARHELM_HELM_URL_LEAK_TEST_CHILD";
+
+    /// Spec (F10, review round 2, security): a rejected `--release-base-url`
+    /// carrying secrets prints NONE of them to stderr.
+    ///
+    /// The unit test above asserts on the `clap::Error` value; this asserts
+    /// on what a terminal actually sees, which is what ends up in CI logs and
+    /// support pastes. It runs in a child process because clap writes the
+    /// refusal to the real stderr on `Parser::parse_from`'s exit path, and
+    /// the sentinel is set only for that child — this project's tests never
+    /// mutate the shared test binary's environment.
+    #[test]
+    fn a_rejected_release_url_never_reaches_stderr() {
+        const SENTINEL: &str =
+            "https://sentinel-user:sentinel-pass@example.invalid/release/?token=sentinel-token";
+
+        if std::env::var_os(URL_LEAK_CHILD).is_some() {
+            use clap::Parser;
+            // `parse_from` prints the refusal and exits; the parent reads
+            // whatever reached stderr.
+            let _ = Wrapper::parse_from(["farhelm", "--release-base-url", SENTINEL]);
+            return;
+        }
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::a_rejected_release_url_never_reaches_stderr",
+                "--nocapture",
+            ])
+            .env(URL_LEAK_CHILD, "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains(super::RELEASE_BASE_URL_REFUSAL),
+            "the child must have refused the URL:\n{stderr}"
+        );
+        for secret in [
+            "sentinel-user",
+            "sentinel-pass",
+            "sentinel-token",
+            "example.invalid",
+        ] {
+            assert!(
+                !stderr.contains(secret),
+                "the refusal leaked {secret:?} to stderr:\n{stderr}"
             );
         }
     }

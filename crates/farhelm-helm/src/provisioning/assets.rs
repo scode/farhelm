@@ -3,15 +3,18 @@
 //!
 //! This is the AUTHORITATIVE RUST inventory (plan §1), not a single source
 //! every consumer literally shares. Every Rust payload source reads
-//! directly from it: [`DirectoryPayloads`](super::payloads::DirectoryPayloads)
-//! today, Step 3b's download source next. `install.sh`'s asset table and
-//! the `SHA256SUMS`-writing release workflow are NOT Rust and cannot import
-//! `RELEASE_ARCHIVES` or `sums_members()` — they keep their own
-//! representations (a delimited shell table, workflow config) — but Step 6
-//! adds a parity test that checks each of those against this module, so the
-//! three descriptions are validated against one another rather than left to
-//! drift silently apart. Update this module first when a target or package
-//! changes; the parity test is what catches the other two falling behind.
+//! directly from it: both
+//! [`DirectoryPayloads`](super::payloads::DirectoryPayloads) and the
+//! verified download source
+//! [`ReleasePayloadSource`](super::release_payloads::ReleasePayloadSource).
+//! `install.sh`'s asset table and the `SHA256SUMS`-writing release workflow
+//! are NOT Rust and cannot import `RELEASE_ARCHIVES` or `sums_members()` —
+//! they keep their own representations (a delimited shell table, workflow
+//! config) — but Step 6 adds a parity test that checks each of those against
+//! this module, so the three descriptions are validated against one another
+//! rather than left to drift silently apart. Update this module first when a
+//! target or package changes; the parity test is what catches the other two
+//! falling behind.
 
 use super::plan::PayloadArch;
 
@@ -91,12 +94,14 @@ pub fn farhelm_archive_for(arch: PayloadArch) -> &'static ReleaseArchive {
 /// entry plus both tmux builds. `sign-sums` (Step 5) writes this same list;
 /// keeping the computation here rather than duplicating it in that job's
 /// script is what keeps the checksum file and the helm's own download
-/// expectations (Step 3b) from drifting apart.
+/// expectations from drifting apart.
 ///
-/// Unused outside this module's own tests until Step 3b's download source
-/// reads `SHA256SUMS` and Step 6's `install.sh` test compares against it —
-/// landed now, with plan §1's exact signature, so those steps add no new
-/// public surface to this module.
+/// Still unused outside this module's own tests: the download source looks
+/// each asset up by name in whatever `SHA256SUMS` it fetched rather than
+/// demanding the file list this function produces, because a release that
+/// grows a seventh asset must not make every older helm refuse it. The
+/// consumers this exists for are the `sign-sums` job (Step 5) and
+/// `install.sh`'s asset table (Step 6).
 #[allow(dead_code)]
 pub fn sums_members() -> Vec<String> {
     let mut members: Vec<String> = RELEASE_ARCHIVES.iter().map(archive_name).collect();

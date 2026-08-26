@@ -99,6 +99,21 @@ account, and offers `loginctl enable-linger` as an optional step so the supervis
 (some managed machines refuse linger; the unit then runs only while you are logged in). Each registered host row later
 offers an update action with the same plan-then-confirm handshake.
 
+The binaries that plan installs are fetched, not carried: the helm downloads the host's `farhelm` — and a `tmux`, if the
+host has none at or above the floor — from the GitHub release matching the helm's own version, checks the release's
+`SHA256SUMS` against a signature it verifies with a key built into farhelm, checks each file's SHA-256, caches them
+under the helm's state directory, and pushes them over SSH. So the helm's machine needs to reach `github.com` at that
+moment; the host never does, before or after. Anything that fails verification is refused, never used. An offline or
+air-gapped helm points `farhelm helm run --payload-dir` at a directory holding the release's files exactly as downloaded
+from the releases page — that directory is trusted as-is, because you put it there. A farhelm you built from source
+downloads nothing by default and says so instead (see "Development" below).
+
+That GitHub release is the DEFAULT source, not the only one. `farhelm helm run --release-base-url <url>` (or
+`FARHELM_RELEASE_BASE_URL`) points the same verified download at any server publishing the release's files under that
+URL — a mirror, a staging server, a test fixture — on any build, including one you compiled yourself. The verification
+is unchanged: the mirror's `SHA256SUMS` still has to carry a signature that farhelm's built-in key accepts, for this
+helm's own version, so a mirror can serve the bytes but cannot alter them. `--payload-dir` still wins if both are given.
+
 Hosts the automatic path does not support keep a manual fallback: run `farhelm supervisor run` in a terminal (with a
 tmux at or above the floor on `PATH`, or named with `--tmux`), or write a systemd user unit by hand. For the unit,
 `farhelm helm setup --dry-run` on that host prints both units Farhelm would install — take the
@@ -168,15 +183,16 @@ signature verification is only the download source's job.
 
 ## Development
 
-Development builds carry no provisioning payloads by default. Asking one to install a host with no `--payload-dir`
+Development builds carry no provisioning payloads by default. Asking one to install a host with neither payload flag
 reports
 `this farhelm was built from source and carries no provisioning payloads; pass --payload-dir <dir> holding the
-release files, or install a release build (see README, "Install")`;
-pass `--payload-dir <dir>` (or set `FARHELM_HELM_PAYLOAD_DIR`) pointing at a directory holding the published release
-files to provision hosts from a development build anyway. Build the web UI with
-`(cd crates/farhelm-ui && dx build --platform web --release)` after `cargo build`, then run the supervisor and helm
-manually when working on the browser surface. The desktop smoke harness supplies those development paths while testing
-the app-owned bootstrap.
+release files, or install a release build (see README, "Install")`.
+Either flag opts a source build back in: `--payload-dir <dir>` (or `FARHELM_HELM_PAYLOAD_DIR`) reads published release
+files from a directory unverified, and `--release-base-url <url>` (or `FARHELM_RELEASE_BASE_URL`) downloads them from
+any server with the full signature and checksum verification a release build performs. `--payload-dir` wins if both are
+given. Build the web UI with `(cd crates/farhelm-ui && dx build --platform web --release)` after `cargo build`, then run
+the supervisor and helm manually when working on the browser surface. The desktop smoke harness supplies those
+development paths while testing the app-owned bootstrap.
 
 `AGENTS.md` has the conventions and the finish-work checks. End-to-end tests: `cargo test -- --show-output` (Rust,
 including real-tmux integration; `--show-output` is what surfaces the skip reasons from tests that need a systemd user
