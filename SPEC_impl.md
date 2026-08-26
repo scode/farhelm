@@ -1119,13 +1119,16 @@ property of the architecture instead of a discipline.
 
 clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. The user-facing surface:
 
-- `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`). It takes no
-  session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`, `--remote-farhelm`, and `--remote-state-dir`
-  were dropped with M6's registry (user decision 2026-08-04). A helm drives every registered host at once, so a flag
-  naming one of them could only ever have meant the wrong thing; the last two live on as per-host registry fields, and
-  creation is `POST /api/sessions`, which is where the host selection belongs. A release build compiles its own web UI
-  in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at runtime, and an ordinary developer build with
-  neither serves the API alone.
+- `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`,
+  `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)).
+  The last two select where "add host" provisioning payloads come from — an operator-staged directory (verified not at
+  all, D3) or a download source other than the default GitHub release (D2); `--payload-dir` wins if both are given
+  (D18). It takes no session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`, `--remote-farhelm`, and
+  `--remote-state-dir` were dropped with M6's registry (user decision 2026-08-04). A helm drives every registered host
+  at once, so a flag naming one of them could only ever have meant the wrong thing; the last two live on as per-host
+  registry fields, and creation is `POST /api/sessions`, which is where the host selection belongs. A release build
+  compiles its own web UI in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at runtime, and an
+  ordinary developer build with neither serves the API alone.
 - `farhelm helm setup [--state-dir DIR] [--port N] [--tmux PATH] [--no-supervisor] [--dry-run]`, and
   `farhelm helm setup --uninstall [--dry-run]` — write, enable, and remove this machine's systemd user units for the
   helm and its supervisor. Linux only (it exits 2 elsewhere, pointing macOS at the desktop app). One state directory is
@@ -1190,11 +1193,25 @@ the session processes and terminals until the user deletes them or the host rebo
 Motivation for shipping tmux ourselves when absent or too old: apt needs root, and SPEC.md forbids requiring it; a
 static tmux under our own lib dir keeps the no-root promise without asking the user to install anything.
 
-The provisioning payloads — linux-musl `farhelm` binaries for both architectures plus the static tmux builds — ship
-inside the helm's own distribution: embedded in the Mac app bundle, included in the Linux release artifact. Motivation:
-provisioning must work with no third-party downloads (consistent with the security posture), and coupling payload
-version to helm version means a provisioned host runs exactly what the provisioning helm expects, which keeps the
-version-skew story simple. The size cost (tens of MB) is accepted.
+The provisioning payloads — linux-musl `farhelm` binaries for both architectures plus the static tmux builds — are no
+longer embedded in the helm's own distribution (D2). This REVERSES the earlier "provisioning must work with no
+third-party downloads" posture: a release-shaped build (D13 — one that embedded the web UI) downloads them, on demand,
+from the GitHub release matching its own version, verifies them, and caches them under helm state before pushing them
+over SSH exactly as before. A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a
+download, and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead —
+files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build,
+developer or release. Motivation for reversing the embedding: bundling every target's binaries inside every platform's
+own artifact cost tens of MB per download and coupled a payload's presence to whichever platform happened to embed it; a
+download keeps the size cost where it belongs (paid once, by the host actually being provisioned) while keeping the same
+"provisioned host runs exactly what the provisioning helm expects" property, because the default download always names
+the provisioning helm's own version.
+
+Verification chain (D3): CI writes one `SHA256SUMS` covering the six release binaries/archives and signs it with an
+unencrypted minisign secret key held as a repository secret; the `farhelm` binary embeds the matching public key and
+refuses any download whose `SHA256SUMS.minisig` does not verify, or whose per-file SHA-256 does not match.
+`--payload-dir` is the one path that skips this — nothing there is downloaded, so nothing there is checked. SPEC.md's
+"no public relay, no third-party rendezvous service" line still holds: GitHub is a download source the helm's own
+machine reaches directly, never a relay or rendezvous point sessions or connections pass through.
 
 ## Cross-compilation and targets
 

@@ -861,8 +861,14 @@ impl Harness {
             served: Vec::new(),
             store: store.clone(),
             state: Arc::new(
-                AppState::new(Arc::clone(&manager), store, _dir.path().to_path_buf())
-                    .expect("build restarted app state"),
+                AppState::new(
+                    Arc::clone(&manager),
+                    store,
+                    _dir.path().to_path_buf(),
+                    crate::provisioning::PayloadSelection::Default,
+                    cfg!(farhelm_release_build),
+                )
+                .expect("build restarted app state"),
             ),
             device_secret,
             manager,
@@ -1083,8 +1089,14 @@ impl FleetBuilder {
             event_subscriber_cap: self
                 .event_subscriber_cap
                 .unwrap_or(crate::events::MAX_SUBSCRIBERS),
-            ..AppState::new(Arc::clone(&manager), self.store, state_dir)
-                .expect("build harness app state")
+            ..AppState::new(
+                Arc::clone(&manager),
+                self.store,
+                state_dir,
+                crate::provisioning::PayloadSelection::Default,
+                cfg!(farhelm_release_build),
+            )
+            .expect("build harness app state")
         });
         let device_secret = state
             .auth

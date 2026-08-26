@@ -149,10 +149,31 @@ AGENTS.md forbids agents from running them — or from restarting the helm's uni
   installed it says so and points at `systemctl --user`. A running local supervisor is discovered and used like any
   other host.
 
+## Install
+
+Interim section — a fuller installation chapter (Step 6) replaces this. For the desktop app see "Quickstart: desktop app
+plus one remote host" above; for a Linux helm see "Running the helm on Linux" above.
+
+Provisioning payloads (the per-target `farhelm-*.tar.gz` archives and `tmux-*` binaries) are not yet published as
+individual release assets on the [releases page](https://github.com/scode/farhelm/releases) — the release workflow this
+repo currently runs ships one aggregate `farhelm-linux-x86_64.tar.gz` in the old layout instead. Publishing the
+per-target files is Step 5's job, once cargo-dist replaces that workflow. Until then, stage `--payload-dir` by hand:
+each archive is named `<package>-<target>.tar.gz` (e.g. `farhelm-x86_64-unknown-linux-musl.tar.gz`) and holds one binary
+nested a level down, at `<package>-<target>/<binary>` — the layout `dist` itself produces — and each tmux build is a
+bare, unarchived executable named `tmux-<target>` alongside them. `crates/farhelm-helm/src/provisioning/assets.rs` is
+the exact name list. Point `--payload-dir <dir>` (or set `FARHELM_HELM_PAYLOAD_DIR`) at that directory to provision
+hosts from it instead of downloading. `--payload-dir` trusts the files it finds there without any verification (D3): the
+release's `SHA256SUMS` may sit alongside them in the same directory, but this path never reads it — checksum and
+signature verification is only the download source's job.
+
 ## Development
 
-Development builds intentionally carry no provisioning payloads; asking one to install a host reports
-`this build carries no provisioning payloads`. Build the web UI with
+Development builds carry no provisioning payloads by default. Asking one to install a host with no `--payload-dir`
+reports
+`this farhelm was built from source and carries no provisioning payloads; pass --payload-dir <dir> holding the
+release files, or install a release build (see README, "Install")`;
+pass `--payload-dir <dir>` (or set `FARHELM_HELM_PAYLOAD_DIR`) pointing at a directory holding the published release
+files to provision hosts from a development build anyway. Build the web UI with
 `(cd crates/farhelm-ui && dx build --platform web --release)` after `cargo build`, then run the supervisor and helm
 manually when working on the browser surface. The desktop smoke harness supplies those development paths while testing
 the app-owned bootstrap.

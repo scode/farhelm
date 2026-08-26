@@ -10,6 +10,11 @@
 //! copies directly; remote setup uses the user's `ssh` and `sftp`, sharing
 //! the option-safe SSH prefix with the steady-state connection manager.
 
+/// The release asset inventory (plan §1) — the archive and binary names a
+/// GitHub release publishes. Drives every Rust payload source directly
+/// (this module's own docstring is the authoritative account of who reads
+/// it, and how later non-Rust consumers stay aligned with it instead).
+pub mod assets;
 mod backend;
 mod e2e;
 mod http;
@@ -19,6 +24,7 @@ mod service;
 
 pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
 pub(crate) use http::{probe_host, provision_host, provisioning_state, update_host};
+pub(crate) use payloads::PayloadSelection;
 pub(crate) use service::ProvisioningService;
 
 #[cfg(test)]
@@ -26,6 +32,7 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
 
+    use super::assets::*;
     use super::backend::*;
     #[allow(unused_imports)]
     use super::e2e::*;
@@ -46,7 +53,7 @@ mod tests {
     use axum::response::IntoResponse;
     use farhelm_proto::ControlMsg;
     use std::collections::VecDeque;
-    use std::path::{Path, PathBuf};
+    use std::path::{Component, Path, PathBuf};
     use std::process::Stdio;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -54,118 +61,12 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use tower::ServiceExt;
 
-    const PAYLOAD_CHILD_ENV: &str = "FARHELM_EMBEDDED_PAYLOAD_TEST_CHILD";
-
-    /// Build the real helm crate in a child Cargo process so `build.rs`, the
-    /// generated manifest, and `production_payloads()` are tested as one
-    /// boundary rather than as three independently plausible pieces.
-    #[test]
-    fn embedded_payload_build_maps_every_sentinel_to_its_runtime_selection() {
-        let fixture = tempfile::tempdir().unwrap();
-        let payload_root = fixture.path().join("payloads");
-        std::fs::create_dir(&payload_root).unwrap();
-        for (filename, bytes) in [
-            (
-                "farhelm-x86_64-unknown-linux-musl",
-                b"farhelm-x86".as_slice(),
-            ),
-            ("tmux-x86_64-unknown-linux-musl", b"tmux-x86".as_slice()),
-            (
-                "farhelm-aarch64-unknown-linux-musl",
-                b"farhelm-arm".as_slice(),
-            ),
-            ("tmux-aarch64-unknown-linux-musl", b"tmux-arm".as_slice()),
-        ] {
-            std::fs::write(payload_root.join(filename), bytes).unwrap();
-        }
-        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(Path::parent)
-            .unwrap();
-        let status = std::process::Command::new(env!("CARGO"))
-            .current_dir(workspace)
-            .args([
-                "test",
-                "--quiet",
-                "-p",
-                "farhelm-helm",
-                "provisioning::tests::embedded_payload_child_reads_exact_manifest_bytes",
-                "--",
-                "--exact",
-                "--nocapture",
-            ])
-            .env("CARGO_TARGET_DIR", fixture.path().join("target"))
-            .env("FARHELM_PAYLOAD_DIR", &payload_root)
-            .env(PAYLOAD_CHILD_ENV, &payload_root)
-            .status()
-            .unwrap();
-        assert!(status.success(), "child payload build failed with {status}");
-    }
-
-    /// Child half of the build-script integration test. A normal test run
-    /// has no marker and returns immediately; the parent rebuild supplies
-    /// four distinct bytes and this test reads them only through production's
-    /// materialized payload source.
-    #[test]
-    fn embedded_payload_child_reads_exact_manifest_bytes() {
-        let Some(root) = std::env::var_os(PAYLOAD_CHILD_ENV).map(PathBuf::from) else {
-            return;
-        };
-        let materialized_root = tempfile::tempdir().unwrap();
-        let payloads = production_payloads(materialized_root.path()).unwrap();
-        let cache_root = materialized_root.path().join("embedded-payloads");
-        assert!(
-            !cache_root.exists(),
-            "constructing the release source must not eagerly write every payload"
-        );
-        std::fs::create_dir(&cache_root).unwrap();
-        let stale = cache_root.join("payload-from-older-generation");
-        std::fs::write(&stale, b"stale").unwrap();
-        for (kind, arch, filename) in [
-            (
-                PayloadKind::Farhelm,
-                PayloadArch::X86_64,
-                "farhelm-x86_64-unknown-linux-musl",
-            ),
-            (
-                PayloadKind::Tmux,
-                PayloadArch::X86_64,
-                "tmux-x86_64-unknown-linux-musl",
-            ),
-            (
-                PayloadKind::Farhelm,
-                PayloadArch::Aarch64,
-                "farhelm-aarch64-unknown-linux-musl",
-            ),
-            (
-                PayloadKind::Tmux,
-                PayloadArch::Aarch64,
-                "tmux-aarch64-unknown-linux-musl",
-            ),
-        ] {
-            let materialized = payloads.path(kind, arch).unwrap();
-            assert!(
-                !stale.exists(),
-                "first payload access must clean files absent from the current manifest"
-            );
-            assert!(
-                materialized.starts_with(materialized_root.path().join("embedded-payloads")),
-                "embedded payload escaped the app-owned state directory: {}",
-                materialized.display()
-            );
-            assert_eq!(
-                std::fs::read(materialized).unwrap(),
-                std::fs::read(root.join(filename)).unwrap(),
-                "{kind:?}/{arch:?} selected the wrong embedded payload"
-            );
-        }
-    }
-
     /// A payload source whose bytes are irrelevant to the fake executor.
     struct FixedPayloads(PathBuf);
 
+    #[async_trait]
     impl PayloadSource for FixedPayloads {
-        fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
             Ok(self.0.clone())
         }
     }
@@ -177,8 +78,9 @@ mod tests {
         requested: Mutex<Vec<PayloadKind>>,
     }
 
+    #[async_trait]
     impl PayloadSource for MissingTmuxPayload {
-        fn path(&self, payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        async fn path(&self, payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
             self.requested.lock().unwrap().push(payload);
             match payload {
                 PayloadKind::Farhelm => Ok(self.farhelm.clone()),
@@ -835,7 +737,9 @@ mod tests {
             let failed = wait_finished(&service, accepted.host_id).await;
             assert_eq!(failed.status, RunStatus::Failed);
             assert!(failed.message.as_deref().is_some_and(|message| {
-                message.contains("this build carries no provisioning payloads")
+                message.contains(
+                    "this farhelm was built from source and carries no provisioning payloads",
+                )
             }));
             assert_eq!(failed.steps[0].status, StepStatus::Pending);
             assert_eq!(failed.steps[1].status, StepStatus::Failed);
@@ -3062,8 +2966,9 @@ mod tests {
         tmux: PathBuf,
     }
 
+    #[async_trait]
     impl PayloadSource for MutablePayload {
-        fn path(&self, payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        async fn path(&self, payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
             Ok(match payload {
                 PayloadKind::Farhelm => self.farhelm.lock().unwrap().clone(),
                 PayloadKind::Tmux => self.tmux.clone(),
@@ -3964,5 +3869,1261 @@ mod tests {
         assert!(!active.success());
         assert!(!enabled.success());
         assert!(!tmux_alive.success());
+    }
+
+    /// Build a tiny but real `.tar.gz` archive at `<dir>/<package>-<target>.tar.gz`,
+    /// nesting one member under `<package>-<target>/` — the dist archive
+    /// layout `DirectoryPayloads` (and, in Step 3b, the download source)
+    /// must locate `member` inside by basename rather than by an exact path.
+    fn write_release_archive(
+        dir: &Path,
+        package: &str,
+        target: &str,
+        member: &str,
+        contents: &[u8],
+    ) {
+        let archive_path = dir.join(format!("{package}-{target}.tar.gz"));
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(contents.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(
+                &mut header,
+                format!("{package}-{target}/{member}"),
+                contents,
+            )
+            .unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+    }
+
+    /// Append one bare member (no nesting) directly at `path` inside a tar
+    /// builder — used to construct archives with zero or several members
+    /// sharing `path`'s basename, which [`write_release_archive`]'s
+    /// one-member-per-call shape cannot produce.
+    fn append_tar_member(
+        builder: &mut tar::Builder<flate2::write::GzEncoder<std::fs::File>>,
+        path: &str,
+        contents: &[u8],
+    ) {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(contents.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder.append_data(&mut header, path, contents).unwrap();
+    }
+
+    /// Build a release archive whose one entry named `member` is NOT a
+    /// regular file — a directory, symlink, or hard link — the shape F3
+    /// (review round 1) rejects outright rather than silently excluding
+    /// from the exactly-one count or, worse, staging as if it were the
+    /// binary.
+    fn write_archive_with_non_regular_member(
+        dir: &Path,
+        package: &str,
+        target: &str,
+        member: &str,
+        entry_type: tar::EntryType,
+    ) {
+        let archive_path = dir.join(format!("{package}-{target}.tar.gz"));
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(entry_type);
+        header.set_size(0);
+        let entry_path = format!("{package}-{target}/{member}");
+        match entry_type {
+            tar::EntryType::Symlink | tar::EntryType::Link => {
+                builder
+                    .append_link(&mut header, &entry_path, "elsewhere-in-the-archive")
+                    .unwrap();
+            }
+            _ => {
+                header.set_cksum();
+                builder
+                    .append_data(&mut header, &entry_path, std::io::empty())
+                    .unwrap();
+            }
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+    }
+
+    /// List `.extracted/<asset>.*.bin` snapshot files for `asset` inside
+    /// `dir`. `DirectoryPayloads`' per-call snapshots are uniquely named
+    /// (F2, review round 2), so there is no single fixed destination path
+    /// left to assert about — tests instead assert about the whole
+    /// matching SET. Built on `read_dir`, which enumerates directory
+    /// entries without following them, so a hypothetical dangling symlink
+    /// left by a broken implementation would still show up here — unlike
+    /// `Path::exists()`, which follows symlinks and would report `false`
+    /// for exactly that broken case (F11, review round 2).
+    fn extracted_snapshot_files(dir: &Path, asset: &str) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(dir.join(".extracted")) else {
+            return Vec::new();
+        };
+        let prefix = format!("{asset}.");
+        entries
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".bin"))
+            })
+            .map(|entry| entry.path())
+            .collect()
+    }
+
+    /// Spec: `DirectoryPayloads` extracts the `farhelm` binary out of the
+    /// published archive and copies the bare tmux binary verbatim, for both
+    /// provisioning architectures, landing under `dir/.extracted/` with
+    /// mode 0755 — the happy path plan lines 467–475 ask for, run against
+    /// tiny real archives built in-test rather than committed binary
+    /// fixtures (3b commits the signed release fixture set).
+    ///
+    /// F12 (review round 1) pins the RETURNED PATH's shape — inside
+    /// `.extracted/`, named after the published asset — without pinning an
+    /// exact filename, since F2 (review round 2) makes every call's
+    /// destination a uniquely named private snapshot rather than a name
+    /// shared across calls. F9 (review round 2) also assigns the SOURCE
+    /// files distinct, non-executable modes before materializing, and
+    /// requires those modes — not just their bytes — to survive unchanged:
+    /// a regression that `chmod 0755`d the operator's own archive or tmux
+    /// binary instead of only the extracted/copied output would satisfy
+    /// every earlier assertion here and still be a real bug.
+    #[tokio::test]
+    async fn directory_payloads_extracts_farhelm_and_copies_tmux_for_both_arches() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut original_archives = std::collections::HashMap::new();
+        let mut original_tmux = std::collections::HashMap::new();
+        for arch in [PayloadArch::X86_64, PayloadArch::Aarch64] {
+            let archive = farhelm_archive_for(arch);
+            write_release_archive(
+                dir.path(),
+                archive.package,
+                archive.target,
+                archive.member,
+                format!("farhelm-bytes-{arch:?}").as_bytes(),
+            );
+            let tmux_bytes = format!("tmux-bytes-{arch:?}").into_bytes();
+            std::fs::write(dir.path().join(tmux_name(arch)), &tmux_bytes).unwrap();
+            // Distinct, non-executable modes so a regression that chmods a
+            // SOURCE instead of only its extracted/copied output cannot
+            // hide behind a content-only comparison (F9, review round 2).
+            std::fs::set_permissions(
+                dir.path().join(archive_name(archive)),
+                std::fs::Permissions::from_mode(0o640),
+            )
+            .unwrap();
+            std::fs::set_permissions(
+                dir.path().join(tmux_name(arch)),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+            original_archives.insert(
+                arch,
+                std::fs::read(dir.path().join(archive_name(archive))).unwrap(),
+            );
+            original_tmux.insert(arch, tmux_bytes);
+        }
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        for arch in [PayloadArch::X86_64, PayloadArch::Aarch64] {
+            let archive = farhelm_archive_for(arch);
+            let extracted_dir = dir.path().join(".extracted");
+            let farhelm_asset = archive_name(archive);
+
+            let farhelm_path = payloads.path(PayloadKind::Farhelm, arch).await.unwrap();
+            assert_eq!(
+                farhelm_path.parent(),
+                Some(extracted_dir.as_path()),
+                "the returned path must live in dir/.extracted/"
+            );
+            assert!(
+                farhelm_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&format!("{farhelm_asset}."))
+                        && name.ends_with(".bin")),
+                "the returned filename must be {farhelm_asset}.<unique>.bin, got {farhelm_path:?}"
+            );
+            assert_eq!(
+                std::fs::read(&farhelm_path).unwrap(),
+                format!("farhelm-bytes-{arch:?}").as_bytes()
+            );
+            assert_eq!(
+                std::fs::metadata(&farhelm_path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o755,
+                "extracted farhelm binary must be executable"
+            );
+
+            let tmux_asset = tmux_name(arch).to_string();
+            let tmux_path = payloads.path(PayloadKind::Tmux, arch).await.unwrap();
+            assert_eq!(
+                tmux_path.parent(),
+                Some(extracted_dir.as_path()),
+                "the returned path must live in dir/.extracted/"
+            );
+            assert!(
+                tmux_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&format!("{tmux_asset}."))
+                        && name.ends_with(".bin")),
+                "the returned filename must be {tmux_asset}.<unique>.bin, got {tmux_path:?}"
+            );
+            assert_eq!(
+                std::fs::read(&tmux_path).unwrap(),
+                format!("tmux-bytes-{arch:?}").as_bytes()
+            );
+            assert_eq!(
+                std::fs::metadata(&tmux_path).unwrap().permissions().mode() & 0o777,
+                0o755,
+                "copied tmux binary must be executable"
+            );
+
+            assert_eq!(
+                std::fs::read(dir.path().join(archive_name(archive))).unwrap(),
+                original_archives[&arch],
+                "materialization must never mutate the operator's staged archive"
+            );
+            assert_eq!(
+                std::fs::metadata(dir.path().join(archive_name(archive)))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o640,
+                "materialization must never change the operator's staged archive's mode"
+            );
+            assert_eq!(
+                std::fs::read(dir.path().join(tmux_name(arch))).unwrap(),
+                original_tmux[&arch],
+                "materialization must never mutate the operator's staged tmux binary"
+            );
+            assert_eq!(
+                std::fs::metadata(dir.path().join(tmux_name(arch)))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600,
+                "materialization must never change the operator's staged tmux binary's mode"
+            );
+        }
+    }
+
+    /// Spec: an absent source asset names the exact path `DirectoryPayloads`
+    /// expected to find it at, so an operator staging the directory gets a
+    /// specific, actionable path rather than a generic "not found".
+    #[tokio::test]
+    async fn directory_payloads_missing_file_names_the_expected_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let error = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        let expected = dir
+            .path()
+            .join(archive_name(farhelm_archive_for(PayloadArch::X86_64)));
+        assert!(
+            format!("{error:#}").contains(&expected.display().to_string()),
+            "error must name {}: {error:#}",
+            expected.display()
+        );
+    }
+
+    /// Spec (F10, review round 2): `require_regular_file`'s non-regular
+    /// branch is reachable at the published SOURCE path, not only inside a
+    /// tar archive (a different code path entirely) — here the expected
+    /// archive path is itself a directory.
+    #[tokio::test]
+    async fn directory_payloads_reports_a_directory_at_the_source_path_as_non_regular() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        std::fs::create_dir_all(dir.path().join(archive_name(archive))).unwrap();
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let error = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("is not a regular file"),
+            "a directory at the source path must be reported as present but non-regular: \
+             {message}"
+        );
+        assert!(
+            !message.contains("does not exist"),
+            "a directory at the source path must not be reported as absent: {message}"
+        );
+    }
+
+    /// Spec (F10, review round 2): a metadata failure that is NOT
+    /// `NotFound` — a symlink loop, deterministically — must retain its
+    /// underlying filesystem error rather than being folded into either
+    /// the "missing asset" or the "not a regular file" message. Without
+    /// this, swapping `std::fs::metadata` back for `Path::is_file()` could
+    /// collapse this case into "missing asset" and the suite would stay
+    /// green.
+    #[tokio::test]
+    async fn directory_payloads_reports_a_symlink_loop_as_an_inspection_failure_not_absence() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let looped_path = dir.path().join(archive_name(archive));
+        std::os::unix::fs::symlink(&looped_path, &looped_path).unwrap();
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let error = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            !message.contains("does not exist"),
+            "a symlink loop must not be reported as absence: {message}"
+        );
+        assert!(
+            !message.contains("is not a regular file"),
+            "a symlink loop is a metadata failure, not a present-but-wrong-type object: {message}"
+        );
+        assert!(
+            message.contains("inspecting"),
+            "a symlink loop must retain the underlying inspection failure: {message}"
+        );
+    }
+
+    /// Spec: zero members named `member` refuses with the exact wording
+    /// plan line 460 specifies — an archive whose one file happens not to
+    /// be called `farhelm` must not be silently accepted as if it were.
+    /// F13 (review round 1) / F11 (review round 2): also proves no
+    /// destination is EVER created — checked by listing `.extracted/` for
+    /// this asset rather than a single fixed path, per F2's per-call
+    /// unique naming.
+    #[tokio::test]
+    async fn directory_payloads_refuses_an_archive_with_no_matching_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        write_release_archive(
+            dir.path(),
+            archive.package,
+            archive.target,
+            "not-farhelm",
+            b"nope",
+        );
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let error = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            format!(
+                "{} contains 0 members named farhelm; expected exactly one",
+                archive_name(archive)
+            )
+        );
+        assert!(
+            extracted_snapshot_files(dir.path(), &archive_name(archive)).is_empty(),
+            "a refused archive must never produce a staged destination"
+        );
+    }
+
+    /// Spec: several members sharing the same basename refuse the same way
+    /// zero does — the extractor must not silently pick one of two
+    /// candidates, since a dist archive that ever carried two `farhelm`
+    /// entries would mean the release build itself went wrong. F13 (review
+    /// round 1) / F11 (review round 2): also proves no destination is
+    /// created — see the sibling zero-match test's docstring.
+    #[tokio::test]
+    async fn directory_payloads_refuses_an_archive_with_several_matching_members() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive_path = dir.path().join(archive_name(archive));
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        append_tar_member(&mut builder, "a/farhelm", b"one");
+        append_tar_member(&mut builder, "b/farhelm", b"two");
+        builder.into_inner().unwrap().finish().unwrap();
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let error = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            format!(
+                "{} contains 2 members named farhelm; expected exactly one",
+                archive_name(archive)
+            )
+        );
+        assert!(
+            extracted_snapshot_files(dir.path(), &archive_name(archive)).is_empty(),
+            "a refused archive must never produce a staged destination"
+        );
+    }
+
+    /// Spec (F3, review round 1, SHOULD-FIX): a same-named directory,
+    /// symlink, or hard link entry makes the archive malformed rather than
+    /// silently dropping out of the count or becoming staged content —
+    /// refused for each shape. F11 (review round 2): the cleanup assertion
+    /// lists `.extracted/` for this asset rather than checking a single
+    /// fixed path with `Path::exists()`, which follows symlinks and would
+    /// have reported `false` for a dangling one left behind by a broken
+    /// implementation even though a real entry remained.
+    #[tokio::test]
+    async fn directory_payloads_refuses_a_non_regular_entry_sharing_the_members_name() {
+        for entry_type in [
+            tar::EntryType::Directory,
+            tar::EntryType::Symlink,
+            tar::EntryType::Link,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let archive = farhelm_archive_for(PayloadArch::X86_64);
+            write_archive_with_non_regular_member(
+                dir.path(),
+                archive.package,
+                archive.target,
+                archive.member,
+                entry_type,
+            );
+            let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+            let error = payloads
+                .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                .await
+                .unwrap_err();
+            assert!(
+                format!("{error:#}").contains("not a regular file"),
+                "{entry_type:?} entry must be refused as malformed: {error:#}"
+            );
+            assert!(
+                extracted_snapshot_files(dir.path(), &archive_name(archive)).is_empty(),
+                "{entry_type:?} entry must never produce a staged destination"
+            );
+        }
+    }
+
+    /// Spec (F13, review round 1) / F2 (review round 2): a malformed
+    /// archive must never disturb an existing snapshot that legitimately
+    /// belongs to an earlier generation, and must never add a new one of
+    /// its own. Seeds `.extracted/<asset>.sentinel.bin` — the shape a real
+    /// earlier successful call would have left, since F2 makes every
+    /// destination a private per-call snapshot rather than a name shared
+    /// across calls — with sentinel bytes and a distinct mode, then
+    /// attempts extraction from a several-members archive and requires the
+    /// sentinel untouched and no additional snapshot present.
+    #[tokio::test]
+    async fn directory_payloads_preserves_existing_snapshots_when_extraction_fails() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive_path = dir.path().join(archive_name(archive));
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        append_tar_member(&mut builder, "a/farhelm", b"one");
+        append_tar_member(&mut builder, "b/farhelm", b"two");
+        builder.into_inner().unwrap().finish().unwrap();
+
+        let extracted_dir = dir.path().join(".extracted");
+        std::fs::create_dir_all(&extracted_dir).unwrap();
+        let sentinel = extracted_dir.join(format!("{}.sentinel.bin", archive_name(archive)));
+        std::fs::write(&sentinel, b"sentinel").unwrap();
+        std::fs::set_permissions(&sentinel, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            std::fs::read(&sentinel).unwrap(),
+            b"sentinel",
+            "a failed extraction must not touch an existing snapshot's bytes"
+        );
+        assert_eq!(
+            std::fs::metadata(&sentinel).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "a failed extraction must not touch an existing snapshot's mode"
+        );
+        assert_eq!(
+            extracted_snapshot_files(dir.path(), &archive_name(archive)),
+            vec![sentinel],
+            "a failed extraction must not add any new snapshot"
+        );
+    }
+
+    /// Spec (F2, review round 2, DECISION: per-call private snapshot):
+    /// `DirectoryPayloads::path` materializes into a UNIQUE file on every
+    /// call and never overwrites a name shared with another call. Two
+    /// calls straddling a source refresh must return DISTINCT paths, and
+    /// each must keep returning the bytes it was actually built from — the
+    /// first caller's snapshot surviving the second caller's own
+    /// materialization is exactly the generation-handoff safety a shared
+    /// destination name did not, by itself, provide.
+    #[tokio::test]
+    async fn directory_payloads_snapshots_are_private_and_survive_a_later_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        write_release_archive(
+            dir.path(),
+            archive.package,
+            archive.target,
+            archive.member,
+            b"generation-one",
+        );
+        std::fs::write(
+            dir.path().join(tmux_name(PayloadArch::X86_64)),
+            b"tmux-generation-one",
+        )
+        .unwrap();
+
+        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let farhelm_path_one = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap();
+        let tmux_path_one = payloads
+            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .await
+            .unwrap();
+
+        // Replace both staged assets under the SAME published names.
+        write_release_archive(
+            dir.path(),
+            archive.package,
+            archive.target,
+            archive.member,
+            b"generation-two",
+        );
+        std::fs::write(
+            dir.path().join(tmux_name(PayloadArch::X86_64)),
+            b"tmux-generation-two",
+        )
+        .unwrap();
+
+        let farhelm_path_two = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap();
+        let tmux_path_two = payloads
+            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .await
+            .unwrap();
+
+        assert_ne!(
+            farhelm_path_one, farhelm_path_two,
+            "each call must get its own private snapshot file"
+        );
+        assert_ne!(
+            tmux_path_one, tmux_path_two,
+            "each call must get its own private snapshot file"
+        );
+        assert_eq!(std::fs::read(&farhelm_path_two).unwrap(), b"generation-two");
+        assert_eq!(
+            std::fs::read(&tmux_path_two).unwrap(),
+            b"tmux-generation-two"
+        );
+        // The FIRST caller's snapshot must remain exactly what it was
+        // handed — the second call's materialization is not permitted to
+        // reach back and disturb it.
+        assert_eq!(
+            std::fs::read(&farhelm_path_one).unwrap(),
+            b"generation-one",
+            "an earlier caller's snapshot must survive a later materialization"
+        );
+        assert_eq!(
+            std::fs::read(&tmux_path_one).unwrap(),
+            b"tmux-generation-one",
+            "an earlier caller's snapshot must survive a later materialization"
+        );
+    }
+
+    /// Marker set only in the child process
+    /// [`directory_payloads_extracted_dir_is_mode_0700_under_a_permissive_umask`]
+    /// re-execs itself as.
+    const EXTRACTED_MODE_CHILD: &str = "FARHELM_HELM_EXTRACTED_MODE_TEST_CHILD";
+
+    /// Spec (F6, review round 2, security): `.extracted` must end up mode
+    /// 0700 regardless of the helm process's umask — proven here under
+    /// umask 000, the most permissive real-world case. `umask` is
+    /// process-wide state, so this MUST run in a genuinely separate child
+    /// process, never merely a different thread of this shared test
+    /// binary (which every OTHER concurrently running test also creates
+    /// files in) — the same isolation shape `lib.rs`'s env-wiring child
+    /// tests use, applied here to a different piece of ambient process
+    /// state.
+    #[test]
+    fn directory_payloads_extracted_dir_is_mode_0700_under_a_permissive_umask() {
+        if std::env::var_os(EXTRACTED_MODE_CHILD).is_some() {
+            // SAFETY: this process exists only to run this one test in
+            // isolation (see the parent branch below), so mutating
+            // process-wide umask here can never race or leak into any
+            // other test.
+            unsafe {
+                libc::umask(0o000);
+            }
+            use std::os::unix::fs::PermissionsExt as _;
+            let payload_dir =
+                PathBuf::from(std::env::var("FARHELM_HELM_EXTRACTED_MODE_TEST_DIR").unwrap());
+            let archive = farhelm_archive_for(PayloadArch::X86_64);
+            write_release_archive(
+                &payload_dir,
+                archive.package,
+                archive.target,
+                archive.member,
+                b"bytes",
+            );
+            let payloads = DirectoryPayloads::new(payload_dir.clone());
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            runtime
+                .block_on(payloads.path(PayloadKind::Farhelm, PayloadArch::X86_64))
+                .unwrap();
+            let mode = std::fs::metadata(payload_dir.join(".extracted"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            println!("MODE={mode:o}");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "provisioning::tests::directory_payloads_extracted_dir_is_mode_0700_under_a_permissive_umask",
+                "--nocapture",
+            ])
+            .env(EXTRACTED_MODE_CHILD, "1")
+            .env("FARHELM_HELM_EXTRACTED_MODE_TEST_DIR", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "extracted-mode child failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mode = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("MODE="))
+            .expect("child printed no MODE= line");
+        assert_eq!(
+            mode, "700",
+            "under umask 000 the .extracted directory must still end up mode 0700"
+        );
+    }
+
+    /// Spec (F9, review round 1, SHOULD-FIX): the exact settled recovery
+    /// text (README, "Install") is a user-facing contract — pinned here
+    /// with a direct equality assertion so it cannot silently drift while
+    /// the broader provisioning-flow test below (which only checks a
+    /// substring, because its point is proving the failure happens before
+    /// host mutation) stays green regardless.
+    #[tokio::test]
+    async fn no_payloads_message_is_exactly_the_settled_recovery_text() {
+        let error = NoPayloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "this farhelm was built from source and carries no provisioning payloads; pass \
+             --payload-dir <dir> holding the release files, or install a release build (see \
+             README, \"Install\")"
+        );
+    }
+
+    /// Spec (F4, review round 2, security): the temporary `Release`
+    /// refusal must never write a mirror URL's credentials to logs —
+    /// exercised with sentinel secrets in both the userinfo and the query
+    /// string, neither of which may appear in the captured warning.
+    #[tokio::test]
+    async fn release_refusal_never_logs_url_userinfo_or_query() {
+        let events = crate::test_capture::install();
+        let state_dir = tempfile::tempdir().unwrap();
+        let url = url::Url::parse(
+            "https://sentinel-user:sentinel-pass@example.invalid/release/path?token=sentinel-token",
+        )
+        .unwrap();
+        let result = production_payloads(
+            PayloadSelection::Release { base_url: url },
+            state_dir.path(),
+            false,
+            state_dir.path(),
+        );
+        assert!(result.is_err(), "Release must still refuse");
+
+        // `matching` returns every event from the WHOLE process-global
+        // buffer whose message contains this substring — including, since
+        // this exact message fires from every `Release`-refusal test that
+        // runs concurrently with this one (e.g.
+        // `production_payloads_selects_by_payload_selection_and_release_build`,
+        // which uses its own unrelated URL). Filtering to the event whose
+        // `base_url` field actually names THIS test's host is what makes
+        // the assertion below about this test's own URL rather than
+        // whichever concurrent test's event happened to land in the buffer
+        // first.
+        let matches = crate::test_capture::matching(&events, "refusing --release-base-url");
+        let mine = matches
+            .iter()
+            .find(|event| {
+                event
+                    .field("base_url")
+                    .is_some_and(|value| value.contains("example.invalid"))
+            })
+            .unwrap_or_else(|| panic!("no logged refusal named this test's own host: {matches:?}"));
+        let base_url_field = mine.field("base_url").unwrap_or_default();
+        assert!(
+            !base_url_field.contains("sentinel-user"),
+            "logged base_url leaked userinfo: {base_url_field}"
+        );
+        assert!(
+            !base_url_field.contains("sentinel-pass"),
+            "logged base_url leaked userinfo: {base_url_field}"
+        );
+        assert!(
+            !base_url_field.contains("sentinel-token"),
+            "logged base_url leaked the query string: {base_url_field}"
+        );
+        assert_eq!(
+            base_url_field, "https://example.invalid/release/path",
+            "logged base_url must be sanitized to scheme://host/path only"
+        );
+    }
+
+    /// Spec: `production_payloads` resolves each `PayloadSelection` the way
+    /// plan lines 418–433 (this PR's staged subset) describe — `Directory`
+    /// always yields a working `DirectoryPayloads`, under BOTH values of
+    /// `release_build` (F8, review round 1: an earlier version tried
+    /// `release_build == false` only, which would have missed a regression
+    /// letting the release-build default override an explicitly selected
+    /// local directory); `Default` yields `NoPayloads` regardless of
+    /// `release_build` FOR NOW (Step 3b changes only the
+    /// `release_build == true` half); `Release` refuses with the "not
+    /// supported yet" placeholder on either `release_build` value, since
+    /// Step 3b's download source does not exist yet.
+    #[tokio::test]
+    async fn production_payloads_selects_by_payload_selection_and_release_build() {
+        for release_build in [false, true] {
+            let state_dir = tempfile::tempdir().unwrap();
+            let payloads = production_payloads(
+                PayloadSelection::Default,
+                state_dir.path(),
+                release_build,
+                state_dir.path(),
+            )
+            .unwrap();
+            let error = payloads
+                .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                .await
+                .unwrap_err();
+            assert!(
+                format!("{error:#}").contains("this farhelm was built from source"),
+                "Default with release_build={release_build} must still yield NoPayloads in this PR"
+            );
+        }
+
+        for release_build in [false, true] {
+            let dir_state = tempfile::tempdir().unwrap();
+            let payload_dir = tempfile::tempdir().unwrap();
+            let archive = farhelm_archive_for(PayloadArch::X86_64);
+            write_release_archive(
+                payload_dir.path(),
+                archive.package,
+                archive.target,
+                archive.member,
+                b"directory-selection-bytes",
+            );
+            let payloads = production_payloads(
+                PayloadSelection::Directory(payload_dir.path().to_path_buf()),
+                dir_state.path(),
+                release_build,
+                dir_state.path(),
+            )
+            .unwrap();
+            let path = payloads
+                .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                .await
+                .unwrap();
+            assert_eq!(
+                std::fs::read(path).unwrap(),
+                b"directory-selection-bytes",
+                "an explicit Directory selection must win regardless of release_build={release_build}"
+            );
+        }
+
+        for release_build in [false, true] {
+            let state_dir = tempfile::tempdir().unwrap();
+            // `Arc<dyn PayloadSource>` carries no `Debug` impl, so
+            // `unwrap_err()` cannot be used directly; `Result::err()`
+            // discards the `Ok` type instead of requiring it be `Debug`
+            // (F27, review round 1).
+            let error = production_payloads(
+                PayloadSelection::Release {
+                    base_url: url::Url::parse("http://127.0.0.1:1/").unwrap(),
+                },
+                state_dir.path(),
+                release_build,
+                state_dir.path(),
+            )
+            .err()
+            .expect("Release must refuse until Step 3b lands a download source");
+            assert_eq!(
+                format!("{error:#}"),
+                "--release-base-url is not supported by this build yet"
+            );
+        }
+    }
+
+    /// Spec: a leftover `<state_dir>/embedded-payloads/` cache from a
+    /// pre-D2 install is removed the first time `production_payloads` runs,
+    /// regardless of which source is selected — this proves it for
+    /// `Directory`, the selection least likely to accidentally exercise the
+    /// same code path `Default` would.
+    ///
+    /// F11 (review round 1): also seeds sibling state — `helm.db` and a
+    /// live `payloads/current` cache — and requires both untouched. The
+    /// destructive boundary is the property actually worth protecting: a
+    /// future cleanup that widened its blast radius to the whole state
+    /// directory, or damaged an unrelated sibling, would still pass a test
+    /// that checked only `embedded-payloads` itself was gone.
+    #[test]
+    fn production_payloads_removes_a_leftover_embedded_payloads_directory() {
+        let state_dir = tempfile::tempdir().unwrap();
+        let leftover = state_dir.path().join("embedded-payloads");
+        std::fs::create_dir_all(leftover.join("stale-generation")).unwrap();
+        std::fs::write(leftover.join("stale-generation").join("farhelm"), b"old").unwrap();
+
+        std::fs::write(state_dir.path().join("helm.db"), b"durable registry").unwrap();
+        std::fs::create_dir_all(state_dir.path().join("payloads")).unwrap();
+        std::fs::write(
+            state_dir.path().join("payloads").join("current"),
+            b"live cache",
+        )
+        .unwrap();
+
+        production_payloads(
+            PayloadSelection::Directory(state_dir.path().join("staged")),
+            state_dir.path(),
+            false,
+            state_dir.path(),
+        )
+        .unwrap();
+
+        assert!(
+            !leftover.exists(),
+            "a leftover pre-D2 embedded payload cache must be removed"
+        );
+        assert_eq!(
+            std::fs::read(state_dir.path().join("helm.db")).unwrap(),
+            b"durable registry",
+            "cleanup must never touch the durable registry"
+        );
+        assert_eq!(
+            std::fs::read(state_dir.path().join("payloads").join("current")).unwrap(),
+            b"live cache",
+            "cleanup must never touch an unrelated live payload cache"
+        );
+    }
+
+    /// Assert that `events` contains a legacy-cache-alias warning naming
+    /// EXACTLY `expected_payload_dir`/`expected_legacy_cache` in its
+    /// structured fields (F12, review round 2). Checking the FIELDS,
+    /// rather than only counting messages matching the static text, is
+    /// what catches a warning whose fields were dropped, swapped, or left
+    /// over from a previous case — those are exactly the paths an operator
+    /// reads to learn which selected directory was protected and which
+    /// retired cache still needs to be moved before cleanup can proceed.
+    fn assert_legacy_cache_alias_warning(
+        events: &Arc<Mutex<Vec<crate::test_capture::CapturedEvent>>>,
+        expected_payload_dir: &Path,
+        expected_legacy_cache: &Path,
+    ) {
+        let expected_dir = expected_payload_dir.display().to_string();
+        let expected_legacy = expected_legacy_cache.display().to_string();
+        let matches = crate::test_capture::matching(
+            events,
+            "--payload-dir points at (or inside) the retired embedded-payloads cache",
+        );
+        assert!(
+            matches.iter().any(|event| {
+                event.field("payload_dir") == Some(expected_dir.as_str())
+                    && event.field("legacy_cache") == Some(expected_legacy.as_str())
+            }),
+            "expected a warning naming payload_dir={expected_dir} legacy_cache={expected_legacy}, \
+             got {matches:?}"
+        );
+    }
+
+    /// Spec (F1, review round 1, BLOCKING; round 2 adds the per-case field
+    /// check): an operator's explicitly selected `--payload-dir` must
+    /// never be deleted as if it were the retired `embedded-payloads`
+    /// cache — even when it happens to alias that location exactly, sit
+    /// beneath it, or reach it through a symlink. Three setups share the
+    /// assertion: the legacy directory (and the file staged inside it)
+    /// survive `production_payloads`, and a `warn!` names EXACTLY that
+    /// case's two paths, checked immediately after the case runs rather
+    /// than only totalled at the end (F12, review round 2) — a total count
+    /// would not notice fields that were absent, swapped, or stale from an
+    /// earlier case.
+    #[test]
+    fn production_payloads_preserves_a_payload_dir_that_aliases_the_legacy_cache() {
+        let events = crate::test_capture::install();
+
+        // Case 1: --payload-dir names the legacy cache directly.
+        let state_dir = tempfile::tempdir().unwrap();
+        let legacy = state_dir.path().join("embedded-payloads");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("farhelm-x86_64-unknown-linux-musl.tar.gz"),
+            b"staged",
+        )
+        .unwrap();
+        production_payloads(
+            PayloadSelection::Directory(legacy.clone()),
+            state_dir.path(),
+            false,
+            state_dir.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(legacy.join("farhelm-x86_64-unknown-linux-musl.tar.gz")).unwrap(),
+            b"staged",
+            "selecting the legacy directory itself must not delete it"
+        );
+        assert_legacy_cache_alias_warning(&events, &legacy, &legacy);
+
+        // Case 2: --payload-dir names a directory nested beneath it.
+        let state_dir = tempfile::tempdir().unwrap();
+        let legacy = state_dir.path().join("embedded-payloads");
+        let nested = legacy.join("staged-by-hand");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            nested.join("farhelm-x86_64-unknown-linux-musl.tar.gz"),
+            b"staged",
+        )
+        .unwrap();
+        production_payloads(
+            PayloadSelection::Directory(nested.clone()),
+            state_dir.path(),
+            false,
+            state_dir.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(nested.join("farhelm-x86_64-unknown-linux-musl.tar.gz")).unwrap(),
+            b"staged",
+            "selecting a directory beneath the legacy cache must not delete it"
+        );
+        assert_legacy_cache_alias_warning(&events, &nested, &legacy);
+
+        // Case 3: --payload-dir is a symlink resolving into it.
+        use std::os::unix::fs::symlink;
+        let state_dir = tempfile::tempdir().unwrap();
+        let legacy = state_dir.path().join("embedded-payloads");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("farhelm-x86_64-unknown-linux-musl.tar.gz"),
+            b"staged",
+        )
+        .unwrap();
+        let alias = state_dir.path().join("payload-dir-alias");
+        symlink(&legacy, &alias).unwrap();
+        production_payloads(
+            PayloadSelection::Directory(alias.clone()),
+            state_dir.path(),
+            false,
+            state_dir.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(legacy.join("farhelm-x86_64-unknown-linux-musl.tar.gz")).unwrap(),
+            b"staged",
+            "a symlink alias of the legacy cache must not be deleted through either path"
+        );
+        assert_legacy_cache_alias_warning(&events, &alias, &legacy);
+    }
+
+    /// Spec (F1, review round 2, BLOCKING): a symlink INSIDE the legacy
+    /// cache that points OUTWARD to a different, populated directory must
+    /// still be preserved when the operator selects that symlink's
+    /// PATHNAME (not its resolved target) as `--payload-dir`. The
+    /// canonical-only check round 1 shipped would resolve the symlink away
+    /// from the legacy tree and conclude the two paths were unrelated,
+    /// missing exactly this case; the lexical check added in round 2
+    /// catches it because the SELECTED PATHNAME itself sits beneath
+    /// `embedded-payloads/`.
+    #[test]
+    fn production_payloads_preserves_an_outward_symlink_selected_inside_the_legacy_cache() {
+        use std::os::unix::fs::symlink;
+
+        let events = crate::test_capture::install();
+        let state_dir = tempfile::tempdir().unwrap();
+        let legacy = state_dir.path().join("embedded-payloads");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let external = state_dir.path().join("external-staging");
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(
+            external.join("farhelm-x86_64-unknown-linux-musl.tar.gz"),
+            b"staged",
+        )
+        .unwrap();
+        let inward_name = legacy.join("alias");
+        symlink(&external, &inward_name).unwrap();
+
+        production_payloads(
+            PayloadSelection::Directory(inward_name.clone()),
+            state_dir.path(),
+            false,
+            state_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(inward_name.join("farhelm-x86_64-unknown-linux-musl.tar.gz")).unwrap(),
+            b"staged",
+            "an outward-pointing symlink selected by its pathname inside the legacy cache must \
+             not be broken by deleting the cache around it"
+        );
+        assert_legacy_cache_alias_warning(&events, &inward_name, &legacy);
+    }
+
+    /// Spec (F1, review round 2, BLOCKING): a dangling symlink AT the
+    /// legacy `embedded-payloads` pathname — not a real directory at all —
+    /// must never be passed to `remove_dir_all`, which would delete
+    /// whatever the link points at (nothing, here) rather than the link
+    /// itself. `production_payloads` still succeeds for an UNRELATED
+    /// selection; only the legacy cleanup step is skipped.
+    #[test]
+    fn production_payloads_leaves_a_dangling_legacy_symlink_alone() {
+        use std::os::unix::fs::symlink;
+
+        let state_dir = tempfile::tempdir().unwrap();
+        let legacy = state_dir.path().join("embedded-payloads");
+        symlink(state_dir.path().join("nonexistent-target"), &legacy).unwrap();
+
+        production_payloads(
+            PayloadSelection::Directory(state_dir.path().join("unrelated-payloads")),
+            state_dir.path(),
+            false,
+            state_dir.path(),
+        )
+        .unwrap();
+
+        let metadata = std::fs::symlink_metadata(&legacy)
+            .expect("the dangling symlink itself must still be present");
+        assert!(
+            metadata.file_type().is_symlink(),
+            "the legacy path must remain exactly the symlink it was, not be replaced or removed"
+        );
+    }
+
+    /// Build a RELATIVE path from `base` to the absolute `target`, by text
+    /// only: enough `..` segments to walk from `base` up to the shared
+    /// root, then `target`'s own components back down.
+    ///
+    /// Exists so the relative-`--payload-dir` regression below can
+    /// construct a genuinely relative selection without ever calling
+    /// `std::env::set_current_dir` — mutating this test process's actual
+    /// working directory would race every other test in the same binary,
+    /// and CLAUDE.md rules that out for the equivalent case of environment
+    /// variables for the same reason. Anchoring the returned path at
+    /// `base` — which the caller always passes as the REAL, unmodified
+    /// `std::env::current_dir()` — means ordinary filesystem calls made by
+    /// this same process resolve it correctly with no process-wide state
+    /// changed at all.
+    fn relative_from(base: &Path, target: &Path) -> PathBuf {
+        let ups = base
+            .components()
+            .filter(|component| !matches!(component, Component::RootDir | Component::Prefix(_)))
+            .count();
+        let mut relative = PathBuf::new();
+        for _ in 0..ups {
+            relative.push("..");
+        }
+        for component in target.components() {
+            if !matches!(component, Component::RootDir | Component::Prefix(_)) {
+                relative.push(component.as_os_str());
+            }
+        }
+        relative
+    }
+
+    /// Spec (F1, review round 3, BLOCKING): a `--payload-dir` selection
+    /// spelled as a RELATIVE path evades the round-2 alias guard exactly
+    /// like an outward symlink did — clap accepts a relative spelling
+    /// unchanged, but the guard's lexical check compared it directly
+    /// against the always-absolute legacy path (never equal, never a
+    /// prefix, no matter how the two relate), and canonicalizing the
+    /// selection followed the inward symlink straight out of the legacy
+    /// tree before the two sides were ever compared. Both gaps close only
+    /// once the selection is made absolute against `cwd` first.
+    #[test]
+    fn production_payloads_preserves_an_outward_symlink_selected_via_a_relative_path() {
+        use std::os::unix::fs::symlink;
+
+        let events = crate::test_capture::install();
+        let state_dir = tempfile::tempdir().unwrap();
+        let legacy = state_dir.path().join("embedded-payloads");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let external = state_dir.path().join("external-staging");
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(
+            external.join("farhelm-x86_64-unknown-linux-musl.tar.gz"),
+            b"staged",
+        )
+        .unwrap();
+        let inward_name = legacy.join("alias");
+        symlink(&external, &inward_name).unwrap();
+
+        // A relative spelling of `inward_name`, anchored at the test
+        // process's REAL cwd — see `relative_from`'s docs for why this
+        // never touches `std::env::set_current_dir`.
+        let cwd = std::env::current_dir().unwrap();
+        let selected = relative_from(&cwd, &inward_name);
+
+        production_payloads(
+            PayloadSelection::Directory(selected.clone()),
+            state_dir.path(),
+            false,
+            &cwd,
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(inward_name.join("farhelm-x86_64-unknown-linux-musl.tar.gz")).unwrap(),
+            b"staged",
+            "a RELATIVE selection of an outward-pointing symlink inside the legacy cache must not \
+             be broken by deleting the cache around it"
+        );
+        assert_legacy_cache_alias_warning(&events, &selected, &legacy);
+    }
+
+    /// Spec (F1, review round 3, BLOCKING): an absolute `--payload-dir`
+    /// beginning with `/..` evades the guard for a different textual
+    /// reason than the relative case above — `normalize_lexical` used to
+    /// preserve a leading `..` past the root instead of clamping it there
+    /// the way the kernel's own path resolution does, so `/..<legacy
+    /// path>` compared unequal (and not-a-prefix) to `<legacy path>`'s own
+    /// lexical form, even though both name the identical filesystem
+    /// location.
+    #[test]
+    fn production_payloads_preserves_an_outward_symlink_selected_via_an_absolute_dot_dot_spelling()
+    {
+        use std::os::unix::fs::symlink;
+
+        let events = crate::test_capture::install();
+        let state_dir = tempfile::tempdir().unwrap();
+        let legacy = state_dir.path().join("embedded-payloads");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let external = state_dir.path().join("external-staging");
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(
+            external.join("farhelm-x86_64-unknown-linux-musl.tar.gz"),
+            b"staged",
+        )
+        .unwrap();
+        let inward_name = legacy.join("alias");
+        symlink(&external, &inward_name).unwrap();
+
+        // Clamps right back to `inward_name`, exactly like the kernel's own
+        // path resolution treats `/..` above the root as a no-op rather
+        // than an escape to a parent that does not exist.
+        let selected = PathBuf::from(format!("/..{}", inward_name.display()));
+        let cwd = std::env::current_dir().unwrap();
+
+        production_payloads(
+            PayloadSelection::Directory(selected.clone()),
+            state_dir.path(),
+            false,
+            &cwd,
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(inward_name.join("farhelm-x86_64-unknown-linux-musl.tar.gz")).unwrap(),
+            b"staged",
+            "an absolute /.. spelling of an outward-pointing symlink inside the legacy cache must \
+             not be broken by deleting the cache around it"
+        );
+        assert_legacy_cache_alias_warning(&events, &selected, &legacy);
+    }
+
+    /// Spec (F2, review round 3, BLOCKING): the provisioning service runs
+    /// up to four host installs at once, all sharing one
+    /// `DirectoryPayloads`, so the very first two "add host" runs against a
+    /// freshly staged directory can both observe `.extracted` absent
+    /// before either creates it. A prior version turned the loser's
+    /// harmless `AlreadyExists` from `DirBuilder::create` into a hard
+    /// provisioning error; this proves both concurrent first calls now
+    /// succeed and leave behind an ordinary mode-0700 directory rather than
+    /// a spurious failure or a permissions mismatch.
+    #[test]
+    fn directory_payloads_concurrent_first_use_both_succeed() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        write_release_archive(
+            dir.path(),
+            archive.package,
+            archive.target,
+            archive.member,
+            b"race-bytes",
+        );
+        let payloads = Arc::new(DirectoryPayloads::new(dir.path().to_path_buf()));
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        // Both tasks await the SAME barrier immediately before their first
+        // call, so neither task's `.extracted`-absent observation can be
+        // sequenced strictly after the other task has already finished
+        // creating the directory — the exact interleaving this fix must
+        // survive.
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let tasks: Vec<_> = (0..2)
+            .map(|_| {
+                let payloads = Arc::clone(&payloads);
+                let barrier = Arc::clone(&barrier);
+                runtime.spawn(async move {
+                    barrier.wait().await;
+                    payloads
+                        .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                        .await
+                })
+            })
+            .collect();
+
+        for task in tasks {
+            runtime.block_on(task).unwrap().expect(
+                "both concurrent first calls must succeed; a loser observing AlreadyExists must \
+                 not turn a harmless race into a provisioning failure",
+            );
+        }
+
+        let metadata = std::fs::symlink_metadata(dir.path().join(".extracted")).unwrap();
+        assert!(
+            metadata.file_type().is_dir(),
+            "the extraction cache must end up a plain directory, not a symlink or other object"
+        );
+        assert_eq!(
+            metadata.permissions().mode() & 0o777,
+            0o700,
+            "the extraction cache must end up mode 0700 regardless of which call actually \
+             created it"
+        );
     }
 }

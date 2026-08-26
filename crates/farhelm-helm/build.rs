@@ -1,18 +1,19 @@
-//! Convert a release-populated payload directory into compile-time byte
-//! inclusions, and — separately — a release-populated UI directory into a
-//! compile-time `include_dir!` tree. No directory means a normal
-//! development build with no foreign artifacts embedded either way.
+//! Convert a release-populated UI directory into a compile-time
+//! `include_dir!` tree. No directory means a normal development build with
+//! no web UI embedded (D12/D13).
+//!
+//! Provisioning payloads (the musl `farhelm`/tmux binaries) are no longer
+//! embedded here (D2): they are downloaded or staged from a directory at
+//! runtime — see `src/provisioning/payloads.rs`. This file used to also
+//! read a build-time payload-directory variable and generate byte
+//! inclusions for them; that whole path was removed rather than kept
+//! dormant, so a build cannot silently resurrect the old embedding by
+//! exporting it. D18 retires that variable's NAME outright for the same
+//! reason: the runtime replacement (`--payload-dir`, `FARHELM_HELM_PAYLOAD_DIR`)
+//! deliberately does not reuse it, so an environment still exporting the old
+//! one cannot silently select the new directory source either.
 
-use std::fmt::Write as _;
 use std::path::PathBuf;
-
-const PAYLOAD_ENV: &str = "FARHELM_PAYLOAD_DIR";
-const FILES: &[(&str, &str, &str)] = &[
-    ("farhelm-x86_64-unknown-linux-musl", "Farhelm", "X86_64"),
-    ("tmux-x86_64-unknown-linux-musl", "Tmux", "X86_64"),
-    ("farhelm-aarch64-unknown-linux-musl", "Farhelm", "Aarch64"),
-    ("tmux-aarch64-unknown-linux-musl", "Tmux", "Aarch64"),
-];
 
 /// The build-time switch for D12/D13: the `dx`-built web UI's output
 /// directory, so a release binary carries its own UI with no `--ui-dist`
@@ -33,34 +34,7 @@ const FILES: &[(&str, &str, &str)] = &[
 const UI_ENV: &str = "FARHELM_UI_DIST";
 
 fn main() {
-    println!("cargo:rerun-if-env-changed={PAYLOAD_ENV}");
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"));
-    let root = std::env::var_os(PAYLOAD_ENV).map(PathBuf::from);
-    let mut source = String::from(
-        "struct EmbeddedPayload {\n    filename: &'static str,\n    kind: PayloadKind,\n    arch: PayloadArch,\n    bytes: &'static [u8],\n}\n\nconst EMBEDDED_PAYLOADS: &[EmbeddedPayload] = &[\n",
-    );
-    if let Some(root) = root {
-        for (filename, kind, arch) in FILES {
-            let path = root.join(filename);
-            println!("cargo:rerun-if-changed={}", path.display());
-            if !path.is_file() {
-                panic!("release payload is missing: {}", path.display());
-            }
-            writeln!(
-                source,
-                "    EmbeddedPayload {{ filename: {filename:?}, kind: PayloadKind::{kind}, arch: PayloadArch::{arch}, bytes: include_bytes!({path:?}) }},",
-                path = path
-                    .canonicalize()
-                    .unwrap_or_else(|error| panic!("canonicalizing {}: {error}", path.display()))
-                    .to_string_lossy(),
-            )
-            .expect("writing generated Rust into a String cannot fail");
-        }
-    }
-    source.push_str("];\n");
-    std::fs::write(out.join("embedded_payloads.rs"), source)
-        .expect("writing embedded payload manifest");
-
     embed_ui(&out);
 }
 
@@ -101,10 +75,10 @@ fn embed_ui(out: &std::path::Path) {
     // `farhelm_embedded_ui` is read via `#[cfg(...)]` in `embedded_ui.rs`, so
     // `rustc` must be told the name is intentional or an `unexpected_cfgs`
     // warning fires on every build that leaves `FARHELM_UI_DIST` unset —
-    // which is every developer build. `farhelm_release_build` has no
-    // consumer yet: it is declared (and set below) ahead of the later
-    // payload-selection work (D13) that will read it, so that work needs no
-    // change to this build script when it lands.
+    // which is every developer build. `farhelm_release_build` is read the
+    // same way by `lib.rs`'s `run_with_ready` (`cfg!(farhelm_release_build)`,
+    // D13): it is the one fact `production_payloads` needs to pick a
+    // download source by default instead of `NoPayloads`.
     println!("cargo:rustc-check-cfg=cfg(farhelm_embedded_ui)");
     println!("cargo:rustc-check-cfg=cfg(farhelm_release_build)");
 
