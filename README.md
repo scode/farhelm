@@ -113,9 +113,9 @@ separate `web/` directory, no unit files to copy, and no `.app` bundle.
 
 ## Quickstart: desktop app plus one remote host
 
-The quickest setup is `farhelm-desktop` (Apple silicon only) as your local helm, driving one remote Ubuntu host. No
-Linux desktop app exists; on a Linux machine the helm is a user service and the UI is a browser tab (see "Running the
-helm on Linux" below).
+The quickest setup is `farhelm-desktop` (Apple silicon only) as your local helm, driving one remote Linux host. No Linux
+desktop app exists; on a Linux machine the helm is a user service and the UI is a browser tab (see "Running the helm on
+Linux" below).
 
 - Install with the curl command above; on macOS it puts both `farhelm` and `farhelm-desktop` into `~/.local/bin`.
 - `brew install tmux`. Neither binary bundles tmux. Homebrew's (3.7c at the time of writing) is the recommended way to
@@ -173,11 +173,13 @@ configuration.
 
 ### Linux hosts
 
-Use the automatic path: add the host from the hosts panel and confirm the displayed plan. It targets Ubuntu on x86_64
-and aarch64 with a systemd user manager, installs a static supervisor binary and user-level systemd units under your own
-account, and offers `loginctl enable-linger` as an optional step so the supervisor starts at boot and survives logout
-(some managed machines refuse linger; the unit then runs only while you are logged in). Each registered host row later
-offers an update action with the same plan-then-confirm handshake.
+Use the automatic path: add the host from the hosts panel and confirm the displayed plan. It targets any Linux host with
+a usable systemd user manager on x86_64 or aarch64; the distribution is not a requirement (nothing provisioning does is
+distribution-specific), and the displayed plan names the one it found. CI exercises Ubuntu. It installs a static
+supervisor binary and user-level systemd units under your own account, and offers `loginctl enable-linger` as an
+optional step so the supervisor starts at boot and survives logout (some managed machines refuse linger; the unit then
+runs only while you are logged in). Each registered host row later offers an update action with the same
+plan-then-confirm handshake. RHEL-family hosts with SELinux enforcing are untested.
 
 The binaries that plan installs are fetched, not carried: the helm downloads the host's `farhelm` — and a `tmux`, if the
 host has none at or above the floor — from the GitHub release matching the helm's own version, checks the release's

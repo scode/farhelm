@@ -235,6 +235,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
                 home: PathBuf::from(behavior.home),
                 user_unit_dir: PathBuf::from(behavior.user_unit_dir),
                 arch: PayloadArch::X86_64,
+                distro_id: "ubuntu".to_string(),
                 needs_tmux: behavior.needs_tmux,
                 host_tmux: (!behavior.needs_tmux).then(|| PathBuf::from("/usr/bin/tmux")),
             })),

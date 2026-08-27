@@ -43,6 +43,19 @@ pub enum PayloadArch {
     Aarch64,
 }
 
+/// The bare architecture spelling (`x86_64`, `aarch64`) used in the
+/// confirmation plan's host line — distinct from the full target triples
+/// `assets.rs` uses for release filenames, which nobody wants to read in
+/// a confirmation prompt.
+impl std::fmt::Display for PayloadArch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::X86_64 => "x86_64",
+            Self::Aarch64 => "aarch64",
+        })
+    }
+}
+
 /// One directory and the mode provisioning must converge on every rerun.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct DirectorySpec {
@@ -174,10 +187,25 @@ pub(crate) struct ProvisioningPlan {
     pub(super) farhelm_path: PathBuf,
     pub(super) state_dir: PathBuf,
     pub(super) actions: Vec<ProvisioningAction>,
+    /// The reach probe's raw `/etc/os-release` `ID`, empty when the host
+    /// had none, and the payload architecture it matched — carried
+    /// through purely for `confirmation()`'s host line. Provisioning
+    /// gates on capabilities, not on this ID (see `Reach::distro_id`), so
+    /// nothing here or in execution branches on it.
+    pub(super) host_distro_id: String,
+    pub(super) host_arch: PayloadArch,
 }
 
 impl ProvisioningPlan {
     /// Render the plan without maintaining a second list of promises.
+    ///
+    /// The host line right after the header exists so a confirming user
+    /// can see, in the one place SPEC.md's "states exactly what it is
+    /// about to do" promise puts everything else, which distribution and
+    /// architecture the reach probe actually found — without that line,
+    /// distro-agnostic provisioning would still work but would give the
+    /// user no way to notice they are about to run it against a host
+    /// they did not expect.
     pub(super) fn confirmation(&self) -> String {
         let mut rendered = format!(
             "Farhelm will perform these steps for {}:\n",
@@ -186,6 +214,12 @@ impl ProvisioningPlan {
                 ProvisioningTarget::Ssh { destination } => destination.clone(),
             }
         );
+        let distro = if self.host_distro_id.is_empty() {
+            "unknown distribution"
+        } else {
+            &self.host_distro_id
+        };
+        rendered.push_str(&format!("host: {distro}, {}\n", self.host_arch));
         for (index, action) in self.actions.iter().enumerate() {
             rendered.push_str(&format!("{}. {}\n", index + 1, action.confirmation_line()));
         }
@@ -327,6 +361,8 @@ impl PlanLayout {
             farhelm_path,
             state_dir,
             actions,
+            host_distro_id: reach.distro_id.clone(),
+            host_arch: reach.arch,
         })
     }
 
