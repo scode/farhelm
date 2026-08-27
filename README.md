@@ -29,11 +29,6 @@ hook does, what it never does, and how to turn it off.
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
 ```
 
-NOTE: No release under this asset layout has been published yet. The only release currently on the
-[releases page](https://github.com/scode/farhelm/releases) (`v0.0.3-rc.1`) predates this script and carries the old, ad
-hoc archive names, so `scripts/install.sh` has nothing to install against until a real `vX.Y.Z` release exists. Until
-then, see "Development" below for a source build.
-
 The script detects your platform (Linux x86_64 or aarch64, macOS on Apple silicon), downloads the matching release from
 GitHub, verifies its SHA-256 against the release's `SHA256SUMS`, and puts `farhelm` — and on macOS also
 `farhelm-desktop` — into `~/.local/bin` (set `FARHELM_INSTALL_DIR` to choose another directory; set `FARHELM_VERSION` to
