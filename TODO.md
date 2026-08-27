@@ -138,13 +138,6 @@ roadmap and carries no priorities unless an entry says so itself.
   middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
   section as amended in #117.
 
-- Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
-  only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real
-  tag was required). Not before a real release exists: rc.1 currently carries the only published Linux artifact, so
-  deleting it today would leave the README's install path pointing at an empty releases page. Deleting only the release
-  would leave a tag pointing into abandoned pre-merge history — remove both (`gh release delete v0.0.3-rc.1` and
-  `gh api -X DELETE repos/<owner>/<repo>/git/refs/tags/v0.0.3-rc.1`).
-
 - Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
   client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
   returns the already-created session instead of double-launching an agent. The durability-era decision made these
@@ -182,3 +175,20 @@ roadmap and carries no priorities unless an entry says so itself.
 - Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
   state, all "not run"). Blocked on a human with a real Mac. Not covered by any CI: Playwright's WebKit is not
   WKWebView.
+
+- Decide whether several helms sharing one supervisor becomes supported, and what that requires. SPEC.md says concurrent
+  helms are unsupported in v1, with the supervisor's one-attachment-per-session rule as the only backstop. Observed on
+  2026-08-27 while acceptance-testing the 0.1.0 rc: a desktop helm (0.1.0-rc.1) and the browser helm (0.0.3) both
+  registered the same host and both listed the same sessions, live, with no disconnects, and switching between the two
+  surfaces worked. That is not luck — sessions, their status and `archived` are supervisor-owned and the helm's
+  `session_cache` is an explicit mirror, so any helm reaching the supervisor sees the same list. What was deliberately
+  NOT tested: opening the SAME session in both helms. The expected result is the displaced-client path the spec defines
+  for a second client (snapshot plus take-control, and auto-reconnect never seizing), since the supervisor enforces that
+  rule, but the path has only ever been exercised between two clients of one helm. Known gaps before this could be
+  called supported: (1) D2 version coupling — each helm expects the supervisor at its OWN version and offers `update`
+  otherwise, so helms of different versions would tug the host up and down (the rc helm already offered to "update" the
+  0.0.3 production supervisor; a compatibility rule such as "at least mine" plus a protocol version is design work, not
+  a fix); (2) no lock against two helms provisioning or updating the same host at once; (3) the cross-helm takeover,
+  replay-after-takeover and dimension handoff have no tests; (4) SPEC.md and SPEC_impl.md would need to state the
+  supported model. Same-version helms look like a small step; mixed versions are the real work. First action when
+  returning: run the untested case with two same-version helms and record what the displaced side shows.
