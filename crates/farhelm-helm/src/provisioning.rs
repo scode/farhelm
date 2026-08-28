@@ -3211,7 +3211,20 @@ mod tests {
             .is_ok_and(|status| status.success())
     }
 
-    async fn self_ssh_available() -> bool {
+    /// Can this machine reach `destination` unattended, over the user's own
+    /// ssh configuration, with no prompt of any kind?
+    ///
+    /// The option set is the transport's own: `BatchMode` refuses to ask for
+    /// a passphrase or password, and `StrictHostKeyChecking=yes` refuses to
+    /// ask about an unknown host key. A destination that fails this check
+    /// would fail every ssh the provisioning run makes, so answering it here
+    /// turns an unusable environment into a named skip instead of a
+    /// mid-install failure.
+    ///
+    /// Takes the destination rather than assuming `localhost`: the same
+    /// probe guards the ssh-to-localhost variant and the remote one
+    /// [`ssh_test_destination`] selects.
+    async fn ssh_available(destination: &str) -> bool {
         tokio::process::Command::new("ssh")
             .args([
                 "-o",
@@ -3220,7 +3233,7 @@ mod tests {
                 "StrictHostKeyChecking=yes",
                 "-o",
                 "ConnectTimeout=10",
-                "localhost",
+                destination,
                 "true",
             ])
             .stdin(Stdio::null())
@@ -3231,11 +3244,46 @@ mod tests {
             .is_ok_and(|status| status.success())
     }
 
+    /// The ssh destination the real-provisioning case installs onto, when
+    /// something outside the test names one.
+    ///
+    /// This is the switch between the case's two shapes, and it exists
+    /// because a helm and the host it provisions are only ever the same
+    /// machine in a test. `scripts/test-provision-centos.sh` sets it to an
+    /// ssh alias for a systemd-booted CentOS Stream 9 container, which is
+    /// how the suite covers a helm on one distribution installing onto
+    /// another — the case the removed `ID=ubuntu` gate used to forbid, and
+    /// one no GitHub-hosted runner can otherwise stand in for.
+    ///
+    /// Absent — a developer laptop, and CI's own Ubuntu runner — the case
+    /// keeps its localhost shape unchanged. Present, it becomes remote:
+    /// installs land in the target's own default paths and every
+    /// post-condition is read back through the helm, because the test
+    /// process cannot see the target's filesystem.
+    ///
+    /// READ, never written. Tests in this binary share one process, so a
+    /// test that set environment variables would race every other one; the
+    /// value is supplied by whoever launched `cargo test`.
+    fn ssh_test_destination() -> Option<String> {
+        std::env::var("FARHELM_TEST_SSH_DESTINATION")
+            .ok()
+            .map(|destination| destination.trim().to_string())
+            .filter(|destination| !destination.is_empty())
+    }
+
     /// Resolve the executable payload contract for real provisioning tests.
     ///
     /// `FARHELM_TEST_BINARY` lets clean or nonstandard target layouts name a
     /// known artifact. The conventional workspace debug path remains a
     /// convenience for the CI sequence, which builds binaries before tests.
+    ///
+    /// It is also what makes a REMOTE target possible at all: the workspace
+    /// debug binary is linked against the runner's glibc and would not
+    /// execute on the CentOS Stream 9 container, so
+    /// `scripts/test-provision-centos.sh` points this at the musl-static
+    /// build the release actually ships. `FARHELM_TEST_TMUX` is its partner
+    /// in [`debug_tmux`]; a remote run needs both, because a plan installs
+    /// whichever of the two payloads the target lacks.
     fn debug_farhelm() -> Option<PathBuf> {
         if let Some(configured) = std::env::var_os("FARHELM_TEST_BINARY") {
             let configured = PathBuf::from(configured);
@@ -3258,7 +3306,24 @@ mod tests {
     /// Locate a real tmux payload independently of Farhelm. The normal
     /// localhost reach check uses this installation directly, while the
     /// source remains available if the private-payload branch is selected.
+    ///
+    /// `FARHELM_TEST_TMUX` overrides the PATH lookup exactly as
+    /// `FARHELM_TEST_BINARY` overrides [`debug_farhelm`]'s, and for the same
+    /// reason: this host's tmux is a dynamically linked distribution package
+    /// that cannot run on the target, and a remote target with no tmux of
+    /// its own is precisely the case where the plan pushes this payload.
+    /// The two variables are a pair — override one for a remote run and you
+    /// must override the other.
     fn debug_tmux() -> Option<PathBuf> {
+        if let Some(configured) = std::env::var_os("FARHELM_TEST_TMUX") {
+            let configured = PathBuf::from(configured);
+            assert!(
+                configured.is_file(),
+                "FARHELM_TEST_TMUX does not name a file: {}",
+                configured.display()
+            );
+            return Some(configured);
+        }
         let output = std::process::Command::new("sh")
             .args(["-c", "command -v tmux"])
             .output()
@@ -3572,30 +3637,60 @@ mod tests {
         client.detach(channel).await;
     }
 
-    /// Exercise the complete installer against a real user manager, either
-    /// through direct local process/file operations or through ssh+sftp to
-    /// localhost. All install/state paths are fixture-owned and linger is a
-    /// simulated action. The unit file stays below the fixture root and the
-    /// user manager sees it only through a nonce-scoped runtime link removed
-    /// by [`UnitGuard`] on every exit.
+    /// Exercise the complete installer against a real user manager, through
+    /// direct local process/file operations, through ssh+sftp to localhost,
+    /// or through ssh+sftp to a genuinely different machine.
     ///
-    /// The two cases enter through different panel actions since D1 —
-    /// SSH through ADD, local through UPDATE — because the local row no
-    /// longer offers to install anything. See the comment at the entry
-    /// point below; everything after it is shared.
+    /// The two SELF-DIRECTED shapes (local, and ssh to localhost) keep every
+    /// install/state path fixture-owned and linger simulated: the unit file
+    /// stays below the fixture root and the user manager sees it only
+    /// through a nonce-scoped runtime link removed by [`UnitGuard`] on every
+    /// exit. That isolation exists because the target is the developer's own
+    /// machine, and a test has no business installing into the real
+    /// `~/.local/lib/farhelm`.
+    ///
+    /// The REMOTE shape — selected by [`ssh_test_destination`] — inverts
+    /// that. The target is a disposable container on another distribution,
+    /// so it installs into the target's own default paths (which is the
+    /// layout the product actually ships) and there is nothing on this
+    /// machine to guard. It also cannot assert on files: this process can
+    /// see none of the target's filesystem, so convergence is read back
+    /// through the helm instead — the run completes, the host connects, a
+    /// session spawns and stays operable across an UPDATE that replaced the
+    /// binary underneath it. Every fixture-path assertion below is therefore
+    /// gated on `remote`, with the reason at the site.
+    ///
+    /// The cases enter through different panel actions since D1 — SSH
+    /// through ADD, local through UPDATE — because the local row no longer
+    /// offers to install anything. See the comment at the entry point below;
+    /// everything after it is shared.
     async fn real_provisioning_case(use_ssh: bool, update: bool) {
+        // An explicitly named destination is the remote shape; the ssh case
+        // otherwise dials this machine as `localhost`, exactly as before.
+        let remote_destination = use_ssh.then(ssh_test_destination).flatten();
+        let remote = remote_destination.is_some();
+        let destination = remote_destination.unwrap_or_else(|| "localhost".to_string());
+        // Skips name the destination, so a log that says a run was skipped
+        // also says WHICH host went uncovered. A remote leg exists to prove
+        // one specific host got provisioned; "skipped" without that name is
+        // indistinguishable from the localhost run that always skips on a
+        // manager-less runner.
         let test_name = if use_ssh {
-            "provisioning_over_ssh_to_localhost"
+            format!("provisioning_over_ssh_to_{destination}")
         } else {
-            "provisioning_over_the_direct_local_transport"
+            "provisioning_over_the_direct_local_transport".to_string()
         };
-        if !user_manager_available().await {
+        // A user manager is required HERE only when the install lands here.
+        // The remote shape installs nothing on this machine, and the runner
+        // that hosts the container has no user manager of its own — gating
+        // on one would skip the leg exactly where it is meant to run.
+        if !remote && !user_manager_available().await {
             eprintln!("SKIPPED {test_name}: no usable systemd user manager exists on this host");
             return;
         }
-        if use_ssh && !self_ssh_available().await {
+        if use_ssh && !ssh_available(&destination).await {
             eprintln!(
-                "SKIPPED {test_name}: passwordless, already-trusted ssh localhost is unavailable"
+                "SKIPPED {test_name}: passwordless, already-trusted ssh to {destination} is unavailable"
             );
             return;
         }
@@ -3607,7 +3702,9 @@ mod tests {
             return;
         };
         let Some(tmux_payload) = debug_tmux() else {
-            eprintln!("SKIPPED {test_name}: no absolute tmux executable is available");
+            eprintln!(
+                "SKIPPED {test_name}: no absolute tmux executable is available; install one or set FARHELM_TEST_TMUX"
+            );
             return;
         };
         let root = tempfile::tempdir().expect("isolated provisioning root");
@@ -3622,14 +3719,22 @@ mod tests {
             supervisor_state.clone()
         };
         tokio::fs::create_dir_all(&helm_state).await.unwrap();
+        // The unit name stays nonce-scoped in every shape. On this machine
+        // that is what keeps the fixture from colliding with a real
+        // installation; on the container it costs nothing and makes the run
+        // identifiable in the target's journal.
         let unit = format!("farhelm-provisioning-test-{}.service", uuid::Uuid::new_v4());
         let unit_path = unit_dir.join(&unit);
-        let mut guard = UnitGuard {
+        // No guard for a remote target: every resource it verifies —
+        // this user manager's units, the fixture's tmux socket — belongs to
+        // the machine running the test, and the remote install owns none of
+        // them. The container is the teardown.
+        let mut guard = (!remote).then(|| UnitGuard {
             unit: unit.clone(),
             unit_path: unit_path.clone(),
             state_dir: supervisor_state.clone(),
             cleaned: false,
-        };
+        });
         let store = HelmStore::open(&helm_state.join("helm.db")).await.unwrap();
         let manager = ConnectionManager::start(
             store.clone(),
@@ -3643,14 +3748,30 @@ mod tests {
             tmux: tmux_payload,
         });
         let launcher = RecordingLauncher::new();
+        // Linger stays simulated in every shape, including the remote one:
+        // `scripts/test-provision-centos.sh` already enables it on the
+        // container's account (the user manager has to survive the ssh
+        // session that starts it), so a real `loginctl enable-linger` here
+        // would prove nothing the harness has not already established, and
+        // it keeps the backend identical across the three shapes.
         let mut system_backend =
             SystemBackend::with_simulated_linger(helm_state.clone(), Ok(()), true);
         system_backend.launcher = Arc::clone(&launcher) as Arc<dyn CommandLauncher>;
-        let service = ProvisioningService::injected(
-            store.clone(),
-            Arc::clone(&manager),
-            Arc::new(system_backend),
-            Arc::clone(&payloads) as Arc<dyn PayloadSource>,
+        // Fixture-owned paths exist to keep an install off the DEVELOPER's
+        // machine. A remote target is a disposable container, so it takes
+        // the production layout instead — which is also the only layout
+        // whose directories the plan can be sure exist there, and the one
+        // real users get.
+        let layout = if remote {
+            PlanLayout {
+                local_state_dir: supervisor_state.clone(),
+                override_lib_dir: None,
+                override_farhelm_path: None,
+                override_state_dir: None,
+                override_unit_dir: None,
+                unit_name: unit.clone(),
+            }
+        } else {
             PlanLayout {
                 local_state_dir: supervisor_state.clone(),
                 override_lib_dir: Some(lib_dir.clone()),
@@ -3658,7 +3779,14 @@ mod tests {
                 override_state_dir: Some(supervisor_state.clone()),
                 override_unit_dir: Some(unit_dir),
                 unit_name: unit.clone(),
-            },
+            }
+        };
+        let service = ProvisioningService::injected(
+            store.clone(),
+            Arc::clone(&manager),
+            Arc::new(system_backend),
+            Arc::clone(&payloads) as Arc<dyn PayloadSource>,
+            layout,
             payload.clone(),
         );
         // The two transports enter through different actions now. ADD is
@@ -3671,23 +3799,38 @@ mod tests {
         // operations and process spawns with no ssh anywhere — under a
         // real user manager.
         let (accepted, plan) = if use_ssh {
-            let response = service
-                .probe(ProbeRequest {
-                    target: ProbeDestination::Ssh {
-                        destination: "localhost".to_string(),
-                    },
-                    remote_farhelm: Some(
+            // The self-directed probe points at paths under the fixture root
+            // that are never created, which is how it guarantees "absent"
+            // without depending on what this machine happens to have
+            // installed. A remote probe passes neither: the container has no
+            // supervisor at all, so the target's own defaults answer absent
+            // on their own — and letting the probe use them is what makes
+            // the recorded coordinates the ones a real ADD would record.
+            let (probe_remote_farhelm, probe_remote_state_dir) = if remote {
+                (None, None)
+            } else {
+                (
+                    Some(
                         probe_farhelm
                             .to_str()
                             .expect("temp path is UTF-8")
                             .to_string(),
                     ),
-                    remote_state_dir: Some(
+                    Some(
                         probe_state
                             .to_str()
                             .expect("temp path is UTF-8")
                             .to_string(),
                     ),
+                )
+            };
+            let response = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Ssh {
+                        destination: destination.clone(),
+                    },
+                    remote_farhelm: probe_remote_farhelm,
+                    remote_state_dir: probe_remote_state_dir,
                 })
                 .await
                 .unwrap();
@@ -3731,33 +3874,44 @@ mod tests {
             Ok(completed) => completed,
             Err(error) => {
                 service.abort_run(accepted.host_id).await;
-                guard
-                    .cleanup()
-                    .expect("cleanup after the timed-out install");
+                if let Some(guard) = guard.as_mut() {
+                    guard
+                        .cleanup()
+                        .expect("cleanup after the timed-out install");
+                }
                 panic!("{error:#}");
             }
         };
         assert_eq!(completed.status, RunStatus::Completed, "{completed:?}");
-        assert!(lib_dir.join("farhelm").is_file());
-        assert!(unit_path.is_file());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o7777;
-            assert_eq!(mode(&lib_dir), 0o755);
-            assert_eq!(mode(&supervisor_state), 0o700);
-            assert_eq!(mode(unit_path.parent().unwrap()), 0o755);
+        // Everything in this block reads the TARGET's filesystem through
+        // this process's own, which only holds where the target is this
+        // machine. The remote shape's equivalent evidence is the connected
+        // host and the operable session below: a supervisor cannot answer
+        // the protocol hello unless the binary landed, the unit was written,
+        // and the user manager started it.
+        if !remote {
+            assert!(lib_dir.join("farhelm").is_file());
+            assert!(unit_path.is_file());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode =
+                    |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o7777;
+                assert_eq!(mode(&lib_dir), 0o755);
+                assert_eq!(mode(&supervisor_state), 0o700);
+                assert_eq!(mode(unit_path.parent().unwrap()), 0o755);
+            }
+            let active = tokio::process::Command::new("systemctl")
+                .args(["--user", "is-active", "--", &unit])
+                .output()
+                .await
+                .unwrap();
+            assert!(
+                active.status.success(),
+                "the nonce unit is not active: {}",
+                String::from_utf8_lossy(&active.stderr)
+            );
         }
-        let active = tokio::process::Command::new("systemctl")
-            .args(["--user", "is-active", "--", &unit])
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            active.status.success(),
-            "the nonce unit is not active: {}",
-            String::from_utf8_lossy(&active.stderr)
-        );
         assert!(
             manager
                 .state(accepted.host_id)
@@ -3785,7 +3939,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: if use_ssh {
                     ProbeDestination::Ssh {
-                        destination: "localhost".to_string(),
+                        destination: destination.clone(),
                     }
                 } else {
                     ProbeDestination::Local
@@ -3802,9 +3956,19 @@ mod tests {
         );
 
         let client = wait_real_client(&manager, accepted.host_id).await;
-        let cwd = root.path().to_str().expect("temp path is UTF-8");
+        // The working directory has to exist ON THE TARGET. The fixture root
+        // does for a self-directed run; a remote target has never heard of
+        // it, so use the one directory every POSIX host is required to have.
+        let cwd = if remote {
+            "/tmp".to_string()
+        } else {
+            root.path()
+                .to_str()
+                .expect("temp path is UTF-8")
+                .to_string()
+        };
         let session = client
-            .create_session(cwd, "/bin/sh", None, 80, 24)
+            .create_session(&cwd, "/bin/sh", None, 80, 24)
             .await
             .expect("create an operable session through the provisioned host");
 
@@ -3838,16 +4002,29 @@ mod tests {
                 Ok(completed) => completed,
                 Err(error) => {
                     service.abort_run(update_run.host_id).await;
-                    guard.cleanup().expect("cleanup after timed-out UPDATE");
+                    if let Some(guard) = guard.as_mut() {
+                        guard.cleanup().expect("cleanup after timed-out UPDATE");
+                    }
                     panic!("{error:#}");
                 }
             };
             assert_eq!(completed.status, RunStatus::Completed, "{completed:?}");
-            assert_eq!(
-                hex_sha256(&tokio::fs::read(lib_dir.join("farhelm")).await.unwrap()),
-                hex_sha256(&bytes),
-                "UPDATE must converge to the newer payload"
-            );
+            if remote {
+                // No filesystem to hash. The convergence proof is what the
+                // next few lines already do: the UPDATE transferred a
+                // DIFFERENT binary (the hash guard would have skipped an
+                // identical one, so a completed run means bytes moved),
+                // restarted the unit onto it, and the helm reconnects to a
+                // supervisor that still owns the session started before the
+                // replacement. A payload that failed to land, landed
+                // truncated, or lost its execute bit could not produce that.
+            } else {
+                assert_eq!(
+                    hex_sha256(&tokio::fs::read(lib_dir.join("farhelm")).await.unwrap()),
+                    hex_sha256(&bytes),
+                    "UPDATE must converge to the newer payload"
+                );
+            }
         }
         let client = wait_real_client(&manager, accepted.host_id).await;
         assert_session_operable(&client, &session.id).await;
@@ -3858,17 +4035,24 @@ mod tests {
         drop(service);
         drop(manager);
         drop(store);
-        guard.cleanup().expect("checked nonce resource teardown");
+        if let Some(guard) = guard.as_mut() {
+            guard.cleanup().expect("checked nonce resource teardown");
+        }
         drop(guard);
-        assert!(!unit_path.exists(), "the nonce unit file survived teardown");
-        let inactive = tokio::process::Command::new("systemctl")
-            .args(["--user", "is-active", "--", &unit])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-            .unwrap();
-        assert!(!inactive.success(), "the nonce unit survived teardown");
+        // Teardown verification is the guard's, and the guard only exists
+        // where the resources do. A remote install is left running until the
+        // container is destroyed, which is the harness's job, not the test's.
+        if !remote {
+            assert!(!unit_path.exists(), "the nonce unit file survived teardown");
+            let inactive = tokio::process::Command::new("systemctl")
+                .args(["--user", "is-active", "--", &unit])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await
+                .unwrap();
+            assert!(!inactive.success(), "the nonce unit survived teardown");
+        }
         let root_path = root.path().to_path_buf();
         drop(root);
         assert!(
@@ -3877,10 +4061,20 @@ mod tests {
         );
     }
 
-    /// The CI-shaped transport proof: real ssh and sftp into isolated paths,
-    /// then an SSH UPDATE that preserves and operates a tmux-held session.
+    /// The CI-shaped transport proof: real ssh and sftp, then an SSH UPDATE
+    /// that preserves and operates a tmux-held session.
+    ///
+    /// Destination-agnostic on purpose. By default it dials `localhost` into
+    /// fixture-owned paths, which is what a laptop and the Ubuntu CI runner
+    /// can offer. With `FARHELM_TEST_SSH_DESTINATION` set it dials that host
+    /// instead — `scripts/test-provision-centos.sh` points it at a
+    /// systemd-booted CentOS Stream 9 container — and becomes the only
+    /// coverage of a helm provisioning a DIFFERENT distribution than its
+    /// own, which is the case the removed `ID=ubuntu` gate used to reject
+    /// outright. See [`real_provisioning_case`] for how the two shapes
+    /// differ.
     #[tokio::test]
-    async fn provisioning_and_update_over_ssh_to_localhost_preserve_an_operable_session() {
+    async fn provisioning_and_update_over_ssh_preserve_an_operable_session() {
         real_provisioning_case(true, true).await;
     }
 
