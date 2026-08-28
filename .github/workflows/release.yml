@@ -179,6 +179,11 @@ jobs:
       - name: "Run the JS unit harness"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: "cd crates/farhelm-ui/js-tests && node --test"
+      - name: "Provision a CentOS Stream 9 host over ssh"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools python3-venv
+          scripts/test-provision-centos.sh
       - name: "Compile the CLI half of the Mac release"
         if: "runner.os == 'macOS'"
         run: "cargo build -p farhelm --locked"

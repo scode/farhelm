@@ -76,6 +76,9 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the container image and the tmux
   build are both cached after the first run.
 - `dprint check`
+- `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
+  and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
+  cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
 
