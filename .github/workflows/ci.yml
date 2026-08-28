@@ -340,6 +340,64 @@ jobs:
             ${{ runner.temp }}/desktop-smoke/*.png
             ${{ runner.temp }}/desktop-smoke/*.txt
 
+  # Provisioning accepts any Linux host with a usable systemd user manager,
+  # but every provisioning integration test dials `localhost` — which on this
+  # runner is Ubuntu. So the one scenario the old `ID=ubuntu` gate existed to
+  # forbid, a helm installing a supervisor onto a DIFFERENT distribution, had
+  # no coverage. GitHub hosts no non-Ubuntu Linux runner, so the script boots
+  # a systemd CentOS Stream 9 container here and provisions it over ssh with
+  # the release's own musl-static payloads. Its header carries the container
+  # and payload rationale.
+  #
+  # Its own job, deliberately kept OUT of `test`: systemd inside Docker is the
+  # least reliable thing in this workflow, and a bad day for it must not read
+  # as the main suite going red.
+  provision-centos:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubicloud
+    # The script's own waits are all bounded, so anything that reaches this
+    # limit is stuck somewhere it does not know it can be stuck.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          # No restore-keys, for the reason the desktop job documents: this
+          # job's target/ holds a musl payload build ON TOP of a host-triple
+          # test build, so restoring a stale generation and then saving
+          # old+new is exactly the shape that filled a runner's disk in the
+          # cache post-step. A lockfile change costs one cold build instead.
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          target: x86_64-unknown-linux-musl
+          cache: false
+          rustflags: ""
+      # musl-tools because rusqlite's `bundled` feature compiles SQLite from C
+      # source, so the payload needs a musl-targeting C toolchain and not just
+      # Rust std for the triple. python3-venv is for the zig toolchain the
+      # pinned tmux build uses on a cache miss.
+      - name: Install payload build dependencies
+        run: sudo apt-get update && sudo apt-get install -y musl-tools python3-venv
+      # Same cache entry as the test job's, deliberately: it is the same
+      # binary from the same pins, and sharing it means only one job ever
+      # pays for the build.
+      - name: Restore pinned tmux
+        uses: actions/cache@v4
+        with:
+          path: .ci-tmux/tmux
+          key: tmux-pinned-ci-${{ runner.os }}-${{ runner.arch }}-ziglang-0.14.1-${{ hashFiles('.github/release/source-pins.env', '.github/release/ziglang-requirements.txt', 'scripts/build-private-tmux.sh', 'scripts/build-pinned-tmux-ci.sh') }}
+      - run: scripts/test-provision-centos.sh
+      # The container image and the musl payload together are a couple of
+      # gigabytes; make the headroom visible in the log so the next
+      # out-of-disk failure is diagnosable rather than mysterious.
+      - run: df -h
+
   # scripts/install.sh is the one file a fresh machine runs unread and
   # unreviewed (`curl | sh`), so a syntax slip or a shellcheck-catchable
   # bug in it gets its own job rather than waiting to be noticed inside

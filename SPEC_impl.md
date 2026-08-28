@@ -1333,6 +1333,18 @@ constraint (see the GUI section's motivation), not an afterthought:
   mouse-report-shaped sequence. Node's built-in runner over vitest/jest: node is already a CI requirement for
   Playwright, so this is zero new dependencies, and the asset-JS layer has no bundler for a module-tooling-heavy runner
   to pay for (PLAN_M6_5.md item 1).
+- **A CentOS Stream 9 container stands in for a host that is not the CI runner.** Provisioning accepts any Linux host
+  with a usable systemd user manager, but every provisioning integration test dials `localhost`, and both CI and the
+  release gate run on Ubuntu — so the case the retired `ID=ubuntu` gate existed to forbid, a helm installing onto a
+  different distribution, was the one case nothing covered. `scripts/test-provision-centos.sh` boots
+  `quay.io/centos/centos:stream9` with systemd as PID 1, publishes its sshd on loopback, and points the existing ssh
+  provisioning test at it through an alias in the user's own ssh config, so the transport, the PAM stack, the user
+  manager, and `/etc/os-release` under test are all the container's. What it pushes is what a release publishes: the
+  musl-static `farhelm` for `x86_64-unknown-linux-musl` and the pinned static tmux, both put through
+  `scripts/check-static-elf.sh` first. That choice is forced — the workspace's glibc debug binary cannot exec on CentOS
+  9's older glibc — and it is also the point, since it makes this the one test of the artifacts users actually receive
+  on a machine that is not the one that built them. Known limit: the container runs under the host's SELinux, and the
+  host is an Ubuntu runner where it is not enforcing, so RHEL-family hosts with SELinux enforcing remain untested.
 - The desktop shell's native glue is the acknowledged manual-test gap (see GUI risks); everything else must be coverable
   without a human.
 

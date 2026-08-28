@@ -172,6 +172,22 @@
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: cd crates/farhelm-ui/js-tests && node --test
 
+- name: Provision a CentOS Stream 9 host over ssh
+  # The cross-distribution provisioning leg. It belongs in the release gate
+  # more than anywhere else: what it proves is that the musl-static payloads
+  # THIS BUILD is about to publish actually install and run on a host that is
+  # not the runner's own Ubuntu. `ci.yml` keeps it in a separate job so a
+  # flaky systemd-in-Docker cannot take the main suite down; here there is no
+  # such split to make, and a failure correctly refuses publication.
+  #
+  # musl-tools is installed again rather than reordered: the release-build
+  # prerequisites further down run after every gate step, and a gate must not
+  # depend on a step that has not run yet.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: |
+    sudo apt-get update && sudo apt-get install -y musl-tools python3-venv
+    scripts/test-provision-centos.sh
+
 # ---------------------------------------------------------------------------
 # The macOS half of the gate.
 #

@@ -70,6 +70,11 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   prerequisites (via an isolated `PATH`), the exact closing-message contract across five tmux fixtures, and that nothing
   outside `FARHELM_INSTALL_DIR` — no `systemctl`/`launchctl` call, nothing else under `$HOME` — ever changes. Every
   invocation goes through `env -i` with an explicit environment, never this process's own.
+- `scripts/test-provision-centos.sh` — boots a systemd CentOS Stream 9 container and makes the helm provision it over
+  ssh, which is the only coverage of a helm installing onto a distribution other than its own. Needs docker and
+  `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux, because the workspace's
+  glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the container image and the tmux
+  build are both cached after the first run.
 - `dprint check`
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
