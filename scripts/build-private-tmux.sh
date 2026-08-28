@@ -16,9 +16,34 @@ zig=${ZIG:-zig}
 work=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-tmux.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
+# Fetch one pinned source archive from the first URL that answers, then
+# verify it against the pinned SHA-256 and unpack it.
+#
+# Several URLs, not one, because every build here — CI's pinned tmux, the
+# release gate, the release's own tmux payloads — runs on a cache miss, and
+# a single origin that is down takes all of them down with it: ftp.gnu.org
+# refused connections for hours on 2026-08-28 and every job that needed
+# ncurses failed at this line. The checksum is what makes a mirror safe to
+# trust — a mirror can only hand back the exact bytes the pin names or fail
+# the check — so the alternates only widen availability, never trust.
+#
+# A short connect timeout is part of the same fix: an origin that drops
+# SYNs rather than refusing them would otherwise hold each attempt for
+# curl's two-minute default before the next URL got its turn.
 download() {
-  local url=$1 name=$2 checksum=$3
-  curl -fsSL "$url" -o "$work/$name"
+  local name=$1 checksum=$2 url
+  shift 2
+  for url in "$@"; do
+    if curl -fsSL --connect-timeout 15 --retry 2 "$url" -o "$work/$name"; then
+      break
+    fi
+    echo "download of $name from $url failed; trying the next source" >&2
+    rm -f "$work/$name"
+  done
+  test -s "$work/$name" || {
+    echo "could not download $name from any source" >&2
+    exit 1
+  }
   if command -v sha256sum >/dev/null 2>&1; then
     echo "$checksum  $work/$name" | sha256sum -c -
   else
@@ -27,9 +52,16 @@ download() {
   tar xzf "$work/$name" -C "$work"
 }
 
-download "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" "tmux.tar.gz" "$TMUX_SHA256"
-download "https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/libevent-${LIBEVENT_VERSION}.tar.gz" "libevent.tar.gz" "$LIBEVENT_SHA256"
-download "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VERSION}.tar.gz" "ncurses.tar.gz" "$NCURSES_SHA256"
+download "tmux.tar.gz" "$TMUX_SHA256" \
+  "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
+download "libevent.tar.gz" "$LIBEVENT_SHA256" \
+  "https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/libevent-${LIBEVENT_VERSION}.tar.gz"
+# ftpmirror.gnu.org redirects to a nearby GNU mirror; the canonical host is
+# still tried first so a mirror that lags a fresh ncurses release does not
+# become the reason a build fails while the origin is fine.
+download "ncurses.tar.gz" "$NCURSES_SHA256" \
+  "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VERSION}.tar.gz" \
+  "https://ftpmirror.gnu.org/ncurses/ncurses-${NCURSES_VERSION}.tar.gz"
 
 prefix="$work/prefix"
 configure_host=()
