@@ -246,6 +246,7 @@ mod tests {
                     user_unit_dir: home.join(".config/systemd/user"),
                     home,
                     arch: PayloadArch::X86_64,
+                    distro_id: "ubuntu".to_string(),
                     needs_tmux: false,
                     host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
                 })),
@@ -663,6 +664,7 @@ mod tests {
         let unit_path = root.path().join("units").join(unit);
         let expected = format!(
             "Farhelm will perform these steps for user@absent:\n\
+             host: ubuntu, x86_64\n\
              1. create or reuse directories {} (mode 0755), {} (mode 0700), {} (mode 0755)\n\
              2. install Farhelm at {} via temporary file {} and atomic rename\n\
              3. write user unit {unit} at {} via temporary file {} and atomic rename\n\
@@ -1077,6 +1079,7 @@ mod tests {
             home: root.path().to_path_buf(),
             user_unit_dir: root.path().join("units"),
             arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
             needs_tmux: false,
             host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         });
@@ -2027,9 +2030,14 @@ mod tests {
         }
     }
 
-    /// Reach parsing refuses malformed fields and unsupported platforms,
-    /// selects both payload architectures, and requests tmux when absent or
-    /// below the supported floor.
+    /// Reach parsing does NOT gate on the distro ID: it refuses only the
+    /// capabilities that actually matter (malformed fields, an
+    /// unsupported architecture, an unusable systemd user manager), and
+    /// carries whatever ID it saw — including none at all — into `Reach`
+    /// for the confirmation plan to name. Distros other than Ubuntu used
+    /// to be sent to the manual path outright; this test used to assert
+    /// that for `debian` and now asserts the opposite, which is the point
+    /// of this change (see the workspace's centos-gate task).
     #[test]
     fn reach_output_parser_covers_platform_and_tool_boundaries() {
         let supported = |os: &str, arch: &str, tmux_path: &str, tmux: &str, manager: &str| {
@@ -2037,13 +2045,34 @@ mod tests {
                 "{REACH_RECORD_MARKER}\0{os}\0/home/test\0{arch}\0{tmux_path}\0{tmux}\0{manager}\0/home/test/.config/systemd/user\0"
             )
         };
-        assert!(matches!(
-            parse_reach_output(
-                supported("debian", "x86_64", "/usr/bin/tmux", "tmux 3.3", "usable").as_bytes()
-            )
-            .unwrap(),
-            ReachOutcome::Manual(_)
-        ));
+        // A non-Ubuntu ID with every real capability present is supported,
+        // and the ID it reported rides along unchanged for the plan to
+        // display — this is the behavior the ubuntu-only gate used to
+        // block.
+        let ReachOutcome::Supported(debian) = parse_reach_output(
+            supported("debian", "x86_64", "/usr/bin/tmux", "tmux 3.3", "usable").as_bytes(),
+        )
+        .unwrap() else {
+            panic!("a usable manager is supported regardless of distro ID")
+        };
+        assert_eq!(debian.distro_id, "debian");
+        let ReachOutcome::Supported(centos) = parse_reach_output(
+            supported("centos", "x86_64", "/usr/bin/tmux", "tmux 3.4", "usable").as_bytes(),
+        )
+        .unwrap() else {
+            panic!("a usable manager is supported regardless of distro ID")
+        };
+        assert_eq!(centos.distro_id, "centos");
+        // No /etc/os-release at all reports an empty ID over the wire; the
+        // manager check is the real requirement, so an empty ID is still
+        // supported rather than refused for lack of a name to show.
+        let ReachOutcome::Supported(unknown) = parse_reach_output(
+            supported("", "x86_64", "/usr/bin/tmux", "tmux 3.4", "usable").as_bytes(),
+        )
+        .unwrap() else {
+            panic!("an empty distro ID is not a reason to refuse an otherwise usable host")
+        };
+        assert_eq!(unknown.distro_id, "");
         assert!(matches!(
             parse_reach_output(supported("ubuntu", "riscv64", "", "", "usable").as_bytes())
                 .unwrap(),
@@ -2064,6 +2093,7 @@ mod tests {
             panic!("x86_64 Ubuntu with a user manager is supported")
         };
         assert!(missing.needs_tmux);
+        assert_eq!(missing.distro_id, "ubuntu");
         let ReachOutcome::Supported(old) = parse_reach_output(
             supported("ubuntu", "aarch64", "/usr/bin/tmux", "tmux 3.2", "usable").as_bytes(),
         )
@@ -2138,6 +2168,7 @@ mod tests {
                     home: root.path().join("home"),
                     user_unit_dir: root.path().join("home/.config/systemd/user"),
                     arch: PayloadArch::X86_64,
+                    distro_id: "ubuntu".to_string(),
                     needs_tmux: true,
                     host_tmux: None,
                 },
@@ -2171,6 +2202,52 @@ mod tests {
         );
     }
 
+    /// The confirmation's host line names whichever distro the reach probe
+    /// saw, verbatim, and falls back to "unknown distribution" only when
+    /// the host had no `/etc/os-release` at all — the one case
+    /// `parse_reach_output` still lets through with an empty ID. Neither
+    /// branch depends on ANY particular distro being present: the whole
+    /// point of gating on capabilities is that this line is free to name
+    /// whatever it saw.
+    #[test]
+    fn confirmation_host_line_names_the_distro_or_says_unknown() {
+        let root = tempfile::tempdir().unwrap();
+        let reach = |distro_id: &str| Reach {
+            home: root.path().join("home"),
+            user_unit_dir: root.path().join("home/.config/systemd/user"),
+            arch: PayloadArch::Aarch64,
+            distro_id: distro_id.to_string(),
+            needs_tmux: false,
+            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
+        };
+        let named = layout(root.path())
+            .plan(
+                ProvisioningOperation::Add,
+                ProvisioningTarget::Ssh {
+                    destination: "host".to_string(),
+                },
+                &reach("centos"),
+                "nonce",
+            )
+            .unwrap();
+        assert!(named.confirmation().contains("host: centos, aarch64\n"));
+        let unknown = layout(root.path())
+            .plan(
+                ProvisioningOperation::Add,
+                ProvisioningTarget::Ssh {
+                    destination: "host".to_string(),
+                },
+                &reach(""),
+                "nonce",
+            )
+            .unwrap();
+        assert!(
+            unknown
+                .confirmation()
+                .contains("host: unknown distribution, aarch64\n")
+        );
+    }
+
     /// Production layout has no test overrides: local and SSH plans use the
     /// documented library, state, unit, and nonce-scoped temporary paths.
     #[test]
@@ -2182,6 +2259,7 @@ mod tests {
             home: home.clone(),
             user_unit_dir: user_units.clone(),
             arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
             needs_tmux: false,
             host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
@@ -4755,6 +4833,7 @@ mod tests {
             user_unit_dir: root.path().join(".config/systemd/user"),
             home: root.path().to_path_buf(),
             arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
             needs_tmux: true,
             host_tmux: None,
         });

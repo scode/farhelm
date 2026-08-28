@@ -81,6 +81,16 @@ pub(super) struct Reach {
     pub(super) home: PathBuf,
     pub(super) user_unit_dir: PathBuf,
     pub(super) arch: PayloadArch,
+    /// The `/etc/os-release` `ID` field, verbatim, empty when the host has
+    /// no such file.
+    ///
+    /// Informational only: nothing in this struct's construction branches
+    /// on it, because it predicts none of the capabilities provisioning
+    /// actually needs (a payload architecture, a usable systemd user
+    /// manager, a resolvable unit directory, an acceptable tmux). It is
+    /// carried through purely so the plan the user confirms can name the
+    /// host it inspected — see `ProvisioningPlan::confirmation`.
+    pub(super) distro_id: String,
     pub(super) needs_tmux: bool,
     /// The host's OWN tmux executable, absolute, when it cleared the
     /// floor — `None` whenever `needs_tmux` is set.
@@ -1640,6 +1650,17 @@ pub(super) fn linger_was_refused(code: Option<i32>, stderr: &str) -> bool {
     .any(|message| lower.contains(message))
 }
 
+/// Turn the reach probe's NUL-delimited record into a support decision.
+///
+/// Nothing here gates on the distro ID. Every real requirement is a
+/// capability the probe measured directly: a payload architecture, a
+/// usable systemd user manager (with a resolvable, absolute unit
+/// directory), and — checked further down — an acceptable tmux or the
+/// ability to install one. The ID is parsed and carried into `Reach`
+/// purely so the confirmation plan can name the host it inspected; an
+/// empty ID (no `/etc/os-release` at all) is not a reason to refuse a
+/// host whose manager is otherwise usable, so it flows through as an
+/// empty string rather than a rejection.
 pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendFailure> {
     let fields: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
     if fields.len() != 9 || fields[0] != REACH_RECORD_MARKER.as_bytes() || !fields[8].is_empty() {
@@ -1648,12 +1669,7 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             String::from_utf8_lossy(output),
         ));
     }
-    let os = String::from_utf8_lossy(fields[1]);
-    if os != "ubuntu" {
-        return Ok(ReachOutcome::Manual(format!(
-            "automatic provisioning supports Ubuntu only; this host reported /etc/os-release ID={os:?}. Run the supervisor manually."
-        )));
-    }
+    let distro_id = String::from_utf8_lossy(fields[1]).into_owned();
     let arch_text = String::from_utf8_lossy(fields[3]);
     let arch = match arch_text.as_ref() {
         "x86_64" => PayloadArch::X86_64,
@@ -1713,6 +1729,7 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
         home,
         user_unit_dir,
         arch,
+        distro_id,
         needs_tmux: !tmux_ok,
         host_tmux: tmux_ok.then_some(tmux_path),
     }))
