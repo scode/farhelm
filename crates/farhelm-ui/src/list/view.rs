@@ -25,7 +25,7 @@ use crate::rows::{
 };
 use crate::{ApiBase, HostId, HostKind, Session};
 
-use super::create_form::CreateSessionForm;
+use super::create_form::{CreatePrefill, CreateSessionForm, prefill_from};
 use super::row::SessionRow;
 use super::shared::{
     DeleteTarget, HostOption, OpenHost, RowState, effective_create_host, host_options,
@@ -356,6 +356,33 @@ fn accepts_listing(
     } else {
         reads.accept_failure(generation)
     }
+}
+
+/// Whether a clone click on `session_id` must be refused outright, before
+/// `ListView`'s `on_clone` touches a single signal.
+///
+/// Pulled out as a pure predicate over the same primitives `on_rename_start`
+/// and `on_delete` already guard on, so the cross-guard is checkable without
+/// mounting a component: the controls a busy or mid-decision row disables
+/// lag one render behind the click that triggered them (`disabled`/
+/// `aria-disabled` are attributes, not synchronous vetoes), so a clone
+/// queued just ahead of that render can still reach the handler. `busy` is
+/// the page-wide operation lock (`OpLock::busy_now`); the rest are this
+/// SPECIFIC row's own state — any of them true means this row's `Session`
+/// is about to change, or is mid-decision, and is not a stable thing to
+/// snapshot into a fresh clone right now.
+fn clone_is_refused(
+    busy: bool,
+    session_id: &str,
+    pending: &HashSet<String>,
+    confirming: &HashSet<String>,
+    confirming_archive: &HashSet<String>,
+    renaming: Option<&str>,
+) -> bool {
+    busy || pending.contains(session_id)
+        || confirming.contains(session_id)
+        || confirming_archive.contains(session_id)
+        || renaming == Some(session_id)
 }
 
 /// The flat session list: host, title, cwd, invocation, and a truthful
@@ -788,6 +815,16 @@ pub(crate) fn ListView(
     // profiles for a create aimed at another.
     let mut chosen_host = use_signal(|| None::<HostId>);
     let mut profiles_open = use_signal(|| None::<HostId>);
+    // A "clone" click's seed for the create form (`create_form::
+    // CreatePrefill`), or `None` for the ordinary blank-form open. Lives
+    // HERE rather than inside the form for the same reason `chosen_host`
+    // does: the form itself unmounts on close and remounts fresh on the
+    // next open, so anything the NEXT open has to remember belongs to
+    // whatever survives that — this component's own state. Cleared
+    // alongside `chosen_host` at both of that signal's own clearing points
+    // below, so an ordinary "new session" open never inherits a stale
+    // clone's fields.
+    let mut clone_prefill = use_signal(|| None::<CreatePrefill>);
     // The filter the reads are currently CARRYING, and the one the surface
     // is being edited into. Two signals rather than one because a filter is
     // applied on submit (see this component's docs): the draft changes with
@@ -1762,6 +1799,59 @@ pub(crate) fn ListView(
         confirming_archive.write().remove(&id);
     };
 
+    // The "clone" menu item's click. It never calls the API itself — it
+    // opens the create form pre-filled from the clicked row, and the
+    // ordinary submit path is what actually launches anything (see
+    // `create_form::CreatePrefill` for what gets carried across, and
+    // `CreateSessionForm`'s own doc for how a new generation reseeds an
+    // already-open form).
+    //
+    // The generation is minted here, not by the form: it has to keep
+    // climbing across clone clicks the form never even reopens for (the
+    // form stays mounted while the user clones a second row without
+    // closing it first), so the ONE place that has seen every click this
+    // page has ever handled is the only place that can hand out a number
+    // guaranteed to be new. `menu_open` is closed explicitly rather than
+    // left to the general "close on anything that could move the layout"
+    // effect near `show_create`'s declaration: that effect WILL also close
+    // it once `show_create` flips, but the row whose menu this was is about
+    // to be covered by the form regardless, and there is no reason to make
+    // the close wait for that effect's next pass.
+    //
+    // Guarded FIRST, before any signal is touched — the same discipline
+    // `on_rename_start` keeps and for the same reason: the row's own
+    // `disabled`/`aria-disabled` attributes lag one render behind the
+    // click that set them, so a clone queued just ahead of that render
+    // (the shared token being claimed, or this very row entering a
+    // pending or confirming state) would otherwise still reach here and
+    // replace the form's prefill, or open it, out from under whatever the
+    // other operation is doing. `ops.busy_now()` covers the page-wide
+    // lock (a create submit already minting a key, a host mutation in
+    // flight); the three row-local sets cover this SPECIFIC row having a
+    // stop/delete in flight, a destructive confirmation open, or its
+    // rename field open — any of which means this row's own `Session` is
+    // about to change or is mid-decision, not a stable thing to snapshot
+    // into a fresh clone right now.
+    let on_clone = move |session: Session| {
+        if clone_is_refused(
+            ops.busy_now(),
+            &session.id,
+            &pending.read(),
+            &confirming.read(),
+            &confirming_archive.read(),
+            renaming.read().as_deref(),
+        ) {
+            return;
+        }
+        menu_open.set(None);
+        let generation = clone_prefill
+            .peek()
+            .as_ref()
+            .map_or(0, |prefill| prefill.generation + 1);
+        clone_prefill.set(Some(prefill_from(&session, generation)));
+        show_create.set(true);
+    };
+
     // The rename button's click: opens this row's field, seeds the draft
     // from the title the row is showing right now, and never calls the API
     // — exactly as `on_delete` opens the confirm prompt. Refuses a row
@@ -2053,6 +2143,7 @@ pub(crate) fn ListView(
     let confirm_delete = use_callback(confirm_delete);
     let cancel_delete = use_callback(cancel_delete);
     let on_archive = use_callback(on_archive);
+    let on_clone = use_callback(on_clone);
     let confirm_archive = use_callback(confirm_archive);
     let cancel_archive = use_callback(cancel_archive);
     let on_rename_start = use_callback(on_rename_start);
@@ -2509,6 +2600,11 @@ pub(crate) fn ListView(
                         // creation default is about a FRESH dialog, not about
                         // where the last one was pointed.
                         chosen_host.set(None);
+                        // Same reasoning as `chosen_host` right above:
+                        // without this, the next "new session" open would
+                        // silently reopen pre-filled from whatever row was
+                        // last cloned.
+                        clone_prefill.set(None);
                     }
                     show_create.set(opening);
                 },
@@ -2523,6 +2619,7 @@ pub(crate) fn ListView(
                 chosen_host,
                 catalog: create_catalog,
                 ops,
+                prefill: clone_prefill(),
                 on_created: move |session: Session| {
                     // Creation is a user-initiated selection too.
                     if let Some(helm) = hosts
@@ -2539,8 +2636,10 @@ pub(crate) fn ListView(
                     // The other close path. This component STAYS mounted
                     // under the sidebar layout, so without this clear the
                     // next open of the dialog would silently reopen on the
-                    // last create's host.
+                    // last create's host — and the last create's clone
+                    // prefill, for the same reason.
                     chosen_host.set(None);
+                    clone_prefill.set(None);
                     on_open.call(session);
                 },
             }
@@ -2640,6 +2739,7 @@ pub(crate) fn ListView(
                                 },
                                 rename_draft,
                                 on_open: guarded_open,
+                                on_clone,
                                 on_stop,
                                 on_delete,
                                 on_confirm_delete: confirm_delete,
@@ -2666,6 +2766,58 @@ pub(crate) fn ListView(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clone click is refused by EACH of its four guards independently,
+    /// and accepted only when every one of them is clear.
+    ///
+    /// This pins the regression the guard exists to prevent: the row's own
+    /// `disabled`/`aria-disabled` attributes are a render behind the click
+    /// that sets them, so a clone queued just ahead of a create submit
+    /// claiming the shared token, or just ahead of this row itself entering
+    /// a pending stop/delete, a destructive confirmation, or a rename, must
+    /// still be caught HERE rather than reaching `on_clone`'s signal writes.
+    /// Each case below flips exactly one guard so a future edit that
+    /// dropped any single one of them would fail here rather than only
+    /// under a real browser.
+    #[test]
+    fn a_clone_is_refused_by_any_one_of_its_four_guards() {
+        let id = "session-1";
+        let empty = HashSet::new();
+        let holding = HashSet::from([id.to_string()]);
+
+        assert!(
+            !clone_is_refused(false, id, &empty, &empty, &empty, None),
+            "nothing is holding this row, so the clone must proceed"
+        );
+        assert!(
+            clone_is_refused(true, id, &empty, &empty, &empty, None),
+            "the shared page-wide lock alone must refuse it"
+        );
+        assert!(
+            clone_is_refused(false, id, &holding, &empty, &empty, None),
+            "a stop or delete already in flight for THIS row must refuse it"
+        );
+        assert!(
+            clone_is_refused(false, id, &empty, &holding, &empty, None),
+            "an open delete confirmation on THIS row must refuse it"
+        );
+        assert!(
+            clone_is_refused(false, id, &empty, &empty, &holding, None),
+            "an open archive confirmation on THIS row must refuse it"
+        );
+        assert!(
+            clone_is_refused(false, id, &empty, &empty, &empty, Some(id)),
+            "this row's own open rename field must refuse it"
+        );
+        // A guard keyed to a DIFFERENT row must never refuse this one —
+        // the per-row sets are per-row for exactly this reason, and a
+        // guard that read them as a single shared flag would block every
+        // clone in the list the instant any one row was mid-operation.
+        assert!(
+            !clone_is_refused(false, id, &empty, &empty, &empty, Some("other-row")),
+            "another row's rename must not block this row's clone"
+        );
+    }
 
     /// A reply is refused when it answers a filter that is no longer
     /// applied, however new it is.

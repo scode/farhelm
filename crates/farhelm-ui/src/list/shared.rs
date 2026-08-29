@@ -268,21 +268,42 @@ impl OpenHost {
 ///   has its local row.
 fn default_create_host(hosts: &[HostOption], open_host: Option<&OpenHost>) -> Option<HostId> {
     open_host
-        .filter(|open| {
-            hosts.iter().any(|host| {
-                // An outer-None `open.identity` is a row from a helm that
-                // predates the field: no identity claim at all, so the id
-                // is the only comparable fact and it alone decides.
-                host.id == open.id
-                    && !host.identity_mismatch
-                    && open
-                        .identity
-                        .as_ref()
-                        .is_none_or(|seen| *seen == host.identity)
-            })
-        })
-        .map(|open| open.id)
+        .and_then(|open| matching_host_option(open, hosts))
+        .map(|host| host.id)
         .or_else(|| hosts.iter().find(|host| host.local).map(|host| host.id))
+}
+
+/// The `HostOption` `open` still names, if the registry's current install
+/// there is the one `open` was recorded against — `None` when it is not,
+/// whether because the row is gone or because it now fronts a different
+/// install.
+///
+/// This is the install comparison behind [`default_create_host`]'s first
+/// clause, pulled out so a SECOND caller can reuse the exact same verdict:
+/// `create_form::CreatePrefill`'s clone handoff asks the identical question
+/// about a cloned row's snapshotted host, and a second hand-copied version
+/// of this filter is exactly how the two would drift apart under a future
+/// edit. See [`default_create_host`]'s own doc for what each of the three
+/// outcomes below means and why: an outer-`None` `identity` degrades to the
+/// row-id-only check a helm predating `host_identity` gets, `None == None`
+/// deliberately passes for two installs that have never identified
+/// themselves, and the identity-mismatch phase disqualifies a row outright
+/// even when its RECORDED identity still equals `open`'s.
+pub(super) fn matching_host_option<'a>(
+    open: &OpenHost,
+    hosts: &'a [HostOption],
+) -> Option<&'a HostOption> {
+    hosts.iter().find(|host| {
+        // An outer-None `open.identity` is a row from a helm that predates
+        // the field: no identity claim at all, so the id is the only
+        // comparable fact and it alone decides.
+        host.id == open.id
+            && !host.identity_mismatch
+            && open
+                .identity
+                .as_ref()
+                .is_none_or(|seen| *seen == host.identity)
+    })
 }
 
 /// The host a create would ACTUALLY go to: the user's choice while it still
