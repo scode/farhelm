@@ -917,6 +917,56 @@ fn require_supported_tmux(program: &Path, v_output: &str) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Wording for a `-V` probe that failed because the OS could not find
+/// `program` at all (`io::ErrorKind::NotFound`) — as opposed to one that ran
+/// and refused (parsed by [`require_supported_tmux`]) or one that could not
+/// be spawned for some other reason (permissions, `ENOEXEC`, ...), which
+/// keep the ordinary "checking the tmux version of ..." context instead.
+///
+/// Two spellings because a bare name and a resolved path failing point at
+/// different repairs: a bare `tmux` failing means nothing on `PATH`
+/// answered to that name, so the fix is installing tmux somewhere on
+/// `PATH` (or pointing `--tmux`/`FARHELM_TMUX` at one); a resolved path
+/// failing means whatever named it — `--tmux`, `FARHELM_TMUX`, or a
+/// systemd unit's environment — points at something wrong, and the message
+/// names that exact path so the operator knows which override to fix.
+///
+/// The bare-name wording is deliberately SOURCE-NEUTRAL: `program` alone
+/// cannot tell this function whether the name is [`DEFAULT_TMUX_PROGRAM`]'s
+/// unconfigured fallback or an explicit one-word `--tmux custom-tmux` /
+/// `FARHELM_TMUX=custom-tmux` override — both are indistinguishable
+/// one-component paths by the time they reach here. Earlier wording
+/// guessed "unconfigured" and said `FARHELM_TMUX unset, nothing on PATH`
+/// unconditionally, which is simply false for an operator who set an
+/// explicit override that PATH could not resolve.
+///
+/// Neither spelling claims outright that `program` does not EXIST: on
+/// Unix, `ENOENT` from a spawn attempt also covers a script whose shebang
+/// interpreter is gone or a binary whose dynamic loader is missing, and
+/// distinguishing that from "nothing there at all" would need an extra
+/// existence check this function does not perform. "Could not be run" is
+/// accurate for every one of those causes without pretending to know
+/// which.
+///
+/// This replaces the misleading `"checking the tmux version of tmux"` this
+/// project shipped before: that phrasing is `program_display_path`'s
+/// fall-back spelling for a bare name PATH could not resolve, and read
+/// like tmux ran and failed rather than like tmux was never found at all.
+fn tmux_not_found_message(program: &Path) -> String {
+    if program.components().count() == 1 {
+        format!(
+            "no tmux could be run: `{}` was not found on PATH, or its interpreter or loader is \
+             missing",
+            program.display()
+        )
+    } else {
+        format!(
+            "no tmux could be run at `{}`: not found, or its interpreter or loader is missing",
+            program.display()
+        )
+    }
+}
+
 /// The environment variable naming the tmux binary to drive.
 ///
 /// Public because the desktop app sets it on the supervisor it spawns:
@@ -992,7 +1042,12 @@ pub fn resolve_tmux_program_from_env(flag: Option<&Path>) -> PathBuf {
 /// tmux 3.6 at /usr/bin/tmux is too old" tells the reader which entry to
 /// fix. `path_var` is a parameter so the search is testable without
 /// touching the test process's environment.
-fn program_display_path(program: &Path, path_var: Option<&std::ffi::OsStr>) -> PathBuf {
+///
+/// Public so the desktop app's own below-floor refusal can name the same
+/// resolved binary this driver's server-side refusal does, rather than
+/// printing whatever bare spelling `--tmux`/`FARHELM_TMUX` happened to
+/// carry — see `farhelm_ui::desktop::run_tmux_preflight_or_exit`.
+pub fn program_display_path(program: &Path, path_var: Option<&std::ffi::OsStr>) -> PathBuf {
     // A name with any separator is already a path; the OS would not
     // consult PATH for it either.
     if program.components().count() != 1 {
@@ -2096,13 +2151,20 @@ impl TmuxDriver {
         // without touching the socket or the config, so the private
         // arguments are inert here and routing around them would only
         // create a call site the override could be forgotten at.
-        let version = self
-            .command()
-            .arg("-V")
-            .stdin(Stdio::null())
-            .output()
-            .await
-            .with_context(|| format!("checking the tmux version of {}", named.display()))?;
+        let version = match self.command().arg("-V").stdin(Stdio::null()).output().await {
+            Ok(output) => output,
+            // `ENOENT`: nothing answered to `self.program` at all, which is
+            // a materially different failure from "something ran and this
+            // process refused to talk to it" — see `tmux_not_found_message`
+            // for why the two spellings below matter to whoever reads them.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                bail!("{}", tmux_not_found_message(&self.program));
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("checking the tmux version of {}", named.display()));
+            }
+        };
         if !version.status.success() {
             bail!(
                 "{} -V failed ({}): {}",
@@ -3948,6 +4010,61 @@ mod tests {
         assert!(message.contains("README"), "{message}");
     }
 
+    /// `tmux_not_found_message` must tell the two "not found" shapes apart:
+    /// a bare name failing means PATH search failed, and the fix is
+    /// installing tmux somewhere on PATH (or setting `--tmux`/
+    /// `FARHELM_TMUX`); a resolved path failing means the override itself
+    /// is wrong, and the fix is fixing that override. Collapsing them into
+    /// one wording (as the pre-fix `"checking the tmux version of tmux"`
+    /// context did) reads like tmux ran and refused rather than like tmux
+    /// was never found at all.
+    #[test]
+    fn not_found_wording_differs_for_a_bare_name_and_a_resolved_path() {
+        let bare = tmux_not_found_message(Path::new("tmux"));
+        assert!(bare.contains("PATH"), "{bare}");
+        assert!(bare.contains('`'), "{bare}");
+
+        let path = tmux_not_found_message(Path::new("/opt/nonexistent/tmux"));
+        assert!(path.contains("/opt/nonexistent/tmux"), "{path}");
+        // The path wording must not accuse PATH of being unset — an
+        // explicit override was given and IT is what is wrong.
+        assert!(!path.contains("PATH"), "{path}");
+    }
+
+    /// A bare name can be [`DEFAULT_TMUX_PROGRAM`]'s unconfigured fallback
+    /// OR an explicit `--tmux custom-tmux` / `FARHELM_TMUX=custom-tmux`
+    /// override — both spellings look identical by the time they reach
+    /// `tmux_not_found_message`, which is exactly the provenance the
+    /// function cannot see. The wording therefore has to work for BOTH
+    /// without asserting which one happened: it must never claim
+    /// `FARHELM_TMUX unset` for a name that may well have come FROM
+    /// `FARHELM_TMUX`, which is what the previous wording did.
+    #[test]
+    fn a_bare_name_from_an_explicit_override_gets_the_same_source_neutral_wording() {
+        let default_fallback = tmux_not_found_message(Path::new(DEFAULT_TMUX_PROGRAM));
+        let explicit_override = tmux_not_found_message(Path::new("custom-tmux"));
+        assert!(!default_fallback.contains("unset"), "{default_fallback}");
+        assert!(!explicit_override.contains("unset"), "{explicit_override}");
+        assert!(
+            explicit_override.contains("custom-tmux"),
+            "{explicit_override}"
+        );
+    }
+
+    /// Every "not found" wording has to cover the Unix ambiguity in
+    /// `ENOENT`: it also fires for an existing script whose shebang
+    /// interpreter is gone, or a binary whose loader is missing, not only
+    /// for a target that plain does not exist. A message that flatly said
+    /// "not found" would send an operator chasing a reinstall when the
+    /// real repair is restoring the interpreter or loader.
+    #[test]
+    fn not_found_wording_covers_a_missing_interpreter_or_loader_too() {
+        for program in [Path::new("tmux"), Path::new("/opt/nonexistent/tmux")] {
+            let message = tmux_not_found_message(program);
+            assert!(message.contains("interpreter or loader"), "{message}");
+        }
+    }
+
     /// A version Farhelm cannot READ is as much a startup blocker as one
     /// that is too old, and it is a harder one to act on: the user sees a
     /// refusal for a tmux that looks fine to them. So the error chain has
@@ -4368,6 +4485,13 @@ mod tests {
     /// no trace, which is the ordinary shape of a mistyped `--tmux` or a
     /// unit file naming a path that a later upgrade removed.
     ///
+    /// Pinned against the COMPLETE `tmux_not_found_message` wording, and
+    /// against the stale `"checking the tmux version of ..."` context it
+    /// replaced, rather than merely checking that the path appears
+    /// somewhere in the error: that old context also contained the path,
+    /// so a driver that quietly stopped calling the helper for this
+    /// branch would still have passed a looser assertion here.
+    ///
     /// Pinning "no config written" alongside the message matters because
     /// the config write sits between the probe and `start-server`: a
     /// reordering that wrote it first would leave a stale file behind on
@@ -4385,10 +4509,50 @@ mod tests {
             .await
             .expect_err("a program that does not exist cannot be driven");
         let message = format!("{error:#}");
-        assert!(message.contains(&absent.display().to_string()), "{message}");
+        assert!(
+            message.contains(&tmux_not_found_message(&absent)),
+            "{message}"
+        );
+        assert!(
+            !message.contains("checking the tmux version of"),
+            "the stale pre-fix context must not reappear: {message}"
+        );
         assert!(
             !driver.config.exists(),
             "a failed probe must not have written a server config"
+        );
+    }
+
+    /// The same production branch, exercised through a BARE name rather
+    /// than a resolved path. The two spellings render different wording
+    /// (see `tmux_not_found_message`'s doc comment), and before this test
+    /// only a resolved-path fixture existed — which meant a driver change
+    /// that stopped routing a bare-name `NotFound` through the helper
+    /// could still pass every `ensure_server` test in this module.
+    ///
+    /// The chosen name is implausible on any real `PATH` rather than
+    /// engineered to be absent by mutating this test process's own
+    /// environment: `Command` resolves a bare program against whatever
+    /// `PATH` this process already has, and a sufficiently unlikely name
+    /// fails to resolve the same way a genuinely absent one would.
+    #[tokio::test]
+    async fn a_missing_bare_program_name_refuses_through_the_same_helper() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bare = PathBuf::from("farhelm-test-nonexistent-tmux-4f19c2");
+
+        let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), bare.clone());
+        let error = driver
+            .ensure_server()
+            .await
+            .expect_err("a bare name absent from PATH cannot be driven");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains(&tmux_not_found_message(&bare)),
+            "{message}"
+        );
+        assert!(
+            !message.contains("checking the tmux version of"),
+            "{message}"
         );
     }
 

@@ -13,21 +13,24 @@ The release is two bare binaries in `~/.local/bin` (D6), so every step below sta
 That is not a compromise for the sake of the checklist — it is how the binaries are installed and how the maintainer
 runs them — but it does mean this pass says nothing about a Finder double-click, which was never validated either.
 
-1. Confirm the tmux discovery and floor (SPEC_impl.md's "Terminal substrate: private tmux server") in three controlled
+1. Confirm the tmux preflight and floor (SPEC_impl.md's "Terminal substrate: private tmux server") in three controlled
    launches.
 
-   These cases only mean anything if the app STARTS the supervisor rather than finding one. Bootstrap probes first and
-   reuses whatever already answers, and a reused supervisor inherited its tmux from whoever launched it — so a stray one
-   makes all three cases pass without exercising anything. Before each launch, quit the app fully and confirm no
-   supervisor is left:
+   `farhelm-desktop` now owns this check itself: right before it would spawn its own managed supervisor, it probes the
+   tmux it is about to hand that supervisor and applies the version floor. A missing or below-floor tmux refuses with
+   ONE plain line on the app's own stderr and exit status 1 — no window ever opens, and nothing reaches a supervisor
+   log, because the supervisor is never started. These cases only mean anything if the app is about to START a
+   supervisor rather than reuse one: bootstrap discovers first, and an answering supervisor is reused exactly as it
+   stands — tmux included — without this preflight running at all (see the separate check below). A stray supervisor
+   left over from an earlier step would therefore make all three cases below pass without exercising anything. Before
+   each launch, quit the app fully and confirm no supervisor is left:
 
    ```
    pgrep -fl 'farhelm supervisor run'   # must print nothing
    ```
 
    If it prints something, that is either a leftover child (wait for it, or kill it) or a supervisor you run yourself —
-   in which case stop it for the duration of this step. Discovering and reusing an existing supervisor is a separate
-   behaviour worth checking on its own; it is not a substitute for these three.
+   in which case stop it for the duration of this step.
 
    (a) With Homebrew tmux installed and no override, the app starts and a local session runs:
 
@@ -35,8 +38,19 @@ runs them — but it does mean this pass says nothing about a Finder double-clic
    unset FARHELM_TMUX; ~/.local/bin/farhelm-desktop
    ```
 
-   (b) Below the floor. Point the override at a distro or older Homebrew build and confirm the supervisor refuses with
-   `tmux <version> at <path> is below Farhelm's floor <floor> (see README: tmux)`:
+   (b) Below the floor. Point the override at a distro or older Homebrew build and confirm `farhelm-desktop` itself
+   exits 1 with exactly this on stderr, no window, and nothing on the supervisor's log (there is no supervisor log to
+   check — it was never started):
+
+   ```
+   found tmux <version> at <path>, which is below the <floor> farhelm needs.
+   On macOS, tmux has to be installed by hand; Homebrew is the recommended way:
+
+       brew install tmux
+
+   FARHELM_TMUX is set and overrides that search, so update it to point at the new install (or unset it) before
+   starting farhelm-desktop again.
+   ```
 
    ```
    FARHELM_TMUX=/path/to/old/tmux ~/.local/bin/farhelm-desktop
@@ -51,12 +65,19 @@ runs them — but it does mean this pass says nothing about a Finder double-clic
    A nonempty override is what makes this case reachable at all. Shortening `PATH` does not: with no override the app
    probes `/opt/homebrew/bin`, `/usr/local/bin` and `/opt/local/bin` by absolute path, finds the Homebrew tmux case (a)
    just established, and starts normally. So this case tests a configured-but-absent binary, which is the realistic
-   version of "no tmux" for a Mac that has Homebrew — not an empty machine.
+   version of "no tmux" for a Mac that has Homebrew — not an empty machine. Confirm the same shape of refusal as (b),
+   with the `NotFound` subject instead ("...and none could be run (looked at: /path/to/old/tmux). Each one was either
+   not found, or is missing its interpreter or loader.").
 
-   For (b) and (c), record where the refusal actually surfaced. Expected today, per TODO.md's entry: it reaches the
-   supervisor's log and nothing else, so the window opens with a local host missing and no stated reason. Write down
-   whether anything in the window explained it — that gap is what the TODO tracks, and this is the observation that
-   would close it. Drop the overrides before the remaining steps.
+   Record whether the ONE stderr line and exit status actually matched, and whether Finder — as opposed to a terminal
+   launch — showed anything at all; a Finder launch has no terminal for that stderr to reach, which is the remaining gap
+   TODO.md tracks. Drop the overrides before the remaining steps.
+
+   Separately, confirm that an ANSWERING manual supervisor is reused untouched regardless of tmux: start one yourself
+   (`farhelm supervisor run --state-dir ~/.local/state/farhelm &`) against a tmux of your choosing, then launch
+   `farhelm-desktop` with `FARHELM_TMUX` pointed at something missing or below the floor. The app must start normally
+   against your supervisor — the preflight must not run at all, because this process is not about to spawn or configure
+   a tmux of its own.
 2. Start the native app and provision a fresh Ubuntu host using only the account's existing passwordless SSH. Confirm
    that setup needs no root, the supervisor registers, and a session runs. Then use
    `~/.local/bin/farhelm helm token show` and open the same embedded helm's authenticated web UI.

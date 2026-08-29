@@ -148,20 +148,10 @@ Within a bucket, no order.
   the verb list. Rough size: three to five days for rules, CLI verbs, and the setting, plus about two for the relay; the
   multi-helm question in the unbucketized list becomes load-bearing here rather than theoretical.
 
-- Make a missing or too-old tmux on macOS a plain message, not a crash. Today `farhelm-desktop` on a Mac without tmux
-  prints the supervisor's WARN line, "Error: checking the tmux version of tmux / Caused by: No such file or directory",
-  and then a `thread 'main' panicked at desktop.rs` with a backtrace hint — the managed supervisor child exited during
-  startup (`DesktopBootstrap::start`), and the panic is the only handling. The behavior itself is by spec (the Mac
-  artifacts bundle no tmux and nothing installs one — SPEC.md's Mac section, SPEC_impl.md's terminal-substrate section);
-  the presentation is the defect. Floor: recognize the supervisor's tmux refusal in the bootstrap and say, in plain
-  words, that on macOS tmux must be installed by hand, at least version 3.7c (read the floor from wherever the
-  supervisor's check gets it, not a second literal), that Homebrew is the recommended way, and the exact command:
-  `brew install tmux` — and NOTHING else: no panic, no stack trace, no backtrace hint, no supervisor WARN line or
-  `Caused by` chain ahead of it. That message alone, then a non-zero exit. Stretch: show that same message in a window,
-  since a Finder launch has no terminal for it to land in (this subsumes the earlier entry about the refusal reaching
-  only the supervisor's log). Also fix the wording of the refusal itself: "checking the tmux version of tmux" is the
-  unresolved bare name after the Homebrew/MacPorts/PATH probes all missed, and should say that no tmux was found in any
-  of them.
+- Show the missing-or-too-old-tmux refusal in a native window, not just on stderr. `farhelm-desktop`'s tmux preflight
+  now prints one plain message and exits (see `desktop.rs`'s `run_tmux_preflight_or_exit`), but a Finder launch has no
+  terminal for stderr to land in, so that message currently reaches nobody there. Unverifiable without a Mac to try it
+  on, so deferred rather than guessed at.
 
 - Add "clone" to the session row's `…` menu (next to rename/stop/archive/delete): start a FRESH agent — same profile (or
   same raw invocation when the session has no source profile), same working directory, same host, same title — as a new

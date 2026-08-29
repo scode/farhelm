@@ -120,9 +120,12 @@ Linux" below).
 - Install with the curl command above; on macOS it puts both `farhelm` and `farhelm-desktop` into `~/.local/bin`.
 - `brew install tmux`. Neither binary bundles tmux. Homebrew's (3.7c at the time of writing) is the recommended way to
   meet the version floor, and `farhelm-desktop` looks for a tmux in the Homebrew and MacPorts prefixes itself, since GUI
-  apps do not see your shell's `PATH`; `FARHELM_TMUX` in its environment names one explicitly. Without an acceptable
-  tmux the managed supervisor refuses to start — today that refusal reaches the supervisor's log rather than a window, a
-  gap TODO.md's macOS entry records — see the tmux NOTE below.
+  apps do not see your shell's `PATH`; `FARHELM_TMUX` in its environment names one explicitly. Before starting its own
+  managed supervisor, `farhelm-desktop` checks the tmux it is about to hand that supervisor against the version floor
+  itself; without an acceptable one it refuses immediately with one plain message on its own stderr and quits, rather
+  than opening a window and letting the managed supervisor fail later — see the tmux NOTE below. Launched from a
+  terminal, that message is right there; launched from Finder there is no terminal for it to reach, which is the
+  remaining gap TODO.md records.
 - Start `farhelm-desktop` (double-click it in Finder, or run `~/.local/bin/farhelm-desktop` from a terminal). It starts
   its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when the app exits.
   The window shows the web UI at `http://127.0.0.1:7433/`. If another process owns that port, the app refuses to start

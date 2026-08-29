@@ -55,10 +55,14 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 - `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
   set, in both directions. Needs `dx` and the wasm32 target; takes a few minutes, since it wipes `target/dx` and
   rebuilds both bundles.
-- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the non-pixel Xvfb integration gate for
-  the embedded helm, managed supervisor, desktop authentication, the tmux override reaching the managed supervisor,
-  hard-exit tether, restart persistence, and that every asset the window requested went through the desktop asset
-  handler. The optional coordinate-driven leg is not part of CI.
+- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — before any of it needs Xvfb, four
+  pre-display process legs drive `farhelm-desktop`'s own entry point directly: a missing tmux and a below-floor tmux
+  each refuse with one exact plain stderr line and exit status 1 (the app's own preflight, run before it would spawn its
+  managed supervisor), and a non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary
+  fallback path with no panic. The non-pixel Xvfb integration gate that follows covers the embedded helm, managed
+  supervisor, desktop authentication, the tmux override reaching the managed supervisor, hard-exit tether, restart
+  persistence, and that every asset the window requested went through the desktop asset handler. The optional
+  coordinate-driven leg is not part of CI.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
