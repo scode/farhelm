@@ -238,6 +238,19 @@ where
     // client has stopped reading entirely, which the writer stall timeout
     // already covers.
     let (priority_tx, mut priority_rx) = mpsc::channel::<Frame>(UPLOAD_PRIORITY_QUEUE);
+    // A full-authority connection is a candidate for agent upcalls; a
+    // session-authenticated one never is. The distinction is admission, not
+    // the hello's `role` string, which is diagnostic free text and never an
+    // authorization input (see `ControlMsg::Hello::role`). Registering here,
+    // as soon as the connection has a writer queue, is what makes the link
+    // findable by any attachment this connection later takes — see
+    // `Supervisor::helm_link_for_session` for how one is found and why the
+    // rule is attachment ownership.
+    let link = if restricted_auth.is_none() {
+        Some(sup.register_helm_link(tx.clone()).await)
+    } else {
+        None
+    };
     let (writer_failed_tx, mut writer_failed_rx) = oneshot::channel();
     // Progress counter for the shutdown-tail drain: `drain_writer` reads
     // this to tell "peer merely slow" apart from "peer gone" instead of
@@ -513,16 +526,36 @@ where
                     let msg = parse_control(&frame)?;
                     match restricted_auth.as_ref() {
                         Some(auth) => handle_restricted_control(&sup, msg, &tx, auth).await,
-                        None => {
-                            let ctx = ConnectionCtx {
-                                tx: &tx,
-                                priority: &priority_tx,
-                                input_routes: &mut input_routes,
-                                upload_routes: &mut upload_routes,
-                                tasks: &mut tasks,
-                            };
-                            handle_control(&sup, msg, ctx).await
-                        }
+                        // An `AgentResponse` is the answer to something
+                        // the SUPERVISOR asked this connection (see
+                        // `super::agent_relay`), so it is completed
+                        // against this connection's pending table rather
+                        // than dispatched as a request. Intercepted here,
+                        // beside the data-frame routing, because the
+                        // pending table is connection-local exactly like
+                        // the channel maps are — the `req_id` it
+                        // correlates by was minted by this connection's
+                        // own counter and means nothing on any other — and
+                        // because `ConnectionCtx` deliberately stops at
+                        // the per-message handlers.
+                        None => match msg {
+                            ControlMsg::AgentResponse { req_id, outcome } => {
+                                let link = link.as_ref().expect(
+                                    "a full-authority connection registers its link at hello",
+                                );
+                                link.complete(req_id, outcome).await;
+                            }
+                            msg => {
+                                let ctx = ConnectionCtx {
+                                    tx: &tx,
+                                    priority: &priority_tx,
+                                    input_routes: &mut input_routes,
+                                    upload_routes: &mut upload_routes,
+                                    tasks: &mut tasks,
+                                };
+                                handle_control(&sup, msg, ctx).await
+                            }
+                        },
                     }
                 }
             }
@@ -531,7 +564,15 @@ where
     }
     .await;
 
-    // Connection gone: every upload it was carrying is over. Each is
+    // Connection gone: retire its upward channel FIRST, before the slower
+    // attachment and handler teardown below. A session waiting on an
+    // agent request has no deadline of its own, so every moment this is
+    // deferred is a moment it waits for an answer that provably cannot
+    // arrive — `HelmLink::fail_all` turns that into an immediate refusal.
+    if let Some(link) = &link {
+        sup.unregister_helm_link(link).await;
+    }
+    // Every upload this connection was carrying is over too. Each is
     // SIGNALLED rather than merely dropped, because a transfer whose queue
     // still holds chunks would otherwise keep writing them to a file
     // nobody will ever commit — the signal is selected on first, so the

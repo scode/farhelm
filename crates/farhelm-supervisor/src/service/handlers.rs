@@ -2930,7 +2930,12 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             .await;
         }
         // Response/event messages arriving at the supervisor are peer
-        // bugs; log and continue.
+        // bugs; log and continue. `AgentResponse` is one of them here by
+        // construction: the connection loop completes it against that
+        // connection's own pending table before dispatch runs (see
+        // `handle_connection`'s control arm), so it can only reach this
+        // point if that interception is bypassed — which this arm reports
+        // like any other message that should not have arrived.
         other => warn!(?other, "unexpected control message at supervisor"),
     }
 }
@@ -2944,12 +2949,16 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
 /// future handler cannot accidentally become available to spawn merely by
 /// being added to the full-authority match.
 ///
-/// The two admitted operations are admitted for opposite reasons, which is
-/// worth keeping in view when a third is proposed. A create is an action
-/// the peer takes on the host, so it is authorized and serialized like any
-/// other lifecycle operation. A report is the peer describing ITSELF —
-/// something no other authority can do, which is exactly why the
-/// full-authority dispatch refuses it.
+/// The three admitted operations are admitted for three different reasons,
+/// which is worth keeping in view when a fourth is proposed. A create is an
+/// action the peer takes on the host, so it is authorized and serialized
+/// like any other lifecycle operation. A report is the peer describing
+/// ITSELF — something no other authority can do, which is exactly why the
+/// full-authority dispatch refuses it. An agent request is neither: this
+/// supervisor does not answer it at all, it carries it to the helm and
+/// brings the answer back (see [`super::agent_relay`]), so what is being
+/// authorized here is the right to ASK AS this session, not any authority
+/// over what the answer contains.
 pub(crate) async fn handle_restricted_control(
     sup: &Arc<Supervisor>,
     msg: ControlMsg,
@@ -3144,13 +3153,63 @@ pub(crate) async fn handle_restricted_control(
             };
             send_reply(tx, &reply).await;
         }
+        ControlMsg::AgentRequest {
+            req_id,
+            session_id,
+            request,
+        } => {
+            // NO lifecycle claim, for `ReportConversation`'s reason and
+            // one more: the two verbs this version carries are read-only
+            // questions answered by another process entirely, so there is
+            // nothing here to serialize against a delete — and holding a
+            // claim across a round trip to the helm would put an unrelated
+            // restart or stop behind a peer that may be waiting out the
+            // full upcall budget.
+            //
+            // Every refusal below is an `AgentResponse` rather than a bare
+            // `Error`: this exchange has two hops and refusals from both,
+            // and one reply shape means the asking CLI decodes exactly one
+            // thing (see `ControlMsg::AgentRequest`'s docs).
+            let outcome = match sup
+                .store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+            {
+                Ok(true) if session_id == auth.session_id => {
+                    sup.relay_agent_request(session_id, request).await
+                }
+                // A credential for one session is not authority to ask
+                // questions as another. The check is here rather than at
+                // the far end because the helm never sees the credential:
+                // by the time the request reaches it, `session_id` is the
+                // only claim about who is asking, and it has to already be
+                // true.
+                Ok(true) => farhelm_proto::AgentOutcome::Err {
+                    kind: ErrorKind::Unauthorized,
+                    message: format!(
+                        "a session-authenticated peer may ask only as itself ({})",
+                        truncate_for_error(&auth.session_id)
+                    ),
+                },
+                Ok(false) => farhelm_proto::AgentOutcome::Err {
+                    kind: ErrorKind::Unauthorized,
+                    message: "the session credential is invalid or its session no longer exists"
+                        .to_string(),
+                },
+                Err(error) => farhelm_proto::AgentOutcome::Err {
+                    kind: ErrorKind::Internal,
+                    message: format!("could not validate the session credential: {error:#}"),
+                },
+            };
+            send_reply(tx, &ControlMsg::AgentResponse { req_id, outcome }).await;
+        }
         other => {
             send_reply(
                 tx,
                 &ControlMsg::Error {
                     req_id: other.request_req_id().unwrap_or(0),
-                    message: "a session-authenticated peer may only create sessions and report \
-                              its conversation"
+                    message: "a session-authenticated peer may only create sessions, report its \
+                              conversation, and ask the helm about the fleet"
                         .to_string(),
                     kind: ErrorKind::Unauthorized,
                 },

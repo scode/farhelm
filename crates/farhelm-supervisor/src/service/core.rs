@@ -171,6 +171,49 @@ pub const UPLOAD_PROGRESS_TIMEOUT: Duration = Duration::from_secs(60);
 /// removed when it does — see `await_disk_stage`.
 pub const UPLOAD_DISK_STAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long the supervisor waits for the attached helm to answer one
+/// agent request before telling the asking session it timed out — see
+/// [`super::agent_relay`].
+///
+/// The bound exists at all because the asking side has none. `farhelm
+/// agent` blocks on a socket read with no deadline of its own,
+/// deliberately: the supervisor is the only party that can tell "no helm
+/// is attached" from "a helm took it and is slow", and a client-side
+/// deadline would collapse those into one unactionable "it did not
+/// answer".
+///
+/// Thirty seconds is generous for what a helm actually does here — the
+/// two read-only verbs answer from memory and helm.db, with no fan-out to
+/// hosts — and the generosity is on purpose: an agent's request racing a
+/// helm that is busy serving a browser should wait, not fail. What the
+/// bound protects is the other direction, a helm that has stopped
+/// answering without its connection dying, where the alternative is an
+/// agent's shell command wedged forever.
+///
+/// Injectable per supervisor (see [`SupervisorTimeouts`]) for the reason
+/// every other timeout here is: a test that asserts the timeout FIRES
+/// cannot afford to wait out the production value, and this repo's tests
+/// never mutate the process environment.
+pub const AGENT_UPCALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long an agent request may wait for ROOM on the helm connection's
+/// writer queue before the relay gives up on delivering it.
+///
+/// Separate from [`AGENT_UPCALL_TIMEOUT`] because the two bound different
+/// failures and produce different answers. This one ends in
+/// `ErrorKind::Unavailable`: the request was never sent, so retrying is
+/// free. The other ends in `ErrorKind::Timeout`: the helm has it and may
+/// still be working, so retrying might repeat it. One budget over both legs
+/// reported the first case as the second, which is the exact distinction
+/// protocol version 13 introduced.
+///
+/// Five seconds rather than thirty because parking here means the queue is
+/// full — the connection is not draining, or is saturated with terminal
+/// output — and no amount of further waiting makes an agent's listing more
+/// likely to get out. Long enough to ride out an ordinary burst; short
+/// enough that a wedged connection is reported as one.
+pub const AGENT_DELIVER_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The timeouts a `Supervisor` treats as "this consumer is gone, not
 /// merely slow".
 ///
@@ -221,6 +264,16 @@ pub struct SupervisorTimeouts {
     /// also widening this one can end up with a sink-ready wait shorter
     /// than the respawn attempt it is meant to cover.
     pub sink_ready: Duration,
+    /// See [`AGENT_UPCALL_TIMEOUT`]. The one entry here that bounds a wait
+    /// on the PEER rather than on tmux or a socket write — the supervisor
+    /// is the client for the duration of an agent request. Counts only the
+    /// wait AFTER the request reached the connection; getting it there is
+    /// [`Self::agent_deliver`]'s budget.
+    pub agent_upcall: Duration,
+    /// See [`AGENT_DELIVER_TIMEOUT`]: how long the relay waits for room on
+    /// the helm connection's writer queue before reporting the request as
+    /// undelivered.
+    pub agent_deliver: Duration,
 }
 
 impl Default for SupervisorTimeouts {
@@ -233,6 +286,8 @@ impl Default for SupervisorTimeouts {
             tmux_exchange: crate::tmux::CONTROL_EXCHANGE_TIMEOUT,
             tmux_pane_list: crate::tmux::PANE_LIST_TIMEOUT,
             sink_ready: SINK_READY_TIMEOUT,
+            agent_upcall: AGENT_UPCALL_TIMEOUT,
+            agent_deliver: AGENT_DELIVER_TIMEOUT,
         }
     }
 }
@@ -2992,6 +3047,19 @@ pub struct Supervisor {
     /// because a takeover cannot interleave inside any of their
     /// check-then-act pairs.
     pub(crate) attachments: Mutex<HashMap<AttachmentKey, ActiveAttach>>,
+    /// The upward request channel of every full-authority connection
+    /// currently served — see [`super::agent_relay`] for what travels up
+    /// one and why anything does.
+    ///
+    /// A `Vec`, not a map: it is indexed by nothing (a link is found by
+    /// matching an attachment's writer queue against it), it holds one
+    /// entry per connected helm, and that is a number a person could count
+    /// on one hand. A key would have to be invented purely to have one.
+    ///
+    /// NOT part of the `attachments`-then-`sessions` lock-ordering rule
+    /// this struct's docs state: `helm_link_for_session` releases
+    /// `attachments` before taking this, and nothing else takes both.
+    pub(crate) helm_links: Mutex<Vec<Arc<super::agent_relay::HelmLink>>>,
     /// Per-terminal barriers for provisional opens and unfinished shutdowns.
     ///
     /// Teardown publishes a `Reaping` entry while it still holds
@@ -3561,6 +3629,7 @@ impl Supervisor {
             host_identity,
             sessions: Mutex::new(sessions),
             attachments: Mutex::new(HashMap::new()),
+            helm_links: Mutex::new(Vec::new()),
             output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
             sinks: Arc::new(std::sync::Mutex::new(Default::default())),
             uploads: Mutex::new(HashMap::new()),

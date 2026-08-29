@@ -635,7 +635,60 @@ decodes to 0, which a receiver reads as "unknown, fall back to `created_at`" and
 recorded here because the per-version changelog in `lore/` is frozen at the moment it was written and is not maintained
 as the protocol grows. The identity hook's pair — `ControlMsg::ReportConversation` and `ConversationReported` — went the
 other way and took the protocol to version 12, since two new tagged variants are exactly what an older decoder refuses
-outright instead of ignoring. So 12 is the current protocol version, and the frozen changelog stops at 11.
+outright instead of ignoring.
+
+Version 13 adds the one shape on this wire that travels UPWARD as a request: `ControlMsg::AgentRequest`, answered by
+`AgentResponse`. Both legs of its journey carry the same pair. An agent inside a session dials its own supervisor's
+socket with the per-session credential — exactly as `farhelm spawn` does — and the supervisor forwards the request to
+the helm, because the session has no route, address, or credential back to the machine the helm runs on. Nothing else
+changed direction: the helm still learns about sessions by drain, so version 10's "no supervisor-edge push channel"
+holds for everything but this. The supervisor picks the helm that holds an attachment to the asking session — well
+defined by the one-attachment-per-session rule, and by construction the helm the user is looking at, which is also the
+rule that stays correct if several helms per supervisor are ever supported. Request ids are per connection on this
+protocol and stay that way: the asking process numbers its own leg, the supervisor numbers the upcall from a counter it
+keeps per helm connection, and the relay holds the mapping for one round trip.
+
+The failure vocabulary is two kinds, split by whether a retry is free. `ErrorKind::Unavailable` means nothing is holding
+the request: no helm is attached, its connection died before or during the request, the request could not be delivered
+onto that connection at all, or the helm itself is not in a state to answer — still starting up, shutting down, or
+serving a connection with no fleet behind it. `ErrorKind::Timeout` means the opposite and only that: the request was
+QUEUED for delivery on the helm's connection and no answer arrived within the supervisor's budget. It may or may not
+have reached the helm — the supervisor observes its own writer queue accepting the frame, never the writer transmitting
+it — so a retry is neither provably free nor provably duplicative, and the message says exactly that rather than
+claiming a delivery nobody watched. Closing that residual gap needs a per-frame transmission receipt from the
+connection's writer, with the answer budget starting at the receipt and a write failure before it reported as
+`Unavailable`; that is the known refinement, deferred because the queue is one `mpsc::Sender<Frame>` shared by every
+attachment site in the supervisor and a receipt changes that type at all of them. Both kinds are emitted by the relay
+and by the helm; the earlier rule that only the supervisor emits them was too narrow, because the helm has its own
+transient states and a bare `Internal` would tell a caller nothing about retrying. The DELIVERY leg gets its own short
+budget (5 seconds) separate from the helm's answer budget (30 seconds) precisely to keep this distinction honest: a
+request that spent its whole budget waiting for room on a full writer queue was never sent, and reporting that as
+`Timeout` would invert the one thing the two kinds exist to say. Both budgets live on the supervisor because it is the
+only party that can tell them apart; the asking CLI blocks with no deadline of its own so that the specific answer
+reaches it.
+
+The trust boundary is the CONNECTION, not the message. The supervisor authenticates the per-session credential and
+refuses a peer asking as a session it is not; from there the helm accepts the forwarded `session_id`, and the claim that
+the connection it arrived on belongs to that session's host, without re-verification — it never sees the credential, so
+there is nothing on its side to check against. That is sound because a full-authority supervisor connection is the
+helm's own provisioned install, holding complete authority over every session on its host: a helm that could not trust
+it for a fleet-wide read could not route a single operation to it either. What the helm does check is that the
+connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. So 13 is
+the current protocol version, and the frozen changelog stops at 11.
+
+The two read verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
+narrowings are contractual rather than incidental. The session listing is drained by cursor under two ceilings — a fixed
+row cap (5,000) and a cumulative encoded-byte allowance across every page it walks (6 MiB, leaving the reply's envelope
+room under the 8 MiB frame limit) — and carries a `truncated` flag when either cuts it, because a partial fleet listing
+is otherwise shaped exactly like a complete one and "that session does not exist" would be indistinguishable from "that
+session is past the cut". The byte allowance is the load-bearing one: the pagination it drains from applies its own
+budget per page, so rows alone bound nothing about the assembled reply, and a fleet of legally fat records would
+otherwise produce an answer no frame could carry — discarded whole, reaching the agent as `Internal` rather than as the
+partial listing the verb promises. It includes archived sessions, flagged, since an agent has no archive switch to flip.
+And the per-session `agent` field is a non-secret label — the source profile's snapshotted name, or the invocation's
+program basename — never the raw command line. Users put credentials in command lines, this listing is readable with any
+one attached session's credential, and its reader is a model that will quote what it read, so arguments must not cross
+this wire at all.
 
 The session list is cursor-paginated on this wire (protocol 8, M6). The contract, recorded here because the milestone
 plan that settled it is history the moment M6 closes: pages walk a total order — creation time descending, session id
@@ -1216,6 +1269,15 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm spawn --cwd <dir> [--title ...] [--agent ...] [--parent ...]
   [--idempotency-key ...]` — the in-session
   spawn CLI from SPEC.md.
+- `farhelm agent hosts|sessions` — the in-session ASKING CLI from SPEC.md, on the same injected credential spawn uses.
+  It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a refusal on stderr with a
+  non-zero exit exactly as spawn does. A table rather than JSON because the reader is a model quoting its own shell
+  output. Every dynamic cell is escaped to one printable line and every non-final column is capped at 48 characters:
+  these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an ESC drives the
+  terminal, and one long title would otherwise be padded onto every other row. A cut listing prints its rows on stdout
+  and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no timeout of its
+  own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see the transport
+  section's version-13 paragraph).
 
 Internal commands live under a hidden-from-help `internal` namespace — `farhelm internal stdio` is the ssh-exec stdio
 proxy. (An underscore prefix like `_stdio` was considered; it is not a recognized convention, while an explicit

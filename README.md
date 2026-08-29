@@ -253,6 +253,41 @@ AGENTS.md forbids agents from running them — or from restarting the helm's uni
   installed it says so and points at `systemctl --user`. A running local supervisor is discovered and used like any
   other host.
 
+## Asking Farhelm about the fleet from inside a session
+
+An agent running in a Farhelm session can ask what else is out there:
+
+```
+farhelm agent hosts
+farhelm agent sessions
+```
+
+Both must run INSIDE a Farhelm session. `farhelm` is on the session's PATH already, and the session credential Farhelm
+injects is what authorizes the question — there is nothing to configure, and nothing to pass. Run outside a session,
+they exit non-zero naming the environment variable that is missing.
+
+The answer comes from the HELM, not from the session's own machine: every host and every session it knows, wherever they
+are running, with the asking session and its host marked `*` in the first column. That is deliberately wider than
+`farhelm spawn`, which only ever creates on the session's own host. Output is an aligned table on stdout, one row per
+line, with anything else on stderr — so a script can capture the table alone.
+
+```
+$ farhelm agent sessions
+  ID        HOST         TITLE   CWD          AGENT  STATUS
+* session-1 this machine auth     /w/auth     claude running
+  session-2 builder      docs     /w/docs     codex  idle (stale)
+  session-3 builder      old      /w/old      codex  archived
+```
+
+`(stale)` means the row is the last thing the helm heard before that host went unreachable, not a live reading.
+`archived` replaces the status word for a session you have archived. A very large fleet is cut — at 5,000 rows, or
+sooner if the rows themselves are large enough to make the answer unsendable — and the cut is announced on stderr rather
+than left to be mistaken for the whole answer.
+
+The failure worth knowing about is `no helm is attached to this session`. The relay reaches the helm that currently
+holds the session open, so a session no client is looking at has no route to ask: open the session in the Farhelm UI and
+run the command again.
+
 ## Development
 
 Development builds carry no provisioning payloads by default. Asking one to install a host with neither payload flag
