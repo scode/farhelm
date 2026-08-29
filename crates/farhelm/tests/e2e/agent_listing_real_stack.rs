@@ -131,8 +131,26 @@ async fn spawn_agent_command(
     token: &str,
     socket: &std::path::Path,
 ) -> std::process::Output {
+    spawn_agent_command_args(&[verb], session, token, socket).await
+}
+
+/// [`spawn_agent_command`]'s general form, for the lifecycle verbs' extra
+/// positional and `--session` arguments — `hosts`/`sessions` never need more
+/// than their own bare verb word.
+///
+/// The three variables go on the CHILD's environment and nowhere else —
+/// this repo's tests never mutate their own process's environment — which
+/// is also exactly the production shape: they are what the launch shim
+/// injects, and they are the only authority the command has.
+async fn spawn_agent_command_args(
+    args: &[&str],
+    session: &str,
+    token: &str,
+    socket: &std::path::Path,
+) -> std::process::Output {
     tokio::process::Command::new(farhelm_bin())
-        .args(["agent", verb])
+        .arg("agent")
+        .args(args)
         .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, session)
         .env(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR, token)
         .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, socket)
@@ -144,14 +162,26 @@ async fn spawn_agent_command(
 /// Run one built `farhelm agent <verb>` as an agent inside `session` would,
 /// and return its stdout.
 async fn agent_command(verb: &str, session: &str, token: &str, socket: &std::path::Path) -> String {
-    let output = spawn_agent_command(verb, session, token, socket).await;
+    agent_command_args(&[verb], session, token, socket).await
+}
+
+/// [`agent_command`]'s general form, for the lifecycle verbs' extra
+/// positional and `--session` arguments — `hosts`/`sessions` never need
+/// more than their own bare verb word.
+async fn agent_command_args(
+    args: &[&str],
+    session: &str,
+    token: &str,
+    socket: &std::path::Path,
+) -> String {
+    let output = spawn_agent_command_args(args, session, token, socket).await;
     assert!(
         output.status.success(),
-        "`farhelm agent {verb}` failed ({}): {}",
+        "`farhelm agent {args:?}` failed ({}): {}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout).expect("the listing is UTF-8")
+    String::from_utf8(output.stdout).expect("the command's stdout is UTF-8")
 }
 
 /// The supervisor's own refusal text when no helm holds a session's
@@ -353,4 +383,187 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     // they hold the processes, the tmux server, and the directories both
     // are still using. See `merged_hosts` for why an explicit drop would
     // only invite someone to reorder them.
+}
+
+/// Spec: the shipped `farhelm agent rename/stop/archive`, run against the
+/// real stack, each produce the UI-visible effect `GET /api/sessions`
+/// reports — a real rename, a real process kill, and a real archive —
+/// through the exact assembly a browser's own REST call would use.
+///
+/// This is the lifecycle counterpart to
+/// [`the_shipped_agent_commands_are_answered_by_the_real_helm`], and
+/// exercises what that test cannot: `HelmAgentRequests::handle`'s `Rename`/
+/// `Stop`/`Archive` arms calling the SAME `sessions.rs` functions
+/// (`do_rename_session`/`do_stop_session`/`do_archive_session`) the REST
+/// routes call, through a real routed connection to a real supervisor
+/// managing real (fake-agent) processes. A unit test driving the handler
+/// directly cannot see a startup-wiring or routing regression that only
+/// shows up once the whole assembly is running; this test starts the
+/// products and drives them exactly as a session's agent would.
+///
+/// ## Two sessions, deliberately — a "controller" and a "target"
+///
+/// Every `farhelm agent` call here authenticates as the CONTROLLER, and
+/// `stop`/`archive` are pointed at the TARGET with an explicit `--session`
+/// — which is also, on its own, the strongest evidence a fixture can offer
+/// for the wide-authority half of `AgentVerb`'s contract ("act on the
+/// asker OR any session the helm knows"): the reply names a session the
+/// asking connection was never attached to at all.
+///
+/// This is not only a style choice. `stop` and `archive` end with the
+/// supervisor's process-tree SWEEP, which claims every same-user process
+/// on the machine whose environment carries the TARGET session's exact
+/// `FARHELM_SESSION_ID` marker (`sweep.rs`'s environment-marker scan,
+/// documented there as intentionally host-wide — it is what catches a
+/// descendant that broke its PPID chain). A `farhelm agent` process
+/// necessarily carries that marker FOR THE SESSION IT AUTHENTICATES AS, so
+/// a bare CLI invocation that both asks-as and acts-on the SAME session
+/// races its own triggered sweep — confirmed empirically while writing
+/// this test, where a stand-alone `farhelm agent archive` (no `--session`)
+/// was reliably SIGTERM'd by the sweep its own request caused, before it
+/// could print a confirmation. That is a property of an unattended CLI
+/// process racing a kill sweep it started against itself, not a defect in
+/// the relay or in `HelmAgentRequests`, and a real in-pane agent survives
+/// it exactly because stopping or archiving ONESELF is supposed to end the
+/// whole tree, calling CLI included. Routing `stop`/`archive` at a
+/// SEPARATE target session sidesteps the race entirely — the controller's
+/// marker never matches the target's sweep — which is what makes this
+/// fixture deterministic. `rename` triggers no sweep at all, so it is
+/// exercised the other way, WITHOUT `--session`, to cover the
+/// "defaults to the asker" half on a verb that carries no such hazard.
+///
+/// `GET /api/sessions/{id}` is the read used to observe each effect rather
+/// than the listing table, because it is documented to answer LIVE for a
+/// connected host (never the cache) — see `sessions::get_session`'s own
+/// docs — so the assertion after `stop` cannot be racing the helm's
+/// periodic refresh the way reading the cached list could.
+#[tokio::test]
+async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+
+    let supervisor = supervisor_process().await;
+    let helm = helm_process(supervisor.state.path(), None).await;
+    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let client = client_with_secret(&secret);
+    await_local_host(&client, &helm.base).await;
+
+    let work = farhelm_teststate::tempdir().expect("work dir");
+    let create_session = |title: &'static str| {
+        let client = client.clone();
+        let base = helm.base.clone();
+        let cwd = work.path().to_string_lossy().into_owned();
+        async move {
+            let (status, body) = post(
+                &client,
+                &format!("{base}/api/sessions"),
+                serde_json::json!({
+                    "cwd": cwd,
+                    "invocation": agent_cmd("internal fake-agent --script basic"),
+                    "title": title,
+                }),
+            )
+            .await;
+            assert!(status.is_success(), "creating {title} failed: {body}");
+            let session: serde_json::Value =
+                serde_json::from_str(&body).expect("created session JSON");
+            session["id"].as_str().expect("session id").to_string()
+        }
+    };
+    let controller_id = create_session("controller").await;
+    let target_id = create_session("before-rename").await;
+
+    // Only the CONTROLLER needs an attachment: the supervisor forwards an
+    // upcall to the helm holding the ASKING session's attachment, and
+    // every `farhelm agent` call below authenticates as the controller —
+    // see the module docs for why the target is named by `--session`
+    // instead of also being attached to.
+    let _terminal = attach_terminal(&helm, &secret, &controller_id).await;
+    let token = session_token(supervisor.state.path(), &controller_id).await;
+    let socket = supervisor.state.path().join("supervisor.sock");
+    let target_url = format!("{}/api/sessions/{target_id}", helm.base);
+
+    // Same CI-runner race as the read-only test above (see
+    // `hosts_until_attached`'s own docs): the controller's `Attach` upcall
+    // reaching the supervisor is not guaranteed by the WebSocket's 101
+    // response alone, and every lifecycle verb below authenticates as the
+    // controller, so its attachment has to be confirmed before the first
+    // one is issued.
+    hosts_until_attached(&controller_id, &token, &socket).await;
+
+    // `rename`, with NO `--session`: defaults to the asker (the controller
+    // itself), and triggers no sweep, so it is the safe verb to exercise
+    // that half of the contract on.
+    let renamed = agent_command_args(
+        &["rename", "renamed-controller"],
+        &controller_id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert_eq!(
+        renamed,
+        format!("renamed {controller_id} to \"renamed-controller\"\n")
+    );
+    let controller_detail = get_json(
+        &client,
+        &format!("{}/api/sessions/{controller_id}", helm.base),
+    )
+    .await;
+    assert_eq!(
+        controller_detail["title"], "renamed-controller",
+        "the rename must be visible through the same read a browser uses: {controller_detail}"
+    );
+
+    // `stop`/`archive`, both with an explicit `--session` naming the
+    // TARGET — see the module docs for why acting on a different session
+    // than the asker is what keeps this fixture out of the sweep's way.
+    let stopped = agent_command_args(
+        &["stop", "--session", &target_id],
+        &controller_id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert_eq!(stopped, format!("stopped {target_id}\n"));
+    let target_detail = get_json(&client, &target_url).await;
+    assert_ne!(
+        target_detail["status"], "running",
+        "a stopped session's agent must no longer read as running: {target_detail}"
+    );
+
+    let archived = agent_command_args(
+        &["archive", "--session", &target_id],
+        &controller_id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert_eq!(archived, format!("archived {target_id}\n"));
+    let fleet = get_json(
+        &client,
+        &format!("{}/api/sessions?include_archived=true", helm.base),
+    )
+    .await;
+    let rows = fleet["sessions"].as_array().expect("sessions is an array");
+    let row = rows
+        .iter()
+        .find(|row| row["id"] == target_id)
+        .unwrap_or_else(|| panic!("the archived session must still be listed: {fleet}"));
+    assert_eq!(
+        row["archived"], true,
+        "the archive must be visible in the same listing the UI polls: {row}"
+    );
+    let default_view = get_json(&client, &format!("{}/api/sessions", helm.base)).await;
+    assert!(
+        default_view["sessions"]
+            .as_array()
+            .expect("sessions is an array")
+            .iter()
+            .all(|row| row["id"] != target_id),
+        "an archived session must not appear in the default, non-archived view: {default_view}"
+    );
+
+    // `helm`, `supervisor` and `work` deliberately outlive this test's last
+    // assertion — see the read-only test above for why an explicit drop
+    // would only invite someone to reorder them.
 }
