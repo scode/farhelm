@@ -84,6 +84,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# The agent-relay e2e module implements `farhelm_helm::agent_requests::
+# AgentRequestHandler`, whose one method is `async fn` in a trait object —
+# so a test double needs the same attribute the trait is declared with.
+async-trait.workspace = true
 # The two-host aggregation test drives a REAL `farhelm helm run` over real
 # loopback HTTP (merged_hosts.rs), because that is the only way to exercise
 # the shipped binary's own serving path; a hand-rolled HTTP client would be

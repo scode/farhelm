@@ -83,7 +83,15 @@
 //! lifecycle). Each owns a sequence or a precedence whose parts have to agree
 //! with each other; see their own module docs for what each one is holding
 //! together.
+//!
+//! `agent_relay` is the one slice that is not a carve-out of an older
+//! file: it arrived whole with `PROTOCOL_VERSION` 13 to carry requests
+//! UPWARD, from a session's own agent to the helm attached to it. It is
+//! separate rather than folded into `connection` because it is the only
+//! place in this service where the supervisor is a client of its peer,
+//! with a pending table and a timeout of its own.
 
+mod agent_relay;
 mod capture;
 mod connection;
 mod core;

@@ -61,3 +61,6 @@ mod session_rename;
 
 mod host_connection;
 mod merged_hosts;
+
+mod agent_listing_real_stack;
+mod agent_relay;

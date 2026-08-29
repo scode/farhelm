@@ -116,7 +116,19 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// before it ever sends a create — there is nothing for this protocol to
 /// carry.
 ///
-/// `protocol_version_is_pinned_at_12` (renamed at every bump since `_at_4`)
+/// Version 13 narrows that "no supervisor-edge push channel" statement
+/// rather than reversing it, and the distinction is worth keeping exact.
+/// It adds exactly ONE request shape that travels supervisor→helm
+/// ([`ControlMsg::AgentRequest`], answered by
+/// [`ControlMsg::AgentResponse`]), and nothing else changes direction: the
+/// helm still learns about session and terminal state by drain and by the
+/// existing post-write wake, so the staleness trade version 10 accepted is
+/// untouched. What forced an upward request at all is that an agent inside
+/// a session has no route, address, or credential back to the machine
+/// running the helm, so the supervisor it CAN reach has to carry the
+/// question the rest of the way — see [`ControlMsg::AgentRequest`].
+///
+/// `protocol_version_is_pinned_at_13` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -126,8 +138,8 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// `lore/2026-08-20-protocol-version-changelog.md`; that file is frozen at
 /// the moment it was written (`lore/AGENTS.md`) and is not extended for
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
-/// this bump added.
-pub const PROTOCOL_VERSION: u32 = 12;
+/// version 12 added and [`ControlMsg::AgentRequest`] for version 13.
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -189,6 +201,32 @@ pub enum ErrorKind {
     /// The peer failed connection admission or a restricted peer requested
     /// an operation outside its permitted slice (PLAN_M7.md item 2).
     Unauthorized,
+    /// The request was well-formed and authorized, and the party that
+    /// would have answered it is not currently reachable. Added with
+    /// `PROTOCOL_VERSION` 13 for the agent relay's defining failure: no
+    /// helm holds an attachment to the asking session, so there is nobody
+    /// to forward [`ControlMsg::AgentRequest`] to.
+    ///
+    /// Distinct from all four of the kinds above in what the caller should
+    /// DO. `NotFound` says the thing named does not exist; here it does,
+    /// and only the path to it is missing. `InvalidRequest` says resend a
+    /// different request; here the same request will work once the helm is
+    /// attached again. `Internal` says nothing the caller does can help,
+    /// which is precisely wrong for a condition an operator fixes by
+    /// opening the session in the UI. Retry-when-the-fleet-changes is the
+    /// action, and no existing kind carries it.
+    Unavailable,
+    /// The request was forwarded and the answer did not arrive inside the
+    /// relay's budget. Added with `PROTOCOL_VERSION` 13.
+    ///
+    /// Deliberately NOT folded into `Unavailable`: the two describe
+    /// opposite states of the same hop. `Unavailable` means the request
+    /// was never delivered and nothing happened; a timeout means it WAS
+    /// delivered and the outcome is unknown — the far side may still be
+    /// working, and may still complete. That difference decides whether a
+    /// retry is free, which is exactly the sort of thing a coarse
+    /// classification exists to tell a caller without parsing prose.
+    Timeout,
 }
 
 /// Frames larger than this are rejected at decode time. Terminal output is
@@ -1256,6 +1294,185 @@ pub enum RestartMode {
     FallbackTemplate,
 }
 
+/// What an agent inside a session is asking the helm for
+/// ([`ControlMsg::AgentRequest`]).
+///
+/// Internally tagged by `verb`, and every variant is a struct variant even
+/// where it currently carries nothing, so that giving a verb an argument
+/// later is an additive edit to that variant rather than a change of shape
+/// on the wire. The verbs this version answers are the two read-only ones;
+/// the mutating verbs an agent will want (`rename`, `stop`, `archive`) and
+/// the creating ones (`create`, `clone`) are deliberately absent rather
+/// than stubbed, because a verb that decodes and then refuses is
+/// indistinguishable, from the agent's side, from one that is broken.
+///
+/// EVERY verb is answered by the helm, including questions about the
+/// asking session's own host. One code path and one place for policy is
+/// the reason; the cost is that "no helm is attached" is a real failure
+/// rather than something the supervisor could quietly answer locally, and
+/// that is the honest trade — a silent downgrade to local semantics would
+/// give an agent a fleet view that is sometimes the fleet and sometimes
+/// one machine, with nothing on the wire saying which.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "verb", rename_all = "snake_case")]
+pub enum AgentVerb {
+    /// Every host the helm knows, so an agent can name one without
+    /// guessing. See [`AgentHost`].
+    Hosts {},
+    /// Every session the helm knows, across every host, archived ones
+    /// included and flagged. See [`AgentSession`].
+    ///
+    /// "Every" up to the helm's own cap, and the reply says when that cap
+    /// was reached — see [`AgentReply::Sessions::truncated`]. There is no
+    /// cursor here on purpose: an agent has no use for a page walk, and the
+    /// honest shape when the fleet outgrows one answer is a filter on this
+    /// verb rather than paging state on a wire that has none.
+    Sessions {},
+}
+
+/// The two ways an [`ControlMsg::AgentResponse`] can land.
+///
+/// A tagged outcome rather than "reply, or else a bare `ControlMsg::Error`"
+/// because this message crosses two hops: the supervisor has refusals of
+/// its own to report (no attached helm, a timed-out upcall) and the helm
+/// has refusals of its own, and one shape carrying both means the CLI
+/// decodes exactly one thing and renders `message` verbatim whoever wrote
+/// it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum AgentOutcome {
+    Ok { reply: AgentReply },
+    Err { kind: ErrorKind, message: String },
+}
+
+/// The answer to one [`AgentVerb`], tagged by `reply` so a decoder never
+/// has to remember which question it asked.
+///
+/// The tag is redundant with the request for a well-behaved pair and is
+/// carried anyway: the relay hands a response back by `req_id` alone, and a
+/// reply whose shape disagreed with its question would otherwise be
+/// undetectable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "reply", rename_all = "snake_case")]
+pub enum AgentReply {
+    Hosts {
+        hosts: Vec<AgentHost>,
+    },
+    Sessions {
+        sessions: Vec<AgentSession>,
+        /// True when the helm stopped short of the whole fleet — it drains
+        /// its own paginated listing up to a hard cap and this says the cap
+        /// was reached.
+        ///
+        /// On the wire rather than left implicit because the alternative is
+        /// the one failure an agent cannot detect: a partial listing is
+        /// shaped exactly like a complete one, so "that session does not
+        /// exist" and "that session is past the cut" are the same answer.
+        /// The verb promises the fleet; this is how it admits when it did
+        /// not deliver it.
+        truncated: bool,
+    },
+}
+
+/// The recovery sentence every relay-produced [`ErrorKind::Unavailable`]
+/// ends with.
+///
+/// One constant across two crates because SPEC.md requires concrete
+/// failures to carry a remedy, and every way the relay can end in
+/// `Unavailable` has the SAME remedy: no helm holds the session's
+/// attachment right now, and opening the session in a client is what
+/// creates one. Spelled once so the four sites that produce such a refusal
+/// (no attachment, connection already closed, closing before enqueue, lost
+/// after acceptance) cannot drift into three different half-answers.
+pub const AGENT_UNAVAILABLE_REMEDY: &str = "open the session in the farhelm UI and try again";
+
+/// One host, as an agent sees it.
+///
+/// Deliberately a NARROWER projection than the helm's own `HostView`: an
+/// agent needs a name it can pass back as a target, enough state to know
+/// whether passing it is worth trying, and which host it is itself sitting
+/// on. Registry ids, destinations, install identities and incarnations are
+/// all things the helm owns and an agent has no verb for, so they are not
+/// on this wire — a field an agent cannot act on is a field that only
+/// invites it to invent uses.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentHost {
+    /// The host's display name — the same string the UI shows and the
+    /// value a later `create`/`clone` verb will name a target by. Names,
+    /// not ids, because ids are per-helm registry rows an agent has no way
+    /// to have learned.
+    pub name: String,
+    /// `"local"` or `"ssh"`.
+    pub kind: String,
+    /// The helm's own stable phase word for this host (`connected`,
+    /// `unreachable-reprobing`, `version-skew`, …) — the same vocabulary
+    /// the UI's chip and the helm's diagnostic trail use, so an agent, a
+    /// log line, and a screen cannot describe one host three ways.
+    pub state: String,
+    /// True for the host the ASKING session runs on. Computed by the helm
+    /// from the connection the upcall arrived on, which is by construction
+    /// that host's connection.
+    pub current: bool,
+}
+
+/// One session, as an agent sees it.
+///
+/// The same narrowing rule [`AgentHost`] follows: what an agent can name,
+/// reason about, or act on later, and nothing else. Timestamps, parentage,
+/// tabs and restart offers are all real parts of the helm's session model
+/// that no verb here consumes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentSession {
+    pub id: String,
+    /// The host's display NAME, not its id — matching [`AgentHost::name`],
+    /// so the two listings join on a value an agent can also type.
+    pub host: String,
+    pub title: String,
+    pub cwd: String,
+    /// What is running, as a DELIBERATELY NON-SECRET label: the profile's
+    /// snapshotted name when the session came from one, and otherwise the
+    /// basename of the invocation's program — `claude`, `codex`, `sh` —
+    /// and nothing else.
+    ///
+    /// Arguments are excluded, and that exclusion is the field's whole
+    /// contract rather than an economy of space. Users put credentials in
+    /// command lines (the repo warns against it and it happens anyway), and
+    /// this listing is fleet-wide: any process holding ANY attached
+    /// session's credential can read every row, and an agent will quote
+    /// what it read into a model's context. One session's `--token abc123`
+    /// must not become another session's transcript. A caller that needs
+    /// the real command line has the helm's own APIs, which are not reached
+    /// by a session credential.
+    pub agent: String,
+    /// The status word the UI shows (`running`, `waiting`, `idle`,
+    /// `exited`, `interrupted`, `error`), or empty for a session nothing
+    /// has classified yet — `SessionStatus::Unknown` is plumbing that must
+    /// never render (see that variant's docs), and an empty string is this
+    /// wire's way of saying the same "no verdict" rather than inventing a
+    /// further word for it.
+    pub status: String,
+    /// True for the asking session itself — matched on host AND session id,
+    /// never on the id alone (see [`AgentHost::current`] for who computes
+    /// this and how).
+    pub current: bool,
+    /// True for a session the user has archived.
+    ///
+    /// Archived rows are IN this listing, unlike the UI's default browse
+    /// view, because the verb's promise is every session the helm knows and
+    /// an agent has no archive switch to flip. The flag is what keeps them
+    /// interpretable: an archived session is durable history, not something
+    /// to go and act on.
+    pub archived: bool,
+    /// True when this row is last-known knowledge rather than a live
+    /// report — the host it belongs to is not currently connected.
+    ///
+    /// SPEC.md requires retained rows from unreachable hosts to stay listed
+    /// and be clearly marked, and without this flag `status` reads the
+    /// same whether the helm watched a session go idle a second ago or
+    /// cached that word before the host vanished overnight.
+    pub stale: bool,
+}
+
 /// Control-channel messages. `req_id` correlates a response to its request
 /// so one connection can carry concurrent requests; unsolicited events —
 /// `Detached`, as of version 6 `UploadAck` and `UploadAborted`, and as of
@@ -2307,6 +2524,70 @@ pub enum ControlMsg {
     /// reconciles. Neither case is visible to the client, and neither
     /// affects the published path.
     UploadAborted { channel: u32, reason: String },
+    /// A question asked by an agent from inside its own session, on its
+    /// way to the helm — `PROTOCOL_VERSION` 13's whole addition, and the
+    /// first request shape on this protocol that also travels
+    /// supervisor→helm.
+    ///
+    /// ## Why the message exists at all
+    ///
+    /// The mental model the user has is that the agent is talking to the
+    /// HELM — the thing they are looking at, which knows the whole fleet.
+    /// The agent cannot: a session runs on a host that has no route,
+    /// address, or credential back to the machine the helm runs on, and
+    /// inventing one would mean every host dialling out to a laptop. What
+    /// the session CAN reach is its own supervisor's socket, over the
+    /// per-session credential it already holds for `farhelm spawn`. So the
+    /// supervisor proxies: it accepts this message from a
+    /// session-authenticated peer and re-sends it up the helm↔supervisor
+    /// control connection, unchanged apart from the `req_id`.
+    ///
+    /// ## The same shape on both legs, two `req_id` namespaces
+    ///
+    /// CLI→supervisor and supervisor→helm carry this identical variant.
+    /// `req_id` is minted by whoever SENDS the leg — the CLI on the first,
+    /// the supervisor's own counter on the second — because a `req_id` has
+    /// only ever meant "correlates with request N on THIS connection", and
+    /// two connections' numbering spaces are unrelated. The relay holds the
+    /// mapping between them for the life of one round trip.
+    ///
+    /// ## Authorization
+    ///
+    /// `session_id` must equal the session the connection authenticated as.
+    /// It is carried explicitly rather than inferred so that the far end —
+    /// the helm, which never sees the credential — can still say which
+    /// session is asking, which is what makes `current` answerable on the
+    /// replies below. A mismatch is [`ErrorKind::Unauthorized`]: a
+    /// credential for one session is not authority to ask questions as
+    /// another.
+    ///
+    /// ## Failure vocabulary
+    ///
+    /// Refusals ride in [`ControlMsg::AgentResponse`]'s outcome rather than
+    /// as a bare `Error`, so one reply shape covers both legs and the CLI
+    /// has exactly one thing to decode. Two kinds are specific to this
+    /// exchange, and they are split by whether a retry is free:
+    /// [`ErrorKind::Unavailable`] means nothing is holding the request (no
+    /// helm attached, its connection died, the request was never delivered,
+    /// or the helm is starting up or shutting down), while
+    /// [`ErrorKind::Timeout`] means the opposite and only that — a helm took
+    /// the request and did not answer inside the relay's budget, so it may
+    /// still be working.
+    AgentRequest {
+        req_id: u64,
+        /// The session asking — always the connection's own authenticated
+        /// session on the first leg; carried forward verbatim on the
+        /// second.
+        session_id: String,
+        request: AgentVerb,
+    },
+    /// The answer to an [`ControlMsg::AgentRequest`], carrying either the
+    /// reply or the refusal (see [`AgentOutcome`]).
+    ///
+    /// A reply for `reply_req_id`'s purposes on BOTH legs: the helm sends
+    /// it to the supervisor under the supervisor's `req_id`, and the
+    /// supervisor re-sends it to the asking session under the session's.
+    AgentResponse { req_id: u64, outcome: AgentOutcome },
     /// A request failed, or (with `req_id` 0) something went wrong that no
     /// request is waiting on. `message` is meant for the user verbatim —
     /// SPEC.md requires concrete, actionable errors, so it travels
@@ -2394,6 +2675,12 @@ impl ControlMsg {
             | ControlMsg::TabClosed { req_id, .. }
             | ControlMsg::UploadStarted { req_id, .. }
             | ControlMsg::UploadCommitted { req_id, .. }
+            // A reply on BOTH legs of the relay: the helm answers the
+            // supervisor's upcall with it, and the supervisor answers the
+            // asking session with it. Nothing distinguishes the two here,
+            // and nothing needs to — each side completes it against its own
+            // pending table.
+            | ControlMsg::AgentResponse { req_id, .. }
             | ControlMsg::Error { req_id, .. } => Some(*req_id),
             // Requests are listed one by one rather than swept up by a
             // wildcard: each is a message a hostile or confused peer could
@@ -2415,7 +2702,11 @@ impl ControlMsg {
             | ControlMsg::CloseTab { .. }
             | ControlMsg::Attach { .. }
             | ControlMsg::BeginUpload { .. }
-            | ControlMsg::CommitUpload { .. } => None,
+            | ControlMsg::CommitUpload { .. }
+            // A request, in both directions it travels. Classifying it as
+            // a reply would let a helm's echo of an upcall complete the
+            // supervisor's own pending entry for it.
+            | ControlMsg::AgentRequest { .. } => None,
             // The handshake, and the channel-correlated events: nothing
             // here has a `req_id` field to return in the first place.
             ControlMsg::Hello { .. }
@@ -2455,7 +2746,11 @@ impl ControlMsg {
             | ControlMsg::CloseTab { req_id, .. }
             | ControlMsg::Attach { req_id, .. }
             | ControlMsg::BeginUpload { req_id, .. }
-            | ControlMsg::CommitUpload { req_id, .. } => Some(*req_id),
+            | ControlMsg::CommitUpload { req_id, .. }
+            // Named here so the supervisor's restricted-admission gate can
+            // correlate its refusal — an uncorrelated one would leave the
+            // asking `farhelm agent` waiting on a reply that never comes.
+            | ControlMsg::AgentRequest { req_id, .. } => Some(*req_id),
             ControlMsg::Hello { .. }
             | ControlMsg::SessionCreated { .. }
             | ControlMsg::SessionList { .. }
@@ -2474,6 +2769,7 @@ impl ControlMsg {
             | ControlMsg::TabClosed { .. }
             | ControlMsg::UploadStarted { .. }
             | ControlMsg::UploadCommitted { .. }
+            | ControlMsg::AgentResponse { .. }
             | ControlMsg::Error { .. }
             | ControlMsg::Detach { .. }
             | ControlMsg::Detached { .. }
@@ -3246,11 +3542,14 @@ mod tests {
     /// history linked from the const's own docs for the M2 bump to 3, the
     /// M2.5 bump to 4, the M3 bump to 5, the M4 bump to 6, the M5 bump to 7,
     /// the M6 bump to 8, the non-displacing attach's bump to 9, the M6.75
-    /// bump to 10, and M7's vocabulary bump to 11). The bump to 12 adds the
-    /// agent-reported conversation identity pair,
-    /// `ControlMsg::ReportConversation`/`ConversationReported` — a new
-    /// tagged variant pair, and so incompatible by this crate's own
-    /// additive-discipline rule same as every prior bump. Pinning the
+    /// bump to 10, M7's vocabulary bump to 11, and the bump to 12 for the
+    /// agent-reported conversation identity pair). The bump to 13 adds the
+    /// agent relay's `ControlMsg::AgentRequest`/`AgentResponse` pair — the
+    /// first request shape that also travels supervisor→helm — plus two
+    /// `ErrorKind` variants (`Unavailable`, `Timeout`) for its two
+    /// relay-specific failures. New tagged variants either way, and so
+    /// incompatible by this crate's own additive-discipline rule same as
+    /// every prior bump. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
     /// drift discovered only by two builds refusing to talk to each other.
@@ -3261,8 +3560,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[test]
-    fn protocol_version_is_pinned_at_12() {
-        assert_eq!(PROTOCOL_VERSION, 12);
+    fn protocol_version_is_pinned_at_13() {
+        assert_eq!(PROTOCOL_VERSION, 13);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -6549,5 +6848,284 @@ mod tests {
             None
         );
         assert_eq!(ControlMsg::hello("supervisor").reply_req_id(), None);
+    }
+
+    /// The version-13 relay pair must sit in the RIGHT arms of both
+    /// accessors, for `ReportConversation`'s reasons plus one this pair has
+    /// on its own: it is the first shape that travels in BOTH directions,
+    /// so each side is simultaneously a requester (of the leg it sends) and
+    /// a responder (of the leg it receives). A misclassified `AgentRequest`
+    /// would let a peer's echo complete the supervisor's own pending upcall
+    /// with a request, and a misclassified `AgentResponse` would leave the
+    /// asking `farhelm agent` process blocked on a frame the demultiplexer
+    /// never routes.
+    #[test]
+    fn agent_relay_pair_is_classified_as_request_and_reply() {
+        let request = ControlMsg::AgentRequest {
+            req_id: 31,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Hosts {},
+        };
+        assert_eq!(request.request_req_id(), Some(31));
+        assert_eq!(request.reply_req_id(), None);
+
+        let reply = ControlMsg::AgentResponse {
+            req_id: 31,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Hosts { hosts: Vec::new() },
+            },
+        };
+        assert_eq!(reply.reply_req_id(), Some(31));
+        assert_eq!(reply.request_req_id(), None);
+    }
+
+    /// Golden JSON for the relay pair, pinned because three independently
+    /// built programs have to agree on it — the `farhelm agent` CLI encodes
+    /// it, the supervisor decodes and re-encodes it, and the helm decodes
+    /// it — and only one of those three is exercised by any single crate's
+    /// tests. Two builds sharing protocol version 13 must interoperate, so
+    /// the shape is frozen inside the version rather than only across
+    /// bumps.
+    ///
+    /// The comparison is over `serde_json::Value`, which is a STRUCTURAL
+    /// equality: it pins tag names, field names, nesting and value
+    /// spellings, and deliberately says nothing about the order fields
+    /// happen to be emitted in. Object key order is not part of this wire's
+    /// contract (both ends decode with serde, which is order-insensitive),
+    /// so freezing encoded bytes would only make the test fail for
+    /// rearrangements no peer can observe.
+    ///
+    /// Every arm is here because each carries a name that can be renamed
+    /// while everything still compiles: `verb`, `result` and `reply` are
+    /// three different internal tags in one message, both verbs and both
+    /// success shapes have their own tag values, and the two relay-specific
+    /// error kinds (`unavailable`, `timeout`) are the words that tell a
+    /// caller whether retrying is free.
+    #[test]
+    fn agent_relay_pair_has_pinned_json_tags() {
+        let request = ControlMsg::AgentRequest {
+            req_id: 1,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Sessions {},
+        };
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 1,
+                "session_id": "s1",
+                "request": { "verb": "sessions" },
+            })
+        );
+
+        let hosts_request = ControlMsg::AgentRequest {
+            req_id: 2,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Hosts {},
+        };
+        assert_eq!(
+            serde_json::to_value(&hosts_request).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 2,
+                "session_id": "s1",
+                "request": { "verb": "hosts" },
+            })
+        );
+
+        let hosts_reply = ControlMsg::AgentResponse {
+            req_id: 2,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Hosts {
+                    hosts: vec![AgentHost {
+                        name: "builder".to_string(),
+                        kind: "ssh".to_string(),
+                        state: "connected".to_string(),
+                        current: false,
+                    }],
+                },
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&hosts_reply).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 2,
+                "outcome": {
+                    "result": "ok",
+                    // Nested, not flattened: `AgentOutcome::Ok` carries the
+                    // reply as a FIELD, so the inner `reply` tag sits one
+                    // level down beside the payload it names.
+                    "reply": {
+                        "reply": "hosts",
+                        "hosts": [{
+                            "name": "builder",
+                            "kind": "ssh",
+                            "state": "connected",
+                            "current": false,
+                        }],
+                    },
+                },
+            })
+        );
+
+        let sessions_reply = ControlMsg::AgentResponse {
+            req_id: 1,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Sessions {
+                    sessions: vec![AgentSession {
+                        id: "s1".to_string(),
+                        host: "builder".to_string(),
+                        title: "auth".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: true,
+                    }],
+                    truncated: true,
+                },
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&sessions_reply).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 1,
+                "outcome": {
+                    "result": "ok",
+                    "reply": {
+                        "reply": "sessions",
+                        "truncated": true,
+                        "sessions": [{
+                            "id": "s1",
+                            "host": "builder",
+                            "title": "auth",
+                            "cwd": "/w",
+                            "agent": "claude",
+                            "status": "running",
+                            "current": true,
+                            "archived": false,
+                            "stale": true,
+                        }],
+                    },
+                },
+            })
+        );
+
+        let refusal = ControlMsg::AgentResponse {
+            req_id: 1,
+            outcome: AgentOutcome::Err {
+                kind: ErrorKind::Unavailable,
+                message: "no helm".to_string(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&refusal).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 1,
+                "outcome": {
+                    "result": "err",
+                    "kind": "unavailable",
+                    "message": "no helm",
+                },
+            })
+        );
+
+        let timed_out = ControlMsg::AgentResponse {
+            req_id: 1,
+            outcome: AgentOutcome::Err {
+                kind: ErrorKind::Timeout,
+                message: "the helm did not answer".to_string(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&timed_out).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 1,
+                "outcome": {
+                    "result": "err",
+                    "kind": "timeout",
+                    "message": "the helm did not answer",
+                },
+            })
+        );
+    }
+
+    /// Both listing replies round-trip with every field intact, including
+    /// the booleans a decoder could plausibly default away.
+    ///
+    /// `current` is the field this test is really about: it is the one
+    /// value neither endpoint can recompute (the CLI does not know which
+    /// host it is on, the helm knows only because the upcall arrived on
+    /// that host's connection), so a serde change that dropped or defaulted
+    /// it would silently mark every row as not-current with nothing else
+    /// looking wrong. `truncated`, `archived` and `stale` are here for the
+    /// same reason in weaker form: each defaults to `false`, which is the
+    /// reassuring answer, so a field lost in serde would read as "complete
+    /// listing, live row, not archived" rather than as an error.
+    #[test]
+    fn agent_listing_replies_roundtrip() {
+        for reply in [
+            AgentReply::Hosts {
+                hosts: vec![
+                    AgentHost {
+                        name: "this machine".to_string(),
+                        kind: "local".to_string(),
+                        state: "connected".to_string(),
+                        current: true,
+                    },
+                    AgentHost {
+                        name: "builder".to_string(),
+                        kind: "ssh".to_string(),
+                        state: "unreachable-reprobing".to_string(),
+                        current: false,
+                    },
+                ],
+            },
+            AgentReply::Sessions {
+                sessions: vec![AgentSession {
+                    id: "s1".to_string(),
+                    host: "this machine".to_string(),
+                    title: "auth-followup".to_string(),
+                    cwd: "/home/u/ws".to_string(),
+                    agent: "claude".to_string(),
+                    status: "running".to_string(),
+                    current: true,
+                    archived: true,
+                    stale: true,
+                }],
+                truncated: true,
+            },
+        ] {
+            let msg = ControlMsg::AgentResponse {
+                req_id: 4,
+                outcome: AgentOutcome::Ok {
+                    reply: reply.clone(),
+                },
+            };
+            let json = serde_json::to_vec(&msg).unwrap();
+            assert_eq!(serde_json::from_slice::<ControlMsg>(&json).unwrap(), msg);
+        }
+    }
+
+    /// A verb this build does not know must fail to decode rather than
+    /// defaulting to some other verb.
+    ///
+    /// The same rule `unknown_control_message_tag_fails_decode` pins one
+    /// level up, restated for the inner enum because the outer message tag
+    /// (`agent_request`) IS one this build knows: a lenient inner decode
+    /// would turn "rename this session", sent by a newer CLI, into whatever
+    /// arm happened to be first, which is the one class of wire error the
+    /// version-skew handshake cannot catch on its own.
+    #[test]
+    fn unknown_agent_verb_fails_decode() {
+        let body = br#"{"type":"agent_request","req_id":1,"session_id":"s1",
+                        "request":{"verb":"rename","title":"x"}}"#;
+        serde_json::from_slice::<ControlMsg>(body)
+            .expect_err("a verb this build has no arm for must not decode");
     }
 }
