@@ -525,6 +525,16 @@ Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per
 Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
 see Durability.)
 
+A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
+spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
+currently attached to that session and relays the answer back, because a session has no way to reach the helm's machine
+directly. The verbs are answered with the HELM's view — every host it knows, every session it knows, whichever machine
+they are on — with the asking session and its host marked. That is deliberately wider than spawn's own-host-only rule
+above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way, including questions
+about the session's own host, so there is one answer to what an agent sees. The failure this defines is "no helm is
+attached to this session", reported as such, with opening the session in a client as the remedy — never a silent
+fallback to what the supervisor alone could have answered.
+
 As with interactive creation, spawning launches the agent without an initial prompt in v1; the spawning agent (or the
 user) interacts with the child through its terminal.
 

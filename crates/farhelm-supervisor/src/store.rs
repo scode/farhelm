@@ -1056,6 +1056,13 @@ fn error_kind_column(kind: farhelm_proto::ErrorKind) -> &'static str {
         K::Internal => "internal",
         K::Conflict => "conflict",
         K::Unauthorized => "unauthorized",
+        // Reachable only if a create ever starts producing them. Neither
+        // is a create outcome today: both belong to the agent relay, which
+        // reserves nothing and replays nothing. They get column spellings
+        // anyway rather than an `unreachable!`, because the alternative is
+        // a panic in the one place a persisted row is being written.
+        K::Unavailable => "unavailable",
+        K::Timeout => "timeout",
     }
 }
 
@@ -1070,6 +1077,8 @@ fn error_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::ErrorKind
         "internal" => K::Internal,
         "conflict" => K::Conflict,
         "unauthorized" => K::Unauthorized,
+        "unavailable" => K::Unavailable,
+        "timeout" => K::Timeout,
         other => anyhow::bail!("reservation row has unrecognized error kind {other:?}"),
     })
 }
@@ -7081,6 +7090,13 @@ mod tests {
     /// `Internal` in storage would silently turn a 400 into a 500 for a
     /// byte-identical request. Every `ErrorKind` is exercised so a new
     /// variant with no on-disk spelling fails here rather than in the field.
+    ///
+    /// `Unavailable` and `Timeout` are the newest two (protocol 13's agent
+    /// relay), and the ones this test's exhaustiveness claim was briefly
+    /// untrue of: both spellings and both inverse mappings compile whether
+    /// or not they collide with each other or with an existing word, so a
+    /// typo there is invisible until a replayed reservation comes back as
+    /// the wrong kind.
     #[tokio::test]
     async fn every_reservation_outcome_shape_round_trips() {
         let (_dir, store) = fresh_store().await;
@@ -7095,9 +7111,13 @@ mod tests {
                 farhelm_proto::ErrorKind::Internal,
                 farhelm_proto::ErrorKind::Conflict,
                 farhelm_proto::ErrorKind::Unauthorized,
+                farhelm_proto::ErrorKind::Unavailable,
+                farhelm_proto::ErrorKind::Timeout,
             ]
             .into_iter()
-            .zip(["failed-0", "failed-1", "failed-2", "failed-3", "failed-4"])
+            .zip([
+                "failed-0", "failed-1", "failed-2", "failed-3", "failed-4", "failed-5", "failed-6",
+            ])
             .map(|(kind, key)| {
                 (
                     key,

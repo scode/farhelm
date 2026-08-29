@@ -162,6 +162,35 @@ pub(crate) enum HostStateView {
     Retired { reason: String },
 }
 
+impl HostStateView {
+    /// This state's stable phase label — the same eight strings
+    /// [`HostState::phase`] produces and the same strings the `#[serde(
+    /// rename)]`s above put on the wire.
+    ///
+    /// A third spelling of one vocabulary, which this type's own docs warn
+    /// against, and it earns the exception by being the only way a
+    /// non-serializing consumer can reach the word. The agent relay needs
+    /// the label as a Rust string (`crate::agent_requests`), and the
+    /// alternatives were worse: re-deriving it from the manager's snapshot
+    /// would bypass the view every other surface renders from, and
+    /// round-tripping through `serde_json` to read a tag back out is a
+    /// vocabulary coupling expressed as an allocation. What keeps the copy
+    /// honest is `phase_matches_the_serialized_tag`, which compares this
+    /// function's answer to the encoder's for every variant.
+    pub(crate) fn phase(&self) -> &'static str {
+        match self {
+            HostStateView::Connecting { .. } => "connecting",
+            HostStateView::Unreachable { .. } => "unreachable-reprobing",
+            HostStateView::Connected { .. } => "connected",
+            HostStateView::VersionSkew { .. } => "version-skew",
+            HostStateView::IdentityMismatch { .. } => "identity-mismatch",
+            HostStateView::IdentityUnverified { .. } => "identity-unverified",
+            HostStateView::Duplicate { .. } => "duplicate",
+            HostStateView::Retired { .. } => "retired",
+        }
+    }
+}
+
 /// How a connected host's most recent cache refresh went.
 ///
 /// Beside the connection rather than inside it, mirroring
@@ -262,7 +291,14 @@ impl From<&HostState> for HostStateView {
 /// (routing, the merged list) also means by "a host". A registry row with
 /// no actor yet is one reconcile away and would otherwise appear with no
 /// state to show.
-async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>> {
+///
+/// `pub(crate)` for the agent relay (`crate::agent_requests`), which
+/// answers an agent's `hosts` verb from this exact listing rather than a
+/// second one of its own — the point of routing an agent's questions
+/// through the helm is that the agent and the user see one fleet, and two
+/// assemblies would eventually disagree. It takes `&AppState` and no axum
+/// extractor, so there is nothing to unwrap for a non-HTTP caller.
+pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>> {
     let rows: std::collections::HashMap<HostId, HostRow> = state
         .store
         .list_hosts()
@@ -623,10 +659,67 @@ pub(crate) async fn retry_host(
 
 #[cfg(test)]
 mod tests {
+    use super::{HostStateView, RefreshView};
     use crate::rest_harness::{self, FleetBuilder, Harness, HostScript};
     use axum::http::StatusCode;
     use serde_json::Value;
     use std::sync::Arc;
+
+    /// Spec: [`HostStateView::phase`] answers, for every variant, exactly
+    /// the string the serializer puts in the `phase` tag.
+    ///
+    /// This is the guard that lets `phase()` exist at all. Its docstring
+    /// admits to being a third copy of one vocabulary — the manager's
+    /// `HostState::phase`, the serde renames, and itself — and a copy is
+    /// only safe while something compares it to the original. Without this
+    /// test, a renamed phase would reach the browser under its new word and
+    /// reach an agent under its old one, with both sides looking correct.
+    #[test]
+    fn phase_matches_the_serialized_tag() {
+        for state in [
+            HostStateView::Connecting {
+                attempt: 1,
+                last_error: None,
+            },
+            HostStateView::Unreachable {
+                cause: "transport-failure",
+                last_error: "no route".to_string(),
+            },
+            HostStateView::Connected {
+                identity: None,
+                build_version: "0.0.0".to_string(),
+                refresh: RefreshView::Pending,
+            },
+            HostStateView::VersionSkew {
+                peer_protocol: 1,
+                peer_build: "0.0.0".to_string(),
+                our_protocol: 2,
+                our_build: "0.0.1".to_string(),
+                remediation: "upgrade".to_string(),
+            },
+            HostStateView::IdentityMismatch {
+                recorded: "a".to_string(),
+                reported: "b".to_string(),
+            },
+            HostStateView::IdentityUnverified {
+                recorded: "a".to_string(),
+            },
+            HostStateView::Duplicate {
+                twin: 1,
+                identity: "a".to_string(),
+            },
+            HostStateView::Retired {
+                reason: "removed".to_string(),
+            },
+        ] {
+            let encoded = serde_json::to_value(&state).unwrap();
+            assert_eq!(
+                encoded["phase"],
+                state.phase(),
+                "the phase word and the wire tag disagree for {state:?}"
+            );
+        }
+    }
 
     /// Issue one request against the harness's real router and return the
     /// status plus the body — decoded as JSON where it is JSON, and as its

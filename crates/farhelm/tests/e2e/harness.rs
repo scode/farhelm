@@ -231,6 +231,249 @@ impl Drop for TmuxServerGuard {
     }
 }
 
+// ---------------------------------------------------------------
+// The REAL-STACK fixtures: separate `farhelm` processes, a loopback
+// port, and HTTP.
+//
+// Everything above this banner drives an in-process `Supervisor` over a
+// duplex pipe, which is the right shape for almost everything: it is fast,
+// it is deterministic, and it still exercises tmux for real. What it
+// cannot show is that the SHIPPED binary assembles itself correctly —
+// which flags it parses, what it prints, which pieces its startup wires
+// together. The helpers below stand up the product's own processes for the
+// handful of tests whose subject is exactly that, and they live here
+// rather than in one of those modules because more than one now needs
+// them.
+// ---------------------------------------------------------------
+
+/// How long a real-stack test waits for a multi-process stack to reach a
+/// state.
+///
+/// Generous rather than tight: supervisors, tmux servers, an ssh handshake
+/// and a helm all have to come up, and on a loaded runner that is genuinely
+/// slow. The failure this bound reports — "it never got there" — is not
+/// diagnosed any better by a shorter wait.
+pub(crate) const REAL_STACK_SETTLE: Duration = Duration::from_secs(90);
+
+/// One running supervisor process plus everything that must die with it.
+///
+/// Field order is drop order and is load-bearing, the same rule
+/// [`TmuxServerGuard`]'s own docs set out: the process first, then its tmux
+/// server, then the directory holding both their sockets.
+///
+/// The child needs no guard of its own — every process here is spawned with
+/// `kill_on_drop(true)`, so dropping the `Child` is what kills it, and a
+/// wrapper would only restate that. Which matters for the same reason the
+/// order does: a test that fails an assertion never reaches an explicit
+/// teardown, and a leaked helm holding a loopback port is exactly the
+/// debris that makes the NEXT run fail for an unrelated reason.
+pub(crate) struct SupervisorProcess {
+    _child: tokio::process::Child,
+    _tmux: TmuxServerGuard,
+    pub(crate) state: farhelm_teststate::TestDir,
+}
+
+/// Start a real `farhelm supervisor run` on a fresh state directory and
+/// wait for its socket to accept.
+///
+/// The socket wait is what makes the rest of a test deterministic: a helm
+/// started against a directory with no socket yet is not wrong — it simply
+/// retries — but it would turn every later assertion into a race with the
+/// reconnect ladder.
+pub(crate) async fn supervisor_process() -> SupervisorProcess {
+    let state = farhelm_teststate::tempdir().expect("supervisor state dir");
+    let child = tokio::process::Command::new(farhelm_bin())
+        .args(["supervisor", "run", "--state-dir"])
+        .arg(state.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn supervisor");
+    let tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let socket = state.path().join("supervisor.sock");
+    let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+    while !socket.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the supervisor at {} never bound its socket",
+            state.path().display()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    SupervisorProcess {
+        _child: child,
+        _tmux: tmux,
+        state,
+    }
+}
+
+/// A running helm process and the loopback base URL it printed.
+pub(crate) struct HelmProcess {
+    _child: tokio::process::Child,
+    pub(crate) base: String,
+}
+
+impl HelmProcess {
+    /// The loopback address behind [`Self::base`], for the one client that
+    /// cannot use an HTTP library: the WebSocket upgrade.
+    pub(crate) fn addr(&self) -> std::net::SocketAddr {
+        self.base
+            .trim_start_matches("http://")
+            .parse()
+            .unwrap_or_else(|e| {
+                panic!("the helm's base URL is not an address ({e}): {}", self.base)
+            })
+    }
+}
+
+/// Start a real `farhelm helm run` on an ephemeral port, against a state
+/// directory somebody else owns, and read back the URL it prints.
+///
+/// `--port 0` plus parsing stdout, rather than picking a port and hoping:
+/// this suite runs concurrently with itself and with whatever else is on
+/// the machine, and a hardcoded port is a flake waiting for a second
+/// worktree.
+///
+/// The state directory is a LOCAL supervisor's, deliberately. The local
+/// row is reached through whatever listens in the helm's own state
+/// directory, so sharing one directory is not a shortcut — it is the
+/// production arrangement, the one where helm.db and `supervisor.sock` are
+/// siblings and the local host needs no registering at all.
+///
+/// `ensure_hosts` is optional because only the fleet tests need a registry
+/// seeded before serving begins; a single-host test passes `None` and gets
+/// the local row alone.
+pub(crate) async fn helm_process(
+    state_dir: &std::path::Path,
+    ensure_hosts: Option<&std::path::Path>,
+) -> HelmProcess {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let mut command = tokio::process::Command::new(farhelm_bin());
+    command
+        .args(["helm", "run", "--port", "0", "--state-dir"])
+        .arg(state_dir);
+    if let Some(ensure) = ensure_hosts {
+        command.arg("--ensure-hosts").arg(ensure);
+    }
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn helm");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let mut lines = BufReader::new(stdout).lines();
+    let line = tokio::time::timeout(REAL_STACK_SETTLE, lines.next_line())
+        .await
+        .expect("the helm printed its URL within the settle budget")
+        .expect("reading the helm's stdout")
+        .expect("the helm printed a line before exiting");
+    let base = line
+        .split_once("http://")
+        .map(|(_, url)| format!("http://{}", url.trim_end_matches('/')))
+        .unwrap_or_else(|| panic!("the helm's first stdout line named no URL: {line:?}"));
+    HelmProcess {
+        _child: child,
+        base,
+    }
+}
+
+/// Exchange the shipped CLI's bootstrap token for the device secret every
+/// later request in a real-stack test carries.
+///
+/// Returned as the raw secret rather than only as a configured client
+/// because the WebSocket routes cannot use an HTTP client at all: they
+/// carry the credential in `Sec-WebSocket-Protocol` instead of a header a
+/// `reqwest::Client` default can supply.
+pub(crate) async fn device_secret(state_dir: &std::path::Path, base: &str) -> String {
+    let output = tokio::process::Command::new(farhelm_bin())
+        .args(["helm", "token", "show", "--state-dir"])
+        .arg(state_dir)
+        .output()
+        .await
+        .expect("run token show");
+    assert!(
+        output.status.success(),
+        "token show failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let token = String::from_utf8(output.stdout)
+        .expect("the token is UTF-8")
+        .trim()
+        .to_string();
+    assert!(!token.is_empty(), "token show must print a credential");
+
+    let response = reqwest::Client::new()
+        .post(format!("{base}/api/auth/token"))
+        .json(&serde_json::json!({ "token": token }))
+        .send()
+        .await
+        .expect("token exchange reached the helm");
+    assert!(
+        response.status().is_success(),
+        "token exchange answered {}",
+        response.status()
+    );
+    let exchange: serde_json::Value = response.json().await.expect("decode device exchange");
+    exchange["device_secret"]
+        .as_str()
+        .expect("the exchange returns a device secret")
+        .to_string()
+}
+
+/// An HTTP client carrying `secret` on every request.
+pub(crate) fn client_with_secret(secret: &str) -> reqwest::Client {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        reqwest::header::HeaderValue::from_str(&format!("Bearer {secret}"))
+            .expect("the device secret is an Authorization value"),
+    );
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .expect("build authenticated client")
+}
+
+/// [`device_secret`] and [`client_with_secret`] together, for the callers
+/// that never need the secret itself.
+pub(crate) async fn authenticated_client(
+    state_dir: &std::path::Path,
+    base: &str,
+) -> reqwest::Client {
+    client_with_secret(&device_secret(state_dir, base).await)
+}
+
+/// GET a JSON body from the helm, failing the test on a non-2xx.
+pub(crate) async fn get_json(client: &reqwest::Client, url: &str) -> serde_json::Value {
+    let response = client.get(url).send().await.expect("GET reached the helm");
+    let status = response.status();
+    let body = response.text().await.expect("read body");
+    assert!(status.is_success(), "GET {url} answered {status}: {body}");
+    serde_json::from_str(&body)
+        .unwrap_or_else(|e| panic!("GET {url} body is not JSON ({e}): {body}"))
+}
+
+/// POST a JSON body to the helm, returning the status and the body text —
+/// both, because a refusal's body is prose and is half of what this stack
+/// promises about refusals.
+pub(crate) async fn post(
+    client: &reqwest::Client,
+    url: &str,
+    body: serde_json::Value,
+) -> (reqwest::StatusCode, String) {
+    let response = client
+        .post(url)
+        .json(&body)
+        .send()
+        .await
+        .expect("POST reached the helm");
+    let status = response.status();
+    (status, response.text().await.expect("read body"))
+}
+
 pub(crate) struct Harness {
     pub(crate) client: Arc<SupervisorClient>,
     /// Shared so tests can open additional connections to the same

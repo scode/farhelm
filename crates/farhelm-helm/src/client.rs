@@ -17,7 +17,7 @@ use farhelm_proto::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
@@ -151,6 +151,51 @@ const UPLOAD_ACK_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// queued keeps the transport busy on a fast link, while capping how much
 /// bulk data an input frame can ever find ahead of it at about a megabyte.
 const UPLOAD_ENQUEUE_FRAMES: usize = 4;
+
+/// How many agent upcalls one connection will answer at a time.
+///
+/// An admission bound, applied BEFORE the answering task is spawned, and
+/// the connection is the right unit for it: a supervisor forwards agent
+/// requests for every session on its host, so one wedged or hostile host
+/// must not be able to conscript the helm's runtime, its database, and its
+/// memory on behalf of the whole fleet. Each answer walks the merged
+/// listing and materializes a reply that can reach megabytes, so the
+/// interesting resource is not the task but what the task allocates.
+///
+/// Four rather than one because these are read-only questions that mostly
+/// wait on helm.db, so a little concurrency costs nothing and keeps a slow
+/// listing from serializing an unrelated fast one — and rather than dozens
+/// because there is no user waiting on the fifth: the overflow answer is an
+/// immediate `Unavailable` telling the agent to retry, which is a better
+/// outcome than a queue that turns into the upcall timeout.
+///
+/// ## What the slot covers, and what it therefore bounds
+///
+/// A permit is held from admission until the WRITER has transmitted the
+/// answer's frame, not merely until the frame was accepted onto the queue
+/// (it rides the queued [`Outbound`], exactly as an upload's allowance
+/// does). So the bound is on queued answer BYTES as well as on concurrent
+/// work: at most `AGENT_ANSWER_SLOTS × MAX_FRAME_LEN` of agent replies can
+/// occupy the shared writer queue at any moment, whatever the peer does.
+///
+/// That is a count of frames, not a byte-weighted admission: four answers
+/// that happen to be near the frame limit still qualify, so the ceiling is
+/// coarse — about 32 MiB — even though a realistic listing is a tiny
+/// fraction of one frame. Weighting admission by encoded size (and giving
+/// interactive control traffic priority over bulk answers) is a possible
+/// follow-up; it was deliberately not built here, because choosing those
+/// weights is a policy decision and the count already closes the unbounded
+/// case this constant exists for.
+const AGENT_ANSWER_SLOTS: usize = 4;
+
+/// Source of [`SupervisorClient::connection_id`] values.
+///
+/// Process-wide and never reused, which is the whole requirement: the id
+/// exists so a request that travelled up one connection can be checked
+/// against whatever connection the manager currently publishes for that
+/// host, and a recycled number would make a dead connection's request look
+/// live again.
+static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// A supervisor-side request failure, carried through as a distinct type
 /// (rather than a bare string `anyhow` error) so callers above this client
@@ -447,10 +492,13 @@ impl TermDetachSignal {
 /// frame has been written — so an upload's allowance measures occupancy
 /// of the shared queue rather than "frames this client accepted", which
 /// is the distinction [`UPLOAD_ENQUEUE_FRAMES`] exists to enforce.
-/// Everything else on this connection (input, control, replies) converts
-/// from a bare `Frame` and carries no permit: only bulk upload data is
-/// rationed, because it is the only producer that can put megabytes
-/// ahead of a keystroke.
+///
+/// Two producers ration themselves this way, and for the same reason:
+/// bulk upload data ([`UPLOAD_ENQUEUE_FRAMES`]) and answered agent
+/// upcalls ([`AGENT_ANSWER_SLOTS`]), the only two that can put megabytes
+/// ahead of a keystroke. Everything else on this connection (input,
+/// control, replies, and the small agent REFUSALS, which hold no
+/// admission at all) converts from a bare `Frame` and carries no permit.
 struct Outbound {
     frame: Frame,
     _allowance: Option<OwnedSemaphorePermit>,
@@ -594,6 +642,62 @@ pub struct SupervisorClient {
     /// `allocate_channel`), so the counter must be able to walk past the
     /// u32 range and fail allocation instead of wrapping back into it.
     next_channel: AtomicU64,
+    /// Who answers a request the SUPERVISOR sends up this connection
+    /// (`ControlMsg::AgentRequest`), and which host to answer it as.
+    ///
+    /// `None` for a connection nobody wired a handler into — every test
+    /// double, and any future caller that has no fleet to describe. Such a
+    /// connection still answers, with a refusal: a supervisor that
+    /// forwarded a request is holding an agent's process open, and silence
+    /// costs that agent the whole upcall budget.
+    agent: Option<AgentUpcalls>,
+    /// This connection's identity, for the life of the process — see
+    /// [`SupervisorClient::connection_id`].
+    connection_id: u64,
+    /// Answering tasks this connection currently owns, so connection death
+    /// can end work being done on its behalf.
+    ///
+    /// A `std::sync::Mutex` rather than the tokio one because every use is
+    /// a push or a drain with no await inside — and because the pushing
+    /// side ([`SupervisorClient::spawn_agent_answer`]) is called from the
+    /// demultiplexer, which must not acquire an async lock that some other
+    /// task could be holding across an await.
+    agent_tasks: std::sync::Mutex<Vec<tokio::task::AbortHandle>>,
+    /// Whether this connection has already logged a dropped agent refusal
+    /// — see [`SupervisorClient::refuse_agent_request`], which floods by
+    /// nature and is worth exactly one line.
+    refusal_drop_logged: AtomicBool,
+    /// The connection-is-done signal, held so [`SupervisorClient::retire`]
+    /// can end both background halves at a moment of the manager's
+    /// choosing.
+    ///
+    /// A SENDER here, unlike `closed`'s receiver, and the two are the same
+    /// channel: the tasks publish death into it, and this end injects it.
+    /// The client holding one does not resurrect the weak-handle discipline
+    /// the tasks are built on — a `watch` sender keeps no task alive and
+    /// holds no transport — but it does mean nothing observes "all senders
+    /// dropped" while the client lives, which is why both halves set the
+    /// flag explicitly on their way out rather than relying on that.
+    shutdown: watch::Sender<bool>,
+}
+
+/// What one connection needs to answer an agent's question: the shared
+/// handler slot, who to answer as, and this connection's ration of
+/// concurrent answers.
+///
+/// The ORIGIN is here because it is the thing the handler cannot work out
+/// for itself. An upcall arrives on exactly one host actor's connection,
+/// and that host is by construction the asking session's own — which is how
+/// `current` gets answered (see [`crate::agent_requests`]'s module docs) —
+/// while the connection id is what lets the handler check that this
+/// connection is still the one that host is served by.
+#[derive(Clone)]
+struct AgentUpcalls {
+    handler: crate::agent_requests::AgentRequestSlot,
+    origin: crate::agent_requests::AgentOrigin,
+    /// [`AGENT_ANSWER_SLOTS`] permits, shared by every answer on this
+    /// connection.
+    permits: Arc<Semaphore>,
 }
 
 /// In-flight requests plus the connection-dead flag, under one mutex on
@@ -639,6 +743,92 @@ fn allocate_channel(next_channel: &AtomicU64) -> anyhow::Result<u32> {
     let id = next_channel.fetch_add(1, Ordering::Relaxed);
     u32::try_from(id)
         .map_err(|_| anyhow::anyhow!("terminal channel ids exhausted on this connection"))
+}
+
+/// The refusal an agent gets when this connection cannot take its question
+/// right now.
+///
+/// [`farhelm_proto::ErrorKind::Unavailable`] rather than `Internal`,
+/// because every case it covers is transient and the caller's correct
+/// response is to try again: a helm that has not finished starting will
+/// have finished in a moment, a connection at its concurrent-answer limit
+/// will have a slot shortly, and a connection with no handler belongs to a
+/// caller that is not serving a fleet at all. Each message names its own
+/// remedy, because "retry" is right for the first two and "there is nothing
+/// here to ask" for the third.
+fn not_ready(message: &str) -> farhelm_proto::AgentOutcome {
+    farhelm_proto::AgentOutcome::Err {
+        kind: farhelm_proto::ErrorKind::Unavailable,
+        message: message.to_string(),
+    }
+}
+
+/// Encode one `AgentResponse`, substituting a small refusal for a reply
+/// that would not fit in a frame.
+///
+/// The size check is what keeps ONE oversized answer from costing the whole
+/// connection. Frames are encoded by the writer task, which discovers a
+/// too-large body only as a write error it cannot attribute — and treats it
+/// exactly like a broken transport, tearing down the multiplexed connection
+/// that carries every terminal, upload and request for this host. Checking
+/// here lets the request that caused it fail alone (see
+/// [`Frame::exceeds_max_len`], which exists for this).
+///
+/// It is a BACKSTOP, not the bound: the listing handler holds its own reply
+/// under a byte allowance well below the frame limit and the CLI caps its
+/// column widths, so a well-behaved helm never reaches this. It is here
+/// because "well-behaved" is an assumption about code on the other side of
+/// a trait object, and the cost of the assumption being wrong is a
+/// connection rather than a request.
+///
+/// `Internal` rather than `Unavailable`: nothing about retrying or waiting
+/// changes the answer, since the same question would produce the same
+/// oversized reply.
+fn agent_response_frame(req_id: u64, outcome: farhelm_proto::AgentOutcome) -> Frame {
+    let frame = Frame::control(&ControlMsg::AgentResponse { req_id, outcome });
+    if frame.exceeds_max_len() {
+        warn!(
+            req_id,
+            bytes = frame.encoded_len(),
+            "an agent reply exceeded the protocol's frame limit and was replaced by a refusal"
+        );
+        return Frame::control(&ControlMsg::AgentResponse {
+            req_id,
+            outcome: farhelm_proto::AgentOutcome::Err {
+                kind: farhelm_proto::ErrorKind::Internal,
+                message: "the reply to this request is too large to send".to_string(),
+            },
+        });
+    }
+    frame
+}
+
+/// Enqueue one answered `AgentResponse`, carrying its admission permit onto
+/// the writer queue.
+///
+/// The permit is MOVED into the queued item rather than dropped when this
+/// returns, which is what makes [`AGENT_ANSWER_SLOTS`] bound queued bytes
+/// as well as concurrent work: the allowance comes back when the writer has
+/// written the frame, so a connection can never hold more than its slots'
+/// worth of near-frame-sized answers in the shared queue at once. Releasing
+/// it at enqueue time — the shape this replaces — let each answer free its
+/// slot the moment the frame was accepted, so a slow-but-progressing
+/// transport could accumulate a queue of megabyte replies ahead of every
+/// keystroke on the connection. It is the same discipline uploads already
+/// use; see [`Outbound`].
+async fn send_agent_outcome(
+    writer_tx: &mpsc::Sender<Outbound>,
+    req_id: u64,
+    outcome: farhelm_proto::AgentOutcome,
+    allowance: OwnedSemaphorePermit,
+) {
+    let frame = agent_response_frame(req_id, outcome);
+    let _ = writer_tx
+        .send(Outbound {
+            frame,
+            _allowance: Some(allowance),
+        })
+        .await;
 }
 
 /// Tell one terminal it is finished, without ever blocking and without
@@ -736,6 +926,59 @@ impl SupervisorClient {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
+        Self::start_with_seams(r, w, writer_stall, upload_stall, None).await
+    }
+
+    /// Like [`Self::start`], but able to answer the supervisor's agent
+    /// upcalls — the shape the connection manager uses for every real host
+    /// (PROTOCOL_VERSION 13).
+    ///
+    /// The handler arrives as a SLOT rather than a value, and reading it
+    /// per request rather than capturing it here is what closes a startup
+    /// window: actors begin dialling before the helm's `AppState` (and so
+    /// the handler) exists, and a connection that captured `None` at that
+    /// moment would answer "not ready" for the rest of its life. See
+    /// [`crate::agent_requests::AgentRequestSlot`].
+    pub async fn start_for_host<R, W>(
+        r: R,
+        w: W,
+        handler: crate::agent_requests::AgentRequestSlot,
+        host: crate::store::HostId,
+    ) -> anyhow::Result<Arc<SupervisorClient>>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        Self::start_with_seams(
+            r,
+            w,
+            WRITER_STALL_TIMEOUT,
+            UPLOAD_ACK_STALL_TIMEOUT,
+            Some((handler, host)),
+        )
+        .await
+    }
+
+    /// Every knob the constructors above vary, in one place, so that the
+    /// handshake and task wiring exist exactly once.
+    ///
+    /// `agent` arrives as the raw pair rather than a built [`AgentUpcalls`]
+    /// because the connection's own id is minted HERE, and the origin an
+    /// upcall is answered under has to carry it.
+    async fn start_with_seams<R, W>(
+        r: R,
+        w: W,
+        writer_stall: Duration,
+        upload_stall: Duration,
+        agent: Option<(
+            crate::agent_requests::AgentRequestSlot,
+            crate::store::HostId,
+        )>,
+    ) -> anyhow::Result<Arc<SupervisorClient>>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
         // Byte-level write progress, so the writer task below can tell a
         // slow supervisor from one that has stopped consuming.
         let (w, bytes_written) = ProgressWrite::new(w);
@@ -763,6 +1006,16 @@ impl SupervisorClient {
         let (writer_tx, mut writer_rx) = mpsc::channel::<Outbound>(SUPERVISOR_WRITER_QUEUE);
         let (connection_done, _) = watch::channel(false);
 
+        let connection_id = NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
+        let agent = agent.map(|(handler, host)| AgentUpcalls {
+            handler,
+            origin: crate::agent_requests::AgentOrigin {
+                host,
+                connection: connection_id,
+            },
+            permits: Arc::new(Semaphore::new(AGENT_ANSWER_SLOTS)),
+        });
+
         let client = Arc::new(SupervisorClient {
             peer,
             closed: connection_done.subscribe(),
@@ -775,6 +1028,11 @@ impl SupervisorClient {
             next_req: AtomicU64::new(1),
             // Channel 0 is the control channel; attachments start at 1.
             next_channel: AtomicU64::new(1),
+            agent,
+            connection_id,
+            agent_tasks: std::sync::Mutex::new(Vec::new()),
+            refusal_drop_logged: AtomicBool::new(false),
+            shutdown: connection_done.clone(),
         });
 
         // A `Weak`, deliberately: the client owns `writer_tx`, so a
@@ -919,6 +1177,58 @@ impl SupervisorClient {
         let mut pending = self.pending.lock().await;
         pending.closed = true;
         pending.map.clear();
+        drop(pending);
+        // Agent answers are the one kind of work this connection does on
+        // somebody ELSE's behalf, so they are the one kind that has to be
+        // stopped explicitly rather than merely failed: the supervisor that
+        // asked has already been told (its own teardown fails every upcall
+        // it was carrying), and what remains is a fleet listing being
+        // assembled — a database walk and a reply that can reach megabytes
+        // — for a peer that can no longer receive it.
+        self.abort_agent_tasks();
+    }
+
+    /// Stop every answer this connection is assembling.
+    ///
+    /// Shared by the two endings that must not leave one running: the
+    /// connection dying ([`Self::fail_all`]) and the manager withdrawing
+    /// the connection ([`Self::retire`]). Dropping an `AbortHandle` does
+    /// not abort anything, so nothing but this call ends that work.
+    fn abort_agent_tasks(&self) {
+        let handles =
+            std::mem::take(&mut *self.agent_tasks.lock().expect("agent task list poisoned"));
+        for handle in handles {
+            handle.abort();
+        }
+    }
+
+    /// End this connection because the manager has stopped publishing it —
+    /// a retarget, an adoption, a reconnect, or a retired host entry.
+    ///
+    /// Synchronous, and callable from inside a `watch::send_modify`
+    /// closure, because that is where a client is withdrawn (see
+    /// `manager::HostActor::publish_refresh`). It does exactly two things,
+    /// both of which the last `Arc` drop CANNOT be trusted to do:
+    ///
+    /// - aborts the answering tasks, which is what stops a fleet listing
+    ///   being assembled for a peer nobody will accept an answer from;
+    /// - signals both background halves, which shuts the write half and
+    ///   lets the transport (an ssh child, a socket) actually close.
+    ///
+    /// The drop was never sufficient for either. An in-flight agent task
+    /// holds a `writer_tx` clone, so the writer channel stays open, so the
+    /// writer task stays parked, so the transport stays alive — and when
+    /// the listing finishes it writes its answer onto a connection the
+    /// registry replaced, which for a host listing means naming the OLD
+    /// connection's row as the asking session's `current` host after that
+    /// row's machine has already changed. Retiring explicitly makes the
+    /// withdrawal and the teardown the same event.
+    ///
+    /// Idempotent: a second call re-signals a flag that is already set and
+    /// drains an empty task list.
+    pub(crate) fn retire(&self) {
+        self.abort_agent_tasks();
+        let _ = self.shutdown.send(true);
     }
 
     /// Route one inbound frame to whoever is waiting for it: data frames
@@ -1101,6 +1411,40 @@ impl SupervisorClient {
                             end_upload(progress, reason.clone());
                         }
                     }
+                    // The one message on this protocol that arrives here as
+                    // a REQUEST rather than a reply or an event: an agent
+                    // inside a session asked the helm something, and its
+                    // supervisor forwarded the question up the connection
+                    // the helm itself opened. See
+                    // [`crate::agent_requests`] for why the question
+                    // travels this way at all.
+                    //
+                    // Answered from a SPAWNED task, without exception. This
+                    // is the shared demultiplexer for every terminal,
+                    // reply, and upload on the connection, so answering
+                    // inline would put the whole fleet's traffic behind one
+                    // listing — and the listing reads helm.db, which is
+                    // exactly the kind of work that must not sit on this
+                    // path (see `dispatch`'s head-of-line note above).
+                    //
+                    // THE TRUST BOUNDARY IS THIS CONNECTION, NOT THIS
+                    // MESSAGE. `session_id` and the claim that this
+                    // connection's host is that session's host are accepted
+                    // without re-verification: the helm never sees the
+                    // per-session credential (only the supervisor can check
+                    // it, and does, before forwarding), and the supervisor
+                    // on the far end of a full-authority connection is the
+                    // helm's own provisioned install with complete
+                    // authority over every session on its host. A helm that
+                    // could not trust it could not route an operation to it
+                    // either. See SPEC_impl.md's version-13 paragraph.
+                    ControlMsg::AgentRequest {
+                        req_id,
+                        session_id,
+                        request,
+                    } => {
+                        self.spawn_agent_answer(*req_id, session_id.clone(), request.clone());
+                    }
                     other => warn!(?other, "unexpected control message at helm"),
                 }
             }
@@ -1192,6 +1536,166 @@ impl SupervisorClient {
                 .send(Frame::control(&ControlMsg::AbortUpload { channel }).into())
                 .await;
         });
+    }
+
+    /// This connection's identity within this process — minted with the
+    /// connection, never reused, never recycled.
+    ///
+    /// It exists for one consumer: the agent-request handler, which is
+    /// handed a host's registry id and has to decide whether the connection
+    /// that carried the request is still the one that host is served by
+    /// (see [`crate::agent_requests::AgentOrigin`]). Registry ids survive a
+    /// retarget and a machine swap; this does not.
+    pub fn connection_id(&self) -> u64 {
+        self.connection_id
+    }
+
+    /// Answer one agent upcall off the demultiplexer's thread and send the
+    /// response back up the same connection.
+    ///
+    /// Answers on every path it can — no handler wired in, no admission
+    /// slot free, a reply too large to send. The supervisor that forwarded
+    /// the request is holding an agent's `farhelm` process open until
+    /// something arrives, so silence here is not a dropped message: it is a
+    /// user watching a command hang for the whole upcall budget and then
+    /// fail with a timeout that names the wrong cause.
+    ///
+    /// The single exception is a refusal that will not fit on a writer
+    /// queue that is already full, which is dropped rather than queued or
+    /// spawned — see [`Self::refuse_agent_request`] for why that trade is
+    /// the right way round.
+    ///
+    /// ## Admission before work
+    ///
+    /// The permit is taken with `try_acquire` BEFORE anything is spawned,
+    /// because what needs bounding is not the task but everything the task
+    /// then allocates — a merged fleet listing and a reply that can reach
+    /// megabytes. Acquiring inside the task would bound concurrency while
+    /// leaving an unbounded queue of tasks waiting to become expensive. A
+    /// connection with no slot free gets an immediate refusal naming the
+    /// retry, which beats a queue that resolves as the supervisor's
+    /// timeout.
+    ///
+    /// ## Refusals spawn NOTHING
+    ///
+    /// The two refusal paths — no handler on this connection, no slot free
+    /// — enqueue with a non-blocking [`Self::refuse_agent_request`] instead
+    /// of a task of their own. A spawned refusal is unbounded by
+    /// construction: it holds no permit (it was refused for want of one),
+    /// so a peer that sends requests faster than it drains replies parks a
+    /// new task on the full writer queue for every one, none of them owned
+    /// by this connection's teardown. That is the same unbounded growth
+    /// admission control exists to prevent, arrived at through the path
+    /// that was supposed to enforce it.
+    ///
+    /// ## Owned, not merely spawned
+    ///
+    /// The handle is retained so [`Self::fail_all`] can abort it. A
+    /// connection's death means nobody is left to receive the answer, and
+    /// an answer in progress is a database walk and a multi-megabyte
+    /// allocation being done for a dead peer.
+    ///
+    /// ## The origin is checked twice
+    ///
+    /// The handler checks it on the way in (that is where `current` is
+    /// computed from), and this checks it again with
+    /// [`crate::agent_requests::AgentRequestHandler::origin_is_live`]
+    /// immediately before an ANSWER is enqueued. The listing between the
+    /// two awaits on the database and the manager, and a host that was
+    /// retargeted, adopted or reconnected in that window has a registry row
+    /// whose machine has changed underneath the answer being assembled for
+    /// it. Sending it anyway would cross that boundary — the reply names
+    /// the old connection's host as `current` while the row now belongs to
+    /// someone else — so the answer is dropped for a refusal the agent can
+    /// retry.
+    ///
+    /// Fire-and-forget on the writer queue: a response that cannot be
+    /// enqueued means the connection is going away, and the supervisor's
+    /// own teardown already fails every upcall it was carrying.
+    fn spawn_agent_answer(
+        &self,
+        req_id: u64,
+        session_id: String,
+        request: farhelm_proto::AgentVerb,
+    ) {
+        let Some(agent) = self.agent.clone() else {
+            self.refuse_agent_request(req_id, "this helm connection cannot answer agent requests");
+            return;
+        };
+        let Ok(permit) = Arc::clone(&agent.permits).try_acquire_owned() else {
+            self.refuse_agent_request(
+                req_id,
+                "too many agent requests in flight on this host; retry",
+            );
+            return;
+        };
+        let writer_tx = self.writer_tx.clone();
+        let task = tokio::spawn(async move {
+            let outcome = match agent.handler.get() {
+                Some(handler) => {
+                    let outcome = handler.handle(agent.origin, &session_id, request).await;
+                    // Re-checked here rather than left to the handler's own
+                    // entry check: the lookup that produced this answer has
+                    // been awaiting all along, and the question that matters
+                    // is whether the connection is current NOW, one step
+                    // before the frame is queued.
+                    match outcome {
+                        farhelm_proto::AgentOutcome::Ok { .. }
+                            if !handler.origin_is_live(agent.origin) =>
+                        {
+                            not_ready("the host connection was replaced; retry")
+                        }
+                        outcome => outcome,
+                    }
+                }
+                None => not_ready("the helm is still starting up; retry in a moment"),
+            };
+            // The permit goes ONTO the queue with the frame; see
+            // `send_agent_outcome`.
+            send_agent_outcome(&writer_tx, req_id, outcome, permit).await;
+        });
+        let mut tasks = self.agent_tasks.lock().expect("agent task list poisoned");
+        // Pruned on the way in rather than by each task on its way out: a
+        // finishing task would have to reach back into this list to remove
+        // itself, and the list can never hold more than the permits allow
+        // plus whatever has finished since the last request.
+        tasks.retain(|handle| !handle.is_finished());
+        tasks.push(task.abort_handle());
+    }
+
+    /// Enqueue one small `Unavailable` refusal for an upcall this
+    /// connection will not do any work for, without blocking and without
+    /// spawning.
+    ///
+    /// Called from the demultiplexer, so it must not await — but neither
+    /// may it hand the refusal to a task, which is what makes `try_send`
+    /// the whole point rather than an optimization. A refusal is issued
+    /// precisely when admission was DENIED, so a task carrying one holds no
+    /// permit and nothing bounds how many of them a peer can create by
+    /// sending faster than it reads.
+    ///
+    /// Dropping the refusal when the queue is full is therefore the
+    /// deliberate ending, and it is not a silent loss: the supervisor that
+    /// forwarded the request has its own budget and turns a missing answer
+    /// into `Timeout` or `Unavailable` for the waiting agent. A full writer
+    /// queue also means this connection is already failing to keep up, so
+    /// the honest thing to add to it is nothing.
+    ///
+    /// Logged once per connection, not once per drop: a peer in this state
+    /// produces them in floods, and the first line has said everything the
+    /// thousandth would.
+    fn refuse_agent_request(&self, req_id: u64, message: &str) {
+        let frame = agent_response_frame(req_id, not_ready(message));
+        if self.writer_tx.try_send(frame.into()).is_err()
+            && !self.refusal_drop_logged.swap(true, Ordering::Relaxed)
+        {
+            warn!(
+                req_id,
+                host = self.agent.as_ref().map(|agent| agent.origin.host),
+                "the writer queue was full; an agent refusal was dropped and will reach the \
+                 asking session as the supervisor's own timeout (logged once per connection)"
+            );
+        }
     }
 
     /// Send a request and await its correlated reply.
@@ -5092,5 +5596,509 @@ mod tests {
              window sits ahead of it"
         );
         send.abort();
+    }
+
+    // ---------------------------------------------------------------
+    // Agent upcalls: the one request that travels UP this connection.
+    // ---------------------------------------------------------------
+
+    /// A helm-side handler the test drives step by step: it announces every
+    /// call on `entered` and then waits for a permit before answering.
+    ///
+    /// Both halves are needed to test the demultiplexer's behavior at all.
+    /// The announcement is what lets a test know an upcall is genuinely
+    /// IN the handler rather than still in flight, and the gate is what
+    /// keeps it there while the test does something else on the same
+    /// connection.
+    struct GatedHandler {
+        entered: mpsc::Sender<()>,
+        gate: Arc<Semaphore>,
+        reply: farhelm_proto::AgentReply,
+    }
+
+    impl GatedHandler {
+        /// A handler parked until the test releases it, one call per
+        /// [`Self::release`].
+        fn parked() -> (Arc<GatedHandler>, mpsc::Receiver<()>, Arc<Semaphore>) {
+            let (entered, calls) = mpsc::channel(8);
+            let gate = Arc::new(Semaphore::new(0));
+            (
+                Arc::new(GatedHandler {
+                    entered,
+                    gate: Arc::clone(&gate),
+                    reply: farhelm_proto::AgentReply::Hosts { hosts: Vec::new() },
+                }),
+                calls,
+                gate,
+            )
+        }
+
+        /// A handler that answers immediately with `reply`.
+        fn answering(reply: farhelm_proto::AgentReply) -> Arc<GatedHandler> {
+            let (entered, _calls) = mpsc::channel(8);
+            Arc::new(GatedHandler {
+                entered,
+                gate: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                reply,
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::agent_requests::AgentRequestHandler for GatedHandler {
+        async fn handle(
+            &self,
+            _origin: crate::agent_requests::AgentOrigin,
+            _session_id: &str,
+            _verb: farhelm_proto::AgentVerb,
+        ) -> farhelm_proto::AgentOutcome {
+            let _ = self.entered.send(()).await;
+            let _permit = self.gate.acquire().await.expect("the gate is never closed");
+            farhelm_proto::AgentOutcome::Ok {
+                reply: self.reply.clone(),
+            }
+        }
+    }
+
+    /// The supervisor's end of a connection, with the hello already
+    /// exchanged — frames written and read by hand, which is what these
+    /// tests need: the shapes involved travel UP the connection, so there
+    /// is no client method that sends them.
+    struct AgentPeer {
+        reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+    }
+
+    impl AgentPeer {
+        async fn ask(&mut self, req_id: u64, verb: farhelm_proto::AgentVerb) {
+            self.writer
+                .write_control(&ControlMsg::AgentRequest {
+                    req_id,
+                    session_id: "s1".to_string(),
+                    request: verb,
+                })
+                .await
+                .expect("send the agent request");
+        }
+
+        /// The next control message, with a deadline so a regression that
+        /// answers nothing fails instead of hanging the suite.
+        async fn next_control(&mut self) -> ControlMsg {
+            let frame = timeout(Duration::from_secs(5), self.reader.read_frame())
+                .await
+                .expect("the helm sent nothing")
+                .expect("read a frame")
+                .expect("the helm closed instead of answering");
+            parse_control(&frame).expect("decode the helm's frame")
+        }
+
+        /// The outcome of the next message, insisting it is the response to
+        /// `req_id`.
+        async fn outcome(&mut self, req_id: u64) -> farhelm_proto::AgentOutcome {
+            match self.next_control().await {
+                ControlMsg::AgentResponse {
+                    req_id: got,
+                    outcome,
+                } if got == req_id => outcome,
+                other => panic!("expected an AgentResponse for {req_id}, got {other:?}"),
+            }
+        }
+    }
+
+    /// A connection wired for agent upcalls against `slot`, with the peer
+    /// handed back so the test can play the supervisor.
+    ///
+    /// The peer's handshake runs in its own task because the client's
+    /// constructor performs the other half of the same exchange and neither
+    /// completes without the other.
+    async fn agent_connection(
+        slot: crate::agent_requests::AgentRequestSlot,
+    ) -> (Arc<SupervisorClient>, AgentPeer) {
+        agent_connection_buffered(slot, 1 << 20).await
+    }
+
+    /// [`agent_connection`] with an explicit transport buffer.
+    ///
+    /// A SMALL buffer is a fixture in its own right: it makes the writer
+    /// task block partway through one frame as soon as the peer stops
+    /// reading, which is the only way to hold answers in the writer's hands
+    /// and in its queue long enough to observe what an admission slot
+    /// covers. The generous default is what every other test wants, since
+    /// nothing else here is about backpressure.
+    ///
+    /// It must still comfortably exceed a HELLO, in both directions: the
+    /// two sides of the handshake each write before either reads, so a
+    /// buffer too small to hold one hello deadlocks the connection before
+    /// the test starts.
+    async fn agent_connection_buffered(
+        slot: crate::agent_requests::AgentRequestSlot,
+        buffer: usize,
+    ) -> (Arc<SupervisorClient>, AgentPeer) {
+        let (client_side, peer_side) = tokio::io::duplex(buffer);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("peer handshake");
+            AgentPeer { reader, writer }
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start_for_host(r, w, slot, 1)
+            .await
+            .expect("client handshake");
+        (client, peer.await.expect("peer task"))
+    }
+
+    /// A connection that reaches "live" before the helm's `AppState` exists
+    /// must refuse with "still starting up" and then start answering once
+    /// the SAME slot is filled — without reconnecting.
+    ///
+    /// This is the whole reason the handler is a shared `OnceLock` read per
+    /// request rather than a value captured at connection time. Production
+    /// starts the connection manager before `AppState`, so a connection CAN
+    /// become live while the slot is empty; an implementation that captured
+    /// the empty state once would answer "not ready" for the rest of that
+    /// connection's life, and every existing test that fills the slot first
+    /// would still pass.
+    #[tokio::test]
+    async fn an_empty_handler_slot_refuses_and_then_answers_once_filled() {
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::new());
+        let (_client, mut peer) = agent_connection(Arc::clone(&slot)).await;
+
+        peer.ask(1, farhelm_proto::AgentVerb::Hosts {}).await;
+        match peer.outcome(1).await {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, farhelm_proto::ErrorKind::Unavailable);
+                assert!(
+                    message.contains("starting up"),
+                    "the refusal must name the transient cause, got: {message}"
+                );
+            }
+            other => panic!("an empty slot must refuse, got {other:?}"),
+        }
+
+        // The SAME slot, on the SAME connection: no reconnect happens here.
+        slot.set(GatedHandler::answering(farhelm_proto::AgentReply::Hosts {
+            hosts: vec![farhelm_proto::AgentHost {
+                name: "this machine".to_string(),
+                kind: "local".to_string(),
+                state: "connected".to_string(),
+                current: true,
+            }],
+        }))
+        .ok()
+        .expect("a fresh slot is empty");
+
+        peer.ask(2, farhelm_proto::AgentVerb::Hosts {}).await;
+        match peer.outcome(2).await {
+            farhelm_proto::AgentOutcome::Ok {
+                reply: farhelm_proto::AgentReply::Hosts { hosts },
+            } => assert_eq!(hosts.len(), 1),
+            other => panic!("a filled slot must answer, got {other:?}"),
+        }
+    }
+
+    /// A slow agent handler must not sit on the demultiplexer: ordinary
+    /// traffic on the same connection has to keep flowing while one is
+    /// parked.
+    ///
+    /// The property is why `spawn_agent_answer` spawns at all, and no other
+    /// test establishes it. The relay's own timeout test looks identical
+    /// from the outside whether the handler is awaited inline or not — it
+    /// waits out a supervisor-side budget either way — so an implementation
+    /// that answered upcalls on the reader loop would freeze every
+    /// terminal, upload and reply on the connection and still pass. Here
+    /// the ordinary request must complete BEFORE the handler is released,
+    /// which is only possible if the two are on different tasks.
+    #[tokio::test]
+    async fn a_parked_agent_handler_does_not_stall_the_connection() {
+        let (handler, mut calls, gate) = GatedHandler::parked();
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
+            handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+        ));
+        let (client, mut peer) = agent_connection(slot).await;
+
+        peer.ask(1, farhelm_proto::AgentVerb::Sessions {}).await;
+        timeout(Duration::from_secs(5), calls.recv())
+            .await
+            .expect("the handler was never called")
+            .expect("the handler's announcement channel is open");
+
+        // With the handler parked, an ordinary request must still get out
+        // and its reply must still be routed back.
+        let listing = tokio::spawn({
+            let client = Arc::clone(&client);
+            async move { client.list_sessions().await }
+        });
+        let req_id = match peer.next_control().await {
+            ControlMsg::ListSessions { req_id, .. } => req_id,
+            other => panic!("expected the ordinary request to reach the peer, got {other:?}"),
+        };
+        peer.writer
+            .write_control(&ControlMsg::SessionList {
+                req_id,
+                sessions: vec![session("a")],
+                total: 1,
+                next_cursor: None,
+            })
+            .await
+            .expect("answer the ordinary request");
+        let listing = timeout(Duration::from_secs(5), listing)
+            .await
+            .expect("the ordinary request never completed while an upcall was parked")
+            .expect("listing task")
+            .expect("listing");
+        assert_eq!(listing.sessions.len(), 1);
+
+        // Only now is the upcall allowed to finish, which proves the
+        // ordering above was not an accident of scheduling.
+        gate.add_permits(1);
+        assert!(matches!(
+            peer.outcome(1).await,
+            farhelm_proto::AgentOutcome::Ok { .. }
+        ));
+    }
+
+    /// A reply too large for a frame must fail its own request and leave
+    /// the connection alive.
+    ///
+    /// The writer task encodes frames long after the sender has moved on,
+    /// and an oversized body reaches it as an unattributable write error —
+    /// which it treats exactly like a broken transport, tearing down the
+    /// connection that carries every terminal, upload and request for this
+    /// host. So one pathological listing would cost the whole host. The
+    /// pre-enqueue size check is a backstop behind the handler's own byte
+    /// allowance (that allowance is on the other side of a trait object,
+    /// which is precisely why a backstop exists), and this pins both
+    /// halves: the request fails, and the next one still succeeds.
+    #[tokio::test]
+    async fn an_oversized_agent_reply_fails_its_request_and_spares_the_connection() {
+        let huge = farhelm_proto::AgentReply::Sessions {
+            sessions: vec![farhelm_proto::AgentSession {
+                id: "s1".to_string(),
+                host: "this machine".to_string(),
+                title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize + 1),
+                cwd: "/w".to_string(),
+                agent: "claude".to_string(),
+                status: "running".to_string(),
+                current: true,
+                archived: false,
+                stale: false,
+            }],
+            truncated: false,
+        };
+        let slot: crate::agent_requests::AgentRequestSlot =
+            Arc::new(std::sync::OnceLock::from(GatedHandler::answering(huge)
+                as Arc<dyn crate::agent_requests::AgentRequestHandler>));
+        let (client, mut peer) = agent_connection(slot).await;
+
+        peer.ask(1, farhelm_proto::AgentVerb::Sessions {}).await;
+        match peer.outcome(1).await {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, farhelm_proto::ErrorKind::Internal);
+                assert!(
+                    message.contains("too large"),
+                    "the refusal must say what was wrong, got: {message}"
+                );
+            }
+            other => panic!("an unsendable reply must be refused, got {other:?}"),
+        }
+
+        // The connection is the thing being protected: it must still carry
+        // ordinary traffic afterwards.
+        let listing = tokio::spawn({
+            let client = Arc::clone(&client);
+            async move { client.list_sessions().await }
+        });
+        let req_id = match peer.next_control().await {
+            ControlMsg::ListSessions { req_id, .. } => req_id,
+            other => panic!("the connection died with the oversized reply: {other:?}"),
+        };
+        peer.writer
+            .write_control(&ControlMsg::SessionList {
+                req_id,
+                sessions: Vec::new(),
+                total: 0,
+                next_cursor: None,
+            })
+            .await
+            .expect("answer the ordinary request");
+        timeout(Duration::from_secs(5), listing)
+            .await
+            .expect("the connection stopped serving after the oversized reply")
+            .expect("listing task")
+            .expect("listing");
+    }
+
+    /// Past [`AGENT_ANSWER_SLOTS`] concurrent upcalls, the next one is
+    /// refused immediately rather than queued.
+    ///
+    /// Admission has to happen before the answering task starts, because
+    /// what needs bounding is what the task allocates: a merged fleet
+    /// listing and a reply that can reach megabytes. One host forwarding
+    /// requests for every session it runs must not be able to conscript the
+    /// helm's runtime and memory on the fleet's behalf, and a queue would
+    /// only convert that pressure into upcall timeouts for everyone.
+    #[tokio::test]
+    async fn concurrent_agent_answers_are_capped_per_connection() {
+        let (handler, mut calls, gate) = GatedHandler::parked();
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
+            handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+        ));
+        let (_client, mut peer) = agent_connection(slot).await;
+
+        for req_id in 1..=AGENT_ANSWER_SLOTS as u64 {
+            peer.ask(req_id, farhelm_proto::AgentVerb::Hosts {}).await;
+            timeout(Duration::from_secs(5), calls.recv())
+                .await
+                .expect("an admitted upcall never reached the handler")
+                .expect("the handler's announcement channel is open");
+        }
+
+        let overflow = AGENT_ANSWER_SLOTS as u64 + 1;
+        peer.ask(overflow, farhelm_proto::AgentVerb::Hosts {}).await;
+        match peer.outcome(overflow).await {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, farhelm_proto::ErrorKind::Unavailable);
+                assert!(
+                    message.contains("too many"),
+                    "the refusal must name the cause, got: {message}"
+                );
+            }
+            other => panic!("the overflow request must be refused, got {other:?}"),
+        }
+
+        gate.add_permits(AGENT_ANSWER_SLOTS);
+    }
+
+    /// A refusal that cannot be enqueued is DROPPED — never awaited, never
+    /// handed to a task of its own — and the drop is logged once for the
+    /// connection.
+    ///
+    /// This is the bound on the refusal path itself, and it is not a
+    /// nicety. A refusal exists precisely because admission was denied, so
+    /// a task carrying one holds no permit; a peer that sends requests
+    /// faster than it reads answers would spawn one per request, each
+    /// parked on the full writer queue, none of them owned by this
+    /// connection's teardown — the unbounded growth admission control
+    /// exists to prevent, reached through the path meant to enforce it.
+    /// Dropping is sound because the supervisor that forwarded the request
+    /// has its own budget: a missing answer becomes its `Timeout` or
+    /// `Unavailable`, which is what a connection this far behind deserves
+    /// to be reported as anyway.
+    #[tokio::test]
+    async fn a_refusal_is_dropped_when_the_writer_queue_is_full() {
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::new());
+        let (client, _peer) = agent_connection(slot).await;
+        // Fills to the brim, and the writer cannot empty it while this
+        // runs: a `try_send` loop never awaits, so on the test runtime's
+        // single thread the writer task is not polled between iterations.
+        while client
+            .writer_tx
+            .try_send(Frame::control(&ControlMsg::Detach { channel: 1 }).into())
+            .is_ok()
+        {}
+
+        // Returns rather than parking, which is the whole contract: this is
+        // called from the demultiplexer, where an await would stall every
+        // terminal, upload and reply on the connection.
+        client.refuse_agent_request(1, "too many agent requests in flight on this host; retry");
+        assert!(
+            client.refusal_drop_logged.load(Ordering::Relaxed),
+            "a dropped refusal must be recorded, so the connection logs it exactly once"
+        );
+    }
+
+    /// An answer's admission slot is held until the writer has SENT it, not
+    /// merely until the writer queue accepted it.
+    ///
+    /// The distinction is what makes [`AGENT_ANSWER_SLOTS`] a bound on
+    /// queued bytes rather than only on concurrent work. A reply may
+    /// legally approach the frame limit; the writer queue counts messages,
+    /// not bytes; so with the slot released at enqueue time a peer that
+    /// reads slowly — slowly enough to fill the queue, fast enough to avoid
+    /// the no-progress timeout — could stack dozens of near-limit replies
+    /// ahead of every keystroke on the connection. Holding the permit on
+    /// the queued frame caps that at the slots' worth.
+    ///
+    /// The fixture pins it from the outside: with the peer not reading, the
+    /// four admitted answers can get no further than the queue, and the
+    /// fifth request must therefore still be refused. Release-at-enqueue
+    /// answers it instead, which is exactly the regression.
+    #[tokio::test]
+    async fn an_answers_slot_is_held_until_the_writer_sends_it() {
+        // Several times the transport buffer below, so the writer blocks
+        // partway through the first answer it writes and every later one
+        // stays in the queue where this test can see it.
+        let reply = farhelm_proto::AgentReply::Hosts {
+            hosts: (0..128)
+                .map(|n| farhelm_proto::AgentHost {
+                    name: format!("host-{n}"),
+                    kind: "ssh".to_string(),
+                    state: "connected".to_string(),
+                    current: false,
+                })
+                .collect(),
+        };
+        let slot: crate::agent_requests::AgentRequestSlot =
+            Arc::new(std::sync::OnceLock::from(GatedHandler::answering(reply)
+                as Arc<dyn crate::agent_requests::AgentRequestHandler>));
+        let (client, mut peer) = agent_connection_buffered(slot, 4096).await;
+
+        for req_id in 1..=AGENT_ANSWER_SLOTS as u64 {
+            peer.ask(req_id, farhelm_proto::AgentVerb::Hosts {}).await;
+        }
+        // Wait for the answers to reach the queue — as far as they can get
+        // with nothing reading — so the overflow request below lands after
+        // the moment a release-at-enqueue implementation would have freed
+        // their slots, rather than racing it.
+        timeout(Duration::from_secs(5), async {
+            while SUPERVISOR_WRITER_QUEUE - client.writer_tx.capacity() < AGENT_ANSWER_SLOTS - 1 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the admitted answers never reached the writer queue");
+
+        let overflow = AGENT_ANSWER_SLOTS as u64 + 1;
+        peer.ask(overflow, farhelm_proto::AgentVerb::Hosts {}).await;
+
+        // Only now does anything drain, which is what lets the queued
+        // answers and the refusal be read at all. Collected by req_id
+        // rather than in order: the four answers race each other onto the
+        // queue.
+        let mut outcomes = std::collections::HashMap::new();
+        for _ in 0..=AGENT_ANSWER_SLOTS {
+            match peer.next_control().await {
+                ControlMsg::AgentResponse { req_id, outcome } => {
+                    outcomes.insert(req_id, outcome);
+                }
+                other => panic!("expected an AgentResponse, got {other:?}"),
+            }
+        }
+        for req_id in 1..=AGENT_ANSWER_SLOTS as u64 {
+            assert!(
+                matches!(
+                    outcomes.get(&req_id),
+                    Some(farhelm_proto::AgentOutcome::Ok { .. })
+                ),
+                "the admitted answers must still be delivered: {outcomes:?}"
+            );
+        }
+        match outcomes.get(&overflow) {
+            Some(farhelm_proto::AgentOutcome::Err { kind, message }) => {
+                assert_eq!(*kind, farhelm_proto::ErrorKind::Unavailable);
+                assert!(
+                    message.contains("too many"),
+                    "the refusal must name the cause, got: {message}"
+                );
+            }
+            other => panic!(
+                "a request arriving while four answers sit in the queue must be refused, got \
+                 {other:?}"
+            ),
+        }
     }
 }

@@ -5,10 +5,15 @@
 //! provisioning copies exactly one binary to a host and the launch shim must
 //! exist inside every session without separate installation (SPEC_impl.md,
 //! "CLI").
-//! `farhelm spawn` keeps stdout machine-readable: its only successful output
-//! is the child id and every diagnostic goes to stderr.
+//! The two in-session commands keep stdout machine-readable, with every
+//! diagnostic on stderr: `farhelm spawn`'s only successful output is the
+//! child id, and `farhelm agent`'s is the listing it was asked for. They
+//! share the injected-environment contract (`spawn_environment`) and
+//! nothing else — a spawn is answered by the supervisor on the other end
+//! of the socket, while an agent request is relayed by it to the helm.
 
 use clap::{Parser, Subcommand};
+use farhelm_proto::AgentReply;
 use std::path::PathBuf;
 
 mod fake_agent;
@@ -49,6 +54,11 @@ enum Cmd {
         #[arg(long)]
         idempotency_key: Option<String>,
     },
+    /// Ask the helm about the fleet, from inside a Farhelm session.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCmd,
+    },
     /// Run the helm: the single control-plane process serving the UI.
     Helm {
         #[command(subcommand)]
@@ -66,6 +76,22 @@ enum Cmd {
         #[command(subcommand)]
         command: InternalCmd,
     },
+}
+
+/// The verbs `farhelm agent` currently carries.
+///
+/// Read-only, and that is the whole set for now rather than a starting
+/// point that happens to be small: the relay these travel over is new, and
+/// a listing that is wrong is a confused agent, while a mutation that is
+/// wrong is a session someone loses. The mutating verbs (rename, stop,
+/// archive) and the creating ones (create, clone) land on the same
+/// transport once it has carried real traffic.
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// List the hosts the helm knows, marking this session's own.
+    Hosts,
+    /// List the sessions the helm knows, marking this one.
+    Sessions,
 }
 
 #[derive(Subcommand)]
@@ -226,6 +252,20 @@ fn main() -> anyhow::Result<()> {
                 idempotency_key,
             }))?;
             println!("{child}");
+            Ok(())
+        }
+        Cmd::Agent { command } => {
+            let verb = match command {
+                AgentCmd::Hosts => farhelm_proto::AgentVerb::Hosts {},
+                AgentCmd::Sessions => farhelm_proto::AgentVerb::Sessions {},
+            };
+            let reply = runtime()?.block_on(agent_request(verb))?;
+            print!("{}", render_agent_reply(&reply));
+            // On stderr, so a script capturing stdout still gets nothing but
+            // the table — the notice is about the ANSWER, not part of it.
+            if let Some(notice) = truncation_notice(&reply) {
+                eprintln!("{notice}");
+            }
             Ok(())
         }
         Cmd::Helm {
@@ -492,7 +532,12 @@ struct SpawnArgs {
 ///
 /// A session id with no token is the recognizable upgrade edge. Every
 /// missing value names the exact variable; no default supervisor is dialed.
-fn spawn_environment() -> anyhow::Result<(String, String, PathBuf)> {
+///
+/// `command` is the user-facing name of the command being run — `farhelm
+/// spawn` or `farhelm agent`. It is a parameter rather than a literal
+/// because both commands share this validation, and an error that named the
+/// wrong one sends a user to diagnose a feature they did not invoke.
+fn spawn_environment(command: &str) -> anyhow::Result<(String, String, PathBuf)> {
     use anyhow::Context;
 
     let session_id = std::env::var_os(farhelm_supervisor::launch::SESSION_ID_ENV_VAR);
@@ -500,14 +545,14 @@ fn spawn_environment() -> anyhow::Result<(String, String, PathBuf)> {
     let supervisor_sock = std::env::var_os(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR);
     if session_id.is_some() && session_token.is_none() {
         anyhow::bail!(
-            "this session predates spawn support and must be restarted before running \
-             farhelm spawn"
+            "this session predates spawn support (it carries no injected session credential) \
+             and must be restarted before running {command}"
         );
     }
     let socket = supervisor_sock
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "{} is required; farhelm spawn will not guess which supervisor to dial",
+                "{} is required; {command} will not guess which supervisor to dial",
                 farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR
             )
         })?
@@ -540,7 +585,7 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake_with_session_auth, parse_control};
     use farhelm_proto::{ControlMsg, SessionAuth};
 
-    let (session_id, token, socket) = spawn_environment()?;
+    let (session_id, token, socket) = spawn_environment("farhelm spawn")?;
     // `~`-prefixed paths are forwarded verbatim: the SUPERVISOR owns that
     // contract (SPEC.md — `~` expands against its own home, `~user` is its
     // refusal to give), and a spawn always targets the same host it runs
@@ -611,6 +656,384 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
             anyhow::bail!("the supervisor sent an unexpected spawn reply: {unexpected:?}")
         }
     }
+}
+
+/// Ask the helm one question, from inside a session, and return its answer.
+///
+/// Mechanically `spawn_session`'s twin — same injected environment
+/// (validated by the same [`spawn_environment`], so the two commands can
+/// never disagree about what a Farhelm session guarantees), same
+/// authenticated handshake, one request, one reply — and semantically its
+/// opposite. A spawn is answered by the supervisor on the other end of the
+/// socket. This is answered by the HELM, which is not on the other end of
+/// anything this process can reach: the session's host has no route,
+/// address, or credential back to the machine the user is sitting at, so
+/// the supervisor forwards the question up the connection the helm itself
+/// opened and relays the answer back. See `farhelm-supervisor`'s
+/// `service::agent_relay`.
+///
+/// NO TIMEOUT here, deliberately. The supervisor bounds the upcall
+/// (`AGENT_UPCALL_TIMEOUT`) and is the only party that can tell "no helm is
+/// attached" from "a helm has it and is slow"; a deadline on this side
+/// would collapse those into one unactionable failure and would fire first,
+/// hiding the specific error the relay was about to send.
+async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<AgentReply> {
+    use anyhow::Context;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake_with_session_auth, parse_control};
+    use farhelm_proto::{AgentOutcome, ControlMsg, SessionAuth};
+
+    // Captured before the request goes out, because the reply's own tag is
+    // the only thing that can be checked against it — see [`ReplyKind`].
+    let expected = ReplyKind::of_verb(&request);
+    let (session_id, token, socket) = spawn_environment("farhelm agent")?;
+    let stream = tokio::net::UnixStream::connect(&socket)
+        .await
+        .with_context(|| format!("connecting to supervisor socket {}", socket.display()))?;
+    let (read, write) = tokio::io::split(stream);
+    let mut reader = FrameReader::new(read);
+    let mut writer = FrameWriter::new(write);
+    // The hello this sends carries `role: "spawn"` — the one spelling
+    // `handshake_with_session_auth` has, shared with the conversation hook,
+    // which is not a spawn either. It is deliberately harmless: `role` is
+    // diagnostic free text and never an authorization input (see
+    // `ControlMsg::Hello::role`); presence of `auth` is what selects
+    // restricted admission. Left as-is rather than widened here so all
+    // three session-authenticated callers keep one handshake.
+    handshake_with_session_auth(
+        &mut reader,
+        &mut writer,
+        SessionAuth {
+            session_id: session_id.clone(),
+            token,
+        },
+    )
+    .await
+    .context("performing the authenticated supervisor handshake")?;
+
+    const REQUEST_ID: u64 = 1;
+    writer
+        .write_control(&ControlMsg::AgentRequest {
+            req_id: REQUEST_ID,
+            session_id,
+            request,
+        })
+        .await
+        .context("sending the agent request")?;
+
+    let frame = reader
+        .read_frame()
+        .await
+        .context("reading the agent reply")?
+        .ok_or_else(|| anyhow::anyhow!("the supervisor closed before answering"))?;
+    match parse_control(&frame).context("decoding the agent reply")? {
+        ControlMsg::AgentResponse {
+            req_id: REQUEST_ID,
+            outcome,
+        } => match outcome {
+            AgentOutcome::Ok { reply } => {
+                // The tag exists precisely so this can be checked. A
+                // response is handed back by `req_id` alone across two
+                // hops, so a peer that correlated a sessions listing with a
+                // hosts request would otherwise have that listing printed
+                // under `farhelm agent hosts` — authoritative-looking output
+                // answering a question nobody asked.
+                let got = ReplyKind::of(&reply);
+                if got != expected {
+                    anyhow::bail!(
+                        "the helm answered the {} question with a {} listing",
+                        expected.noun(),
+                        got.noun()
+                    );
+                }
+                Ok(reply)
+            }
+            // The message is rendered verbatim whoever wrote it — the
+            // supervisor's relay, or the helm's own listing — because
+            // SPEC.md's actionable-error rule applies to both hops and
+            // neither side's prose improves by being paraphrased here.
+            AgentOutcome::Err { message, .. } => anyhow::bail!(message),
+        },
+        // Still possible, and not a protocol violation: the supervisor
+        // sends an uncorrelated `Error` when it refuses the CREDENTIAL,
+        // before any request has been read (see
+        // `io::handshake_with_session_auth`).
+        ControlMsg::Error {
+            req_id: 0 | REQUEST_ID,
+            message,
+            ..
+        } => anyhow::bail!(message),
+        unexpected => {
+            anyhow::bail!("the supervisor sent an unexpected agent reply: {unexpected:?}")
+        }
+    }
+}
+
+/// Which listing shape a verb must be answered with.
+///
+/// A retained expectation, because the protocol's `reply` tag is only
+/// useful to a client that remembers what it asked. The relay hands a
+/// response back by `req_id` across two hops and nothing on either hop
+/// re-checks the shape, so this is the only place a mismatch can be caught.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReplyKind {
+    Hosts,
+    Sessions,
+}
+
+impl ReplyKind {
+    fn of_verb(verb: &farhelm_proto::AgentVerb) -> ReplyKind {
+        match verb {
+            farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
+            farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
+        }
+    }
+
+    fn of(reply: &AgentReply) -> ReplyKind {
+        match reply {
+            AgentReply::Hosts { .. } => ReplyKind::Hosts,
+            AgentReply::Sessions { .. } => ReplyKind::Sessions,
+        }
+    }
+
+    /// The word this kind is called in an error a user reads.
+    fn noun(self) -> &'static str {
+        match self {
+            ReplyKind::Hosts => "hosts",
+            ReplyKind::Sessions => "sessions",
+        }
+    }
+}
+
+/// The one-line warning a cut listing owes its reader, or `None` for a
+/// complete one.
+///
+/// Separate from the table because it does not belong on stdout: the table
+/// is the machine-readable answer and this is a statement about that
+/// answer's completeness. It exists at all because a truncated listing is
+/// shaped exactly like a whole one, so without it "no such session" and
+/// "past the cut" are the same output.
+fn truncation_notice(reply: &AgentReply) -> Option<String> {
+    match reply {
+        AgentReply::Sessions {
+            sessions,
+            truncated: true,
+        } => Some(format!(
+            "warning: this is not the whole fleet; the listing was cut at {} sessions",
+            sessions.len()
+        )),
+        _ => None,
+    }
+}
+
+/// One listing as a plain aligned table on stdout.
+///
+/// A table rather than JSON because the consumer is a language model
+/// reading its own shell output: columns survive being quoted into a
+/// conversation, and an agent that wanted structure would be parsing prose
+/// out of `message` on the failure path anyway. The `*` column is the one
+/// piece of information that has no other spelling — which row is the
+/// asking session, and which host it is on.
+///
+/// Returns the text rather than printing it so the shape is testable
+/// without a process.
+fn render_agent_reply(reply: &AgentReply) -> String {
+    match reply {
+        AgentReply::Hosts { hosts } => {
+            let mut rows = vec![vec![
+                String::new(),
+                "NAME".to_string(),
+                "KIND".to_string(),
+                "STATE".to_string(),
+            ]];
+            rows.extend(hosts.iter().map(|host| {
+                vec![
+                    marker(host.current),
+                    host.name.clone(),
+                    host.kind.clone(),
+                    host.state.clone(),
+                ]
+            }));
+            aligned(&rows)
+        }
+        AgentReply::Sessions { sessions, .. } => {
+            let mut rows = vec![vec![
+                String::new(),
+                "ID".to_string(),
+                "HOST".to_string(),
+                "TITLE".to_string(),
+                "CWD".to_string(),
+                "AGENT".to_string(),
+                "STATUS".to_string(),
+            ]];
+            rows.extend(sessions.iter().map(|session| {
+                vec![
+                    marker(session.current),
+                    session.id.clone(),
+                    session.host.clone(),
+                    session.title.clone(),
+                    session.cwd.clone(),
+                    session.agent.clone(),
+                    session_status_cell(session),
+                ]
+            }));
+            aligned(&rows)
+        }
+    }
+}
+
+/// The STATUS cell: the status word, overridden for an archived session and
+/// annotated for a stale one.
+///
+/// `archived` REPLACES the word rather than joining it, because a live
+/// status is meaningless for an archived session: whatever the helm last
+/// saw is history the user has already filed away, and printing `running`
+/// beside an archive marker invites an agent to go and interact with it.
+/// `stale` is additive instead — the word is still the last thing anyone
+/// observed, and what the reader needs is to know it may be old.
+fn session_status_cell(session: &farhelm_proto::AgentSession) -> String {
+    if session.archived {
+        return "archived".to_string();
+    }
+    if session.stale {
+        return format!("{} (stale)", session.status);
+    }
+    session.status.clone()
+}
+
+/// The "this one is you" column: `*` for the asking session and its host,
+/// empty otherwise.
+fn marker(current: bool) -> String {
+    if current { "*" } else { "" }.to_string()
+}
+
+/// The widest a non-final column is allowed to get.
+///
+/// This bound is what keeps output linear in the ROW COUNT rather than in
+/// row count times the longest field. Alignment pads every cell in a column
+/// to the widest one, and session fields are user text bounded only by the
+/// supervisor's create-time cap (tens of kilobytes), so one pathological
+/// title in a middle column would otherwise add that many spaces to every
+/// other row — turning a valid, bounded reply into hundreds of megabytes
+/// before a single byte is printed.
+///
+/// Forty-eight is chosen to fit the values that actually matter whole —
+/// session ids, host names, ordinary titles, most working directories — on
+/// a terminal that can still show the columns after it.
+const MAX_CELL_WIDTH: usize = 48;
+
+/// Pad every column to its widest cell, one row per line, with every cell
+/// first made safe and bounded.
+///
+/// Three things happen here, and each is load-bearing:
+///
+/// **Escaping.** Every cell is arbitrary text from somewhere else on the
+/// fleet — titles, working directories, host names, status words — printed
+/// straight to a terminal. A newline in one cell forges a row; a tab shifts
+/// the columns; an ESC introduces a control sequence that can repaint the
+/// screen, hide what is above it, or reach terminal features that have
+/// nothing to do with printing. So control characters become visible
+/// escapes, and one cell can only ever produce one line.
+///
+/// **Clamping.** Non-final columns are cut to [`MAX_CELL_WIDTH`] with a
+/// trailing `…`, for the amplification reason that constant documents. The
+/// final column is neither padded nor clamped: nothing follows it, so it
+/// costs its own length and no more.
+///
+/// **Widths in `char`s, not bytes.** A title or directory is arbitrary user
+/// text, and byte counting would misalign every row after the first
+/// non-ASCII one. It remains an approximation — a wide CJK glyph occupies
+/// two terminal cells and counts as one char here — and that is the right
+/// approximation for this surface: the reader is a model parsing columns,
+/// not a person eyeballing a grid, and the alternative is a Unicode
+/// width-table dependency for a debug-shaped listing.
+///
+/// The last column is never padded, so no line carries trailing spaces.
+fn aligned(rows: &[Vec<String>]) -> String {
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    // Sanitized ONCE, before anything measures: a width taken from the raw
+    // text and then applied to the escaped text would misalign every row
+    // that contained anything to escape.
+    let rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .map(|(column, cell)| {
+                    let cell = safe_cell(cell);
+                    if column + 1 == row.len() {
+                        cell
+                    } else {
+                        clamp(cell)
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let widths: Vec<usize> = (0..columns)
+        .map(|column| {
+            rows.iter()
+                .filter_map(|row| row.get(column))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut out = String::new();
+    for row in &rows {
+        let mut line = String::new();
+        for (column, cell) in row.iter().enumerate() {
+            if column + 1 == row.len() {
+                line.push_str(cell);
+            } else {
+                line.push_str(cell);
+                let pad = widths[column].saturating_sub(cell.chars().count());
+                line.extend(std::iter::repeat_n(' ', pad + 1));
+            }
+        }
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    out
+}
+
+/// One cell as a single printable line.
+///
+/// Every control character is replaced by a visible escape rather than
+/// dropped, so a cell that contained one still says so — a silently
+/// stripped newline turns two forged rows into one plausible row, which is
+/// worse than an ugly one. C0, DEL and C1 are all covered: C1 is the eight-
+/// bit form of the same escape sequences ESC introduces, and a terminal in
+/// a legacy encoding acts on it.
+fn safe_cell(cell: &str) -> String {
+    let mut out = String::with_capacity(cell.len());
+    for ch in cell.chars() {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                // `is_control` is Unicode's Cc category: C0, DEL, and C1,
+                // all of which fit in two hex digits.
+                out.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Cut `cell` to [`MAX_CELL_WIDTH`] characters, marking the cut with `…`.
+///
+/// The ellipsis replaces the last kept character rather than being appended
+/// to it, so a clamped cell is exactly the width the bound names — a cell
+/// that could exceed its own limit would defeat the point of having one.
+fn clamp(cell: String) -> String {
+    if cell.chars().count() <= MAX_CELL_WIDTH {
+        return cell;
+    }
+    let mut out: String = cell.chars().take(MAX_CELL_WIDTH - 1).collect();
+    out.push('…');
+    out
 }
 
 /// Capture the whole environment `farhelm helm setup` is allowed to
@@ -913,5 +1336,172 @@ mod tests {
             Some(std::path::PathBuf::from("/tmp/fake-agent-home"))
         );
         assert_eq!(extra, vec!["--settings", "{}"]);
+    }
+
+    // ---------------------------------------------------------------
+    // `farhelm agent`'s table. The process-level contract lives in
+    // tests/agent_cli.rs; what follows is the rendering itself, where an
+    // exact expected string is cheap and a spawned binary is not.
+    // ---------------------------------------------------------------
+
+    fn agent_session(id: &str, title: &str) -> farhelm_proto::AgentSession {
+        farhelm_proto::AgentSession {
+            id: id.to_string(),
+            host: "h".to_string(),
+            title: title.to_string(),
+            cwd: "/w".to_string(),
+            agent: "claude".to_string(),
+            status: "running".to_string(),
+            current: false,
+            archived: false,
+            stale: false,
+        }
+    }
+
+    fn sessions(rows: Vec<farhelm_proto::AgentSession>) -> AgentReply {
+        AgentReply::Sessions {
+            sessions: rows,
+            truncated: false,
+        }
+    }
+
+    /// Spec: column widths are counted in characters, so a multibyte but
+    /// single-width character does not shift the columns after it.
+    ///
+    /// The formatter deliberately uses `chars().count()` instead of
+    /// `len()`, and nothing else notices the difference: every other table
+    /// fixture in this repo is ASCII, where the two agree exactly. A
+    /// regression to byte length would misalign every row containing an
+    /// accented name or title while all existing tests stayed green.
+    ///
+    /// Wide CJK glyphs are deliberately kept out of this case. They are a
+    /// different problem with a different right answer (display width, not
+    /// character count), and folding them in here would turn one regression
+    /// test into an argument about which approximation is being pinned.
+    #[test]
+    fn column_widths_count_characters_not_bytes() {
+        // "café" is 4 characters and 5 bytes; "tea" is 3 of each. Under
+        // byte counting the first row's TITLE column would be padded one
+        // column too wide and CWD would not line up.
+        let rendered = render_agent_reply(&sessions(vec![
+            agent_session("s1", "café"),
+            agent_session("s2", "tea"),
+        ]));
+        assert_eq!(
+            rendered,
+            [
+                " ID HOST TITLE CWD AGENT  STATUS",
+                " s1 h    café  /w  claude running",
+                " s2 h    tea   /w  claude running",
+                "",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// Spec: control characters in a cell become visible escapes, so no
+    /// value from the fleet can forge a row or drive the terminal.
+    ///
+    /// Every dynamic cell here is text from somewhere else on the fleet,
+    /// printed straight to a terminal a person and a model are both reading.
+    /// A newline forges a row that looks exactly like a real one; an ESC
+    /// opens a control sequence that can repaint the screen, hide the lines
+    /// above it, or reach terminal features that have nothing to do with
+    /// printing. Escaping rather than stripping is deliberate: a silently
+    /// removed newline turns two forged rows into one plausible row.
+    #[test]
+    fn control_characters_in_a_cell_are_escaped_into_one_visible_line() {
+        let rendered = render_agent_reply(&sessions(vec![agent_session(
+            "s1",
+            "real\n  s2 forged\ttab\x1b[31m",
+        )]));
+        assert_eq!(
+            rendered.lines().count(),
+            2,
+            "a cell must never produce a second row: {rendered:?}"
+        );
+        assert!(rendered.contains("real\\n"), "{rendered:?}");
+        assert!(rendered.contains("forged\\ttab"), "{rendered:?}");
+        assert!(rendered.contains("\\x1b[31m"), "{rendered:?}");
+        assert!(
+            !rendered.contains('\x1b'),
+            "no raw ESC may reach the terminal: {rendered:?}"
+        );
+    }
+
+    /// Spec: a non-final column is cut to [`MAX_CELL_WIDTH`] with a `…`,
+    /// while the final column is left whole.
+    ///
+    /// This is a resource bound, not a cosmetic one. Alignment pads every
+    /// cell of a column to the widest one in it, and session titles, paths
+    /// and invocations are user text bounded only by the supervisor's
+    /// create-time cap — so one long value in a middle column multiplies by
+    /// the row count into an output far larger than the reply that produced
+    /// it. The final column is exempt because nothing is padded to it.
+    #[test]
+    fn non_final_columns_are_clamped_and_the_last_is_not() {
+        let long = "x".repeat(MAX_CELL_WIDTH * 3);
+        let mut row = agent_session("s1", &long);
+        row.status = long.clone();
+        let rendered = render_agent_reply(&sessions(vec![row]));
+        let title = rendered
+            .lines()
+            .nth(1)
+            .expect("a data row")
+            .split_whitespace()
+            .nth(2)
+            .expect("the TITLE cell");
+        assert_eq!(title.chars().count(), MAX_CELL_WIDTH);
+        assert!(title.ends_with('…'), "the cut must be marked: {title}");
+        assert!(
+            rendered.contains(&long),
+            "the final column carries its value whole"
+        );
+    }
+
+    /// Spec: STATUS says `archived` for an archived session and appends
+    /// `(stale)` to a cached one.
+    ///
+    /// Both facts are ones the status word alone cannot carry. A cached
+    /// `running` from a host that went offline overnight is byte-identical
+    /// to one observed a second ago, and SPEC.md requires such rows to be
+    /// clearly marked. An archived session's live status is worse than
+    /// uninformative: it is history the user filed away, so showing
+    /// `running` there invites an agent to go and interact with it.
+    #[test]
+    fn the_status_column_reports_archive_and_staleness() {
+        let mut archived = agent_session("s1", "t");
+        archived.archived = true;
+        let mut stale = agent_session("s2", "t");
+        stale.stale = true;
+        let rendered = render_agent_reply(&sessions(vec![archived, stale]));
+        assert_eq!(
+            rendered,
+            [
+                " ID HOST TITLE CWD AGENT  STATUS",
+                " s1 h    t     /w  claude archived",
+                " s2 h    t     /w  claude running (stale)",
+                "",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// Spec: a truncated listing produces a warning naming the cut; a
+    /// complete one produces none.
+    ///
+    /// The notice is the only thing distinguishing a partial fleet from a
+    /// whole one — the table itself is shaped identically either way, so
+    /// without it "no such session" and "past the cut" are the same answer.
+    #[test]
+    fn a_truncated_listing_warns_and_a_complete_one_does_not() {
+        assert!(truncation_notice(&sessions(vec![agent_session("s1", "t")])).is_none());
+        let notice = truncation_notice(&AgentReply::Sessions {
+            sessions: vec![agent_session("s1", "t")],
+            truncated: true,
+        })
+        .expect("a truncated listing must say so");
+        assert!(notice.contains("not the whole fleet"), "{notice}");
+        assert!(notice.contains('1'), "the notice names the count: {notice}");
     }
 }
