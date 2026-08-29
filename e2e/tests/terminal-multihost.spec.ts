@@ -31,7 +31,16 @@
 // =====================================================================
 
 import { test, expect, Page, APIRequestContext, Locator } from "@playwright/test";
-import { openHostMenu, openHostsPanel, openRowMenu, stubFeed } from "./helpers/fleet";
+import {
+  cleanupProfile,
+  createProfile,
+  createSession,
+  openHostMenu,
+  openHostsPanel,
+  openRowMenu,
+  stubFeed,
+} from "./helpers/fleet";
+import { stackScratchDir } from "./helpers/scratch";
 import path from "node:path";
 import fs from "node:fs";
 import { ChildProcess, spawn } from "node:child_process";
@@ -1405,6 +1414,192 @@ test.describe("multi-host", () => {
     } finally {
       if (!id) id = await findSessionIdByTitle(request, title);
       if (id) await cleanupSession(request, id);
+    }
+  });
+
+  // Clone across hosts, end to end (`create_form.rs`'s `pending_choice`):
+  // cloning a row that lives on the SECOND host, while the create
+  // dialog's ordinary default points at the FIRST, must still land the
+  // create on the row's own host with the row's own profile — not on
+  // wherever the dialog would otherwise have defaulted, and not on a
+  // profile id that happens to collide with one on the wrong machine
+  // (profile ids are per-supervisor, and every fresh supervisor seeds the
+  // same starters).
+  test("clone-cross-host: a remote row's clone carries its own host and profile across the handoff", async ({
+    page,
+    request,
+  }) => {
+    requireFleet();
+    const info = stackInfo();
+    const remote = await apiRemoteHost(request);
+
+    const profile = await createProfile(request, remote.id, {
+      name: `clone-remote-profile-${Date.now()}`,
+    });
+    const title = `clone-remote-source-${Date.now()}`;
+    const source = await createSession(request, {
+      title,
+      cwd: "/tmp",
+      host: remote.id,
+      profile_id: profile.id,
+    });
+    // Opened FIRST so the dialog's ordinary default (SPEC.md's "the open
+    // session's host") names the LOCAL machine — the opposite of where
+    // the row this test clones actually lives. Without this anchor, a
+    // clone that landed on the remote host by coincidence of already
+    // being the effective default would look identical to one that
+    // genuinely carried its own row's host across.
+    const anchorTitle = `clone-remote-anchor-${Date.now()}`;
+    const anchor = await createSession(request, { title: anchorTitle, cwd: "/tmp" });
+
+    let cloneId: string | undefined;
+    try {
+      await page.goto("/");
+      const anchorRow = rowByTitle(page, anchorTitle);
+      await expect(anchorRow).toBeVisible({ timeout: 20_000 });
+      await anchorRow.locator(".session-row-open").click();
+      await expect(page.locator(".titlebar .title")).toHaveText(anchorTitle, {
+        timeout: 20_000,
+      });
+
+      const sourceRow = rowByTitle(page, title);
+      await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+      await openRowMenu(sourceRow);
+      await sourceRow.locator(".session-row-clone").click();
+
+      const form = page.locator(".create-session-form");
+      await expect(form).toBeVisible();
+      // The selector follows the CLONED row's host across the handoff
+      // (`pending_choice`), not the anchor session's host the dialog
+      // would otherwise have opened onto.
+      await expect(form.locator(".create-session-host")).toHaveValue(String(remote.id), {
+        timeout: 20_000,
+      });
+      await expect(form.locator(".create-session-profile")).toHaveValue(profile.id, {
+        timeout: 20_000,
+      });
+
+      const newCwd = stackScratchDir("clone-remote-e2e-");
+      await form.locator('input[type="text"]').nth(0).fill(newCwd);
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
+        ),
+        form.locator(".create-session-submit").click(),
+      ]);
+      // The wire body itself, not just what the picker showed — the two
+      // could disagree if the reseed effect wrote the picker's display
+      // without also writing what submit actually reads.
+      const sent = response.request().postDataJSON();
+      expect(sent.host).toBe(remote.id);
+      expect(sent.profile_id).toBe(profile.id);
+
+      const body = await response.json();
+      cloneId = body.id as string;
+      const clonedRow = page.locator(`.session-row[data-session-id="${cloneId}"]`);
+      await expect(clonedRow).toBeVisible({ timeout: 20_000 });
+      await expect(clonedRow.locator(".session-host")).toHaveText(info.remote_ssh, {
+        timeout: 20_000,
+      });
+    } finally {
+      if (cloneId) await cleanupSession(request, cloneId);
+      await cleanupSession(request, anchor.id);
+      await cleanupSession(request, source.id);
+      await cleanupProfile(request, remote.id, profile.id);
+    }
+  });
+
+  // The other half of the cross-host handoff above: `pending_choice` cannot
+  // apply the clone's own agent choice in the SAME render that moves
+  // `chosen_host` (the profile catalog only catches up a render pass later),
+  // and item2-review2.md's F6 requires that an explicit pick made anywhere
+  // in that window wins outright rather than being silently overwritten
+  // once the queued choice finally lands. The pick below is fired
+  // immediately after the clone click, without first waiting for the
+  // picker to settle on the cloned profile — Playwright's own auto-waiting
+  // on `selectOption` is what gives this a real (if not perfectly pinned)
+  // chance of landing INSIDE the handoff; either way the fix's guarantee is
+  // that the FINAL request reflects the explicit pick, whichever side of
+  // the queue's own consumption it happens to land on.
+  test("clone-cross-host-explicit-pick: an agent chosen during the handoff wins over the queued clone", async ({
+    page,
+    request,
+  }) => {
+    requireFleet();
+    const remote = await apiRemoteHost(request);
+
+    const clonedProfile = await createProfile(request, remote.id, {
+      name: `clone-remote-cloned-${Date.now()}`,
+    });
+    const explicitProfile = await createProfile(request, remote.id, {
+      name: `clone-remote-explicit-${Date.now()}`,
+    });
+    const title = `clone-remote-explicit-source-${Date.now()}`;
+    const source = await createSession(request, {
+      title,
+      cwd: "/tmp",
+      host: remote.id,
+      profile_id: clonedProfile.id,
+    });
+    // Opened first for the same reason `clone-cross-host` opens one: with
+    // no anchor the dialog's ordinary default might already name the
+    // remote host by coincidence, and this handoff only exists at all when
+    // the clone has to MOVE the selector away from wherever it opened.
+    const anchorTitle = `clone-remote-explicit-anchor-${Date.now()}`;
+    const anchor = await createSession(request, { title: anchorTitle, cwd: "/tmp" });
+
+    let cloneId: string | undefined;
+    try {
+      await page.goto("/");
+      const anchorRow = rowByTitle(page, anchorTitle);
+      await expect(anchorRow).toBeVisible({ timeout: 20_000 });
+      await anchorRow.locator(".session-row-open").click();
+      await expect(page.locator(".titlebar .title")).toHaveText(anchorTitle, {
+        timeout: 20_000,
+      });
+
+      const sourceRow = rowByTitle(page, title);
+      await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+      await openRowMenu(sourceRow);
+      await sourceRow.locator(".session-row-clone").click();
+
+      const form = page.locator(".create-session-form");
+      await expect(form).toBeVisible();
+      await form.locator(".create-session-profile").selectOption(explicitProfile.id);
+
+      // The host still followed the clone across the handoff — only the
+      // agent was overridden.
+      await expect(form.locator(".create-session-host")).toHaveValue(String(remote.id), {
+        timeout: 20_000,
+      });
+      await expect(form.locator(".create-session-profile")).toHaveValue(explicitProfile.id);
+
+      const newCwd = stackScratchDir("clone-remote-explicit-e2e-");
+      await form.locator('input[type="text"]').nth(0).fill(newCwd);
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
+        ),
+        form.locator(".create-session-submit").click(),
+      ]);
+      const sent = response.request().postDataJSON();
+      expect(sent.host).toBe(remote.id);
+      expect(
+        sent.profile_id,
+        "the explicit pick must reach the wire, not the clone's own profile the handoff had queued",
+      ).toBe(explicitProfile.id);
+
+      const body = await response.json();
+      cloneId = body.id as string;
+      await expect(page.locator(`.session-row[data-session-id="${cloneId}"]`)).toBeVisible({
+        timeout: 20_000,
+      });
+    } finally {
+      if (cloneId) await cleanupSession(request, cloneId);
+      await cleanupSession(request, anchor.id);
+      await cleanupSession(request, source.id);
+      await cleanupProfile(request, remote.id, clonedProfile.id);
+      await cleanupProfile(request, remote.id, explicitProfile.id);
     }
   });
 

@@ -251,6 +251,51 @@ for the consequence line and a confirm/cancel pair with focus on cancel, rather 
 sub-state is a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it
 deliberately does not answer Escape.
 
+Clone (the row menu's newest item) reuses the create form rather than a second submit path: the click builds a
+`CreatePrefill` snapshot of the row's `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic
+generation the list view mints per click. A `use_effect` inside the form compares that generation against the last one
+it applied and reseeds every field — including the raw invocation, for a profile-backed clone too, since the command
+input is merely disabled while a profile is chosen, not emptied, and leaving it stale would surface an unrelated command
+the moment the user switches modes — whenever the two disagree; comparing generations rather than mere presence is what
+makes cloning the SAME row twice in a row reseed a second time, since an unrelated rerender of that effect (a host
+reconnect, a catalog refresh) must not overwrite an edit in progress. The profile choice is trusted only when the row's
+own profile snapshot is `Present` — the catalog still holds that id under the SAME name — which is deliberately STRICTER
+than an ordinary create's remembered-default rule (an id that merely still exists, under a new name, is not evidence
+that cloning it again is what today's catalog would still offer); every other answer falls back to the raw command.
+Trusting the id at all is still a snapshot decision, not a live one: submitting a profile-backed clone resolves that id
+against whatever definition the catalog holds at that moment, exactly like any other profile-backed create.
+
+The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
+`HostId` is a registry row that outlives a retarget or an adopt) before either the selector or the agent choice trusts
+it; a row whose install this client cannot currently confirm is left at the ordinary default with a note explaining why,
+rather than risking a stale command — or, worse, a colliding starter-profile id — landing on a successor install. That
+identity check is not a one-shot gate: `CloneHostState` (`list::create_form`) tracks it across renders so a clone opened
+before the FIRST hosts read lands keeps retrying once the registry answers, instead of giving up permanently because the
+form's separate text-field reseed only ever runs once per clone generation; and a clone whose host DID pass the check is
+re-checked on every later pass, withdrawing the selection back to the ordinary default the instant a retarget or an
+adopt changes the installation behind it while the form stays open. A row that names no host at all (a session from a
+helm too old to report one) is treated as permanently unconfirmable rather than retried: its agent is left unresolved
+with its own note, since there is no install to check at all and applying a raw command or a profile id sight-unseen
+onto whatever host the ordinary default picks could run it on a machine the row never named. An explicit host or agent
+interaction takes the decision away from all of this automatic reconciliation outright, for the rest of that clone
+generation.
+
+A cross-host clone that DOES pass the identity check still cannot select its host and apply its agent choice in the same
+render: the form's own profile catalog is scoped to the LIST VIEW's chosen-host effect, which only catches up one render
+pass after the clone moves `chosen_host`. The agent choice is queued (bound to the target's full install fingerprint,
+not merely its host id, so a retarget landing during the wait cannot be mistaken for the install the choice was actually
+queued for) and applied the instant the catalog's target matches it — on the SAME render when the clone's own host was
+already current, and on a later one otherwise. Because that handoff spans a render the user can act inside of, any
+explicit host or agent interaction cancels a still-queued choice outright, so an answer given before the handoff catches
+up is never silently overwritten once it does.
+
+A clone's working directory, invocation and title are peer-relayed text (SPEC.md's clone rule copies them off another
+session, and a remote supervisor under `--ssh` is the one this client does not control) going into editable controls, so
+they get the profile editor's escaped-display / raw-seed / edited-flag treatment (`profiles::submitted_field`) rather
+than being written in raw: shown escaped while untouched, so a directional override or an invisible character cannot
+make the field say something different from the bytes a submit would send, and an untouched submit still sends those
+ORIGINAL bytes rather than the escaped spelling on screen.
+
 Known risks, accepted deliberately:
 
 - API churn between Dioxus 0.x releases. Mitigation: pin, avoid internals, budget for migrations.

@@ -27,7 +27,10 @@
 //! each one currently have" — and every operation built on that (arrow
 //! navigation, Home/End, filing a freshly-mounted item's handle, moving focus
 //! to a computed position) is IDENTICAL once that question can be asked,
-//! whether the answer is a session's four actions or a host's five. Rather
+//! whether the answer is the session row's five actions or the host row's
+//! five (a coincidence of today's action sets, not an assumption baked in
+//! anywhere here — see `MenuOrder`'s own doc for why `N` is still a
+//! per-row compile-time constant rather than a shared one). Rather
 //! than write that logic twice against two concrete enums, it is written
 //! once against a type parameter `A` (the row's own action enum — `Copy +
 //! Eq + Hash`, since a position is filed and looked up by the action it
@@ -501,8 +504,9 @@ pub(crate) fn cancel_menu_focus(mut queue: MenuFocusQueue) {
 /// [`MenuOrder::pack`] packs the visible actions to the front, so
 /// iteration stops at the first gap by construction.
 ///
-/// `N` is the row's OWN total action count (4 for the session row, 5 for
-/// the host row) — a compile-time fact each row bakes into its own
+/// `N` is the row's OWN total action count (5 for the session row, 5 for
+/// the host row today — the match is incidental, not a constraint this
+/// type enforces) — a compile-time fact each row bakes into its own
 /// `MenuOrder` type alias, never inferred or shared across rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MenuOrder<A, const N: usize>([Option<A>; N]);
@@ -1018,9 +1022,9 @@ pub(crate) fn closed_toggle_key_intent(key: &Key) -> Option<MenuOpenIntent> {
 /// `None` is the re-entry case rather than the opening one.)
 ///
 /// Wrapping rather than stopping at the ends: both rows' menus are short
-/// enough to see whole (four items at most for the session row, five for
-/// the host row), so running off the bottom and reappearing at the top
-/// costs nothing and saves a direction change. An out-of-range `current`
+/// enough to see whole (five items at most, for either row), so running
+/// off the bottom and reappearing at the top costs nothing and saves a
+/// direction change. An out-of-range `current`
 /// (an index from a render whose item set has since changed) is treated
 /// as "not on an item" rather than clamped, so the next arrow re-enters
 /// the list at a defined end instead of landing somewhere derived from a

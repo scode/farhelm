@@ -1235,7 +1235,14 @@ impl ProfileDraft {
 /// override with its visible spelling means the visible spelling, and no
 /// comparison against the seed can tell that apart from not having edited at
 /// all (which is why this takes an `edited` flag rather than comparing).
-fn submitted_field(text: &str, edited: bool, seed: Option<&str>) -> String {
+///
+/// `pub(crate)` because `list::create_form` reuses this exact rule for a
+/// clone's working directory, invocation and title (item2-review2.md's F5):
+/// those three fields are peer-relayed text going into an editable control
+/// for the same reason a profile's name and invocation are, and a second,
+/// hand-copied version of this decision is exactly how the two would drift
+/// apart under a future edit.
+pub(crate) fn submitted_field(text: &str, edited: bool, seed: Option<&str>) -> String {
     match seed {
         Some(seed) if !edited => seed.to_string(),
         _ => text.to_string(),

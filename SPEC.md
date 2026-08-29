@@ -205,7 +205,7 @@ session itself — **error** when the agent process could not be started at all 
 
 ### Lifecycle operations
 
-The client supports: create, open, rename, restart, stop, archive, delete.
+The client supports: create, open, rename, restart, clone, stop, archive, delete.
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
   Terminal tabs keep running, and the session remains with its terminal still viewable.
@@ -216,6 +216,16 @@ The client supports: create, open, rename, restart, stop, archive, delete.
   confirms, stops the agent, then relaunches. Restart reuses the session's terminal when it still exists — the previous
   run's output stays in scrollback — and creates a fresh one when it does not (after a reboot, or on an archived
   session). Restart touches the agent terminal only; terminal tabs are unaffected.
+- **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, working directory,
+  title, and agent — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
+  cloning starts a brand-new, independent create through the same form and the same confirmation described under
+  Creation and identity above, so every field can be edited before submitting and the request can be cancelled like any
+  other create. The agent carries over as a profile only while the source's profile is still the one it names (the same
+  identity a session's own profile snapshot already tracks); otherwise the form falls back to the source's raw
+  invocation, exactly as "the client asks instead of guessing" already requires for a vanished remembered default.
+  Cloning does not deduplicate titles — a duplicate is allowed, the same as any other create. Clone is offered on
+  archived sessions too: it is the only way to get a new, running agent out of one without restarting (and thereby
+  unarchiving) the original.
 - **Archive** hides the session from the default list and shuts down everything in it — agent and terminal tabs — with
   confirmation when anything is still running. Archived sessions keep their metadata; their terminal contents are gone
   (see Terminal experience). Restart on an archived session unarchives it and recovers the conversation where the agent
