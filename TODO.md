@@ -1,11 +1,102 @@
 # TODO
 
-A running list of things the maintainer wants fixed or built, in no particular order. This is intent, not history: an
-entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
-roadmap and carries no priorities unless an entry says so itself.
+A running list of things the maintainer wants fixed or built. This is intent, not history: an entry is REMOVED in the
+same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
+priorities unless an entry says so itself.
 
-- Show the managed supervisor's tmux refusal in a window on macOS. Today it reaches only the supervisor's log (README's
-  tmux NOTE), so a Mac without an acceptable tmux shows no reason for the missing local host.
+Three buckets, assigned by the maintainer: "near term" is what should be picked up next; "maybe later" is wanted but not
+soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either way. Within
+a bucket, no order.
+
+## Near term
+
+- Let an agent talk to the helm from inside its session, with injected rules that make `$farhelm <request>` work out of
+  the box. Two halves. (a) Rules injection, on by default with a setting to turn it off: the per-launch `SessionStart`
+  hook the supervisor already injects for identity capture (`farhelm internal hook`; Claude via `--settings`, Codex via
+  `-c hooks.SessionStart=…`, SPEC_impl.md's identity-hook paragraph) also emits a short rules block to stdout — "you are
+  inside farhelm session N; `$farhelm …` means use the `farhelm` CLI; these are the verbs" — because Claude Code feeds a
+  SessionStart hook's stdout into the model's context. Injected rules rather than a skill file, deliberately: a skill
+  would live in a vendor-owned directory, which SPEC.md's no-agent-configuration rule forbids, while hook output is on
+  disk nowhere and cannot outlive the launch. Verify before building that Codex feeds hook stdout into context too (it
+  fires SessionStart at the first prompt, which is early enough); if it does not, the fallback is a `-c` instructions
+  key pointing at a file under farhelm's own state dir. The existing skip rules (user-supplied `--settings`, Codex hook
+  config, bare `--`) and the `FARHELM_AGENT_HOOKS` switch carry over unchanged, and a skipped launch has no rules — say
+  so somewhere the user can see. SPEC.md needs a sentence: today the hook's contract is "reports identity, prints
+  nothing"; this makes its output visible to the agent by design. (b) The channel. The mental model is that the agent is
+  talking to the HELM — the thing the user is looking at — not to its host's supervisor. The session cannot reach the
+  helm directly (the host has no route, address, or credential back to the laptop), so the supervisor is the proxy:
+  `farhelm` inside the session dials `supervisor.sock` with the per-session credential exactly as `farhelm spawn` does
+  today, and the supervisor forwards the request up the helm↔supervisor control channel as a new upcall message — the
+  first request/response RPC going UPWARD on that protocol, so it needs correlation ids, a timeout, and a clear "no helm
+  is attached to this session" failure. Route to the helm that holds this session's attachment (the supervisor's
+  one-attachment-per-session rule makes that well defined, and it is by construction the helm the user is looking at).
+  Every verb goes via the helm, including same-host ones: one code path, one place for policy, and "no helm attached" is
+  the honest failure rather than a silent downgrade to local semantics. SPEC.md's agent-spawn section says v1 targets
+  the session's own host only; this widens it, and the widening must be recorded there. LITMUS TEST — the entry is not
+  done until this works end to end, from a session on a REMOTE host, driven only by the agent through the injected
+  rules: `$farhelm clone this session onto <other host name>` produces a session on the other host, with the same agent
+  resolved by profile NAME against that host's own catalog (profile ids are per-supervisor and name nothing elsewhere;
+  no matching name means a refusal naming the host, not a silent fallback), in the same cwd unless `--cwd` says
+  otherwise (a directory absent on the target is the helm's normal create refusal, reported verbatim), and the new
+  session appears in the UI without a refresh. That case is chosen because it is exactly what a supervisor-local
+  implementation cannot do: it needs the host list the helm owns (`farhelm hosts`, so the agent can name a target
+  without guessing), the helm's create path, cross-host profile resolution, and the upcall round trip. An implementation
+  that satisfies every other verb but not this one has built the wrong thing. Also `$farhelm help`, which just prints
+  the verb list. Rough size: three to five days for rules, CLI verbs, and the setting, plus about two for the relay; the
+  multi-helm question in the unbucketized list becomes load-bearing here rather than theoretical.
+
+- Make a missing or too-old tmux on macOS a plain message, not a crash. Today `farhelm-desktop` on a Mac without tmux
+  prints the supervisor's WARN line, "Error: checking the tmux version of tmux / Caused by: No such file or directory",
+  and then a `thread 'main' panicked at desktop.rs` with a backtrace hint — the managed supervisor child exited during
+  startup (`DesktopBootstrap::start`), and the panic is the only handling. The behavior itself is by spec (the Mac
+  artifacts bundle no tmux and nothing installs one — SPEC.md's Mac section, SPEC_impl.md's terminal-substrate section);
+  the presentation is the defect. Floor: recognize the supervisor's tmux refusal in the bootstrap and say, in plain
+  words, that on macOS tmux must be installed by hand, at least version 3.7c (read the floor from wherever the
+  supervisor's check gets it, not a second literal), that Homebrew is the recommended way, and the exact command:
+  `brew install tmux` — and NOTHING else: no panic, no stack trace, no backtrace hint, no supervisor WARN line or
+  `Caused by` chain ahead of it. That message alone, then a non-zero exit. Stretch: show that same message in a window,
+  since a Finder launch has no terminal for it to land in (this subsumes the earlier entry about the refusal reaching
+  only the supervisor's log). Also fix the wording of the refusal itself: "checking the tmux version of tmux" is the
+  unresolved bare name after the Homebrew/MacPorts/PATH probes all missed, and should say that no tmux was found in any
+  of them.
+
+- Add "clone" to the session row's `…` menu (next to rename/stop/archive/delete): start a FRESH agent — same profile (or
+  same raw invocation when the session has no source profile), same working directory, same host, same title — as a new
+  session with a new conversation, leaving the original alone. Deliberately not restart-with-resume, whose whole point
+  is continuing the captured conversation. UI improvement, not a supervisor feature: the row already carries everything
+  a create needs (`cwd`, `invocation`, `source_profile`, host) and `api::create_session` takes exactly those, so clone
+  is a create pre-filled from the row with a fresh intent key. Also a clone-WITH-EDIT variant that opens the create form
+  pre-filled from the row instead of creating immediately: the common case is "same host, same agent, but in that other
+  directory", so the row's values become the defaults and the user changes the one field that differs — this is probably
+  the more useful of the two and may be all that is needed (a plain clone is then just submitting the form unchanged).
+  Decisions to make when doing it: whether a create from a `source_profile` whose existence is no longer `Present` falls
+  back to the snapshotted invocation or refuses; and whether an identical title is acceptable ("farhelm" twice — rename
+  is cheap afterwards, so probably yes). A "replace" (delete+clone) variant was considered and deferred: its cost is
+  ordering (create-then-delete is the safe failure) and the confirm-when-live gate, not the create itself.
+
+- Make the host row's `remove` (and `edit destination`) reachable. On an ssh host the buttons exist (`hosts.rs`
+  `HostRow`, gated on `HostKind::Ssh`) but are clipped off the sidebar's right edge: `.host-row-main` is one
+  non-wrapping flex line whose fixed-size children — name at `min-width: 8em`, phase chip, `profiles`,
+  `edit destination`, `remove`, plus `retry`/`adopt` when not connected — add up to roughly 430px, inside the 312px that
+  the 340px sidebar leaves after `.hosts-panel`'s padding, and `.app-sidebar`'s `overflow: hidden auto` clips rather
+  than scrolls horizontally. The `.host-name` comment guards against a long NAME pushing the controls off; the controls
+  do it on their own. The e2e assertion `terminal-multihost.spec.ts` makes on `.host-remove` passes regardless, because
+  Playwright's `toBeVisible` ignores clipping by an ancestor's `overflow: hidden` — a fixed test should assert the
+  button's bounding box lies inside the sidebar's. Candidate fixes: wrap the actions onto a second line, or fold them
+  into the same `…` menu the session row got in PR #239.
+
+## Maybe later
+
+- Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
+  activity time, the cwd line, the profile chip and the header's archive button) but the browser owns their ~1s delay
+  and nothing — no CSS, attribute, or JS — shortens it; WebKit's web content ignores the macOS tooltip-delay default
+  too. A faster, themed tooltip is a component shown on hover after a delay of the app's own choosing (~300ms), and it
+  has to escape the sidebar: `.app-sidebar`'s `overflow: hidden auto` clips anything anchored inside a row near its
+  edges, so the tooltip needs a body-level portal or `position: fixed` with measured coordinates — the row `…` menu's
+  popover is the pattern to copy. If the native delay turns out tolerable, a `title` pass over the terse actions (stop /
+  archive / delete, the host row's buttons) is an hour and needs none of this.
+
+## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
   supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
