@@ -26,7 +26,8 @@
  * native, the prompt states' refusal to answer any of them, focus
  * returning to the toggle on an automatic dismissal, a busy menu staying
  * navigable, and the raised surface's computed style. The pure decisions
- * behind all of it live in list/menu_panel.rs and are unit-tested there;
+ * behind all of it live in menu_panel.rs (shared with the host row's own
+ * menu — hosts.rs) and are unit-tested there;
  * nothing in the Rust suite can dispatch a key, move focus, or resolve a
  * computed style, which is what this file is for.
  *
@@ -42,6 +43,7 @@ import {
   createSession,
   localHostId,
   openFilterBar,
+  openHostMenu,
   openHostsPanel,
   openRowMenu,
   pinAutoSelect,
@@ -704,7 +706,7 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
  * Arrow navigation reaches EVERY item, wraps at both ends, and Home/End
  * jump — through the real nodes, not through index arithmetic.
  *
- * `next_menu_focus` in list/menu_panel.rs already pins the arithmetic,
+ * `next_menu_focus` in menu_panel.rs already pins the arithmetic,
  * and it cannot prove any of what this proves: that all four items
  * mounted, that each registered a handle under its own action, and that
  * the positions the key handler derives from `MenuOrder` line up with the
@@ -965,8 +967,26 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     const remove = target.locator(".session-row-delete");
 
     // ArrowDown on a CLOSED toggle: opens and lands on the first command.
-    await toggle.focus();
-    await expect(toggle).toBeFocused();
+    //
+    // The mount-ready wait above only rules out the FIRST steal. This
+    // session's `sleep 300` invocation is not a real agent — nothing ever
+    // proves the attach — so the reconnect ladder in terminal.js keeps
+    // unmounting and remounting the island (see that file's "Auto-reconnect"
+    // header comment), and every remount runs its own one-time `reveal()`.
+    // `reveal()`'s own `takesFocus()` deliberately does NOT hold back for a
+    // focused button — only for an editable control or another terminal —
+    // so a reconnect landing in the gap between `.focus()` and the
+    // assertion below steals focus right back out from under the toggle,
+    // on WebKit under CI load (`chrome.spec.ts`'s focus-ring test documents
+    // the same per-second churn against the same fixture). Retrying the
+    // whole focus-then-check, rather than only waiting on the check, is
+    // what lets a losing attempt recover: the next iteration re-focuses
+    // after whatever reconnect just fired, instead of polling a focus that
+    // is never coming back on its own.
+    await expect(async () => {
+      await toggle.focus();
+      await expect(toggle).toBeFocused();
+    }).toPass({ timeout: 10_000 });
     await page.keyboard.press("ArrowDown");
     await expect(target.locator(".session-row-menu-panel")).toBeVisible();
     await expect(rename).toBeFocused();
@@ -1025,9 +1045,14 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     // proven only through the other. Focus is re-established from the
     // TOGGLE rather than assumed: cancelling the rename above unmounted
     // the button that held it, and the panel never closed, so there was
-    // no fresh open to place focus anywhere.
+    // no fresh open to place focus anywhere. Same retry as above and for
+    // the same reason — the reconnect ladder is still running this whole
+    // test, not just at its start.
     await expect(target.locator(".session-row-menu-panel")).toBeVisible();
-    await toggle.focus();
+    await expect(async () => {
+      await toggle.focus();
+      await expect(toggle).toBeFocused();
+    }).toPass({ timeout: 10_000 });
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
@@ -1187,6 +1212,17 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsStripSettled(page);
+    // Same precaution, for the same reason, as "opening the actions menu
+    // enters it" above: this test asserts where focus IS at several points,
+    // and the lone session's terminal takes focus for itself when its mount
+    // lands — which can be after the row is visible. Without this wait a
+    // mount landing between the open and the first focus assertion steals
+    // the focus the panel just placed, and the failure reads as a menu that
+    // did not enter itself (the item holding the roving `tabindex` while
+    // something else holds DOM focus) rather than as the race it is.
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
 
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
@@ -1997,7 +2033,10 @@ test("a local session's host line is provisional until the registry confirms it"
 test("closing the hosts panel closes its profiles section", async ({ page }) => {
   await page.goto("/");
   await openHostsPanel(page);
-  const toggleProfiles = page.locator(".host-profiles-toggle").first();
+  // `.host-profiles-toggle` now lives inside the host row's own "⋯" menu.
+  const firstHostRow = page.locator(".host-row").first();
+  await openHostMenu(firstHostRow);
+  const toggleProfiles = firstHostRow.locator(".host-profiles-toggle");
   await toggleProfiles.click();
   await expect(page.locator(".profiles-section")).toBeVisible({ timeout: 20_000 });
 
@@ -2005,6 +2044,53 @@ test("closing the hosts panel closes its profiles section", async ({ page }) => 
   await expect(page.locator(".hosts-panel")).toBeHidden();
   await openHostsPanel(page);
   await expect(page.locator(".profiles-section")).toHaveCount(0);
+});
+
+/**
+ * F10/TEST-CROSS-MENU: host menus and session menus keep separate
+ * open-menu signals, and each toggle's own callback explicitly clears the
+ * OTHER signal when it opens (`HostsPanel`'s own doc calls this "one row
+ * menu open, across BOTH panels"). Nothing before this opened one kind and
+ * then the other and checked that the first actually closed — removing
+ * either cross-close write would leave two floating panels mounted at
+ * once, and both are `position: fixed` panels that can overlap unrelated
+ * rows, making a command — including a destructive one — look attached to
+ * the wrong owner.
+ *
+ * Both directions: the two signals are written independently, so a
+ * regression in either write is invisible to a test that only opens the
+ * other order.
+ */
+test("opening one row's menu closes the other row kind's open one", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `cross-menu-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const sessionRow = row(page, session.id);
+    await expect(sessionRow).toBeVisible({ timeout: 20_000 });
+    await openHostsPanel(page);
+    const hostRow = page.locator(".host-row").first();
+
+    // Session menu open, then a host menu opens: the session's must close.
+    await openRowMenu(sessionRow);
+    await expect(sessionRow.locator(".session-row-menu-panel")).toBeVisible();
+    await openHostMenu(hostRow);
+    await expect(sessionRow.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(sessionRow.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+    await expect(hostRow.locator(".host-row-menu-panel")).toBeVisible();
+
+    // The reverse: with the host menu still open, a session menu opens —
+    // the host's must close.
+    await openRowMenu(sessionRow);
+    await expect(hostRow.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(hostRow.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+    await expect(sessionRow.locator(".session-row-menu-panel")).toBeVisible();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
 });
 
 /**

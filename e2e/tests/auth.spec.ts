@@ -349,10 +349,35 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   // Leave the shared suite authenticated under the replacement. Playwright
   // reloads this file for later contexts and workers, while the header refresh
   // above advances request fixtures that remain in this worker.
-  const state = await page.context().storageState();
+  //
+  // The CREDENTIAL only, rebuilt in global-setup.ts's exact shape rather than
+  // dumped from `page.context().storageState()`. This file is the baseline
+  // localStorage every later project's contexts start from, and this page has
+  // by now used the product: it clicked a row, so the UI wrote
+  // `farhelm.last-selected` (list/view.rs's `remember_selection`), and a whole
+  // dump hands that remembered selection to every context for the rest of the
+  // run. Nothing after this point asked for it, and it is not inert — the
+  // sidebar's auto-select resolves a remembered id against the helm before it
+  // considers its own fallback. That is how sort.spec.ts's incomplete-walk
+  // fallback test came to open the shared session instead of the newest-created
+  // one, on both engines, in a full run and nowhere else — the projects that
+  // run it on its own never execute this test, so the residue is invisible
+  // outside the full suite. Any other preference this page leaves behind (the
+  // list sort, say) would travel the same way, so the filter is on the whole
+  // shape rather than on the one key that has bitten us.
+  const { cookies } = await page.context().storageState();
   await writeFile(
     AUTH_STORAGE_STATE_PATH,
-    JSON.stringify(state),
+    JSON.stringify({
+      cookies,
+      origins: [{
+        origin: new URL(baseURL!).origin,
+        // Pinned to the replacement by the assertion just above, which is
+        // also what makes the `!` safe: the route handler always sets it
+        // before the exchange reply reaches the page.
+        localStorage: [{ name: DEVICE_SECRET_KEY, value: replacementSecret! }],
+      }],
+    }),
     { mode: 0o600 },
   );
   await chmod(AUTH_STORAGE_STATE_PATH, 0o600);

@@ -30,8 +30,8 @@
 // reset and restoration hooks.
 // =====================================================================
 
-import { test, expect, Page, APIRequestContext } from "@playwright/test";
-import { openHostsPanel, openRowMenu, stubFeed } from "./helpers/fleet";
+import { test, expect, Page, APIRequestContext, Locator, Route } from "@playwright/test";
+import { openHostMenu, openHostsPanel, openRowMenu, stubFeed } from "./helpers/fleet";
 import path from "node:path";
 import fs from "node:fs";
 import { ChildProcess, spawn } from "node:child_process";
@@ -193,6 +193,115 @@ function hostRowByName(page: Page, name: string) {
     has: page.locator(".host-name", {
       hasText: new RegExp(`^${escapeRegExp(name)}$`),
     }),
+  });
+}
+
+/**
+ * Assert that `locator`'s element is not merely present in the DOM and
+ * geometrically inside the viewport, but fully PAINTED there — its center
+ * AND all four corners resolve, under a real hit test, to the element
+ * itself rather than to a clipping ancestor or a covering surface.
+ *
+ * A center-only hit test (this function's predecessor, in the clipping
+ * regression this closes — F8/TEST-CLIP-EDGE) passes for a button whose
+ * EDGE is clipped while its center stays reachable, which is exactly the
+ * shape of failure a sidebar's `overflow: hidden` produces: it clips
+ * PAINT, not the element's own `getBoundingClientRect()`, so the box lies
+ * fully inside the viewport right up until the one pixel of margin this
+ * function's corner probes are what actually exercise. Five points — the
+ * center plus all four corners, each inset off the boundary edge so the
+ * probe lands ON the element's own paint rather than exactly on an edge
+ * where rounding could tip either way — is what proves the WHOLE control
+ * is reachable, not merely some pixel of it.
+ *
+ * Each corner's inset is that corner's own `border-radius`, floored at one
+ * pixel, rather than a flat pixel for all four. A rounded corner's
+ * outermost pixel belongs to NO element: it is outside the element's own
+ * painted shape, so `elementFromPoint` there resolves to whatever is
+ * painted behind it (and the engines disagree about which side of the
+ * curve a point exactly on it falls — Chromium and WebKit both answered
+ * three of the panel's four 1px-inset corners with the panel and the
+ * fourth with its parent). Insetting by the radius lands the probe on the
+ * first pixel of the corner that is genuinely the element's. This costs
+ * nothing against the failure the corners exist to catch: a sidebar's
+ * `overflow: hidden` eats whole chunks of a control, never just the four
+ * pixels of a corner's curve.
+ *
+ * Throws on a detached element or a page with no real viewport rather than
+ * silently returning: a caller here is asserting reachability, and a hard
+ * assertion two lines above already means execution never reaches a
+ * `null` box or viewport in practice — a dead branch that RETURNED
+ * successfully (this function's predecessor) reads as a passing case that
+ * can never actually be observed.
+ */
+async function assertFullyPaintedAndHitTestable(page: Page, locator: Locator): Promise<void> {
+  const box = await locator.boundingBox();
+  if (box === null) {
+    throw new Error("element has no bounding box — is it detached, or display:none?");
+  }
+  const viewport = page.viewportSize();
+  if (viewport === null) {
+    throw new Error("page reports no viewport size");
+  }
+
+  // Entirely inside the viewport — not merely overlapping it, which a
+  // half-clipped button could still do.
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+
+  // `parseFloat` reads the computed pixel length these classes all use;
+  // a percentage radius would parse to its own number and land the probe
+  // somewhere arbitrary, so this deliberately does not pretend to support
+  // one — nothing in app.css writes a percentage radius, and a future rule
+  // that did would have to teach this helper about it.
+  const radii = await locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      topLeft: parseFloat(style.borderTopLeftRadius) || 0,
+      topRight: parseFloat(style.borderTopRightRadius) || 0,
+      bottomLeft: parseFloat(style.borderBottomLeftRadius) || 0,
+      bottomRight: parseFloat(style.borderBottomRightRadius) || 0,
+    };
+  });
+  const inset = (radius: number) => Math.max(1, Math.ceil(radius));
+  const points = [
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+    { x: box.x + inset(radii.topLeft), y: box.y + inset(radii.topLeft) },
+    { x: box.x + box.width - inset(radii.topRight), y: box.y + inset(radii.topRight) },
+    { x: box.x + inset(radii.bottomLeft), y: box.y + box.height - inset(radii.bottomLeft) },
+    {
+      x: box.x + box.width - inset(radii.bottomRight),
+      y: box.y + box.height - inset(radii.bottomRight),
+    },
+  ];
+
+  // Evaluated ON the element's own handle, not via a CSS selector re-query
+  // from `page.evaluate`: a locator can be scoped through several levels
+  // of filtering with no single selector string that names it, while
+  // `Locator.evaluate` hands the callback the exact bound DOM node.
+  //
+  // Each probe reports WHAT it hit, not merely whether it hit: a corner
+  // that resolves to a clipping ancestor and one that resolves to a
+  // covering surface are different bugs, and the failure message is the
+  // only place that distinction survives.
+  const probes = await locator.evaluate(
+    (element, points) =>
+      points.map(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        return {
+          ok: !!hit && (hit === element || element.contains(hit)),
+          hit: hit ? `${hit.tagName}.${(hit as HTMLElement).className}` : "nothing",
+        };
+      }),
+    points,
+  );
+  probes.forEach((probe, index) => {
+    expect(
+      probe.ok,
+      `probe point ${index} (${points[index].x}, ${points[index].y}) missed the element — hit ${probe.hit}`,
+    ).toBe(true);
   });
 }
 
@@ -551,6 +660,10 @@ test.describe("multi-host", () => {
     await expect(local).toHaveAttribute("data-host-phase", "connected");
     await expect(local).toHaveAttribute("data-host-kind", "local");
     await expect(local.locator(".host-chip")).toHaveText("connected");
+    // `.host-remove`/`.host-edit` now live inside the row's "⋯" menu, so
+    // the count assertions below apply to the OPEN menu — a local row
+    // opens onto profiles/retry only, never these two.
+    await openHostMenu(local);
     await expect(local.locator(".host-remove")).toHaveCount(0);
     await expect(local.locator(".host-edit")).toHaveCount(0);
 
@@ -558,6 +671,7 @@ test.describe("multi-host", () => {
     const remote = hostRowByName(page, info.remote_ssh);
     await expect(remote).toHaveAttribute("data-host-phase", "connected");
     await expect(remote).toHaveAttribute("data-host-kind", "ssh");
+    await openHostMenu(remote);
     await expect(remote.locator(".host-remove")).toHaveCount(1);
 
     // The identities are the point of the two rows being two rows: the
@@ -573,6 +687,526 @@ test.describe("multi-host", () => {
       await expect(
         page.locator(`[data-host-id="${host.id}"] .host-detail`),
       ).toContainText(host.identity);
+    }
+  });
+
+  // The regression test for TODO.md's now-removed near-term entry, and the
+  // one this whole menu redesign exists to make possible: `toBeVisible()`
+  // — used everywhere else in this file — does NOT notice clipping by an
+  // ancestor's `overflow: hidden`, which is exactly how `.host-remove`
+  // used to render invisible and unclickable off the sidebar's right edge
+  // while every other assertion in this suite kept passing.
+  // `assertFullyPaintedAndHitTestable` checks the two things `toBeVisible()`
+  // cannot: the button's own bounding box lies entirely inside the
+  // viewport, and its center AND all four corners actually hit-test to IT
+  // (or a descendant of it) rather than to whatever `.app-sidebar`'s clip
+  // left painted on top. A `position: fixed` panel escaping that clip (see
+  // `.host-row-menu-panel`'s own app.css comment) is what makes both true;
+  // a regression back to an inline, sidebar-clipped `.host-remove` would
+  // fail the bounding-box check outright and the hit-test the moment the
+  // clip started eating even one pixel of it.
+  test("host-remove-escapes-the-sidebar-clip: the menu panel is not merely present, it is reachable", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9005,
+          kind: "ssh",
+          destination: "user@manageable",
+          name: "user@manageable",
+          identity: "identity-manageable",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-manageable",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = hostRowByName(page, "user@manageable");
+    await openHostMenu(row);
+    const remove = row.locator(".host-remove");
+    await expect(remove).toBeVisible();
+
+    // Center-only used to be the whole check here, and a button whose EDGE
+    // is clipped while its center stays reachable would still pass it —
+    // `assertFullyPaintedAndHitTestable` probes all four corners too. See
+    // its own doc (F8/TEST-CLIP-EDGE).
+    await assertFullyPaintedAndHitTestable(page, remove);
+  });
+
+  // F1/COR-CONFIRM-CLIP: choosing `remove` used to replace `.host-row-main`'s
+  // contents with the name, the chip, an unshrinkable warning sentence, a
+  // second copy of the name, AND both buttons — all on one non-wrapping
+  // line, which the 340px sidebar clips exactly the way it once clipped
+  // `remove` itself (the regression the previous test guards). This proves
+  // the FIX rather than merely the shape of the old bug: both confirmation
+  // controls are fully painted and hit-testable after proceeding through
+  // the real click path, not just present in the DOM.
+  test("host-confirm-remove-fits-the-sidebar: both prompt buttons stay reachable", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9006,
+          kind: "ssh",
+          // Long enough that the old single-line layout could never have
+          // fit it plus the warning sentence plus both buttons — the exact
+          // condition F1 describes, not merely a name at the edge of it.
+          destination: "user@a-rather-long-manageable-hostname.example.internal",
+          name: "user@a-rather-long-manageable-hostname.example.internal",
+          identity: "identity-manageable",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-manageable",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = hostRowByName(page, "user@a-rather-long-manageable-hostname.example.internal");
+    await openHostMenu(row);
+    await row.locator(".host-remove").click();
+
+    const confirm = row.locator(".host-confirm-remove");
+    const cancel = row.locator(".host-cancel-remove");
+    await expect(confirm).toBeVisible();
+    await expect(cancel).toBeVisible();
+
+    await assertFullyPaintedAndHitTestable(page, confirm);
+    await assertFullyPaintedAndHitTestable(page, cancel);
+  });
+
+  // F2/COR-HOST-MENU-OFFSCREEN: the longest real phase word
+  // (`unreachable-reprobing`) is long enough BY ITSELF — no unusually long
+  // host name required — to overflow the header line's available width
+  // once the name, the chip, and the "⋯" toggle are all accounted for.
+  // `.host-row-main` used to allow that line to WRAP (to make room for the
+  // removal confirmation below it — see `.host-confirm-remove-panel` in
+  // app.css), and wrapping sent the "⋯" onto a line of its own starting at
+  // the row's LEFT edge, anchoring its `position: fixed` floating menu off
+  // the sidebar's own left edge with it — clipped and unclickable, the
+  // same class of bug `host-remove-escapes-the-sidebar-clip` above already
+  // guards on the RIGHT edge. This proves the header now stays on one
+  // line (the toggle painted at the row's usual right-hand spot) and that
+  // its menu, once opened, is fully reachable at every corner — not merely
+  // present in the DOM.
+  test("host-menu-survives-the-longest-phase-word: the header never wraps its toggle off-screen", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9020,
+          kind: "ssh",
+          destination: "user@remote-host",
+          name: "user@remote-host",
+          identity: null,
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "unreachable-reprobing",
+            cause: "dial-failed",
+            last_error: "connection refused",
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = hostRowByName(page, "user@remote-host");
+    await expect(row.locator(".host-chip")).toHaveText("unreachable-reprobing");
+
+    // The toggle itself, BEFORE opening anything: still on the header's one
+    // line, fully inside the sidebar, not wrapped away to the left.
+    const toggle = row.locator(".host-row-menu");
+    await assertFullyPaintedAndHitTestable(page, toggle);
+
+    await openHostMenu(row);
+    const panel = row.locator(".host-row-menu-panel");
+    await assertFullyPaintedAndHitTestable(page, panel);
+    // Every corner of every item too, not just the panel's own box — the
+    // same standard `host-remove-escapes-the-sidebar-clip` holds `.host-remove`
+    // to, applied here to the whole item set this phase's menu offers (no
+    // `.host-adopt`: this phase carries no identity to adopt).
+    for (const item of [
+      row.locator(".host-profiles-toggle"),
+      row.locator(".host-retry"),
+      row.locator(".host-edit"),
+      row.locator(".host-remove"),
+    ]) {
+      await assertFullyPaintedAndHitTestable(page, item);
+    }
+  });
+
+  // F2/COR-STALE-ANCHOR: the add-host form mounts ABOVE `.host-list`, so
+  // opening it moves every host row's vertical position — and an already
+  // open row menu is a `position: fixed` panel measured at its toggle's OLD
+  // coordinates (see `menu_panel_style`'s own doc), left stranded there
+  // unless something notices and closes it. Toggling the form open must
+  // close a host menu that predates it, not merely leave the panel visually
+  // near enough to look plausible.
+  test("add-host-form-closes-a-stray-host-menu: the add form's own layout shift is covered", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9007,
+          kind: "ssh",
+          destination: "user@manageable",
+          name: "user@manageable",
+          identity: "identity-manageable",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-manageable",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = hostRowByName(page, "user@manageable");
+    await openHostMenu(row);
+    await expect(row.locator(".host-row-menu-panel")).toBeVisible();
+
+    await page.locator(".add-host-button").click();
+    await expect(page.locator(".add-host-form")).toBeVisible();
+    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(row.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  // F9/TEST-HOST-KEYBOARD: `menu_panel.rs`'s keyboard mechanics are pinned
+  // headlessly, but nothing before this proved `HostRow` wired them to real
+  // DOM elements — every other host-menu test drives it by pointer click and
+  // finds items by class alone. An adoptable ssh host is used deliberately:
+  // it is the one state offering all five actions, so the separator's
+  // position and the wrap boundary are both exercised on the full list
+  // rather than a shorter one.
+  test("host-menu-keyboard-contract: role=menu, every item reachable, wraps, Escape/Tab restore focus", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9009,
+          kind: "ssh",
+          destination: "user@mismatched-keyboard",
+          name: "user@mismatched-keyboard",
+          identity: "identity-recorded",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "identity-mismatch",
+            recorded: "identity-recorded",
+            reported: "identity-reported",
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = hostRowByName(page, "user@mismatched-keyboard");
+    await openHostMenu(row);
+
+    const toggle = row.locator(".host-row-menu");
+    const menu = row.locator(".host-row-menu-items");
+    await expect(menu).toHaveAttribute("role", "menu");
+
+    const profiles = row.locator(".host-profiles-toggle");
+    const retry = row.locator(".host-retry");
+    const adopt = row.locator(".host-adopt");
+    const edit = row.locator(".host-edit");
+    const remove = row.locator(".host-remove");
+    for (const item of [profiles, retry, adopt, edit, remove]) {
+      await expect(item).toHaveAttribute("role", "menuitem");
+    }
+
+    // Focus is put on the toggle EXPLICITLY, rather than left where the
+    // opening click put it: this walks the list from OUTSIDE it.
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+
+    await page.keyboard.press("ArrowDown");
+    await expect(profiles).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(retry).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(adopt).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(edit).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(remove, "the separator is not a stop on the way to remove").toBeFocused();
+    // Both wrap boundaries, in the two directions that reach them.
+    await page.keyboard.press("ArrowDown");
+    await expect(profiles).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(remove).toBeFocused();
+
+    await page.keyboard.press("Home");
+    await expect(profiles).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(remove).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The half a plain "Escape closes it" assertion would miss: closing
+    // destroys the element that held focus, and without the handoff the
+    // user lands on the document body, dozens of Tab presses from the row
+    // they were working on.
+    await expect(toggle).toBeFocused();
+
+    // Tab exits and restores focus identically to Escape.
+    await openHostMenu(row);
+    await toggle.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(profiles).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+  });
+
+  // F11/TEST-EDIT-CLOSE: nothing before this ACTIVATED Edit — every existing
+  // test only checked it was present or disabled. This proves the whole
+  // lifecycle: choosing it closes the "⋯" menu before the row swaps to the
+  // destination field, the existing destination is copied into the draft,
+  // and cancelling returns an ordinary row with no menu revived behind it.
+  test("host-edit-destination-lifecycle: closes the menu, prefills, cancel restores the row", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9011,
+          kind: "ssh",
+          destination: "user@editable",
+          name: "user@editable",
+          identity: "identity-editable",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-editable",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = hostRowByName(page, "user@editable");
+    await openHostMenu(row);
+    await row.locator(".host-edit").click();
+
+    // Gone the instant the row swaps to the destination field — nothing
+    // here dismisses it by hand.
+    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+    const input = row.locator(".host-destination-input");
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue("user@editable");
+
+    await row.locator(".host-cancel-edit").click();
+
+    // Back to the ordinary row, and no menu revived behind it.
+    await expect(row.locator(".host-destination-input")).toHaveCount(0);
+    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(row.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  // F14/TEST-BUSY-GUARDS: `aria-disabled`, unlike a native `disabled`
+  // attribute, does not stop a click or a keyboard activation from
+  // reaching the button — each of the five item handlers has to refuse
+  // busy on its OWN. Existing tests check only the disabled APPEARANCE.
+  // This holds one operation open on the (always-present) local host, then
+  // arrows through every item of an UNRELATED, fully adoptable host's menu
+  // and activates each one, proving that no request any of them could have
+  // caused reaches that other host (the row's own background provisioning
+  // read is named and excluded below) and that nothing opens — while also
+  // proving keyboard navigation still REACHES every item, so a fix that
+  // swapped `aria-disabled` for native `disabled` (which would also satisfy
+  // "no request, nothing opens") fails this test too.
+  test("host-menu-busy-guards: aria-disabled items refuse activation but stay reachable", async ({
+    page,
+    request,
+  }) => {
+    const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
+    let releaseLocalRetry: () => void = () => {};
+    const localRetryHeld = new Promise<void>((resolve) => {
+      releaseLocalRetry = resolve;
+    });
+    await page.route(`**/api/hosts/${local.id}/retry`, async (route) => {
+      await localRetryHeld;
+      await route.continue();
+    });
+    // Everything addressed to this host, under BOTH shapes its endpoints
+    // take: the sub-resources (`/profiles`, `/retry`, `/adopt`,
+    // `/destination`) and the host resource itself, which is what a
+    // removal's `DELETE` targets (api.rs). A glob covering only the
+    // sub-resources would make `remove`'s guard unobservable here.
+    const targetHits: string[] = [];
+    const recordTargetHit = async (route: Route) => {
+      targetHits.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+      await route.continue();
+    };
+    await page.route("**/api/hosts/9013", recordTargetHit);
+    await page.route("**/api/hosts/9013/*", recordTargetHit);
+    // The one request on this host that no menu item can cause: every host
+    // row mounts a provisioning panel that reads its own host's retained
+    // run (`provisioning.rs`) on mount, on every feed notice, and on a
+    // fallback poll. It is background traffic with no relationship to the
+    // menu, it arrives at times this test does not control, and none of
+    // the five item handlers would ever issue it — so it is named and
+    // excluded here rather than allowed to stand in for the guards this
+    // test is actually about.
+    const backgroundProvisioningRead = "GET /api/hosts/9013/provisioning";
+    const menuAttributableHits = () =>
+      targetHits.filter((hit) => hit !== backgroundProvisioningRead);
+
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9013,
+          kind: "ssh",
+          destination: "user@busy-target",
+          name: "user@busy-target",
+          identity: "identity-recorded",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "identity-mismatch",
+            recorded: "identity-recorded",
+            reported: "identity-reported",
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    // Every step below runs while a stalled route holds the shared
+    // operation token. Releasing it has to happen even when an assertion
+    // throws: a route left waiting outlives the test body, and Playwright's
+    // own page teardown then blocks on it until the suite's `afterEach`
+    // times out — which buries the real failure under a second, unrelated
+    // one.
+    try {
+      await page.goto("/");
+      await openHostsPanel(page);
+      const source = page.locator(`[data-host-id="${local.id}"]`);
+      const target = hostRowByName(page, "user@busy-target");
+
+      // Hold ONE operation open on an unrelated row — the page's single
+      // shared operation token, so every OTHER row's items go
+      // `aria-disabled` too.
+      await openHostMenu(source);
+      await source.locator(".host-retry").click();
+
+      await openHostMenu(target);
+      const profiles = target.locator(".host-profiles-toggle");
+      const retry = target.locator(".host-retry");
+      const adopt = target.locator(".host-adopt");
+      const edit = target.locator(".host-edit");
+      const remove = target.locator(".host-remove");
+      const items = [profiles, retry, adopt, edit, remove];
+      for (const item of items) {
+        await expect(item).toHaveAttribute("aria-disabled", "true");
+      }
+
+      // Reachable despite being disabled: arrow navigation still lands on
+      // every one of them, in the declared order.
+      const toggle = target.locator(".host-row-menu");
+      await toggle.focus();
+      for (const item of items) {
+        await page.keyboard.press("ArrowDown");
+        await expect(item).toBeFocused();
+      }
+
+      // The baseline the activation assertion below is measured against:
+      // opening the panel and walking it with the arrow keys must already
+      // have reached nothing on this host. Asserted rather than assumed,
+      // so a request that arrives BEFORE any activation is reported here,
+      // where it happened, instead of being blamed on a failed guard.
+      expect(menuAttributableHits()).toEqual([]);
+
+      // Activated anyway. `aria-disabled` (unlike the native `disabled`
+      // attribute) does not remove an element from the accessibility tree or
+      // stop it receiving events — it is a semantic hint, not a browser
+      // enforcement mechanism — but Playwright's own actionability checks
+      // treat it as disabled and WAIT for it to clear before a plain
+      // `.click()` will dispatch anything, which would time this test out
+      // without ever exercising a single handler's guard
+      // (F6/TEST-ARIA-DISABLED-CLICK). `dispatchEvent` bypasses Playwright's
+      // actionability checks entirely and fires the event directly on the
+      // element — exactly the activation a native `<button>` still answers
+      // to despite `aria-disabled`, which is the real hazard this test
+      // exists to catch: each handler's OWN guard has to refuse, because the
+      // DOM will not refuse it first.
+      for (const item of items) {
+        await item.dispatchEvent("click");
+      }
+
+      // Nothing opened…
+      await expect(page.locator(".profiles-section")).toHaveCount(0);
+      await expect(target.locator(".host-destination-input")).toHaveCount(0);
+      await expect(target.locator(".host-confirm-remove")).toHaveCount(0);
+      await expect(target.locator(".host-row-menu-panel")).toBeVisible();
+      // …and nothing the menu could have caused reached this host's own
+      // endpoints (its profiles GET included: a toggle guard that failed
+      // open would still have to read the catalog before the section could
+      // render).
+      expect(menuAttributableHits()).toEqual([]);
+    } finally {
+      releaseLocalRetry();
     }
   });
 
@@ -643,7 +1277,9 @@ test.describe("multi-host", () => {
     );
     // The row stays unmanageable even while it is down: it is still the
     // reserved local row, and offering remove would offer an operation the
-    // helm refuses outright.
+    // helm refuses outright. Checked inside the OPEN menu — `.host-remove`
+    // now lives there, not on the row line.
+    await openHostMenu(local);
     await expect(local.locator(".host-remove")).toHaveCount(0);
   });
 
@@ -694,7 +1330,9 @@ test.describe("multi-host", () => {
     await expect(row.locator(".host-detail")).toContainText("identity-before");
     await expect(row.locator(".host-detail")).toContainText("identity-after");
     // The control names what adopting would accept, so the click and the
-    // sentence above it cannot disagree.
+    // sentence above it cannot disagree. `.host-adopt` now lives inside
+    // the row's "⋯" menu.
+    await openHostMenu(row);
     await expect(row.locator(".host-adopt")).toHaveText("adopt identity-after");
   });
 
@@ -734,6 +1372,7 @@ test.describe("multi-host", () => {
     await openHostsPanel(page);
     const row = hostRowByName(page, "user@silent");
     await expect(row).toHaveAttribute("data-host-phase", "identity-unverified");
+    await openHostMenu(row);
     await expect(row.locator(".host-adopt")).toHaveCount(0);
     await expect(row.locator(".host-detail")).toContainText(
       "identity-recorded",
@@ -788,6 +1427,7 @@ test.describe("multi-host", () => {
     await page.goto("/");
     await openHostsPanel(page);
     const row = hostRowByName(page, "user@racing");
+    await openHostMenu(row);
     await row.locator(".host-adopt").click();
 
     // The refusal is the helm's, verbatim, in this row's own error line —
@@ -1170,6 +1810,7 @@ test.describe("multi-host", () => {
       // dialogs, so there is no browser prompt to accept, and the flow is
       // the same on both renderers.
       const row = hostRowByName(page, info.remote_ssh);
+      await openHostMenu(row);
       await row.locator(".host-remove").click();
       await expect(row.locator(".confirm-consequence")).toContainText(
         "leaves its supervisor and sessions running",
@@ -1379,6 +2020,7 @@ test.describe("multi-host", () => {
     await page.goto("/");
     await openHostsPanel(page);
     const row = page.locator(`[data-host-id="${local.id}"]`);
+    await openHostMenu(row);
     await expect(row.locator(".host-retry")).toBeVisible();
     await row.locator(".host-retry").click();
 
@@ -1404,6 +2046,7 @@ test.describe("multi-host", () => {
     await page.goto("/");
     await openHostsPanel(page);
     const row = hostRowByName(page, info.remote_ssh);
+    await openHostMenu(row);
     await row.locator(".host-remove").click();
     await expect(row.locator(".host-confirm-remove")).toBeVisible();
     // Focus lands on the way OUT of the destructive action, so a stray
@@ -1413,6 +2056,10 @@ test.describe("multi-host", () => {
 
     // Back to the ordinary controls, same host, same id — a cancel that
     // "worked" by re-adding the host would look identical without this.
+    // The menu itself closed when `remove` was clicked (see `HostRow`'s
+    // own doc for why), so `.host-remove` is checked inside a freshly
+    // reopened one rather than on the row line.
+    await openHostMenu(row);
     await expect(row.locator(".host-remove")).toBeVisible();
     await expect(row.locator(".host-confirm-remove")).toHaveCount(0);
     expect((await apiRemoteHost(request)).id).toBe(before.id);

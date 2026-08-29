@@ -645,6 +645,14 @@ pub(crate) fn ListView(
     // `commit_listing` reconciles it (a menu whose row left the listing
     // must not reappear, already open, when the row comes back).
     let mut menu_open = use_signal(|| None::<String>);
+    // The host row's counterpart — see `HostsPanel`'s own "one row menu
+    // open, across BOTH panels" doc for why this is a SECOND signal (kept
+    // in step with `menu_open` above by each side's own toggle callback)
+    // rather than one signal shared between two very differently-shaped
+    // row kinds. Owned here, next to `menu_open`, for the same reason that
+    // one is: this is the only component both the session list and the
+    // hosts panel are mounted underneath.
+    let mut host_menu_open = use_signal(|| None::<HostId>);
     // Which row, if any, has its rename field open (PLAN_M5.md item 6),
     // and the text being typed into it.
     //
@@ -707,13 +715,14 @@ pub(crate) fn ListView(
             read.refresh_error().is_some(),
         )
     });
-    // Closes any open actions-menu panel the instant something above
-    // `.session-list` could have moved the row it was measured against —
-    // a `position: fixed` panel's coordinates are a one-time snapshot
-    // (see `menu_panel_style`), so anything that shifts the sidebar's
-    // layout above the rows leaves it visibly detached from its toggle
-    // unless something notices and closes it. Two different KINDS of
-    // cause feed this one effect:
+    // Closes any open actions-menu panel — a SESSION row's or a HOST row's,
+    // whichever is open — the instant something above `.session-list` (or
+    // above `.host-list`, for the host row's own panel) could have moved
+    // the row it was measured against: a `position: fixed` panel's
+    // coordinates are a one-time snapshot (see `menu_panel_style`), so
+    // anything that shifts the sidebar's layout above the rows leaves it
+    // visibly detached from its toggle unless something notices and closes
+    // it. Two different KINDS of cause feed this one effect:
     //
     // - EXTERNAL layout shifts — a scroll on `.app-sidebar`/`.app-shell`,
     //   or (where the renderer supports it) a window resize — arrive as
@@ -731,14 +740,30 @@ pub(crate) fn ListView(
     //
     // Reruns on every write any of these six reads subscribes to,
     // including the initial mount: that first run is a no-op (`menu_open`
-    // starts `None`), so there is no special-casing needed to skip it.
+    // and `host_menu_open` both start `None`), so there is no
+    // special-casing needed to skip it.
     //
     // NOT exhaustive — a same-INDEX height change on a row already above
     // the open one (a per-row error line appearing, say) moves the open
     // row without tripping ANY of these six signals or the index-based
     // reflow check in `commit_listing`. See that check's own doc for the
     // residual this leaves and why it is accepted rather than chased
-    // further here.
+    // further here. `commit_listing`'s own reconciliation is SESSION-only,
+    // too: the hosts list carries no analogous reorder guard, on the
+    // judgment that a small, largely id-ordered registry reordering under
+    // an open host menu is enough rarer than a session listing reordering
+    // to accept as a residual rather than duplicate that machinery for a
+    // second row kind.
+    //
+    // The host row accepts the identical same-index-height-change residual
+    // as the session row above, for the identical reason: it is covered by
+    // NEITHER a reorder guard nor any of the six signals this effect
+    // watches, and a host row's OWN detail/remedy/warning/error text
+    // growing or shrinking is exactly the shape of change that can move an
+    // open host menu without tripping any of them. Chasing it would mean
+    // watching every open row's own measured height, which is the same
+    // trade `commit_listing`'s doc already declines for the rarer
+    // reordering case, made again here for a residual judged rarer still.
     use_effect(move || {
         layout_epoch();
         hosts_open();
@@ -747,6 +772,9 @@ pub(crate) fn ListView(
         hosts_strip_shape();
         if menu_open.peek().is_some() {
             menu_open.set(None);
+        }
+        if host_menu_open.peek().is_some() {
+            host_menu_open.set(None);
         }
     });
     // The create dialog's explicit host choice, and which host row has its
@@ -2013,6 +2041,12 @@ pub(crate) fn ListView(
     let toggle_menu = use_callback(move |id: String| {
         let currently = menu_open.peek().as_deref() == Some(id.as_str());
         menu_open.set(if currently { None } else { Some(id) });
+        // Opening a session row's menu must close whichever host row's menu
+        // is open — see `HostsPanel`'s own "one row menu open, across BOTH
+        // panels" doc.
+        if !currently {
+            host_menu_open.set(None);
+        }
     });
     let on_stop = use_callback(on_stop);
     let on_delete = use_callback(on_delete);
@@ -2252,6 +2286,8 @@ pub(crate) fn ListView(
                 mutation_busy_hosts,
                 provisioning_busy_hosts,
                 profiles_open,
+                host_menu_open,
+                session_menu_open: menu_open,
                 profiles: host_profiles,
                 on_changed: refresh_hosts,
             }

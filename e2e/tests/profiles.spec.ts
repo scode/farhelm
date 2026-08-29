@@ -50,6 +50,7 @@ import {
   listProfiles,
   listSessions,
   localHostId,
+  openHostMenu,
   openHostsPanel,
   openRowMenu,
   ProfileRow,
@@ -99,16 +100,24 @@ async function listWithStubbedFeed(page: Page): Promise<FeedStub> {
 
 /** Expand one host's profiles section from its row in the hosts panel —
  * opening the panel itself first, since the sidebar keeps it behind a
- * toggle. */
+ * toggle, and the row's own "⋯" menu behind a second one now that
+ * `profiles`/`retry`/`adopt`/`edit destination`/`remove` all moved into it. */
 async function openProfiles(page: Page, host: number) {
   await openHostsPanel(page);
-  await page.locator(`[data-host-id="${host}"] .host-profiles-toggle`).click();
+  const row = page.locator(`[data-host-id="${host}"]`);
+  await openHostMenu(row);
+  await row.locator(".host-profiles-toggle").click();
   await expect(section(page, host)).toBeVisible({ timeout: 20_000 });
 }
 
-/** Collapse it again. */
+/** Collapse it again. `openHostMenu` is idempotent (see its own doc), so
+ * this reopens the row's menu rather than assuming it is still the one
+ * `openProfiles` left up — anything between the two calls (a poll, a
+ * layout shift) may have closed it in the meantime. */
 async function closeProfiles(page: Page, host: number) {
-  await page.locator(`[data-host-id="${host}"] .host-profiles-toggle`).click();
+  const row = page.locator(`[data-host-id="${host}"]`);
+  await openHostMenu(row);
+  await row.locator(".host-profiles-toggle").click();
   await expect(section(page, host)).toHaveCount(0, { timeout: 20_000 });
 }
 
@@ -277,6 +286,38 @@ test.describe("agent profiles", () => {
     profiles.push({ host, id: found!.id });
     return found!;
   }
+
+  /**
+   * F5/COR-PROFILES-OVERLAY: choosing "profiles" from the kebab menu must
+   * close the menu itself. Both surfaces begin directly under the same host
+   * line, so an actions panel left open (the behavior before this fix)
+   * could cover the profiles header or its first control depending on
+   * viewport and content geometry. This proves the fix without dismissing
+   * anything by hand: the row's own menu must already be gone, and
+   * "new profile" must take a real click rather than one a covering panel
+   * would have intercepted.
+   */
+  test("profiles-closes-its-own-menu: the new-profile control needs no manual dismissal", async ({
+    page,
+    request,
+  }) => {
+    const local = await localHostId(request);
+    await listWithStubbedFeed(page);
+    await openHostsPanel(page);
+    const row = page.locator(`[data-host-id="${local}"]`);
+    await openHostMenu(row);
+    await row.locator(".host-profiles-toggle").click();
+    await expect(section(page, local)).toBeVisible({ timeout: 20_000 });
+
+    // The choice closes the menu itself — nothing here dismisses it by hand.
+    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(row.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+
+    // Not merely present: a click Playwright's actionability checks would
+    // refuse to deliver if a still-open menu panel covered this point.
+    await section(page, local).locator(".new-profile-button").click();
+    await expect(section(page, local).locator(".profile-form")).toBeVisible({ timeout: 20_000 });
+  });
 
   /**
    * The whole CRUD round trip, driven through the panel: define a profile,
@@ -1680,8 +1721,15 @@ test.describe("agent profiles", () => {
     await profileRow(page, local, profile.id).locator(".profile-confirm-delete").click();
 
     // With the token held, a host verb on the same row is refused before it
-    // starts — and the section must survive it.
-    await page.locator(`[data-host-id="${local}"] .host-retry`).click({ force: true });
+    // starts — and the section must survive it. `.host-retry` lives inside
+    // the row's own "⋯" menu now; `openProfiles` above already opened it
+    // and clicking `.profile-delete`/`.profile-confirm-delete` (inside the
+    // profiles SECTION, a sibling of the menu, not a child of it) does not
+    // close it, but reopening is idempotent and guards against a stray
+    // dismissal in between.
+    const localRow = page.locator(`[data-host-id="${local}"]`);
+    await openHostMenu(localRow);
+    await localRow.locator(".host-retry").click({ force: true });
     await expect(
       section(page, local),
       "a verb that never started must not collapse the surface it would have replaced",
