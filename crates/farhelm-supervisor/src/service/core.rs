@@ -214,6 +214,35 @@ pub const AGENT_UPCALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// enough that a wedged connection is reported as one.
 pub const AGENT_DELIVER_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The LAST bound on a mutation's delete fence: how long the relay keeps a
+/// retained upcall entry alive before declaring its helm link unusable.
+///
+/// A mutating verb whose answer budget expires does not release its fence —
+/// the budget expiring says nothing about whether the helm is still working
+/// — so [`super::agent_relay::HelmLink::upcall`] hands the guard to a task
+/// that waits for the link to resolve the entry or die. That made connection
+/// loss the only terminal event, and a live connection that simply never
+/// resolves the entry (a helm answering under a `req_id` it already used, a
+/// helm that quietly forgot the request) therefore fenced the asking session
+/// against deletion for the life of the process, while every later mutation
+/// from that session queued behind it.
+///
+/// So the retention itself is bounded, and its expiry RETIRES THE LINK
+/// rather than quietly dropping the guard. Dropping it would be the
+/// budget-shaped release `upcall` argues against, one clock further out:
+/// still a guess that the mutation ended. Retiring is not a guess — it ends
+/// the connection, which makes the ending the honest
+/// "delivered, outcome unknown" that every pending upcall on a dead link
+/// already gets.
+///
+/// Ten minutes: far past any plausible far-hop rename/stop/archive (the helm
+/// routes it to another supervisor, which has its own budgets an order of
+/// magnitude shorter), and short enough that a wedged link is not a
+/// permanent one. Deliberately not tight — reaching it means killing a
+/// connection that may be serving live terminals, so the bound should only
+/// ever be reached by something genuinely broken.
+pub const AGENT_FENCE_RETAIN_TIMEOUT: Duration = Duration::from_secs(600);
+
 /// The timeouts a `Supervisor` treats as "this consumer is gone, not
 /// merely slow".
 ///
@@ -274,6 +303,15 @@ pub struct SupervisorTimeouts {
     /// the helm connection's writer queue before reporting the request as
     /// undelivered.
     pub agent_deliver: Duration,
+    /// See [`AGENT_FENCE_RETAIN_TIMEOUT`]: the last bound on a mutation's
+    /// retained delete fence, whose expiry retires the helm link.
+    ///
+    /// Injectable for the usual reason plus a sharper one: the production
+    /// value is minutes, and the test that proves the bound FIRES has to
+    /// reach it — under `start_paused`, which only advances time when the
+    /// runtime is otherwise idle, so an unreachable value is an
+    /// indefinitely parked test rather than a slow one.
+    pub agent_fence_retain: Duration,
 }
 
 impl Default for SupervisorTimeouts {
@@ -288,6 +326,7 @@ impl Default for SupervisorTimeouts {
             sink_ready: SINK_READY_TIMEOUT,
             agent_upcall: AGENT_UPCALL_TIMEOUT,
             agent_deliver: AGENT_DELIVER_TIMEOUT,
+            agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
         }
     }
 }
@@ -433,6 +472,18 @@ pub type SinkLookupGate = SinkReservationGate;
 /// removes the attachment. Production installs none.
 pub type NaturalDetachGate = SinkReservationGate;
 
+/// A hook awaited inside an `AgentRequest`'s window between claiming the
+/// delete fence and checking the asking session's credential.
+///
+/// That window is the entire content of the claim-before-authentication
+/// rule (see [`Supervisor::agent_request_locks`]), and it is invisible from
+/// outside: both orderings answer the same thing, and the wrong one is
+/// wrong only for the instant a delete can slip through. Holding the
+/// boundary is what lets a test try the delete DURING it — the only way to
+/// tell "the fence was claimed first" from "the fence was claimed at some
+/// point". Production installs none.
+pub type AgentAuthGate = SinkReservationGate;
+
 /// A hook awaited after a forwarder's output client is safely gone but before
 /// that result is published to teardown waiters.
 ///
@@ -577,6 +628,8 @@ pub struct SupervisorSeams {
     pub forwarder_cleanup_gate: Option<ForwarderCleanupGate>,
     /// See [`ArchiveGate`]. `None` in production.
     pub archive_gate: Option<ArchiveGate>,
+    /// See [`AgentAuthGate`]. `None` in production.
+    pub agent_auth_gate: Option<AgentAuthGate>,
     /// See [`SampleFault`]. `None` in production.
     pub sample_fault: Option<SampleFault>,
     /// How often the supervisor's own periodic task fires — see
@@ -724,6 +777,7 @@ impl Default for SupervisorSeams {
             natural_detach_gate: None,
             forwarder_cleanup_gate: None,
             archive_gate: None,
+            agent_auth_gate: None,
             sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
             activity_quantum: ACTIVITY_STAMP_QUANTUM,
@@ -1244,6 +1298,14 @@ pub(crate) struct KeyedLocks {
     /// lookup itself, never across the `await` that acquires the per-key
     /// lock.
     locks: std::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
+    /// Per-key count of claims that have reached their wait — see
+    /// [`KeyedLocks::claims_reached_for_test`].
+    #[cfg(test)]
+    reached: std::sync::Mutex<HashMap<String, u64>>,
+    /// Woken whenever `reached` grows, so an observer can await a
+    /// contender's arrival instead of spinning for it.
+    #[cfg(test)]
+    reached_changed: tokio::sync::Notify,
 }
 
 impl KeyedLocks {
@@ -1261,6 +1323,21 @@ impl KeyedLocks {
                 }
             }
         };
+        // Announced HERE — after the map hop, and with no await between
+        // this and the acquisition below, so a task the counter has
+        // reported cannot fail to be registered on the per-key mutex by the
+        // time any observer runs. See
+        // [`KeyedLocks::claims_reached_for_test`].
+        #[cfg(test)]
+        {
+            *self
+                .reached
+                .lock()
+                .expect("keyed lock arrival map poisoned")
+                .entry(key.to_string())
+                .or_default() += 1;
+            self.reached_changed.notify_waiters();
+        }
         KeyedGuard {
             registry: Arc::clone(self),
             key: key.to_string(),
@@ -1284,6 +1361,66 @@ impl KeyedLocks {
             .get(key)
             .and_then(std::sync::Weak::upgrade);
         lock.is_some_and(|lock| lock.try_lock().is_err())
+    }
+
+    /// Resolve once at least `count` claims of `key` have reached their
+    /// wait on the per-key lock.
+    ///
+    /// Exists because "the contender is blocked on the fence" is otherwise
+    /// unobservable, and the ordering tests that assert it were reduced to
+    /// yielding a fixed number of scheduler turns and reading an empty
+    /// queue as proof. That proves nothing: a task that has not been polled
+    /// at all leaves the same empty queue as one parked on the fence, so
+    /// those tests would have passed against an implementation that had
+    /// moved or dropped the claim entirely and merely ran late.
+    ///
+    /// What makes the count trustworthy is where [`Self::claim`] increments
+    /// it: after the map lookup and in the same uninterrupted stretch as
+    /// the `lock_owned()` await, with nothing between them that can yield.
+    /// A task this counter has reported therefore cannot be observed —
+    /// observing requires the observer to run, which requires this task to
+    /// have yielded, which it can only do at the acquisition — before it is
+    /// a registered waiter.
+    ///
+    /// Monotonic and per key, never decremented, so a test says "the second
+    /// claim of this key has arrived" rather than "somebody is waiting",
+    /// which would be ambiguous with the holder that is already there.
+    ///
+    /// UNBOUNDED, and every caller must wrap it in a `tokio::time::timeout`
+    /// carrying its own ordering-specific message. The bound is not
+    /// defensive padding: the regression these observations exist to catch
+    /// is a claim that was moved or removed, and against that
+    /// implementation the count is never reached — so an unbounded await
+    /// turns a failing test into a parked test suite. The message belongs
+    /// at the call site rather than here because what did not happen
+    /// ("the delete never reached the fence", "the second mutation never
+    /// claimed") is the whole diagnostic, and it differs per caller.
+    #[cfg(test)]
+    pub(crate) async fn claims_reached_for_test(&self, key: &str, count: u64) {
+        loop {
+            // `enable()` registers this waiter BEFORE the count is read,
+            // which is the whole ceremony's point: `notify_waiters` only
+            // wakes waiters that already exist, and a `Notified` future
+            // registers on its first POLL rather than on construction — so
+            // reading the count first, or merely constructing the future
+            // first, would let an increment land in the gap and leave this
+            // parked on a notification that has already gone by.
+            let changed = self.reached_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self
+                .reached
+                .lock()
+                .expect("keyed lock arrival map poisoned")
+                .get(key)
+                .copied()
+                .unwrap_or_default()
+                >= count
+            {
+                return;
+            }
+            changed.await;
+        }
     }
 }
 
@@ -3294,6 +3431,66 @@ pub struct Supervisor {
     /// (see this struct's lock-discipline docs). Nothing acquires a
     /// lifecycle claim while holding either of the other two.
     pub(crate) lifecycle_locks: Arc<KeyedLocks>,
+    /// One claim per ASKING session id, held for the whole of a MUTATING
+    /// `AgentRequest` upcall (`Rename`/`Stop`/`Archive`) — see
+    /// `handlers::handle_agent_request`'s `AgentRequest` arm.
+    ///
+    /// This is a lease on the CREDENTIAL that admitted the upcall, not on
+    /// whatever the verb ends up acting on. `authenticates_session` is a
+    /// snapshot taken once, at the top of that handler, and the round trip
+    /// to the helm and back can run long enough for `DeleteSession` to
+    /// remove the very row that snapshot vouched for. Without a fence, a
+    /// session deleted in that window keeps its already-spent credential
+    /// good for a mutation that lands afterward — the authority the delete
+    /// was supposed to revoke, exercised on borrowed time. Holding this
+    /// claim across the upcall, and having [`handle_delete_session`]
+    /// (`super::handlers`) wait on the SAME key before it tears a session
+    /// down, closes that window: a delete targeting an id with an
+    /// in-flight fence waits for the fence to clear, by which point the
+    /// mutation it authorized has already completed.
+    ///
+    /// TWO PROPERTIES MAKE THAT TRUE, and both are easy to lose in a
+    /// refactor of the handler:
+    ///
+    /// - The claim is taken BEFORE `authenticates_session` runs, so the
+    ///   check happens under the fence. Taken afterwards, a whole delete
+    ///   can begin and finish in the gap between the check and the claim,
+    ///   and the mutation then proceeds on an identity that no longer
+    ///   exists.
+    /// - The claim is released when the MUTATION is over, not when the
+    ///   asking CLI's answer budget is. `service::agent_relay`'s
+    ///   `HelmLink::upcall` takes ownership of the guard for exactly this
+    ///   reason and holds it past a budget expiry until the helm answers or
+    ///   the link dies — see its docs for the bound that puts on the hold.
+    ///
+    /// DELIBERATELY SEPARATE from `lifecycle_locks` above, keyed the same
+    /// way (by session id) though the two are never the same lock for the
+    /// same id. The obvious-looking alternative — reuse `lifecycle_locks`
+    /// for this fence too — deadlocks the common case: a self-targeting
+    /// verb (no `--session`, the asking session acting on itself) would
+    /// hold `lifecycle_locks(id)` on the way up while the mutation's OWN
+    /// execution, reached moments later through `StopSession`/
+    /// `RenameSession`/`ArchiveSession`, tries to claim the identical key
+    /// to do the work. Two registries mean the fence and the target's own
+    /// lifecycle claim can never be the same lock, so a self-targeting
+    /// verb cannot block on itself.
+    ///
+    /// LOCK ORDER relative to `lifecycle_locks`: `handle_delete_session` is
+    /// the only site that ever holds both, and it claims THIS registry
+    /// first, `lifecycle_locks` second. No other code path acquires
+    /// `lifecycle_locks` and then reaches for this one, so that single
+    /// fixed order is enough to rule out a cycle — reversing it would
+    /// reintroduce exactly the self-target deadlock the split above avoids
+    /// (a concurrent self-targeting mutation would then hold
+    /// `lifecycle_locks(id)` while waiting on this registry, which
+    /// `handle_delete_session` would be holding while waiting on
+    /// `lifecycle_locks(id)`).
+    ///
+    /// Read-only verbs (`Hosts`/`Sessions`) take no claim here: they change
+    /// nothing durable, so a delete racing a listing has nothing to
+    /// protect against, and serializing them behind an unrelated delete
+    /// would cost latency for no correctness gain.
+    pub(crate) agent_request_locks: Arc<KeyedLocks>,
     /// The home directory the agents' own record trees hang off
     /// (PLAN_M3.md item 8), resolved once at construction from
     /// `SupervisorSeams::agent_home` or `$HOME`.
@@ -3645,6 +3842,7 @@ impl Supervisor {
             may_record: std::sync::atomic::AtomicBool::new(may_record),
             intent_locks: Arc::new(KeyedLocks::default()),
             lifecycle_locks: Arc::new(KeyedLocks::default()),
+            agent_request_locks: Arc::new(KeyedLocks::default()),
             agent_home,
             user_home,
             capture_window,

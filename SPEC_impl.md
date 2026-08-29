@@ -667,6 +667,45 @@ request that spent its whole budget waiting for room on a full writer queue was 
 only party that can tell them apart; the asking CLI blocks with no deadline of its own so that the specific answer
 reaches it.
 
+A MUTATING verb is fenced against its own asker being deleted mid-flight, and its failures speak a different vocabulary
+from a listing's. The credential that admits an `AgentRequest` is validated once, but a rename/stop/archive stays in
+flight to the helm and back for as long as thirty seconds, which is ample room for a `DeleteSession` to revoke that very
+credential underneath it. So the supervisor claims a per-asking-session fence (`Supervisor::agent_request_locks`) BEFORE
+it checks the credential — checking first and claiming after leaves a gap a whole delete fits inside — and
+`handle_delete_session` waits on the same key before tearing anything down. The fence is released when the MUTATION
+ends, not when the CLI's answer budget does: a budget expiring says nothing about whether the helm is still working, so
+the guard is held until the helm answers or the connection dies. That is bounded by the LINK's life rather than by a
+clock, which is only a bound if the link can be counted on to end — and it cannot, because a response naming no pending
+entry is dropped, which is right for an ordinary late answer and indistinguishable from a helm answering under an id it
+has already used. So the retention has a last resort of its own (ten minutes), and its expiry RETIRES THE LINK rather
+than dropping the guard: dropping it would be the same budget-shaped release on a longer clock, still guessing that the
+mutation ended, whereas ending the connection makes every pending upcall on it resolve as the delivered-outcome-unknown
+ending the relay already speaks. A response correlated to a `req_id` that was NEVER ISSUED is retired the same way and
+immediately, on both legs of the relay: it cannot be a late answer, so the only readings are a broken peer and a hostile
+one, and on a connection that stays healthy the waiter it strands has nothing else to end it. Correspondingly, a
+connection lost after the request was queued is reported to a mutating caller as `Timeout` ("delivered, outcome
+unknown") rather than `Unavailable` ("never delivered, retry freely"), with a remedy that says to look at the session
+before retrying — the change may already have taken effect, and the retry-safe kind would be an invitation to apply it
+twice. A listing keeps `Unavailable`, having nothing to double-apply. Which verbs are mutating is
+`AgentVerb::is_mutating`, one exhaustive match in the protocol crate that both the supervisor and the helm read, so a
+verb added later cannot be fenced on one side and not the other.
+
+That vocabulary is a rule about a PHASE, not a list of failures, and every hop applies it the same way: once a mutation
+has been handed to the next hop, the only endings that may speak plainly are the expected success reply and a refusal
+the peer itself authored. Everything else — the link dying, a frame that will not decode, a reply correlated to another
+request, a well-formed reply of the wrong shape, a refusal that could not be enqueued — is delivered-outcome-unknown for
+a mutating verb, because each of them leaves the same question unanswered and a peer broken enough to produce one is not
+thereby proof that nothing happened. The helm's own connection to a target supervisor enforces this by ending rather
+than by guessing: an agent answer it cannot even refuse (its writer queue full) closes the connection instead of
+dropping the refusal, since the link dying is the terminal event a mutation's retained fence is waiting for, and a
+silent drop on a link that then recovers holds that fence until the retention's own last-resort bound expires. A
+wrong-shape reply is named by its `ControlMsg` VARIANT and nothing else, for the same reason the phase rule exists at
+all: the full rendering of a legal near-frame-limit listing pushed the agent's own reply frame past the protocol limit,
+whereupon the size backstop replaced the whole outcome and the mutation vocabulary was lost to a bare `Internal` — and
+it carried a session's raw invocation and cwd into an agent-facing error chain besides. That backstop now preserves an
+outcome-unknown verdict's kind and remedy when it has to drop oversized prose, for the same reason: a size check must
+not be able to revoke a claim about durable state.
+
 The trust boundary is the CONNECTION, not the message. The supervisor authenticates the per-session credential and
 refuses a peer asking as a session it is not; from there the helm accepts the forwarded `session_id`, and the claim that
 the connection it arrived on belongs to that session's host, without re-verification — it never sees the credential, so
@@ -674,7 +713,26 @@ there is nothing on its side to check against. That is sound because a full-auth
 helm's own provisioned install, holding complete authority over every session on its host: a helm that could not trust
 it for a fleet-wide read could not route a single operation to it either. What the helm does check is that the
 connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. So 13 is
-the current protocol version, and the frozen changelog stops at 11.
+the current protocol version, and the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/
+`Archive`, added additively within the version rather than as a version bump of their own — which was possible ONLY
+because 13 itself had not yet shipped when they landed, still being developed on this branch with no released build
+speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to keep adding to 13
+after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own, same as any
+other. The same allowance covers the one thing in 13 that is not an addition at all: `AgentSession::host` became
+`Option<String>`, so a lifecycle reply can say "there is a session here but no host name I can vouch for" instead of
+encoding that as an empty string indistinguishable from a real value. A decoder built against 13 EARLIER IN ITS OWN
+DEVELOPMENT rejects `host: null` outright — the running additive rule does not stretch to cover it under any reading —
+so it is allowed here only because nothing released speaks 13 yet. It must not be carried forward the same way once 13
+ships: the identical edit made afterwards needs a version of its own. Each verb is routed and recorded through the exact
+same `sessions.rs` functions (`route_session`, the client call, `record_session`) the REST `/rename`/`/stop`/`/archive`
+routes use, so a refusal that comes out of the SHARED operation — an unknown session, a disconnected host, a title the
+owning supervisor rejects — is the identical sentence the UI would have shown. The equivalence covers that shared path
+and stops there, deliberately, in two places. The relay adds a doorway check of its own (`validate_agent_verb`) that the
+REST surface has no counterpart for, since only the relay puts an attacker-chosen target and title onto two
+byte-unbounded queues before anything downstream can look at them; its refusals are relay-specific by construction. And
+the agent CLI escapes and caps a refusal before printing it, because the destination is a terminal rather than a browser
+— so the WORDING is the UI's, while the bytes may be escaped and the tail cut. Both divergences are one-directional:
+they can refuse something the UI would have allowed through to the same shared code, never the reverse.
 
 The two read verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is drained by cursor under two ceilings — a fixed
@@ -1278,6 +1336,25 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no timeout of its
   own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see the transport
   section's version-13 paragraph).
+- `farhelm agent rename <title> [--session <id>]`, `farhelm agent stop [--session <id>]`, and
+  `farhelm agent archive [--session <id>]` — the in-session ACTING CLI, on the same relay and credential. Omitting
+  `--session` acts on the asking session itself; naming one acts on any session the helm knows, on any host — the same
+  wider-than-spawn authority the read-only verbs already have. Success prints one plain confirmation line on stdout
+  (`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), its dynamic cells run through the same escaping the
+  listing tables use, so a scripted caller gets exactly one line rather than a table with one row — with one carve-out
+  this contract cannot avoid: a bare `stop`/`archive` (no `--session`) ends the ASKING session's own process tree, and
+  the host-wide marker sweep that reaches it can SIGTERM the `farhelm agent` process itself before it prints anything at
+  all. That is not a bug in the CLI — stopping or archiving yourself is supposed to end the whole tree, calling CLI
+  included — so a caller that needs the confirmation line should target a session other than its own.
+- SPEC.md's "with confirmation when anything is still running" rule for archive is a UI affordance and does NOT apply to
+  `farhelm agent archive`. It is written for the panel, where a person is one click from ending work they may not know
+  is running and a dialog is what puts the fact in front of them. This CLI has no such reader: its caller is the agent
+  itself, non-interactive by construction, and the only shapes a confirmation could take here would each defeat the rule
+  rather than implement it — a prompt on a stdin nobody is attached to hangs, and a `--yes` flag the agent always passes
+  is a confirmation in name only. The safeguard that does transfer is the audit trail: the helm logs, at `info`, which
+  session asked to act on which before the request leaves it (`agent_requests::resolve_target`), so an archive an
+  operator did not expect is attributable rather than anonymous. The same reasoning covers `stop`, whose SPEC wording
+  puts the confirmation on restart rather than on the stop itself.
 
 Internal commands live under a hidden-from-help `internal` namespace — `farhelm internal stdio` is the ssh-exec stdio
 proxy. (An underscore prefix like `_stdio` was considered; it is not a recognized convention, while an explicit

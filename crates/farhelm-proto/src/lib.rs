@@ -1300,11 +1300,11 @@ pub enum RestartMode {
 /// Internally tagged by `verb`, and every variant is a struct variant even
 /// where it currently carries nothing, so that giving a verb an argument
 /// later is an additive edit to that variant rather than a change of shape
-/// on the wire. The verbs this version answers are the two read-only ones;
-/// the mutating verbs an agent will want (`rename`, `stop`, `archive`) and
-/// the creating ones (`create`, `clone`) are deliberately absent rather
-/// than stubbed, because a verb that decodes and then refuses is
-/// indistinguishable, from the agent's side, from one that is broken.
+/// on the wire. This version adds the three lifecycle verbs — `rename`,
+/// `stop`, `archive` — beside the two read-only ones; the CREATING verbs
+/// (`create`, `clone`) stay deliberately absent rather than stubbed,
+/// because a verb that decodes and then refuses is indistinguishable, from
+/// the agent's side, from one that is broken.
 ///
 /// EVERY verb is answered by the helm, including questions about the
 /// asking session's own host. One code path and one place for policy is
@@ -1313,6 +1313,17 @@ pub enum RestartMode {
 /// that is the honest trade — a silent downgrade to local semantics would
 /// give an agent a fleet view that is sometimes the fleet and sometimes
 /// one machine, with nothing on the wire saying which.
+///
+/// The three lifecycle verbs share one shape of target: `session_id:
+/// Option<String>`, where `None` means the ASKING session — the one the
+/// relay already proved this connection's credential belongs to, so the
+/// helm can substitute it without a second round of authority-checking —
+/// and `Some(id)` names any session the helm knows, on any host. That is
+/// deliberately wider than "only your own session": the feature's whole
+/// mental model is an agent talking to the HELM, which has fleet-wide
+/// authority already, and narrowing a lifecycle verb to the asker's own row
+/// would need a second, invented notion of per-session permission that
+/// nothing else in this system has.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum AgentVerb {
@@ -1328,6 +1339,64 @@ pub enum AgentVerb {
     /// honest shape when the fleet outgrows one answer is a filter on this
     /// verb rather than paging state on a wire that has none.
     Sessions {},
+    /// Change a session's title — SPEC.md's rename verb, reached through
+    /// the same routing and recording the REST `/rename` route uses.
+    /// Answered with [`AgentReply::Session`], the session's freshly
+    /// recomputed row.
+    Rename {
+        /// `None` for the asking session; see the enum's own docs for the
+        /// target-resolution rule this field shares with `Stop` and
+        /// `Archive`.
+        session_id: Option<String>,
+        /// Forwarded to the supervisor VERBATIM, with the exact acceptance
+        /// rule `RenameSession::title` documents (control characters
+        /// refused, otherwise anything up to the field cap, including the
+        /// empty string) — an agent gets no separate, looser rule.
+        title: String,
+    },
+    /// Kill a session's agent process tree, leaving the session listed and
+    /// its terminal viewable — SPEC.md's "stop". Answered with
+    /// [`AgentReply::Stopped`], which carries nothing beyond success: unlike
+    /// `Rename`/`Archive`, a stop's REST counterpart already replies with an
+    /// empty object, so there is no fresher row to hand back.
+    Stop {
+        /// `None` for the asking session; see the enum's own docs.
+        session_id: Option<String>,
+    },
+    /// Stop a session's agent and tabs, remove its terminal, and retain its
+    /// metadata and attachments — SPEC.md's archive. Answered with
+    /// [`AgentReply::Session`], carrying the durable post-teardown state
+    /// (`archived: true`) exactly as the REST `/archive` route does.
+    Archive {
+        /// `None` for the asking session; see the enum's own docs.
+        session_id: Option<String>,
+    },
+}
+
+impl AgentVerb {
+    /// Whether answering this verb CHANGES something durable at its target,
+    /// as opposed to only describing the fleet.
+    ///
+    /// The single authority for a distinction three separate places have to
+    /// agree on, and the reason it lives on the type rather than at each of
+    /// them: the supervisor decides from it whether to hold the
+    /// delete-fence (`agent_request_locks`) and whether a lost connection
+    /// may be reported as a free retry; the helm decides from it whether a
+    /// completed answer may still be withdrawn as "the connection was
+    /// replaced". Both used to spell the same non-exhaustive `matches!`
+    /// list independently, so a verb added to one and forgotten in the
+    /// other would silently bypass whichever fence its author did not think
+    /// of — a failure with no compile error and no test that could see it.
+    ///
+    /// The `match` is EXHAUSTIVE on purpose. A new variant does not compile
+    /// until somebody says which side of this line it falls on, which is
+    /// the whole point of centralizing it.
+    pub fn is_mutating(&self) -> bool {
+        match self {
+            AgentVerb::Hosts {} | AgentVerb::Sessions {} => false,
+            AgentVerb::Rename { .. } | AgentVerb::Stop { .. } | AgentVerb::Archive { .. } => true,
+        }
+    }
 }
 
 /// The two ways an [`ControlMsg::AgentResponse`] can land.
@@ -1372,6 +1441,21 @@ pub enum AgentReply {
         /// not deliver it.
         truncated: bool,
     },
+    /// Answers `Rename` and `Archive` alike: the ONE session either verb
+    /// acted on, freshly recomputed by the host that owns it. Sharing a
+    /// reply shape between two verbs is deliberate — both are "here is the
+    /// row now", and inventing `Renamed`/`Archived` twins would only be two
+    /// names for the same fact with no behavioral difference a caller could
+    /// key on.
+    Session {
+        session: AgentSession,
+    },
+    /// Answers `Stop`. Empty on purpose, matching the REST `/stop` route's
+    /// own empty-object success body: a stop has nothing fresher to report
+    /// than "it happened", and the session's `status` is whatever the next
+    /// `sessions` listing observes rather than something this reply could
+    /// know synchronously.
+    Stopped {},
 }
 
 /// The recovery sentence every relay-produced [`ErrorKind::Unavailable`]
@@ -1385,6 +1469,29 @@ pub enum AgentReply {
 /// (no attachment, connection already closed, closing before enqueue, lost
 /// after acceptance) cannot drift into three different half-answers.
 pub const AGENT_UNAVAILABLE_REMEDY: &str = "open the session in the farhelm UI and try again";
+
+/// The recovery sentence a relay failure gets when the request had already
+/// been handed to the helm and the verb CHANGES something.
+///
+/// Deliberately different advice from [`AGENT_UNAVAILABLE_REMEDY`], because
+/// the situation is the opposite one. That remedy is "nothing happened,
+/// make the helm reachable and send it again"; this one covers the ending
+/// where a rename/stop/archive may ALREADY have taken effect on its target
+/// and only the answer was lost. Telling such a caller to try again would
+/// be advice to repeat a mutation it cannot know it did not already
+/// perform — re-stopping a session someone has since restarted, or
+/// re-renaming one a user has since retitled. So the action offered is to
+/// LOOK first, which is the only step that is safe whichever way the
+/// ambiguity resolved.
+///
+/// Spelled once, in the same crate as the outcome kind it accompanies, for
+/// the same reason its sibling is: the sites that produce this ending sit
+/// in three crates — the supervisor's relay on the near hop, the helm's
+/// classifier on the far one, and the agent CLI for everything that goes
+/// wrong after its own write — and must not drift into different
+/// half-answers.
+pub const AGENT_MUTATION_UNKNOWN_REMEDY: &str = "check the session's current state before retrying, since the change may already have taken \
+     effect";
 
 /// One host, as an agent sees it.
 ///
@@ -1426,7 +1533,28 @@ pub struct AgentSession {
     pub id: String,
     /// The host's display NAME, not its id — matching [`AgentHost::name`],
     /// so the two listings join on a value an agent can also type.
-    pub host: String,
+    ///
+    /// `None` means the helm had no name it could VOUCH for, which is a
+    /// different statement from a host whose name happens to be short or
+    /// odd. It arises on the lifecycle verbs' replies: the row's host is
+    /// pinned to the connection the mutation actually routed through, and a
+    /// retarget, adoption or removal in the window between the mutation and
+    /// its projection leaves that connection no longer current — so there
+    /// is a session to report but no name that describes the machine it was
+    /// acted on. An empty string was the previous encoding and could not be
+    /// told apart from a real value; the option makes the absence explicit
+    /// on the wire. `stale` is always set alongside it, and says why.
+    ///
+    /// Widening this field was a BREAKING wire change made inside protocol
+    /// 13 rather than by bumping it, and that is allowed exactly once, for
+    /// the reason SPEC_impl.md's version-13 paragraph gives: 13 has not
+    /// shipped, so no released build speaks it and no decoder exists that
+    /// this can break. A decoder built earlier in 13's own development
+    /// refuses `host: null` outright — this is not additive under the
+    /// running "optional field with a decode default" rule, and nothing
+    /// about it should be read as precedent. Once 13 ships, the same edit
+    /// needs a version of its own.
+    pub host: Option<String>,
     pub title: String,
     pub cwd: String,
     /// What is running, as a DELIBERATELY NON-SECRET label: the profile's
@@ -1460,8 +1588,20 @@ pub struct AgentSession {
     /// Archived rows are IN this listing, unlike the UI's default browse
     /// view, because the verb's promise is every session the helm knows and
     /// an agent has no archive switch to flip. The flag is what keeps them
-    /// interpretable: an archived session is durable history, not something
-    /// to go and act on.
+    /// interpretable: an archived session is durable history rather than a
+    /// live one, which a reader should weigh before acting on it — not a
+    /// row the lifecycle verbs refuse to touch. `Rename`, `Stop` and
+    /// `Archive` may all target an archived session's id exactly as they
+    /// would any other: a `Rename` or a repeat `Archive` succeeds normally.
+    ///
+    /// `Stop` on an archived session is the one to be careful describing.
+    /// It is not a request the supervisor short-circuits: it runs the same
+    /// process-tree teardown any stop runs, against a session whose
+    /// processes archiving already ended. The ordinary result is therefore
+    /// success with nothing left to kill — but it is a real teardown that
+    /// can report a real failure (a pane probe that cannot reach tmux, say),
+    /// so a caller must not read "already archived" as "this call cannot
+    /// fail".
     pub archived: bool,
     /// True when this row is last-known knowledge rather than a live
     /// report — the host it belongs to is not currently connected.
@@ -2780,6 +2920,77 @@ impl ControlMsg {
             | ControlMsg::UploadAck { .. }
             | ControlMsg::AbortUpload { .. }
             | ControlMsg::UploadAborted { .. } => None,
+        }
+    }
+
+    /// This message's variant name, and NOTHING from its payload.
+    ///
+    /// Exists for diagnostics that outlive the message and travel to
+    /// somewhere the message itself must not go. A `{msg:?}` rendering is
+    /// unbounded — a `SessionList` legitimately reaches megabytes, past
+    /// [`MAX_FRAME_LEN`] once it is quoted inside another frame — and it is
+    /// also indiscriminate, printing fields (a session's raw invocation
+    /// argv, its cwd) that the agent-facing surfaces deliberately redact.
+    /// The variant name carries the whole of what a "the peer answered the
+    /// wrong thing" diagnostic actually needs and none of the risk; see
+    /// `farhelm_helm::SupervisorTransportError::SentWrongReply`, which is
+    /// rendered into an error chain that ends up in an agent's terminal.
+    ///
+    /// The match is exhaustive with no wildcard arm, for the same reason
+    /// [`Self::reply_req_id`]'s is: a new variant must be a compile error
+    /// here rather than silently reporting itself as something else. The
+    /// names are the RUST identifiers, not the snake_case `type` tag on the
+    /// wire — these strings are read by humans debugging a peer, and the
+    /// identifier is what they will grep for.
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            ControlMsg::Hello { .. } => "Hello",
+            ControlMsg::CreateSession { .. } => "CreateSession",
+            ControlMsg::SessionCreated { .. } => "SessionCreated",
+            ControlMsg::ListSessions { .. } => "ListSessions",
+            ControlMsg::SessionList { .. } => "SessionList",
+            ControlMsg::StopSession { .. } => "StopSession",
+            ControlMsg::SessionStopped { .. } => "SessionStopped",
+            ControlMsg::DeleteSession { .. } => "DeleteSession",
+            ControlMsg::SessionDeleted { .. } => "SessionDeleted",
+            ControlMsg::ArchiveSession { .. } => "ArchiveSession",
+            ControlMsg::SessionArchived { .. } => "SessionArchived",
+            ControlMsg::RestartSession { .. } => "RestartSession",
+            ControlMsg::SessionRestarted { .. } => "SessionRestarted",
+            ControlMsg::ReportConversation { .. } => "ReportConversation",
+            ControlMsg::ConversationReported { .. } => "ConversationReported",
+            ControlMsg::RenameSession { .. } => "RenameSession",
+            ControlMsg::SessionRenamed { .. } => "SessionRenamed",
+            ControlMsg::ListProfiles { .. } => "ListProfiles",
+            ControlMsg::ProfileList { .. } => "ProfileList",
+            ControlMsg::CreateProfile { .. } => "CreateProfile",
+            ControlMsg::ProfileCreated { .. } => "ProfileCreated",
+            ControlMsg::UpdateProfile { .. } => "UpdateProfile",
+            ControlMsg::ProfileUpdated { .. } => "ProfileUpdated",
+            ControlMsg::DeleteProfile { .. } => "DeleteProfile",
+            ControlMsg::ProfileDeleted { .. } => "ProfileDeleted",
+            ControlMsg::OpenTab { .. } => "OpenTab",
+            ControlMsg::TabOpened { .. } => "TabOpened",
+            ControlMsg::CloseTab { .. } => "CloseTab",
+            ControlMsg::TabClosed { .. } => "TabClosed",
+            ControlMsg::Attach { .. } => "Attach",
+            ControlMsg::Attached { .. } => "Attached",
+            ControlMsg::Detach { .. } => "Detach",
+            ControlMsg::Detached { .. } => "Detached",
+            ControlMsg::ReplayComplete { .. } => "ReplayComplete",
+            ControlMsg::Resize { .. } => "Resize",
+            ControlMsg::PauseOutput { .. } => "PauseOutput",
+            ControlMsg::ResumeOutput { .. } => "ResumeOutput",
+            ControlMsg::BeginUpload { .. } => "BeginUpload",
+            ControlMsg::UploadStarted { .. } => "UploadStarted",
+            ControlMsg::UploadAck { .. } => "UploadAck",
+            ControlMsg::CommitUpload { .. } => "CommitUpload",
+            ControlMsg::UploadCommitted { .. } => "UploadCommitted",
+            ControlMsg::AbortUpload { .. } => "AbortUpload",
+            ControlMsg::UploadAborted { .. } => "UploadAborted",
+            ControlMsg::AgentRequest { .. } => "AgentRequest",
+            ControlMsg::AgentResponse { .. } => "AgentResponse",
+            ControlMsg::Error { .. } => "Error",
         }
     }
 }
@@ -6879,6 +7090,59 @@ mod tests {
         assert_eq!(reply.request_req_id(), None);
     }
 
+    /// Spec: [`ControlMsg::variant_name`] names the variant and leaks
+    /// nothing else — no payload field, no matter how large the message.
+    ///
+    /// The property is a security and a robustness one at once, which is why
+    /// it is pinned rather than left to the obvious-looking match. Its one
+    /// caller stores the result in an error that is rendered into an agent's
+    /// terminal and re-encoded into a reply frame, so a rendering that
+    /// included payload would both leak fields the agent surfaces redact
+    /// (a session's raw argv, its cwd) and be able to push that reply past
+    /// [`MAX_FRAME_LEN`]. A fat `SessionList` is the shape that does both,
+    /// so that is the fixture: its name must come back with none of it.
+    #[test]
+    fn a_variant_name_carries_no_payload() {
+        let fat = ControlMsg::SessionList {
+            req_id: 1,
+            sessions: vec![SessionInfo {
+                parent: None,
+                archived: false,
+                id: "s1".to_string(),
+                title: "t".repeat(4096),
+                created_at: 0,
+                last_activity_at: 0,
+                creation_seq: None,
+                cwd: "/secret".to_string(),
+                invocation: "claude --dangerously-skip-permissions".to_string(),
+                status: SessionStatus::default(),
+                annotation: None,
+                restart_offer: RestartOffer::default(),
+                tabs: Vec::new(),
+                source_profile: None,
+            }],
+            total: 1,
+            next_cursor: Some("cursor-token".to_string()),
+        };
+        let name = fat.variant_name();
+        assert_eq!(name, "SessionList");
+        assert!(
+            name.len() < 64
+                && !name.contains("secret")
+                && !name.contains("claude")
+                && !name.contains("cursor"),
+            "the name must carry nothing from the payload: {name}"
+        );
+        // And the accessor is total: every variant answers, including the
+        // ones that carry no `req_id` at all.
+        assert_eq!(ControlMsg::hello("supervisor").variant_name(), "Hello");
+        assert_eq!(
+            ControlMsg::Detach { channel: 1 }.variant_name(),
+            "Detach",
+            "a channel-correlated event names itself like any other"
+        );
+    }
+
     /// Golden JSON for the relay pair, pinned because three independently
     /// built programs have to agree on it — the `farhelm agent` CLI encodes
     /// it, the supervisor decodes and re-encodes it, and the helm decodes
@@ -6975,7 +7239,7 @@ mod tests {
                 reply: AgentReply::Sessions {
                     sessions: vec![AgentSession {
                         id: "s1".to_string(),
-                        host: "builder".to_string(),
+                        host: Some("builder".to_string()),
                         title: "auth".to_string(),
                         cwd: "/w".to_string(),
                         agent: "claude".to_string(),
@@ -7055,6 +7319,163 @@ mod tests {
         );
     }
 
+    /// Golden JSON for the three lifecycle verbs and their two reply tags,
+    /// pinned for the same three-independent-programs reason
+    /// `agent_relay_pair_has_pinned_json_tags` documents: the CLI encodes a
+    /// request, the supervisor decodes and re-encodes it unchanged, and the
+    /// helm decodes it, so a tag rename in only one of those builds is
+    /// invisible to every other test that constructs `AgentVerb` in Rust and
+    /// round-trips it through the SAME crate's own serializer.
+    ///
+    /// Also confirms, directly rather than by inference, the requirement
+    /// this addition is easiest to get wrong: adding tagged fields to
+    /// `AgentVerb` must not perturb `ControlMsg::request_req_id`/
+    /// `reply_req_id`, which classify by the OUTER `ControlMsg` variant
+    /// (`AgentRequest`/`AgentResponse`) and never look inside `AgentVerb` at
+    /// all — the same accessors `agent_relay_pair_is_classified_as_request_
+    /// and_reply` already pins for the read-only pair.
+    #[test]
+    fn lifecycle_agent_verbs_have_pinned_json_tags() {
+        let rename = ControlMsg::AgentRequest {
+            req_id: 5,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Rename {
+                session_id: None,
+                title: "new title".to_string(),
+            },
+        };
+        assert_eq!(rename.request_req_id(), Some(5));
+        assert_eq!(rename.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&rename).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 5,
+                "session_id": "s1",
+                "request": { "verb": "rename", "session_id": null, "title": "new title" },
+            })
+        );
+
+        let rename_named = ControlMsg::AgentRequest {
+            req_id: 6,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Rename {
+                session_id: Some("s2".to_string()),
+                title: "new title".to_string(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&rename_named).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 6,
+                "session_id": "s1",
+                "request": { "verb": "rename", "session_id": "s2", "title": "new title" },
+            })
+        );
+
+        let stop = ControlMsg::AgentRequest {
+            req_id: 7,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Stop { session_id: None },
+        };
+        assert_eq!(stop.request_req_id(), Some(7));
+        assert_eq!(stop.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&stop).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 7,
+                "session_id": "s1",
+                "request": { "verb": "stop", "session_id": null },
+            })
+        );
+
+        let archive = ControlMsg::AgentRequest {
+            req_id: 8,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Archive {
+                session_id: Some("s2".to_string()),
+            },
+        };
+        assert_eq!(archive.request_req_id(), Some(8));
+        assert_eq!(archive.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&archive).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 8,
+                "session_id": "s1",
+                "request": { "verb": "archive", "session_id": "s2" },
+            })
+        );
+
+        let session_reply = ControlMsg::AgentResponse {
+            req_id: 5,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "s1".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "new title".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        };
+        assert_eq!(session_reply.reply_req_id(), Some(5));
+        assert_eq!(session_reply.request_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&session_reply).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 5,
+                "outcome": {
+                    "result": "ok",
+                    "reply": {
+                        "reply": "session",
+                        "session": {
+                            "id": "s1",
+                            "host": "this machine",
+                            "title": "new title",
+                            "cwd": "/w",
+                            "agent": "claude",
+                            "status": "running",
+                            "current": true,
+                            "archived": false,
+                            "stale": false,
+                        },
+                    },
+                },
+            })
+        );
+
+        let stopped_reply = ControlMsg::AgentResponse {
+            req_id: 7,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Stopped {},
+            },
+        };
+        assert_eq!(stopped_reply.reply_req_id(), Some(7));
+        assert_eq!(stopped_reply.request_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&stopped_reply).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 7,
+                "outcome": {
+                    "result": "ok",
+                    "reply": { "reply": "stopped" },
+                },
+            })
+        );
+    }
+
     /// Both listing replies round-trip with every field intact, including
     /// the booleans a decoder could plausibly default away.
     ///
@@ -7089,7 +7510,7 @@ mod tests {
             AgentReply::Sessions {
                 sessions: vec![AgentSession {
                     id: "s1".to_string(),
-                    host: "this machine".to_string(),
+                    host: Some("this machine".to_string()),
                     title: "auth-followup".to_string(),
                     cwd: "/home/u/ws".to_string(),
                     agent: "claude".to_string(),
@@ -7112,19 +7533,62 @@ mod tests {
         }
     }
 
+    /// The two lifecycle reply shapes round-trip with every field intact —
+    /// `agent_listing_replies_roundtrip`'s twin, for `Session` and
+    /// `Stopped`.
+    ///
+    /// `Session` gets the same `current`/`archived`/`stale` treatment as a
+    /// listing row, for the identical reason: each defaults to `false` on a
+    /// decode, so a field a serde change dropped would silently read as the
+    /// reassuring answer rather than as a decode failure. `Stopped` is here
+    /// mainly to pin that an EMPTY struct variant still needs its `reply`
+    /// tag on the wire to decode back to itself — nothing else about it
+    /// could regress silently, but a tag typo would.
+    #[test]
+    fn agent_lifecycle_replies_roundtrip() {
+        for reply in [
+            AgentReply::Session {
+                session: AgentSession {
+                    id: "s1".to_string(),
+                    host: Some("builder".to_string()),
+                    title: "renamed".to_string(),
+                    cwd: "/home/u/ws".to_string(),
+                    agent: "codex".to_string(),
+                    status: "idle".to_string(),
+                    current: true,
+                    archived: true,
+                    stale: true,
+                },
+            },
+            AgentReply::Stopped {},
+        ] {
+            let msg = ControlMsg::AgentResponse {
+                req_id: 9,
+                outcome: AgentOutcome::Ok {
+                    reply: reply.clone(),
+                },
+            };
+            let json = serde_json::to_vec(&msg).unwrap();
+            assert_eq!(serde_json::from_slice::<ControlMsg>(&json).unwrap(), msg);
+        }
+    }
+
     /// A verb this build does not know must fail to decode rather than
     /// defaulting to some other verb.
     ///
     /// The same rule `unknown_control_message_tag_fails_decode` pins one
     /// level up, restated for the inner enum because the outer message tag
     /// (`agent_request`) IS one this build knows: a lenient inner decode
-    /// would turn "rename this session", sent by a newer CLI, into whatever
-    /// arm happened to be first, which is the one class of wire error the
-    /// version-skew handshake cannot catch on its own.
+    /// would turn "clone this session", sent by a newer CLI once that verb
+    /// lands, into whatever arm happened to be first, which is the one
+    /// class of wire error the version-skew handshake cannot catch on its
+    /// own. `clone` is used here, rather than `rename`, precisely because
+    /// this version now HAS a `rename` arm — the enum's own docs name
+    /// `create`/`clone` as the still-absent verbs this test needs one of.
     #[test]
     fn unknown_agent_verb_fails_decode() {
         let body = br#"{"type":"agent_request","req_id":1,"session_id":"s1",
-                        "request":{"verb":"rename","title":"x"}}"#;
+                        "request":{"verb":"clone"}}"#;
         serde_json::from_slice::<ControlMsg>(body)
             .expect_err("a verb this build has no arm for must not decode");
     }

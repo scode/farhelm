@@ -533,7 +533,9 @@ they are on — with the asking session and its host marked. That is deliberatel
 above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way, including questions
 about the session's own host, so there is one answer to what an agent sees. The failure this defines is "no helm is
 attached to this session", reported as such, with opening the session in a client as the remedy — never a silent
-fallback to what the supervisor alone could have answered.
+fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive — on the
+asking session or on any session named by id, with the helm applying its ordinary rules to the operation exactly as it
+would for a client request.
 
 As with interactive creation, spawning launches the agent without an initial prompt in v1; the spawning agent (or the
 user) interacts with the child through its terminal.

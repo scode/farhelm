@@ -7,7 +7,7 @@
 //! as a reader/writer pair so this code cannot tell the difference,
 //! which is the SPEC_impl.md transport-blindness made structural.
 
-use anyhow::{Context, bail};
+use anyhow::bail;
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
@@ -215,6 +215,79 @@ static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 pub struct SupervisorError {
     pub kind: ErrorKind,
     pub message: String,
+}
+
+/// A request that produced no USABLE reply, split by the one fact that
+/// changes what a caller may safely do next: whether the frame had already
+/// been handed to the writer queue when the answer was lost.
+///
+/// A typed error rather than the bare `anyhow` string this replaces,
+/// because the two halves of that split are indistinguishable in prose and
+/// the distinction is exactly the one an agent's `Rename`/`Stop`/`Archive`
+/// turns on. Everything above this client used to see both endings as an
+/// unclassified failure, which [`crate::error_kind`] reads as `Internal` —
+/// a kind that says nothing about retrying, for a situation where "may I
+/// send this again?" is the whole question. See
+/// [`crate::agent_requests`]'s `transport_outcome` for who consults it and
+/// what each variant then means to an agent.
+///
+/// The supervisor's own relay makes the SAME split one hop further out
+/// (`service::agent_relay::connection_lost_after_queueing`), and for the
+/// same reason: a rename that was handed to a peer that then died may
+/// already have taken effect, and telling its caller "nothing happened" is
+/// an invitation to apply it twice.
+///
+/// The two connection-loss `Display` strings keep the words "connection
+/// closed" the previous untyped errors carried, since callers and tests
+/// across two crates match on that phrase to recognize a dead transport.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum SupervisorTransportError {
+    /// The connection was already gone when the request was made: the
+    /// writer queue refused it, or the pending registry was closed. Nothing
+    /// was sent, so nothing happened, so a retry is free.
+    #[error("the supervisor connection closed before the request was sent")]
+    NotSent,
+    /// The frame reached the writer queue and the connection died before a
+    /// reply came back. The supervisor may have performed the request and
+    /// lost only the answer.
+    #[error("the supervisor connection closed after the request was sent")]
+    SentUnanswered,
+    /// The frame reached the writer queue, the supervisor answered, and the
+    /// answer was not the reply this request's own wrapper accepts — a
+    /// correlated frame of the wrong variant.
+    ///
+    /// A third phase rather than a plain protocol error because the FACTS
+    /// about the request are the same ones `SentUnanswered` records: it went
+    /// out, and nothing came back that says what became of it. A peer buggy
+    /// or hostile enough to answer a `StopSession` with a `SessionRenamed`
+    /// may well have performed the stop, so a caller that reads this as
+    /// "something is broken, try again" can kill an agent somebody restarted
+    /// in between. Only the lifecycle wrappers whose verbs travel the agent
+    /// relay construct it; everywhere else a wrong reply stays the untyped
+    /// protocol error it has always been, because `Internal` is the right
+    /// reading when nothing durable was at stake.
+    #[error("the supervisor answered {request} with an unexpected {reply}")]
+    SentWrongReply {
+        /// The request this client sent, named as its `ControlMsg` variant.
+        request: &'static str,
+        /// What came back instead, as its `ControlMsg` VARIANT NAME and
+        /// nothing else.
+        ///
+        /// Bounded on purpose, and it used to be the whole `{reply:?}`
+        /// rendering. Two things were wrong with that, and both are
+        /// realized by one legal frame — a near-limit `SessionList`
+        /// answering a `StopSession`. It is unbounded: this string is
+        /// re-encoded into the agent's own reply frame, so an oversized
+        /// wrong reply pushed that frame past `MAX_FRAME_LEN` and the size
+        /// backstop in [`agent_response_frame`] replaced the whole outcome
+        /// — turning the `Timeout`-plus-remedy vocabulary this variant
+        /// exists to produce back into the bare `Internal` it exists to
+        /// avoid. And it is indiscriminate: a `SessionInfo` carries a raw
+        /// invocation argv and cwd, which the agent-facing surfaces redact
+        /// and which a wrong-variant diagnostic has no business restoring.
+        /// The variant name is the whole of what a caller can act on.
+        reply: &'static str,
+    },
 }
 
 /// `list_sessions`'s return value: the sessions themselves plus the
@@ -662,11 +735,21 @@ pub struct SupervisorClient {
     /// side ([`SupervisorClient::spawn_agent_answer`]) is called from the
     /// demultiplexer, which must not acquire an async lock that some other
     /// task could be holding across an await.
-    agent_tasks: std::sync::Mutex<Vec<tokio::task::AbortHandle>>,
-    /// Whether this connection has already logged a dropped agent refusal
-    /// — see [`SupervisorClient::refuse_agent_request`], which floods by
-    /// nature and is worth exactly one line.
-    refusal_drop_logged: AtomicBool,
+    agent_tasks: std::sync::Mutex<AgentTasks>,
+    /// A test-only interruption between spawning an answer's work task and
+    /// registering its abort handle, so the one interval retirement could
+    /// once have slipped through can be produced on demand rather than
+    /// raced for.
+    ///
+    /// See [`SupervisorClient::spawn_agent_answer`]'s "Registered before it
+    /// can run" section for the property it exists to pin, and
+    /// `an_answer_spawned_into_a_retirement_never_runs` for the fixture.
+    #[cfg(test)]
+    agent_spawn_seam: std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    /// Whether this connection has already logged an agent refusal it could
+    /// not enqueue — see [`SupervisorClient::refuse_agent_request`], whose
+    /// failure mode floods by nature and is worth exactly one line.
+    refusal_undeliverable_logged: AtomicBool,
     /// The connection-is-done signal, held so [`SupervisorClient::retire`]
     /// can end both background halves at a moment of the manager's
     /// choosing.
@@ -679,6 +762,31 @@ pub struct SupervisorClient {
     /// dropped" while the client lives, which is why both halves set the
     /// flag explicitly on their way out rather than relying on that.
     shutdown: watch::Sender<bool>,
+}
+
+/// The answering work one connection owns, plus the fact that decides
+/// whether any MORE of it may start.
+///
+/// The flag is what makes "retirement cancels this connection's answering
+/// work" a property of the code rather than of the scheduler. Registration
+/// and the question "has this connection been retired?" have to be answered
+/// under ONE lock hold, because they are the two halves of a single
+/// decision: a task registered after the last drain would be a task nothing
+/// is left to abort, doing a fleet listing — or routing a mutation to
+/// another host — on behalf of a peer that is provably gone. See
+/// [`SupervisorClient::spawn_agent_answer`] for the start gate that makes
+/// the decision reachable before the work has run.
+///
+/// Terminal, deliberately: a retired connection is never revived (the
+/// manager builds a new one), so nothing ever clears the flag.
+#[derive(Default)]
+struct AgentTasks {
+    /// The WORK tasks' abort handles — not their owners'; see
+    /// [`SupervisorClient::abort_agent_tasks`].
+    handles: Vec<tokio::task::AbortHandle>,
+    /// Whether [`SupervisorClient::abort_agent_tasks`] has run, i.e. this
+    /// connection has been failed or retired.
+    retired: bool,
 }
 
 /// What one connection needs to answer an agent's question: the shared
@@ -763,6 +871,64 @@ fn not_ready(message: &str) -> farhelm_proto::AgentOutcome {
     }
 }
 
+/// The error for a LIFECYCLE request answered with a correlated reply of
+/// the wrong variant — see [`SupervisorTransportError::SentWrongReply`].
+///
+/// A function rather than three inline constructions because the phase
+/// claim it makes is the load-bearing part and must be made identically by
+/// every wrapper that makes it: `stop`, `rename` and `archive` are the
+/// verbs an agent can drive across two hops, so each of them is a place
+/// where a wrong answer has to keep the request's own "it was sent" fact
+/// rather than degrading into an untyped protocol complaint. Verbs whose
+/// wrong replies stay untyped (`list_sessions`, `restart`, the tab and
+/// upload calls) are deliberately not routed here; nothing above them turns
+/// the distinction into advice.
+///
+/// BOTH sides are `ControlMsg` variant NAMES rather than messages, because
+/// this string is rendered into an agent-facing error chain and re-encoded
+/// into the agent's own reply frame: a message carries session ids, raw
+/// invocations and cwds, and a reply message carries however many megabytes
+/// the peer chose to send. See [`SupervisorTransportError::SentWrongReply`]'s
+/// `reply` field for what the unbounded rendering actually cost.
+fn wrong_reply(request: &'static str, reply: &ControlMsg) -> anyhow::Error {
+    anyhow::Error::new(SupervisorTransportError::SentWrongReply {
+        request,
+        reply: reply.variant_name(),
+    })
+}
+
+/// The answer an upcall gets when the task that was preparing it DIED —
+/// panicked, or ended in any way that produced no outcome of its own.
+///
+/// It exists because "the answer task is gone" is not a state the rest of
+/// the relay can observe. The connection stays healthy, so nothing calls
+/// `fail_all`; the supervisor's pending entry stays in a LIVE link's map,
+/// so its answer-budget expiry retains the mutation's delete fence and then
+/// waits for a resolution that can no longer come. The asking session would
+/// get a timeout and the asker's session id would stay fenced against
+/// deletion for the rest of the connection's life. So the supervising task
+/// answers on the dead one's behalf, which both frees the fence and tells
+/// the asker something true.
+///
+/// A MUTATION gets [`farhelm_proto::ErrorKind::Timeout`] and the
+/// check-before-retrying remedy for the same reason every other
+/// delivered-outcome-unknown ending does: the handler had already begun,
+/// and this side cannot know whether it got as far as renaming, stopping or
+/// archiving the target before it died. A listing gets the ordinary
+/// retry-safe refusal, having changed nothing whatever it did.
+fn panic_fallback(is_mutation: bool) -> farhelm_proto::AgentOutcome {
+    if !is_mutation {
+        return not_ready("the helm failed while answering this request; retry");
+    }
+    farhelm_proto::AgentOutcome::Err {
+        kind: farhelm_proto::ErrorKind::Timeout,
+        message: format!(
+            "the helm failed while performing this request, so the outcome is unknown — {}",
+            farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY
+        ),
+    }
+}
+
 /// Encode one `AgentResponse`, substituting a small refusal for a reply
 /// that would not fit in a frame.
 ///
@@ -784,20 +950,60 @@ fn not_ready(message: &str) -> farhelm_proto::AgentOutcome {
 /// `Internal` rather than `Unavailable`: nothing about retrying or waiting
 /// changes the answer, since the same question would produce the same
 /// oversized reply.
+///
+/// ## The one outcome the backstop must not flatten
+///
+/// A replacement that always said `Internal` could DOWNGRADE the answer it
+/// was replacing, and the case is not hypothetical: an outcome that already
+/// carries [`farhelm_proto::ErrorKind::Timeout`] is the relay's
+/// "delivered, outcome unknown" verdict on a mutation, built by
+/// [`crate::agent_requests`]'s `transport_outcome` out of an error chain
+/// this side does not control the length of. Rewriting that to `Internal`
+/// tells the asking agent "this should not happen" about a rename/stop/
+/// archive that may well have taken effect — the exact substitution the
+/// mutation vocabulary exists to prevent, arrived at through a size check.
+/// So the kind and the check-before-retrying remedy survive the
+/// replacement; only the oversized prose is dropped.
+///
+/// Keyed on the KIND rather than on a `mutating` flag threaded down from
+/// the caller, because the kind is the claim: `Timeout` on this path means
+/// outcome-unknown wherever it came from, and a size backstop has no
+/// business deciding that a claim it cannot fit is a claim it can revoke.
 fn agent_response_frame(req_id: u64, outcome: farhelm_proto::AgentOutcome) -> Frame {
+    // Read before `outcome` moves into the frame; nothing is cloned.
+    let outcome_unknown = matches!(
+        &outcome,
+        farhelm_proto::AgentOutcome::Err {
+            kind: farhelm_proto::ErrorKind::Timeout,
+            ..
+        }
+    );
     let frame = Frame::control(&ControlMsg::AgentResponse { req_id, outcome });
     if frame.exceeds_max_len() {
         warn!(
             req_id,
             bytes = frame.encoded_len(),
+            outcome_unknown,
             "an agent reply exceeded the protocol's frame limit and was replaced by a refusal"
         );
-        return Frame::control(&ControlMsg::AgentResponse {
-            req_id,
-            outcome: farhelm_proto::AgentOutcome::Err {
+        let replacement = if outcome_unknown {
+            farhelm_proto::AgentOutcome::Err {
+                kind: farhelm_proto::ErrorKind::Timeout,
+                message: format!(
+                    "the reply to this request is too large to send, so the outcome is unknown \
+                     — {}",
+                    farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY
+                ),
+            }
+        } else {
+            farhelm_proto::AgentOutcome::Err {
                 kind: farhelm_proto::ErrorKind::Internal,
                 message: "the reply to this request is too large to send".to_string(),
-            },
+            }
+        };
+        return Frame::control(&ControlMsg::AgentResponse {
+            req_id,
+            outcome: replacement,
         });
     }
     frame
@@ -1030,8 +1236,10 @@ impl SupervisorClient {
             next_channel: AtomicU64::new(1),
             agent,
             connection_id,
-            agent_tasks: std::sync::Mutex::new(Vec::new()),
-            refusal_drop_logged: AtomicBool::new(false),
+            agent_tasks: std::sync::Mutex::new(AgentTasks::default()),
+            #[cfg(test)]
+            agent_spawn_seam: std::sync::Mutex::new(None),
+            refusal_undeliverable_logged: AtomicBool::new(false),
             shutdown: connection_done.clone(),
         });
 
@@ -1113,7 +1321,19 @@ impl SupervisorClient {
         tokio::spawn(async move {
             loop {
                 let frame = tokio::select! {
-                    _ = reader_cancel.changed() => return,
+                    // `break`, not `return`: cancellation is the manager
+                    // withdrawing this connection ([`SupervisorClient::retire`])
+                    // or the writer half having already died, and BOTH leave
+                    // requests sitting in `pending` whose frames the writer
+                    // queue accepted. Returning here skipped the `fail_all()`
+                    // tail below and left every one of them parked on a
+                    // `oneshot` nothing would ever complete — for an agent's
+                    // rename/stop/archive, a supervisor-side delete fence held
+                    // against the asking session for the life of the process
+                    // while its host reconnected happily on a new connection.
+                    // Every ending of this loop must drain, so they all leave
+                    // it the same way.
+                    _ = reader_cancel.changed() => break,
                     frame = reader.read_frame() => frame,
                 };
                 match frame {
@@ -1147,13 +1367,19 @@ impl SupervisorClient {
     /// requests fail fast. Idempotent, and called from BOTH halves — the
     /// demux loop on read EOF/error, the writer task on write failure —
     /// because either half dying alone (a half-broken ssh pipe) leaves
-    /// the other alive and waiters hung.
+    /// the other alive and waiters hung. The demux loop also arrives here
+    /// by way of the shutdown signal, which is how a manager-driven
+    /// [`Self::retire`] drains what the connection was carrying instead of
+    /// abandoning it.
     ///
     /// Terminals and uploads each get an explicit out-of-band notice
     /// (`signal_detached`, `end_upload` on the upload's watch); pending
     /// requests are failed by dropping their oneshot senders, which makes
-    /// `request()` return the "connection closed" error instead of
-    /// hanging an HTTP handler.
+    /// `request()` return [`SupervisorTransportError::SentUnanswered`]
+    /// instead of hanging an HTTP handler. That variant rather than the
+    /// other one is the whole point of draining here: every entry in this
+    /// map belongs to a frame the writer queue already accepted, so a
+    /// caller must be told its request may have been acted on.
     ///
     /// Terminals are DRAINED here while uploads are only marked: a
     /// terminal's consumer owns its receiver and learns the reason from
@@ -1194,9 +1420,38 @@ impl SupervisorClient {
     /// connection dying ([`Self::fail_all`]) and the manager withdrawing
     /// the connection ([`Self::retire`]). Dropping an `AbortHandle` does
     /// not abort anything, so nothing but this call ends that work.
+    ///
+    /// These handles are the WORK tasks, not their supervisors (see
+    /// [`Self::spawn_agent_answer`]). Each supervisor observes its task's
+    /// cancellation, sends nothing, and releases the admission slot — the
+    /// one termination that is deliberately not answered, because this is
+    /// exactly the case where the peer is already gone.
+    ///
+    /// ABORTING A MUTATION DOES NOT UNDO IT, and nothing here pretends
+    /// otherwise. A `Rename`/`Stop`/`Archive` task aborted at an await
+    /// point may already have sent its mutation to the TARGET host — a
+    /// different connection from this one, which this abort does not touch
+    /// — so the durable change can land after the asking side has been told
+    /// the request ended. There is no way to know from here which side of
+    /// that line an aborted task was on, so the honest vocabulary is
+    /// applied where the answer is reported instead: the supervisor's relay
+    /// gives a mutating verb whose connection died an "outcome unknown"
+    /// ending rather than a retry-safe one (`service::agent_relay`'s
+    /// `connection_lost_after_queueing`). Aborting anyway is still right —
+    /// the alternative is a listing being assembled for a peer that cannot
+    /// receive it — but it is a cancellation of the ANSWER, not of the act.
+    ///
+    /// Marks the connection retired in the SAME lock hold that drains the
+    /// handles, which is what closes the door behind it: an answer whose
+    /// task was spawned but not yet registered would otherwise be inserted
+    /// into a list this call had already emptied and run on unabortably.
+    /// See [`AgentTasks`] and [`Self::spawn_agent_answer`].
     fn abort_agent_tasks(&self) {
-        let handles =
-            std::mem::take(&mut *self.agent_tasks.lock().expect("agent task list poisoned"));
+        let handles = {
+            let mut tasks = self.agent_tasks.lock().expect("agent task list poisoned");
+            tasks.retired = true;
+            std::mem::take(&mut tasks.handles)
+        };
         for handle in handles {
             handle.abort();
         }
@@ -1214,6 +1469,20 @@ impl SupervisorClient {
     ///   being assembled for a peer nobody will accept an answer from;
     /// - signals both background halves, which shuts the write half and
     ///   lets the transport (an ssh child, a socket) actually close.
+    ///
+    /// Signalling the halves is also what FAILS this connection's pending
+    /// requests, and that is a requirement rather than a side effect: the
+    /// demux loop answers the signal by breaking into [`Self::fail_all`],
+    /// so a request whose frame the writer queue had already accepted comes
+    /// back as [`SupervisorTransportError::SentUnanswered`] instead of
+    /// waiting on a connection nobody is reading any more. A retirement is
+    /// ordinary — a reconnect, a retarget, an adoption — so the waiter is
+    /// typically an agent's rename/stop/archive being relayed to this host,
+    /// and the supervisor that asked holds a delete fence until it hears
+    /// something back. Retiring without draining strands that fence for the
+    /// life of the process, on a fleet that has otherwise recovered.
+    /// Asynchronous only in the sense that the drain happens on the demux
+    /// task rather than under this call.
     ///
     /// The drop was never sufficient for either. An in-flight agent task
     /// holds a `writer_tx` clone, so the writer channel stays open, so the
@@ -1247,6 +1516,11 @@ impl SupervisorClient {
     /// resynchronization or way to recover the `req_id`, so keeping the
     /// connection alive could strand the corresponding request forever;
     /// it is returned as a fatal protocol error.
+    ///
+    /// A reply correlated to a `req_id` this connection NEVER ISSUED is
+    /// fatal for the same reason and not for the "no longer exists" one —
+    /// see the arm itself, which is where the distinction between an
+    /// impossible correlation and an ordinary late answer is drawn.
     ///
     /// The `req_id != 0` guard is the protocol's "not tied to any
     /// request" rule (see `ControlMsg::Error`): request ids start at 1, so
@@ -1296,6 +1570,43 @@ impl SupervisorClient {
                 // `Error`); it has no pending entry to complete and falls
                 // through to the arms below, which log it.
                 if let Some(req_id) = msg.reply_req_id().filter(|req_id| *req_id != 0) {
+                    // A reply naming an id this connection has NEVER handed
+                    // out is impossible rather than merely late, and the
+                    // two must be told apart here because only one of them
+                    // is survivable. See `Self::request`'s own docs: a
+                    // waiter on this map has no deadline, so a peer that
+                    // answers under an id nobody is waiting for — and never
+                    // under the real one — parks that waiter for the life
+                    // of a connection that stays perfectly healthy, along
+                    // with the agent-answer permit and, one hop out, the
+                    // asking session's delete fence. Killing the connection
+                    // converts it into the one ending the whole relay
+                    // already knows how to report (`fail_all`, hence
+                    // `SentUnanswered` for everything already queued).
+                    //
+                    // "Issued" is exactly `< next_req`, and `request()`
+                    // maintains that for every id it sends rather than
+                    // trusting callers to have minted theirs with
+                    // `req_id()` — see the `fetch_max` there. The relaxed
+                    // load is ordered by causality rather than by the
+                    // atomic: a peer can only name an id whose request
+                    // reached the wire, which is after that update and
+                    // after the writer queue's own synchronization.
+                    if req_id >= self.next_req.load(Ordering::Relaxed) {
+                        anyhow::bail!(
+                            "the supervisor answered with req_id {req_id}, which this connection \
+                             never issued"
+                        );
+                    }
+                    // An id that WAS issued and is no longer in the map is
+                    // the ordinary late answer — a cancelled HTTP handler,
+                    // a request whose caller went away — and is dropped in
+                    // silence, exactly as before. Nothing here can tell a
+                    // late answer from a peer re-answering a completed id,
+                    // so that residual case is bounded only by the
+                    // connection's own life; the supervisor's retained
+                    // fence is bounded independently
+                    // (`service::agent_relay::HelmLink::upcall`).
                     if let Some(tx) = self.pending.lock().await.map.remove(&req_id) {
                         let _ = tx.send(msg);
                     }
@@ -1561,9 +1872,11 @@ impl SupervisorClient {
     /// fail with a timeout that names the wrong cause.
     ///
     /// The single exception is a refusal that will not fit on a writer
-    /// queue that is already full, which is dropped rather than queued or
-    /// spawned — see [`Self::refuse_agent_request`] for why that trade is
-    /// the right way round.
+    /// queue that is already full: it is neither queued nor spawned, and
+    /// the CONNECTION ends instead, so the supervisor's own teardown is what
+    /// tells the asking session — see [`Self::refuse_agent_request`] for why
+    /// an accepted request may never be left with no terminal response at
+    /// all.
     ///
     /// ## Admission before work
     ///
@@ -1588,17 +1901,53 @@ impl SupervisorClient {
     /// admission control exists to prevent, arrived at through the path
     /// that was supposed to enforce it.
     ///
-    /// ## Owned, not merely spawned
+    /// ## Owned, not merely spawned — and SUPERVISED
     ///
     /// The handle is retained so [`Self::fail_all`] can abort it. A
     /// connection's death means nobody is left to receive the answer, and
     /// an answer in progress is a database walk and a multi-megabyte
     /// allocation being done for a dead peer.
     ///
-    /// ## The origin is checked twice
+    /// Two tasks rather than one: the work task computes an outcome, and a
+    /// small owner task awaits it and is what actually sends. That shape
+    /// exists so that EVERY way the work can end produces a response —
+    /// including the one nothing else in this system can see. A panic
+    /// anywhere in the handler leaves the connection perfectly healthy, so
+    /// no teardown runs and no `fail_all` fires; the supervisor's pending
+    /// entry sits in a live link's map, its answer budget expires, and for a
+    /// mutation the delete fence it retained is then held against the
+    /// asker's session id until the connection eventually dies. Every later
+    /// mutation and any delete of that session blocks behind it. Answering
+    /// from outside the task is the only place that ending can be caught;
+    /// see [`panic_fallback`] for what is said. A CANCELLED task is
+    /// deliberately silent — that is this connection's own teardown, where
+    /// the answer has nowhere to go.
+    ///
+    /// ## Registered before it can run
+    ///
+    /// A spawned task starts when the runtime says so, which on a
+    /// multithreaded runtime can be before the next line of this function
+    /// executes. Storing the abort handle afterwards therefore used to leave
+    /// a real interval — spawn to registration — in which
+    /// [`Self::abort_agent_tasks`] could drain an empty list and return,
+    /// after which the handle was inserted into a connection that had
+    /// already been torn down. The escaped task kept walking the database
+    /// for a peer nobody would accept an answer from, and a mutation whose
+    /// entry check had already passed kept routing to its target, both
+    /// outside the boundary these docs claim owns them.
+    ///
+    /// So the work task is spawned PARKED, behind a one-shot start gate, and
+    /// the gate is opened only after the handle is stored — under the same
+    /// lock hold that asks whether the connection has been retired (see
+    /// [`AgentTasks`]). Retired, and the task is aborted at the gate instead
+    /// of registered: nothing of the handler ever runs, and the owner
+    /// observes an ordinary cancellation. The ordering is then a property of
+    /// the code rather than of how the scheduler felt.
+    ///
+    /// ## The origin is checked twice — but ONLY for a read-only verb
     ///
     /// The handler checks it on the way in (that is where `current` is
-    /// computed from), and this checks it again with
+    /// computed from), and for `Hosts`/`Sessions` this checks it again with
     /// [`crate::agent_requests::AgentRequestHandler::origin_is_live`]
     /// immediately before an ANSWER is enqueued. The listing between the
     /// two awaits on the database and the manager, and a host that was
@@ -1608,6 +1957,25 @@ impl SupervisorClient {
     /// the old connection's host as `current` while the row now belongs to
     /// someone else — so the answer is dropped for a refusal the agent can
     /// retry.
+    ///
+    /// A `Rename`/`Stop`/`Archive` that came back `Ok` skips this second
+    /// check entirely, and that is not an oversight: by the time `Ok`
+    /// reaches here the mutation has already happened, non-retriably, at
+    /// its target. Reporting it as [`not_ready`]'s `Unavailable` — which
+    /// callers read as "never happened, safe to repeat" — would be false
+    /// for an action that just took effect; a retry could re-rename,
+    /// re-stop, or re-target the wrong session on the strength of a lie
+    /// this connection told about its own liveness. The ENTRY check inside
+    /// `handle` already refused the mutation outright if the connection
+    /// was stale before any of it ran (see that function's own docs); there
+    /// is no honest "undo" once it has run, so the exit check is skipped
+    /// rather than made to lie. This also sidesteps the one thing the exit
+    /// check could still have caught for these verbs — a `Rename`/`Archive`
+    /// reply's own host name going stale in the same window — because
+    /// `agent_requests::agent_session_reply` now pins that name (and marks
+    /// the row `stale` when it cannot) against the SAME incarnation the
+    /// mutation itself routed through, rather than a fresh, unchecked
+    /// lookup this check would otherwise be guarding.
     ///
     /// Fire-and-forget on the writer queue: a response that cannot be
     /// enqueued means the connection is going away, and the supervisor's
@@ -1629,19 +1997,44 @@ impl SupervisorClient {
             );
             return;
         };
+        // Captured before `request` is moved into `handler.handle` below —
+        // see this method's own docs ("The origin is checked twice") for
+        // why a MUTATING verb's successful outcome must not be re-judged
+        // against the origin's liveness the way a listing's is. The
+        // classification itself belongs to the verb, not to this file: the
+        // supervisor's relay asks the identical question about the identical
+        // set, and two hand-maintained lists would eventually disagree.
+        let is_mutation = request.is_mutating();
         let writer_tx = self.writer_tx.clone();
-        let task = tokio::spawn(async move {
-            let outcome = match agent.handler.get() {
+        // The start gate — see "Registered before it can run" above. The
+        // sender is released only once this task's abort handle is stored,
+        // so everything below the gate is inside the cancellation boundary
+        // rather than racing it.
+        let (start, started) = oneshot::channel::<()>();
+        // The work task ANSWERS rather than sends: what reaches the wire is
+        // decided by its owner below, which is what lets a death that
+        // produced no answer still produce one.
+        let answer = tokio::spawn(async move {
+            // The gate is dropped rather than sent on only if registration
+            // refused this task, which also aborts it — so this arm is
+            // unreachable and is written as a refusal rather than as work,
+            // so that a future change which drops the gate WITHOUT aborting
+            // cannot turn it into an unowned answer.
+            if started.await.is_err() {
+                return not_ready("the host connection was replaced; retry");
+            }
+            match agent.handler.get() {
                 Some(handler) => {
                     let outcome = handler.handle(agent.origin, &session_id, request).await;
                     // Re-checked here rather than left to the handler's own
                     // entry check: the lookup that produced this answer has
                     // been awaiting all along, and the question that matters
                     // is whether the connection is current NOW, one step
-                    // before the frame is queued.
+                    // before the frame is queued. Skipped for a completed
+                    // mutation — see this method's docs.
                     match outcome {
                         farhelm_proto::AgentOutcome::Ok { .. }
-                            if !handler.origin_is_live(agent.origin) =>
+                            if !is_mutation && !handler.origin_is_live(agent.origin) =>
                         {
                             not_ready("the host connection was replaced; retry")
                         }
@@ -1649,23 +2042,79 @@ impl SupervisorClient {
                     }
                 }
                 None => not_ready("the helm is still starting up; retry in a moment"),
+            }
+        });
+        let abort = answer.abort_handle();
+        tokio::spawn(async move {
+            let outcome = match answer.await {
+                Ok(outcome) => outcome,
+                // Cancelled means THIS CONNECTION is being torn down
+                // (`abort_agent_tasks`, from `fail_all` or `retire`), which
+                // is the one ending that must stay silent: there is nobody
+                // left to receive an answer, the supervisor's own teardown
+                // has already failed every upcall it was carrying, and the
+                // queue this would push onto is going away with the rest.
+                Err(join) if join.is_cancelled() => return,
+                Err(_) => {
+                    warn!(
+                        req_id,
+                        is_mutation,
+                        "an agent answer task died; the asking session is being told the outcome \
+                         is unknown"
+                    );
+                    panic_fallback(is_mutation)
+                }
             };
             // The permit goes ONTO the queue with the frame; see
-            // `send_agent_outcome`.
+            // `send_agent_outcome`. It rides in this task rather than in the
+            // one above so a panic cannot take the admission slot's whole
+            // purpose with it: the fallback answer is queued under the same
+            // allowance a real one would have been.
             send_agent_outcome(&writer_tx, req_id, outcome, permit).await;
         });
-        let mut tasks = self.agent_tasks.lock().expect("agent task list poisoned");
-        // Pruned on the way in rather than by each task on its way out: a
-        // finishing task would have to reach back into this list to remove
-        // itself, and the list can never hold more than the permits allow
-        // plus whatever has finished since the last request.
-        tasks.retain(|handle| !handle.is_finished());
-        tasks.push(task.abort_handle());
+        // The interval this seam interrupts is exactly the one the gate
+        // above exists to make survivable; see the field's docs.
+        #[cfg(test)]
+        if let Some(seam) = self
+            .agent_spawn_seam
+            .lock()
+            .expect("agent spawn seam poisoned")
+            .as_ref()
+        {
+            seam();
+        }
+        {
+            let mut tasks = self.agent_tasks.lock().expect("agent task list poisoned");
+            if tasks.retired {
+                // The connection was withdrawn while this answer was being
+                // set up. Aborting BEFORE the gate opens is what makes the
+                // cancellation boundary structural: the work task has not
+                // been polled past its first await, so the handler never
+                // runs, and the owner sees a cancelled join and stays
+                // silent exactly as it does for a task aborted mid-flight.
+                abort.abort();
+                return;
+            }
+            // Pruned on the way in rather than by each task on its way out: a
+            // finishing task would have to reach back into this list to remove
+            // itself, and the list can never hold more than the permits allow
+            // plus whatever has finished since the last request.
+            tasks.handles.retain(|handle| !handle.is_finished());
+            // The WORK task's handle, not its owner's: aborting the work is
+            // what stops a fleet listing being assembled for a peer that
+            // cannot receive it, and the owner then observes the cancellation
+            // and releases the admission slot. Storing the owner's instead
+            // would leave the work running with nothing left to notice.
+            tasks.handles.push(abort);
+        }
+        // Registered, so it may run. Nothing waits on this: the receiver is
+        // held by a task that cannot have finished, so the send cannot fail.
+        let _ = start.send(());
     }
 
     /// Enqueue one small `Unavailable` refusal for an upcall this
     /// connection will not do any work for, without blocking and without
-    /// spawning.
+    /// spawning — and RETIRE the connection if even that will not fit.
     ///
     /// Called from the demultiplexer, so it must not await — but neither
     /// may it hand the refusal to a task, which is what makes `try_send`
@@ -1674,27 +2123,57 @@ impl SupervisorClient {
     /// permit and nothing bounds how many of them a peer can create by
     /// sending faster than it reads.
     ///
-    /// Dropping the refusal when the queue is full is therefore the
-    /// deliberate ending, and it is not a silent loss: the supervisor that
-    /// forwarded the request has its own budget and turns a missing answer
-    /// into `Timeout` or `Unavailable` for the waiting agent. A full writer
-    /// queue also means this connection is already failing to keep up, so
-    /// the honest thing to add to it is nothing.
+    /// ## Why a full queue ends the connection
     ///
-    /// Logged once per connection, not once per drop: a peer in this state
-    /// produces them in floods, and the first line has said everything the
-    /// thousandth would.
+    /// The refusal is the SOLE terminal response to a request the
+    /// supervisor has already accepted on the asking session's behalf, and
+    /// dropping it used to be treated as harmless on the grounds that the
+    /// supervisor's own budget would expire. That reasoning holds for a
+    /// listing and fails for a mutation: a rename/stop/archive whose answer
+    /// budget expires does not END there, because the budget expiring says
+    /// nothing about whether the helm is still working, so the supervisor
+    /// RETAINS the asking session's delete fence until the request resolves
+    /// or the link dies (`service::agent_relay::HelmLink::upcall`). A queue
+    /// that later drains on a connection that never closes gives it
+    /// neither, and every subsequent mutation from that agent — and any
+    /// delete of its session — blocks for the rest of an otherwise healthy
+    /// connection's life.
+    ///
+    /// So the ending is the link's, not the request's: [`Self::retire`]
+    /// signals both halves, the write half closes, and the supervisor's own
+    /// teardown resolves every upcall it was carrying with the post-queue
+    /// vocabulary. That vocabulary is conservative rather than exact — a
+    /// mutation refused for want of an admission slot provably did NOT run,
+    /// yet arrives as "delivered, outcome unknown" — which is the right way
+    /// round: a bounded, honest overstatement of doubt beats an unbounded
+    /// silent hold.
+    ///
+    /// Retiring is chosen over the alternative of reserving refusal capacity
+    /// before admitting a request because it needs no new bookkeeping to go
+    /// wrong: this path is only reachable on a connection whose bounded
+    /// writer queue is already full, which is a connection failing to keep
+    /// up with its own peer, so closing it costs a reconnect that the
+    /// no-progress timeouts were heading towards anyway.
+    ///
+    /// Logged once per connection, not once per failure: `retire` is
+    /// idempotent and the frames behind this one produce the same ending,
+    /// so the first line has said everything the thousandth would.
     fn refuse_agent_request(&self, req_id: u64, message: &str) {
         let frame = agent_response_frame(req_id, not_ready(message));
-        if self.writer_tx.try_send(frame.into()).is_err()
-            && !self.refusal_drop_logged.swap(true, Ordering::Relaxed)
-        {
-            warn!(
-                req_id,
-                host = self.agent.as_ref().map(|agent| agent.origin.host),
-                "the writer queue was full; an agent refusal was dropped and will reach the \
-                 asking session as the supervisor's own timeout (logged once per connection)"
-            );
+        if self.writer_tx.try_send(frame.into()).is_err() {
+            if !self
+                .refusal_undeliverable_logged
+                .swap(true, Ordering::Relaxed)
+            {
+                warn!(
+                    req_id,
+                    host = self.agent.as_ref().map(|agent| agent.origin.host),
+                    "the writer queue was full and an agent refusal could not be enqueued; \
+                     retiring the connection so the asking session is told something (logged \
+                     once per connection)"
+                );
+            }
+            self.retire();
         }
     }
 
@@ -1711,7 +2190,42 @@ impl SupervisorClient {
     /// that prose). There is no timeout: the connection dying is what
     /// unblocks a waiter, and inventing a deadline here would abandon
     /// slow-but-fine operations on a loaded host.
+    ///
+    /// That makes the ONLY terminal event a connection loss, which is why
+    /// [`Self::dispatch`] treats a reply naming a never-issued `req_id` as
+    /// fatal rather than dropping it: without a deadline of its own, a
+    /// waiter whose answer arrived under an impossible id would otherwise
+    /// sit here for the life of a connection that is behaving normally in
+    /// every other respect.
+    ///
+    /// A connection that dies instead of answering becomes a
+    /// [`SupervisorTransportError`], and WHICH variant depends on how far
+    /// the request had got — the two failure sites before the enqueue say
+    /// `NotSent`, the wait after it says `SentUnanswered`. That phase split
+    /// is load-bearing rather than descriptive: an agent's lifecycle verb
+    /// travels this leg, and the difference between "never left this
+    /// process" and "the target may have done it and lost the answer" is
+    /// the difference between a free retry and one that can stop a session
+    /// somebody has since restarted. Both used to be one untyped string.
     async fn request(&self, req_id: u64, msg: ControlMsg) -> anyhow::Result<ControlMsg> {
+        // Record `req_id` as ISSUED before anything can reach the wire.
+        //
+        // [`Self::dispatch`] rejects a reply naming an id past `next_req` as
+        // an impossible correlation, which is only sound if this counter
+        // covers every id that ever went out. `req_id()` is where production
+        // callers get theirs, but this method ACCEPTS one — the id lives
+        // inside `msg` too, so the caller has to mint it — and an id that
+        // arrived any other way would otherwise be answered into a
+        // connection kill. Maintaining the claim here, at the one place a
+        // request is sent, makes it a property of the registry rather than
+        // of caller discipline. A no-op on the ordinary path, since
+        // `req_id()` has already moved the counter past its own id.
+        //
+        // Saturating rather than wrapping: an id of `u64::MAX` would have
+        // nothing above it to reserve, and pinning the counter there costs
+        // only that one unreachable id's answer.
+        self.next_req
+            .fetch_max(req_id.saturating_add(1), Ordering::Relaxed);
         // Writer capacity is reserved BEFORE the pending entry is
         // registered, and that ordering is the whole point. The queue is
         // bounded, so sending can park; if it parks with the entry already
@@ -1725,19 +2239,24 @@ impl SupervisorClient {
             .writer_tx
             .reserve()
             .await
-            .map_err(|e| anyhow::Error::new(e).context("supervisor connection closed"))?;
+            .map_err(|_| anyhow::Error::new(SupervisorTransportError::NotSent))?;
         let (tx, rx) = oneshot::channel();
         {
             // Check-and-insert under one lock hold; see `Pending` for
             // why splitting them hangs requests.
             let mut pending = self.pending.lock().await;
             if pending.closed {
-                bail!("supervisor connection closed");
+                return Err(anyhow::Error::new(SupervisorTransportError::NotSent));
             }
             pending.map.insert(req_id, tx);
         }
         permit.send(Frame::control(&msg).into());
-        let reply = rx.await.context("supervisor connection closed")?;
+        // Everything from here on is POST-ENQUEUE: the sender being dropped
+        // means `fail_all` ran, or the whole connection went, with this
+        // frame already in the writer's hands.
+        let reply = rx
+            .await
+            .map_err(|_| anyhow::Error::new(SupervisorTransportError::SentUnanswered))?;
         // Matched by value, not `if let ... = &reply`: an owned `message`
         // moves straight into `SupervisorError` instead of a borrow forcing
         // a clone here for no reason (the reply is not used afterwards
@@ -2214,6 +2733,12 @@ impl SupervisorClient {
     /// not be confirmed complete (both surfaced via `SupervisorError`,
     /// `downcast_ref`-able from the returned error). `Ok` is the only
     /// outcome that means the sweep actually ran to completion.
+    ///
+    /// A correlated reply of the WRONG variant is a third thing again, and
+    /// comes back as [`SupervisorTransportError::SentWrongReply`] rather
+    /// than as an untyped protocol complaint: the stop was sent, so an agent
+    /// relaying this must be told its outcome is unknown. See
+    /// [`wrong_reply`].
     pub async fn stop_session(&self, id: &str) -> anyhow::Result<()> {
         let req_id = self.req_id();
         match self
@@ -2227,7 +2752,7 @@ impl SupervisorClient {
             .await?
         {
             ControlMsg::SessionStopped { .. } => Ok(()),
-            other => bail!("unexpected reply to stop_session: {other:?}"),
+            other => Err(wrong_reply("StopSession", &other)),
         }
     }
 
@@ -2284,7 +2809,9 @@ impl SupervisorClient {
     /// A refusal — an unknown `id`, or a title the supervisor rejects —
     /// arrives as a [`SupervisorError`] the caller can downcast for its
     /// `ErrorKind` and message, exactly like every other request on this
-    /// client.
+    /// client. A correlated reply of the wrong VARIANT does not: it is
+    /// [`SupervisorTransportError::SentWrongReply`], which keeps the fact
+    /// that the rename was sent (see [`wrong_reply`]).
     pub async fn rename_session(&self, id: &str, title: &str) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
@@ -2299,7 +2826,7 @@ impl SupervisorClient {
             .await?
         {
             ControlMsg::SessionRenamed { session, .. } => Ok(session),
-            other => bail!("unexpected reply to rename_session: {other:?}"),
+            other => Err(wrong_reply("RenameSession", &other)),
         }
     }
 
@@ -2310,6 +2837,12 @@ impl SupervisorClient {
     /// a later restart. Repeating the request is successful and returns the
     /// same current state, which lets a caller recover from an ambiguous
     /// transport failure without guessing whether the first request landed.
+    ///
+    /// A correlated reply of the wrong variant is
+    /// [`SupervisorTransportError::SentWrongReply`], not an untyped protocol
+    /// error, for the reason [`wrong_reply`] gives — even though this verb
+    /// is the one whose repeat is harmless, because the vocabulary is the
+    /// same across all three lifecycle verbs by design.
     pub async fn archive_session(&self, id: &str) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
@@ -2323,7 +2856,7 @@ impl SupervisorClient {
             .await?
         {
             ControlMsg::SessionArchived { session, .. } => Ok(session),
-            other => bail!("unexpected reply to archive_session: {other:?}"),
+            other => Err(wrong_reply("ArchiveSession", &other)),
         }
     }
 
@@ -3634,6 +4167,564 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// Spec: a supervisor that READS a request and then dies without
+    /// answering fails it as [`SupervisorTransportError::SentUnanswered`].
+    ///
+    /// The phase this records is the whole reason the error is typed. The
+    /// verb driven here is a `StopSession`, which is what an agent's
+    /// `farhelm agent stop` becomes on this leg: the target supervisor may
+    /// have killed the agent and lost only the reply, so the failure that
+    /// comes back must not read as "nothing happened". Everything above
+    /// this client used to see one untyped string for both phases, which
+    /// `error_kind` classifies as `Internal` — a kind that says nothing
+    /// about retrying at all. `agent_requests::transport_outcome` is what
+    /// turns this variant into the agent's outcome-unknown ending.
+    ///
+    /// The peer READING the frame is what makes the phase provable: the
+    /// enqueue happened, observably, before the connection went.
+    #[tokio::test]
+    async fn a_peer_that_reads_a_request_and_dies_reports_it_as_sent() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let frame = reader
+                .read_frame()
+                .await
+                .unwrap()
+                .expect("the helm sent nothing to read");
+            parse_control(&frame).expect("decode the request")
+            // Both halves drop here: the supervisor dies holding a request
+            // it has already taken off the wire.
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let stop = tokio::spawn({
+            let client = Arc::clone(&client);
+            async move { client.stop_session("s1").await }
+        });
+        let read_by_the_peer = timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer never read the request")
+            .expect("peer task");
+        assert!(matches!(read_by_the_peer, ControlMsg::StopSession { .. }));
+
+        let error = timeout(Duration::from_secs(5), stop)
+            .await
+            .expect("the request hung after its peer died")
+            .expect("request task")
+            .expect_err("a peer that never answers cannot succeed");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentUnanswered)
+            ),
+            "a request the peer had already taken must be reported as sent: {error:#}"
+        );
+    }
+
+    /// Spec: RETIRING a connection drains its pending requests exactly as a
+    /// dead one does — [`SupervisorTransportError::SentUnanswered`] for a
+    /// frame the writer queue had already taken — while a replacement
+    /// connection to the same peer keeps working.
+    ///
+    /// Retirement is not a failure; it is the manager withdrawing a
+    /// connection on a reconnect, a retarget, an adoption or a retired host
+    /// row, and the peer on the other side is usually perfectly healthy.
+    /// That is exactly what made the missing drain so quiet: the demux
+    /// loop's cancellation arm used to RETURN, skipping the `fail_all` tail
+    /// that every other ending of that loop goes through, so a request on
+    /// the old connection sat on a `oneshot` nobody would ever complete
+    /// while the fleet visibly recovered around it. For an agent's
+    /// rename/stop/archive that is a supervisor-side delete fence held
+    /// against the asking session for the life of the process — the far end
+    /// of the chain this drain feeds, pinned in the supervisor's own crate
+    /// by `agent_relay::tests::a_mutations_fence_outlives_the_answer_budget`
+    /// (the `fail_all` half), since the fence is not observable from here.
+    ///
+    /// The second connection is what makes "stranded" the right word rather
+    /// than "delayed": nothing about the retirement stops the host being
+    /// served again immediately, which is why nothing else would ever have
+    /// noticed the hung waiter.
+    #[tokio::test]
+    async fn retiring_a_connection_drains_a_request_the_queue_already_took() {
+        /// One live client plus the peer's frame reader, with the hello
+        /// already exchanged and the peer's writer parked in a task the
+        /// caller can answer through.
+        ///
+        /// Returned rather than inlined twice because this test's whole
+        /// point is the SECOND connection: a fixture written once cannot
+        /// accidentally differ between the retired connection and its
+        /// replacement.
+        async fn connected() -> (
+            Arc<SupervisorClient>,
+            FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+            FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        ) {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                (reader, writer)
+            });
+            let (r, w) = tokio::io::split(client_side);
+            let client = SupervisorClient::start(r, w).await.unwrap();
+            let (reader, writer) = peer.await.expect("peer task");
+            (client, reader, writer)
+        }
+
+        let (retired, mut retired_reader, _retired_writer) = connected().await;
+        let stop = tokio::spawn({
+            let client = Arc::clone(&retired);
+            async move { client.stop_session("s1").await }
+        });
+        // Read by the peer, which is what makes the phase provable: the
+        // frame left the queue before anything was retired.
+        let frame = timeout(Duration::from_secs(5), retired_reader.read_frame())
+            .await
+            .expect("the peer never saw the request")
+            .unwrap()
+            .expect("the helm sent nothing to read");
+        assert!(matches!(
+            parse_control(&frame).expect("decode the request"),
+            ControlMsg::StopSession { .. }
+        ));
+
+        // The manager withdrawing the connection. The peer is untouched and
+        // still perfectly able to answer — it simply never will, because
+        // nothing is left listening for it.
+        retired.retire();
+        let error = timeout(Duration::from_secs(5), stop)
+            .await
+            .expect("a retired connection left its request hanging")
+            .expect("request task")
+            .expect_err("a retired connection cannot answer");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentUnanswered)
+            ),
+            "a retired connection's queued request must be reported as sent: {error:#}"
+        );
+
+        // And the replacement works, which is the state the fleet is really
+        // in while a stranded waiter would still be waiting.
+        let (replacement, mut reader, mut writer) = connected().await;
+        let stop = tokio::spawn({
+            let client = Arc::clone(&replacement);
+            async move { client.stop_session("s1").await }
+        });
+        let frame = timeout(Duration::from_secs(5), reader.read_frame())
+            .await
+            .expect("the replacement peer never saw the request")
+            .unwrap()
+            .expect("the helm sent nothing to read");
+        let ControlMsg::StopSession { req_id, .. } =
+            parse_control(&frame).expect("decode the request")
+        else {
+            panic!("the replacement must send a StopSession");
+        };
+        writer
+            .write_control(&ControlMsg::SessionStopped { req_id })
+            .await
+            .expect("answer the replacement");
+        timeout(Duration::from_secs(5), stop)
+            .await
+            .expect("the replacement's request hung")
+            .expect("request task")
+            .expect("a healthy replacement connection answers");
+    }
+
+    /// Spec: a request made on a connection that is ALREADY dead fails as
+    /// [`SupervisorTransportError::NotSent`].
+    ///
+    /// The other side of the phase split, and it needs its own test because
+    /// nothing structural keeps the two apart: one `map_err` copied to the
+    /// wrong side of the enqueue collapses them, and every message they
+    /// produce still says the connection closed. Collapsed toward `NotSent`
+    /// a lost mutation reply becomes "retry freely" — the exact lie the
+    /// split exists to prevent; collapsed the other way, every request that
+    /// never left the process starts telling its caller to go and inspect
+    /// the fleet before trying again.
+    #[tokio::test]
+    async fn a_request_on_an_already_dead_connection_reports_that_nothing_was_sent() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            // And immediately goes away, before anything is asked of it.
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        peer.await.expect("peer task");
+        // The connection is dead the moment the demux loop sees EOF, which
+        // is a scheduling step away rather than instant; waiting for the
+        // flag is what makes this test about the pre-enqueue path rather
+        // than a race against it.
+        timeout(Duration::from_secs(5), async {
+            while !client.pending.lock().await.closed {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the client never noticed its peer was gone");
+
+        let error = timeout(Duration::from_secs(5), client.stop_session("s1"))
+            .await
+            .expect("a request on a dead connection must fail fast")
+            .expect_err("a dead connection cannot answer");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::NotSent)
+            ),
+            "nothing was queued, so the failure must say so: {error:#}"
+        );
+    }
+
+    /// Spec: a LIFECYCLE request answered with a correlated reply of the
+    /// wrong variant keeps the fact that it was sent, as
+    /// [`SupervisorTransportError::SentWrongReply`].
+    ///
+    /// The phase, not the protocol violation, is what this pins. A peer
+    /// that answers a `StopSession` with a `SessionRenamed` is broken or
+    /// hostile either way, but the request still went out and the target may
+    /// still have stopped the agent before answering nonsense — so an
+    /// untyped "unexpected reply" error, which `error_kind` reads as
+    /// `Internal`, tells an agent nothing about the one question it has.
+    /// `agent_requests::transport_outcome` turns this variant into the same
+    /// outcome-unknown ending a dead connection gets, pinned there beside
+    /// the other phases.
+    ///
+    /// `stop` is the verb because it is the one whose repeat is destructive
+    /// in the plainest way; the three lifecycle wrappers share the shape.
+    #[tokio::test]
+    async fn a_lifecycle_reply_of_the_wrong_variant_is_reported_as_sent() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let frame = reader
+                .read_frame()
+                .await
+                .unwrap()
+                .expect("the helm sent nothing to read");
+            let ControlMsg::StopSession { req_id, .. } =
+                parse_control(&frame).expect("decode the request")
+            else {
+                panic!("expected a StopSession");
+            };
+            // Correlated, well formed, and the answer to a question nobody
+            // asked.
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: session("s1"),
+                })
+                .await
+                .expect("answer with the wrong variant");
+            // Held so the connection stays alive: the point is that this
+            // failure is NOT a connection loss.
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = timeout(Duration::from_secs(5), client.stop_session("s1"))
+            .await
+            .expect("the request hung on a wrong reply")
+            .expect_err("a wrong reply cannot succeed");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentWrongReply { request, .. })
+                    if *request == "StopSession"
+            ),
+            "a correlated wrong reply must keep the request's own phase: {error:#}"
+        );
+        let _peer = peer.await.expect("peer task");
+    }
+
+    /// Spec: a wrong-variant reply is reported by VARIANT NAME, so a reply
+    /// that legally fills most of a frame still produces a small error.
+    ///
+    /// The small `SessionRenamed` fixture above cannot see this, and the
+    /// case it misses is the one that broke the vocabulary the sibling test
+    /// pins. `SentWrongReply` used to carry the whole `{reply:?}` rendering,
+    /// which for a near-limit `SessionList` is megabytes; that string
+    /// travels into `agent_requests::transport_outcome`'s message, which is
+    /// re-encoded into the agent's own `AgentResponse` frame, which then
+    /// tripped `agent_response_frame`'s size backstop and was replaced
+    /// wholesale — so the `Timeout`-plus-remedy answer a mutation is
+    /// supposed to get arrived as a bare `Internal`. Size is not the only
+    /// harm: the same rendering carries a `SessionInfo`'s raw invocation
+    /// and cwd into an agent-facing error chain, which the agent surfaces
+    /// deliberately redact.
+    ///
+    /// The reply is built near the frame limit rather than merely "big"
+    /// because that is the legal shape a real supervisor can produce — a
+    /// listing answering a `StopSession` — and because a bound that holds
+    /// for a kilobyte and not for a megabyte is not a bound.
+    #[tokio::test]
+    async fn a_near_frame_limit_wrong_reply_still_reports_a_small_error() {
+        // ~7 MiB of encoded sessions: comfortably under `MAX_FRAME_LEN` (so
+        // the peer can actually send it) and comfortably over it once
+        // Debug-rendered and re-encoded inside another frame, which is what
+        // the old shape did.
+        let sessions: Vec<SessionInfo> = (0..116)
+            .map(|n| {
+                let mut info = session(&format!("s{n}"));
+                info.title = "t".repeat(60_000);
+                info.invocation = "claude --dangerously-skip-permissions".to_string();
+                info.cwd = "/home/someone/secret-project".to_string();
+                info
+            })
+            .collect();
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let frame = reader
+                .read_frame()
+                .await
+                .unwrap()
+                .expect("the helm sent nothing to read");
+            let ControlMsg::StopSession { req_id, .. } =
+                parse_control(&frame).expect("decode the request")
+            else {
+                panic!("expected a StopSession");
+            };
+            writer
+                .write_control(&ControlMsg::SessionList {
+                    req_id,
+                    sessions,
+                    total: 116,
+                    next_cursor: None,
+                })
+                .await
+                .expect("a near-limit listing is a legal frame");
+            // Held so the connection stays alive; this failure is not a
+            // connection loss.
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = timeout(Duration::from_secs(30), client.stop_session("s1"))
+            .await
+            .expect("the request hung on a wrong reply")
+            .expect_err("a wrong reply cannot succeed");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentWrongReply { request, reply })
+                    if *request == "StopSession" && *reply == "SessionList"
+            ),
+            "the wrong reply must be named by variant: {error:#}"
+        );
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.len() < 1024,
+            "a megabyte reply must not produce a megabyte error ({} bytes)",
+            rendered.len()
+        );
+        assert!(
+            !rendered.contains("secret-project") && !rendered.contains("skip-permissions"),
+            "the error must not carry fields the agent surfaces redact: {rendered}"
+        );
+        let _peer = peer.await.expect("peer task");
+    }
+
+    /// Spec: a reply under a `req_id` this connection never issued ends the
+    /// connection, while one under an id it HAS issued is dropped in
+    /// silence.
+    ///
+    /// [`SupervisorClient::request`] has no deadline on purpose, so a
+    /// connection loss is its only terminal event. That makes a dropped
+    /// correlation unsurvivable in one specific case: a peer that answers
+    /// under an id nobody is waiting for, and never under the real one,
+    /// leaves the waiter parked forever on a transport that stays healthy —
+    /// and with it the connection's agent-answer permit and, one hop out,
+    /// the asking session's delete fence. An id past this connection's own
+    /// counter cannot be a late answer, so it is treated as the protocol
+    /// violation it is.
+    ///
+    /// The benign half is asserted first and is not a formality: retiring
+    /// on EVERY unrecognized id would tear the connection down on ordinary
+    /// traffic, since a request whose caller went away leaves exactly such
+    /// an id behind. Its evidence is that the second request still reaches
+    /// the peer at all — a connection retired by the duplicate would have
+    /// failed it as `NotSent` instead.
+    #[tokio::test]
+    async fn a_reply_under_a_never_issued_req_id_ends_the_connection() {
+        /// The next `StopSession`'s `req_id`, since this fixture reads two.
+        async fn next_stop<R: tokio::io::AsyncRead + Unpin>(reader: &mut FrameReader<R>) -> u64 {
+            let frame = reader
+                .read_frame()
+                .await
+                .unwrap()
+                .expect("the helm sent nothing to read");
+            match parse_control(&frame).expect("decode the request") {
+                ControlMsg::StopSession { req_id, .. } => req_id,
+                other => panic!("expected a StopSession, got {other:?}"),
+            }
+        }
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+
+            let first = next_stop(&mut reader).await;
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id: first })
+                .await
+                .expect("answer the first request");
+            // The same id a second time: issued, no longer pending, and
+            // indistinguishable from a late answer.
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id: first })
+                .await
+                .expect("answer it again");
+
+            let second = next_stop(&mut reader).await;
+            // Correlated to nothing this connection ever sent.
+            writer
+                .write_control(&ControlMsg::SessionStopped {
+                    req_id: second + 1_000,
+                })
+                .await
+                .expect("answer under an impossible id");
+            writer
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        timeout(Duration::from_secs(5), client.stop_session("s1"))
+            .await
+            .expect("the first request hung")
+            .expect("a healthy peer answers");
+
+        let error = timeout(Duration::from_secs(5), client.stop_session("s2"))
+            .await
+            .expect("the request hung on an impossible correlation")
+            .expect_err("an answer nobody can be waiting for is not an answer");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentUnanswered)
+            ),
+            "the request was queued before the violation, and a `NotSent` here would also mean \
+             the harmless duplicate had wrongly killed the connection: {error:#}"
+        );
+        timeout(Duration::from_secs(5), client.closed())
+            .await
+            .expect("an impossible correlation must end the connection");
+        let _peer = peer.await.expect("peer task");
+    }
+
+    /// Spec: the oversized-answer backstop keeps an outcome-unknown verdict
+    /// outcome-unknown; only its prose is dropped.
+    ///
+    /// The backstop exists to stop one huge reply costing the whole
+    /// connection, and the obvious implementation — replace anything that
+    /// does not fit with a small `Internal` — quietly changes what the
+    /// answer CLAIMS. `Timeout` on this path is the relay's
+    /// "delivered, outcome unknown" verdict on a rename/stop/archive, built
+    /// out of an error chain whose length this side does not control.
+    /// Rewriting it to `Internal` tells the asking agent "this should not
+    /// happen" about a mutation that may have taken effect, which is the
+    /// exact substitution the mutation vocabulary exists to prevent —
+    /// arrived at through a size check rather than through any judgement
+    /// about the request.
+    ///
+    /// Both directions, because the fix is only correct if it is narrow: an
+    /// oversized answer that was NOT outcome-unknown must still collapse to
+    /// `Internal`, which is the honest reading when nothing durable is at
+    /// stake and no retry changes anything.
+    #[test]
+    fn the_oversized_answer_backstop_preserves_an_unknown_outcome() {
+        let huge = "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize + 1);
+        let decode = |frame: Frame| match parse_control(&frame).expect("decode the response") {
+            ControlMsg::AgentResponse { outcome, .. } => outcome,
+            other => panic!("expected an AgentResponse, got {other:?}"),
+        };
+
+        let replaced = agent_response_frame(
+            7,
+            farhelm_proto::AgentOutcome::Err {
+                kind: farhelm_proto::ErrorKind::Timeout,
+                message: huge.clone(),
+            },
+        );
+        assert!(
+            !replaced.exceeds_max_len(),
+            "the replacement must be the thing that fits"
+        );
+        match decode(replaced) {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(
+                    kind,
+                    farhelm_proto::ErrorKind::Timeout,
+                    "a delivered-outcome-unknown verdict must survive its own size"
+                );
+                assert!(
+                    message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+                    "and must keep telling the agent what to do before retrying: {message}"
+                );
+            }
+            other => panic!("the backstop cannot turn a refusal into a success: {other:?}"),
+        }
+
+        let collapsed = agent_response_frame(
+            8,
+            farhelm_proto::AgentOutcome::Err {
+                kind: farhelm_proto::ErrorKind::Internal,
+                message: huge,
+            },
+        );
+        match decode(collapsed) {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(
+                    kind,
+                    farhelm_proto::ErrorKind::Internal,
+                    "nothing durable was at stake, so the honest kind is unchanged"
+                );
+                assert!(
+                    !message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+                    "and the mutation remedy must not be spread to a class that cannot need it: \
+                     {message}"
+                );
+            }
+            other => panic!("the backstop cannot turn a refusal into a success: {other:?}"),
+        }
     }
 
     /// Read EOF must cancel the parked writer even while an external
@@ -5800,6 +6891,352 @@ mod tests {
         }
     }
 
+    /// A handler that records whether it was ever entered and answers
+    /// immediately.
+    ///
+    /// The flag is the whole fixture: the cancellation-boundary tests are
+    /// about work that must NOT begin, and "the handler was never called" is
+    /// the only observation that distinguishes an aborted task from one that
+    /// ran and had its answer discarded.
+    struct RecordingHandler {
+        entered: Arc<AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::agent_requests::AgentRequestHandler for RecordingHandler {
+        async fn handle(
+            &self,
+            _origin: crate::agent_requests::AgentOrigin,
+            _session_id: &str,
+            _verb: farhelm_proto::AgentVerb,
+        ) -> farhelm_proto::AgentOutcome {
+            self.entered.store(true, Ordering::SeqCst);
+            farhelm_proto::AgentOutcome::Ok {
+                reply: farhelm_proto::AgentReply::Stopped {},
+            }
+        }
+    }
+
+    /// Spec: an answer whose connection is retired between spawning its work
+    /// task and registering it never runs the handler at all.
+    ///
+    /// The interval is real and used to be unowned. A spawned task starts
+    /// when the runtime says so, so on a multithreaded runtime the work
+    /// could begin — and `abort_agent_tasks` could drain an empty list and
+    /// return — before the abort handle was stored. The handle then landed
+    /// in a torn-down connection's list, and the escaped task kept walking
+    /// the database for a peer nobody would accept an answer from; worse,
+    /// for a mutation whose entry check had already passed, it kept routing
+    /// a `stop` to its target on the authority of a connection the manager
+    /// had withdrawn. Every docstring in this file claims retirement OWNS
+    /// that work, and this is what makes the claim structural rather than a
+    /// statement about scheduling luck.
+    ///
+    /// The seam fires precisely between the spawn and the registration,
+    /// which is the only place the race was ever reachable from; a refactor
+    /// that reorders those two must move the seam with it or this test stops
+    /// pinning anything. `Stop` is the verb because a mutation escaping the
+    /// boundary is the consequential half — a listing merely wastes work.
+    #[tokio::test]
+    async fn an_answer_spawned_into_a_retirement_never_runs() {
+        let entered = Arc::new(AtomicBool::new(false));
+        let slot: crate::agent_requests::AgentRequestSlot =
+            Arc::new(std::sync::OnceLock::from(Arc::new(RecordingHandler {
+                entered: Arc::clone(&entered),
+            })
+                as Arc<dyn crate::agent_requests::AgentRequestHandler>));
+        let (client, mut peer) = agent_connection(slot).await;
+
+        // A `Weak`, so the seam cannot keep the client alive past the test.
+        let retiring = Arc::downgrade(&client);
+        *client
+            .agent_spawn_seam
+            .lock()
+            .expect("agent spawn seam poisoned") = Some(Box::new(move || {
+            if let Some(client) = retiring.upgrade() {
+                client.retire();
+            }
+        }));
+
+        peer.ask(1, farhelm_proto::AgentVerb::Stop { session_id: None })
+            .await;
+        timeout(Duration::from_secs(5), client.closed())
+            .await
+            .expect("the seam's retirement never took effect");
+
+        assert!(
+            !entered.load(Ordering::SeqCst),
+            "the handler ran for a connection that had already been retired"
+        );
+        assert!(
+            client
+                .agent_tasks
+                .lock()
+                .expect("agent task list poisoned")
+                .handles
+                .is_empty(),
+            "a retired connection must register nothing after its drain"
+        );
+        // Silence is the contract for a cancelled answer (see
+        // `spawn_agent_answer`), so the peer sees the connection end rather
+        // than an `AgentResponse`.
+        let ending = timeout(Duration::from_secs(5), peer.reader.read_frame())
+            .await
+            .expect("the connection neither answered nor closed")
+            .expect("read the connection's ending");
+        assert!(
+            ending.is_none(),
+            "a cancelled answer must send nothing: {:?}",
+            ending.map(|frame| parse_control(&frame))
+        );
+    }
+
+    /// A handler whose ENTRY check would pass but whose EXIT check always
+    /// says the connection is no longer current — the exact shape
+    /// `spawn_agent_answer`'s second `origin_is_live` call exists to catch,
+    /// isolated from any real retarget/adoption race so it can be produced
+    /// on demand.
+    struct StaleExitHandler {
+        reply: farhelm_proto::AgentReply,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::agent_requests::AgentRequestHandler for StaleExitHandler {
+        async fn handle(
+            &self,
+            _origin: crate::agent_requests::AgentOrigin,
+            _session_id: &str,
+            _verb: farhelm_proto::AgentVerb,
+        ) -> farhelm_proto::AgentOutcome {
+            farhelm_proto::AgentOutcome::Ok {
+                reply: self.reply.clone(),
+            }
+        }
+
+        fn origin_is_live(&self, _origin: crate::agent_requests::AgentOrigin) -> bool {
+            false
+        }
+    }
+
+    /// Spec: a completed READ-ONLY listing whose origin has gone stale by
+    /// the time the answer is ready is downgraded to `Unavailable` — the
+    /// exit re-check `spawn_agent_answer`'s docs describe, still armed for
+    /// the two verbs it protects.
+    ///
+    /// This is the control for
+    /// [`a_stale_origin_does_not_downgrade_a_completed_mutation`]: without
+    /// it, a mutating verb skipping the check would be indistinguishable
+    /// from BOTH verb classes never being checked at all.
+    #[tokio::test]
+    async fn a_stale_origin_downgrades_a_completed_listing_to_unavailable() {
+        let handler = Arc::new(StaleExitHandler {
+            reply: farhelm_proto::AgentReply::Hosts { hosts: Vec::new() },
+        });
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
+            handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+        ));
+        let (_client, mut peer) = agent_connection(slot).await;
+
+        peer.ask(1, farhelm_proto::AgentVerb::Hosts {}).await;
+        match peer.outcome(1).await {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, farhelm_proto::ErrorKind::Unavailable);
+                assert!(
+                    message.contains("replaced"),
+                    "the refusal must name the cause, got: {message}"
+                );
+            }
+            other => panic!("a stale-origin listing must be downgraded, got {other:?}"),
+        }
+    }
+
+    /// Spec: a completed MUTATING verb is reported EXACTLY as the handler
+    /// returned it even when the origin has gone stale by the time the
+    /// answer is ready.
+    ///
+    /// This is the regression test for the bug fixed alongside it: before
+    /// the fix, `spawn_agent_answer` downgraded ANY `Ok` outcome whose
+    /// origin had gone stale to `Unavailable` — a kind callers read as
+    /// "never happened, safe to retry". A completed stop, rename or archive
+    /// could therefore be reported as though it had not happened, inviting
+    /// a retry that re-applies an action already taken.
+    ///
+    /// ALL THREE verbs are driven rather than one standing in for the
+    /// others, and the reason is the shape of the thing being protected:
+    /// what decides the skip is a classification list
+    /// ([`farhelm_proto::AgentVerb::is_mutating`]) rather than anything
+    /// structural about the outcome. A verb dropped from that list would
+    /// fail no test that only exercised its neighbors, which is exactly the
+    /// failure mode centralizing the list was meant to end — so the test
+    /// enumerates the set too. `Stop` and the two `Session`-shaped replies
+    /// are both represented, since they take different arms of the reply
+    /// match on the way out.
+    #[tokio::test]
+    async fn a_stale_origin_does_not_downgrade_a_completed_mutation() {
+        let renamed = |id: &str| farhelm_proto::AgentSession {
+            id: id.to_string(),
+            host: Some("this machine".to_string()),
+            title: "t".to_string(),
+            cwd: "/w".to_string(),
+            agent: "claude".to_string(),
+            status: "running".to_string(),
+            current: false,
+            archived: false,
+            stale: false,
+        };
+        let cases = [
+            (
+                farhelm_proto::AgentVerb::Stop { session_id: None },
+                farhelm_proto::AgentReply::Stopped {},
+            ),
+            (
+                farhelm_proto::AgentVerb::Rename {
+                    session_id: None,
+                    title: "t".to_string(),
+                },
+                farhelm_proto::AgentReply::Session {
+                    session: renamed("s1"),
+                },
+            ),
+            (
+                farhelm_proto::AgentVerb::Archive { session_id: None },
+                farhelm_proto::AgentReply::Session {
+                    session: renamed("s1"),
+                },
+            ),
+        ];
+
+        for (verb, reply) in cases {
+            let handler = Arc::new(StaleExitHandler {
+                reply: reply.clone(),
+            });
+            let slot: crate::agent_requests::AgentRequestSlot =
+                Arc::new(std::sync::OnceLock::from(
+                    handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+                ));
+            let (_client, mut peer) = agent_connection(slot).await;
+
+            peer.ask(1, verb.clone()).await;
+            match peer.outcome(1).await {
+                farhelm_proto::AgentOutcome::Ok { reply: got } => assert_eq!(
+                    got, reply,
+                    "{verb:?} must be reported exactly as the handler answered it"
+                ),
+                other => panic!(
+                    "a completed {verb:?} must be reported truthfully even with a stale origin, \
+                     got {other:?}"
+                ),
+            }
+        }
+    }
+
+    /// A handler that panics on every call, which is the one ending an
+    /// answer task can reach that produces no outcome of its own.
+    struct PanickingHandler;
+
+    #[async_trait::async_trait]
+    impl crate::agent_requests::AgentRequestHandler for PanickingHandler {
+        async fn handle(
+            &self,
+            _origin: crate::agent_requests::AgentOrigin,
+            _session_id: &str,
+            _verb: farhelm_proto::AgentVerb,
+        ) -> farhelm_proto::AgentOutcome {
+            panic!("the agent handler blew up");
+        }
+    }
+
+    /// Spec: a panicking handler still produces an `AgentResponse` — the
+    /// outcome-unknown ending for a mutation, a retry-safe refusal for a
+    /// listing — while the connection stays alive and its admission slots
+    /// come back.
+    ///
+    /// This is the ending nothing else in the relay can see, and the reason
+    /// the answer task is supervised rather than merely spawned. A panic
+    /// leaves the connection HEALTHY, so no teardown runs and the
+    /// supervisor's `fail_all` never fires; its pending entry waits out the
+    /// answer budget in a live link's map, and for a mutation the delete
+    /// fence that budget retains is then held against the asking session
+    /// until the connection eventually dies — blocking every later mutation
+    /// from that agent and any delete of it, on a link that looks perfectly
+    /// well. A response arriving is exactly what releases that fence, which
+    /// is why the assertion is "something came back", asserted from the
+    /// supervisor's own side of the wire.
+    ///
+    /// More requests are driven than there are admission slots, and that is
+    /// the second half of the claim: the permit rides in the supervising
+    /// task, so a dead work task cannot take a slot with it. Were the slot
+    /// leaked, the run past [`AGENT_ANSWER_SLOTS`] would come back as "too
+    /// many agent requests" instead of as the fallback — a connection
+    /// permanently unable to answer any agent at all after four panics.
+    #[tokio::test]
+    async fn a_panicking_handler_still_answers_and_leaves_the_connection_alive() {
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
+            Arc::new(PanickingHandler) as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+        ));
+        let (client, mut peer) = agent_connection(slot).await;
+
+        for req_id in 1..=(AGENT_ANSWER_SLOTS as u64 + 1) {
+            peer.ask(req_id, farhelm_proto::AgentVerb::Stop { session_id: None })
+                .await;
+            match peer.outcome(req_id).await {
+                farhelm_proto::AgentOutcome::Err { kind, message } => {
+                    assert_eq!(
+                        kind,
+                        farhelm_proto::ErrorKind::Timeout,
+                        "a mutation whose handler died may already have taken effect: {message}"
+                    );
+                    assert!(
+                        message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+                        "and must say what to do about it: {message}"
+                    );
+                }
+                other => panic!("a dead answer task must still answer, got {other:?}"),
+            }
+        }
+
+        // A listing has changed nothing, so it gets the retry-safe refusal
+        // rather than the mutation vocabulary.
+        let listing_id = AGENT_ANSWER_SLOTS as u64 + 2;
+        peer.ask(listing_id, farhelm_proto::AgentVerb::Hosts {})
+            .await;
+        match peer.outcome(listing_id).await {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, farhelm_proto::ErrorKind::Unavailable);
+                assert!(
+                    !message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+                    "a listing has nothing to check before retrying: {message}"
+                );
+            }
+            other => panic!("a dead answer task must still answer, got {other:?}"),
+        }
+
+        // The connection is the other thing being claimed: a panicking
+        // handler must not take the host's terminals and requests with it.
+        let sessions = tokio::spawn({
+            let client = Arc::clone(&client);
+            async move { client.list_sessions().await }
+        });
+        let req_id = match peer.next_control().await {
+            ControlMsg::ListSessions { req_id, .. } => req_id,
+            other => panic!("the connection died with the panicking handler: {other:?}"),
+        };
+        peer.writer
+            .write_control(&ControlMsg::SessionList {
+                req_id,
+                sessions: Vec::new(),
+                total: 0,
+                next_cursor: None,
+            })
+            .await
+            .expect("answer the ordinary request");
+        timeout(Duration::from_secs(5), sessions)
+            .await
+            .expect("the connection stopped serving after a handler panic")
+            .expect("listing task")
+            .expect("listing");
+    }
+
     /// A slow agent handler must not sit on the demultiplexer: ordinary
     /// traffic on the same connection has to keep flowing while one is
     /// parked.
@@ -5878,7 +7315,7 @@ mod tests {
         let huge = farhelm_proto::AgentReply::Sessions {
             sessions: vec![farhelm_proto::AgentSession {
                 id: "s1".to_string(),
-                host: "this machine".to_string(),
+                host: Some("this machine".to_string()),
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize + 1),
                 cwd: "/w".to_string(),
                 agent: "claude".to_string(),
@@ -5973,25 +7410,53 @@ mod tests {
         gate.add_permits(AGENT_ANSWER_SLOTS);
     }
 
-    /// A refusal that cannot be enqueued is DROPPED — never awaited, never
-    /// handed to a task of its own — and the drop is logged once for the
-    /// connection.
+    /// Spec: a refusal that cannot be enqueued RETIRES the connection —
+    /// without ever awaiting, and without a task of its own — so the
+    /// request it was the sole answer to still gets an ending, and the
+    /// connection's pending requests are drained rather than stranded.
     ///
-    /// This is the bound on the refusal path itself, and it is not a
-    /// nicety. A refusal exists precisely because admission was denied, so
-    /// a task carrying one holds no permit; a peer that sends requests
-    /// faster than it reads answers would spawn one per request, each
-    /// parked on the full writer queue, none of them owned by this
-    /// connection's teardown — the unbounded growth admission control
-    /// exists to prevent, reached through the path meant to enforce it.
-    /// Dropping is sound because the supervisor that forwarded the request
-    /// has its own budget: a missing answer becomes its `Timeout` or
-    /// `Unavailable`, which is what a connection this far behind deserves
-    /// to be reported as anyway.
+    /// Two properties in one fixture, because each is unsound without the
+    /// other. The refusal must not block or spawn: it is issued from the
+    /// demultiplexer, where an await stalls every terminal, upload and reply
+    /// on the connection, and it exists precisely because admission was
+    /// DENIED, so a task carrying one holds no permit and a peer sending
+    /// faster than it reads could spawn one per request. But it must also
+    /// not simply vanish, which is what this used to do: the supervisor's
+    /// answer budget expiring does not END a mutation, so it RETAINS the
+    /// asking session's delete fence until the request resolves or the link
+    /// dies (`service::agent_relay::HelmLink::upcall`). A queue that later
+    /// drains on a connection that never closes supplies neither, and the
+    /// asker's every later mutation blocks behind a fence nothing will
+    /// release. Retiring converts a request with no possible answer into a
+    /// connection loss, which is an ending the whole relay already knows how
+    /// to report.
+    ///
+    /// The pending `stop_session` is what proves the second half locally:
+    /// its drain to `SentUnanswered` is exactly the event that, one hop out,
+    /// makes the supervisor's `fail_all` resolve the upcall and drop the
+    /// retained fence (pinned there by
+    /// `agent_relay::tests::a_mutations_fence_outlives_the_answer_budget`).
+    /// The fence itself lives in another crate and cannot be observed from
+    /// here.
     #[tokio::test]
-    async fn a_refusal_is_dropped_when_the_writer_queue_is_full() {
+    async fn an_undeliverable_refusal_retires_the_connection() {
         let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::new());
         let (client, _peer) = agent_connection(slot).await;
+
+        // A request the writer queue has already accepted, so the drain has
+        // something to prove. Its peer never answers it.
+        let stop = tokio::spawn({
+            let client = Arc::clone(&client);
+            async move { client.stop_session("s1").await }
+        });
+        timeout(Duration::from_secs(5), async {
+            while client.pending.lock().await.map.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the stop never reached the pending registry");
+
         // Fills to the brim, and the writer cannot empty it while this
         // runs: a `try_send` loop never awaits, so on the test runtime's
         // single thread the writer task is not polled between iterations.
@@ -6006,8 +7471,24 @@ mod tests {
         // terminal, upload and reply on the connection.
         client.refuse_agent_request(1, "too many agent requests in flight on this host; retry");
         assert!(
-            client.refusal_drop_logged.load(Ordering::Relaxed),
-            "a dropped refusal must be recorded, so the connection logs it exactly once"
+            client.refusal_undeliverable_logged.load(Ordering::Relaxed),
+            "an undeliverable refusal must be recorded, so the connection logs it exactly once"
+        );
+
+        timeout(Duration::from_secs(5), client.closed())
+            .await
+            .expect("an undeliverable refusal must end the connection");
+        let error = timeout(Duration::from_secs(5), stop)
+            .await
+            .expect("the queued request hung after the connection was retired")
+            .expect("request task")
+            .expect_err("a retired connection cannot answer");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentUnanswered)
+            ),
+            "the request was already queued, so its ending must say so: {error:#}"
         );
     }
 

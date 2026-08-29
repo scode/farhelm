@@ -1,6 +1,6 @@
-//! The helm's answers to questions asked by an agent from inside a
-//! session — the top of the relay whose supervisor half lives in
-//! `farhelm-supervisor`'s `service::agent_relay`.
+//! The helm's answers to questions asked — and actions requested — by an
+//! agent from inside a session: the top of the relay whose supervisor half
+//! lives in `farhelm-supervisor`'s `service::agent_relay`.
 //!
 //! # Why the question arrives here at all
 //!
@@ -18,11 +18,33 @@
 //!
 //! Every verb here is served from the exact code path its REST counterpart
 //! uses — `hosts::host_views` for hosts, `aggregate::session_page` for
-//! sessions. Not for economy: the point of routing an agent's questions
-//! through the helm at all is that the agent and the user see one fleet.
+//! sessions, and `sessions::do_rename_session`/`do_stop_session`/
+//! `do_archive_session` for the three lifecycle verbs. Not for economy: the
+//! point of routing an agent's questions (and now its actions) through the
+//! helm at all is that the agent and the user see, and act on, one fleet.
 //! Two listings assembled two ways would drift, and the drift would show
 //! up as an agent confidently naming a host that is not in the panel the
-//! user is reading.
+//! user is reading; two rename implementations would drift on exactly the
+//! validation rule that matters (SPEC.md's control-character refusal).
+//!
+//! # Lifecycle verbs act on ANY session, not only the asker's own
+//!
+//! `Rename`, `Stop` and `Archive` each carry `session_id: Option<String>`,
+//! and `None` resolves to the ASKING session — the one the supervisor has
+//! already proven this connection's credential belongs to. A `Some(id)`
+//! names any session the helm knows, on any host, BY ID — including the
+//! asking session's own id, which [`resolve_target`] accepts exactly as it
+//! would an explicit `None`; there is no separate "you may not name
+//! yourself" rule to enforce. That is intentional: the feature's mental
+//! model is an agent talking to the helm
+//! itself, which already has fleet-wide authority, and inventing a
+//! narrower per-session permission for agents alone would be a second
+//! authorization model with nothing else in this system to keep it
+//! honest. What IS worth a paper trail is which session asked to act on
+//! which — logged at `info` by [`resolve_target`], the one place all three
+//! verbs resolve the substitution — so an operator reading the helm's log
+//! can tell an agent renaming itself apart from one reaching across the
+//! fleet.
 //!
 //! # What `current` means, and why only this side can compute it
 //!
@@ -54,6 +76,7 @@ use async_trait::async_trait;
 use farhelm_proto::{
     AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ErrorKind, SessionStatus,
 };
+use tracing::info;
 
 use crate::AppState;
 use crate::store::HostId;
@@ -89,6 +112,15 @@ pub struct AgentOrigin {
 /// supervisor is holding an agent's `farhelm` process open until one
 /// arrives or its budget expires, so a handler that returns nothing costs
 /// a user a timeout rather than an error.
+///
+/// That remains the CONTRACT, not merely a wish, even though the caller
+/// now survives a breach of it: `client::SupervisorClient`'s answer task is
+/// supervised and answers on a dead handler's behalf (see
+/// `client::panic_fallback`). The backstop exists because the cost of a
+/// silent handler is not one lost reply — a mutation's delete fence stays
+/// claimed against the asking session until the connection dies — and it
+/// can only ever produce the outcome-unknown ending, which is strictly
+/// worse for the user than the real answer this trait promises.
 #[async_trait]
 pub trait AgentRequestHandler: Send + Sync {
     /// Answer one verb on behalf of `session_id`.
@@ -99,6 +131,14 @@ pub trait AgentRequestHandler: Send + Sync {
     /// supervisor to be the session that authenticated; nothing here
     /// re-checks it, and nothing here may treat it as authority for
     /// anything beyond marking its own row.
+    ///
+    /// `session_id` has a SECOND job on the three lifecycle verbs, and it
+    /// is easy to miss from the signature alone: it is also the default
+    /// TARGET. A `Rename`/`Stop`/`Archive` carrying `session_id: None` in
+    /// its own field acts on this authenticated id (see [`resolve_target`]),
+    /// which is what makes a bare `farhelm agent stop` mean "stop me". That
+    /// is a substitution, not an authority check — an explicit target may
+    /// name any session in the fleet, including this one.
     async fn handle(&self, origin: AgentOrigin, session_id: &str, verb: AgentVerb) -> AgentOutcome;
 
     /// Whether `origin`'s connection is STILL the one its host is served
@@ -106,12 +146,23 @@ pub trait AgentRequestHandler: Send + Sync {
     ///
     /// Separate from [`Self::handle`], and synchronous, because of when it
     /// is called: the client asks it one step before it queues a successful
-    /// answer (see `SupervisorClient::spawn_agent_answer`), to close the
-    /// window between the entry check and the reply. The listing in between
-    /// awaits on the database and the manager, and a host retargeted,
-    /// adopted or reconnected in that window has a registry row whose
-    /// machine has changed — so the answer's `current` marker would name a
-    /// host that is no longer the asking session's.
+    /// answer to a READ-ONLY verb (see `SupervisorClient::spawn_agent_answer`),
+    /// to close the window between the entry check and the reply. The
+    /// listing in between awaits on the database and the manager, and a
+    /// host retargeted, adopted or reconnected in that window has a
+    /// registry row whose machine has changed — so the answer's `current`
+    /// marker would name a host that is no longer the asking session's.
+    ///
+    /// A COMPLETED MUTATION SKIPS THIS CHECK. `Rename`/`Stop`/`Archive` are
+    /// re-checked on the way IN by `handle` and not on the way out, because
+    /// by then the change has already happened at its target and there is
+    /// nothing to withdraw: converting it into the `Unavailable` refusal
+    /// this check produces would tell the caller "nothing happened, retry
+    /// freely" about an act that just took effect. See
+    /// `SupervisorClient::spawn_agent_answer`'s own docs for the full
+    /// argument, including why the one thing the exit check could still
+    /// have caught for those verbs is handled by pinning the reply's host
+    /// name instead ([`agent_session_reply`]).
     ///
     /// Defaults to `true` for the test doubles that have no fleet behind
     /// them: a handler that cannot tell a stale connection from a live one
@@ -229,6 +280,10 @@ impl AgentRequestHandler for HelmAgentRequests {
                 message: "the host connection was replaced; retry".to_string(),
             };
         }
+        // Captured before `verb` is consumed by the dispatch below, for the
+        // question only the failure arm asks: whether what was attempted
+        // CHANGES something. See [`transport_outcome`].
+        let mutating = verb.is_mutating();
         let reply = match verb {
             AgentVerb::Hosts {} => {
                 crate::hosts::host_views(&state)
@@ -241,16 +296,52 @@ impl AgentRequestHandler for HelmAgentRequests {
                     })
             }
             AgentVerb::Sessions {} => session_listing(&state, origin.host, session_id).await,
+            AgentVerb::Rename {
+                session_id: target,
+                title,
+            } => {
+                let target = resolve_target(target, session_id, "rename");
+                crate::sessions::do_rename_session(&state, &target, &title)
+                    .await
+                    .map(|(claim, info)| {
+                        agent_session_reply(&state, &claim, info, origin.host, session_id)
+                    })
+            }
+            AgentVerb::Stop { session_id: target } => {
+                let target = resolve_target(target, session_id, "stop");
+                crate::sessions::do_stop_session(&state, &target)
+                    .await
+                    .map(|()| AgentReply::Stopped {})
+            }
+            AgentVerb::Archive { session_id: target } => {
+                let target = resolve_target(target, session_id, "archive");
+                crate::sessions::do_archive_session(&state, &target)
+                    .await
+                    .map(|(claim, info)| {
+                        agent_session_reply(&state, &claim, info, origin.host, session_id)
+                    })
+            }
         };
         match reply {
             Ok(reply) => AgentOutcome::Ok { reply },
-            // Whatever the listing could not do is the agent's answer
-            // verbatim, classified `Internal` because a listing failure is
-            // never something a different request would have avoided.
-            Err(error) => AgentOutcome::Err {
-                kind: ErrorKind::Internal,
+            // Classified the same way the REST surface classifies the SAME
+            // failures (`crate::error_kind`), rather than flattened to
+            // `Internal`: a lifecycle verb's refusal — an unknown session, a
+            // rejected title, a non-connected host — is exactly the kind of
+            // thing a caller can act on differently, and an agent deserves
+            // the same distinction a browser gets. The two read-only verbs
+            // above rarely produce a classifiable error at all (a listing
+            // failure has nothing upstream to classify against), so this
+            // arm falls back to `Internal` for them exactly as before.
+            // A dead target-supervisor connection is consulted FIRST,
+            // because `error_kind` has no answer for it: nothing in that
+            // chain is a `SupervisorError` (the peer never replied), so it
+            // falls through to `Internal` — the one kind that tells a caller
+            // nothing at all about retrying.
+            Err(error) => transport_outcome(&error, mutating).unwrap_or(AgentOutcome::Err {
+                kind: crate::error_kind(&error),
                 message: format!("{error:#}"),
-            },
+            }),
         }
     }
 
@@ -264,6 +355,78 @@ impl AgentRequestHandler for HelmAgentRequests {
         self.state
             .upgrade()
             .is_some_and(|state| origin_is_live(&state, origin))
+    }
+}
+
+/// Classify a failure whose cause is the TARGET supervisor never giving a
+/// usable answer, or `None` if that is not what went wrong.
+///
+/// The helm sits in the middle of two hops, and this is the far one: the
+/// asking session's supervisor forwarded the verb up to the helm, and the
+/// helm routed it down to the supervisor that owns the target session. A
+/// `Rename`/`Stop`/`Archive` that reached THAT supervisor and lost only its
+/// reply is the same delivered-outcome-unknown ending the near hop already
+/// speaks about (`service::agent_relay::connection_lost_after_queueing`) —
+/// and it used to arrive at the agent as `Internal`, because
+/// [`crate::error_kind`] finds nothing to classify in a chain whose peer
+/// never answered. `Internal` says nothing about retrying, and a blind
+/// retry of a stop can kill an agent somebody restarted after the first one
+/// took effect.
+///
+/// So the phase [`crate::SupervisorTransportError`] records decides the
+/// vocabulary, and only for a mutation:
+///
+/// - Never enqueued, either class: [`ErrorKind::Unavailable`] — nothing
+///   left this process, so nothing happened and a retry is free. (This is a
+///   change for listings too, and a strictly more accurate one: the old
+///   `Internal` claimed a fault where there was a missing peer.)
+/// - Enqueued, then no USABLE answer, MUTATION: [`ErrorKind::Timeout`],
+///   whose documented contract is "delivered, outcome unknown", plus the
+///   remedy that says to look before retrying. "No usable answer" covers
+///   both post-send endings — the connection dying without a reply, and a
+///   correlated reply of a variant the request's own wrapper does not
+///   accept. They differ in how they look and not at all in what they let a
+///   caller conclude: the request went out, and nothing came back that says
+///   what became of it. A peer that answered a `stop` with a rename
+///   confirmation may perfectly well have stopped the session first.
+/// - Enqueued, then no answer, listing: `Unavailable` as well. A listing
+///   has nothing to double-apply, so the retry-safe kind stays true however
+///   far the request got; the mutation vocabulary is deliberately not
+///   spread to a class that cannot need it.
+/// - Enqueued, then a WRONG reply, listing: not classified here at all
+///   (`None`), so [`crate::error_kind`]'s `Internal` stands. A peer
+///   violating the protocol is a fault rather than an unavailability, and
+///   for a class with nothing at stake the honest word for it is the one
+///   that says "this should not happen".
+///
+/// The message keeps the whole chain (`{error:#}`) rather than a sentence
+/// of its own, because the context above the transport error names which
+/// operation was attempted and the agent has no other way to learn it.
+///
+/// That makes the chain's SIZE this function's problem, since what it
+/// returns is re-encoded into the asking agent's own reply frame: a
+/// transport error carrying an unbounded rendering of the peer's message
+/// pushes that frame past the protocol limit, and
+/// `client::agent_response_frame`'s backstop then replaces the answer. That
+/// is why [`crate::SupervisorTransportError::SentWrongReply`] keeps only a
+/// variant name, and why the backstop preserves this function's `Timeout`
+/// and remedy when it does have to replace an oversized outcome.
+fn transport_outcome(error: &anyhow::Error, mutating: bool) -> Option<AgentOutcome> {
+    use crate::SupervisorTransportError as Lost;
+    let lost = crate::find_cause::<Lost>(error)?;
+    match (lost, mutating) {
+        (Lost::SentUnanswered | Lost::SentWrongReply { .. }, true) => Some(AgentOutcome::Err {
+            kind: ErrorKind::Timeout,
+            message: format!(
+                "{error:#}; the outcome is unknown — {}",
+                farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY
+            ),
+        }),
+        (Lost::SentWrongReply { .. }, false) => None,
+        _ => Some(AgentOutcome::Err {
+            kind: ErrorKind::Unavailable,
+            message: format!("{error:#}"),
+        }),
     }
 }
 
@@ -288,6 +451,164 @@ fn origin_is_live(state: &AppState, origin: AgentOrigin) -> bool {
         .status(origin.host)
         .and_then(|status| status.client)
         .is_some_and(|client| client.connection_id() == origin.connection)
+}
+
+/// The session ONE lifecycle verb acts on: `target` if the verb named one,
+/// else `asking` — the substitution [`AgentVerb`]'s own docs promise for
+/// `Rename`/`Stop`/`Archive`.
+///
+/// Also where "which session asked to act on which" is logged, at `info`
+/// rather than left to be reconstructed from a `RenameSession`/
+/// `StopSession`/`ArchiveSession` line on whatever supervisor eventually
+/// answers: an operator reading the HELM's own log wants to see, in one
+/// place, that a session reached across the fleet (or renamed itself)
+/// before the request ever leaves this process — see the module's own docs
+/// for why no narrower authorization check accompanies it.
+///
+/// Both ids go through [`escape_for_log`] on the way into that line. The
+/// relay's own `validate_agent_verb` already refuses a target carrying a
+/// `Cc` control character, so this is not the only thing standing between a
+/// hostile id and the log — but it is the only one that covers the rest of
+/// Unicode's presentation-bending characters, and it is the only one at all
+/// for `asking`, which arrives from the supervisor's hello rather than from
+/// a validated verb field.
+fn resolve_target(target: Option<String>, asking: &str, verb: &str) -> String {
+    let target = target.unwrap_or_else(|| asking.to_string());
+    info!(
+        asking = escape_for_log(asking).as_str(),
+        target = escape_for_log(&target).as_str(),
+        verb,
+        "an agent is acting on a session"
+    );
+    target
+}
+
+/// Render an id for the AUDIT LOG with everything that could forge the
+/// line's presentation replaced by a visible `\u{…}` escape.
+///
+/// Only for logging. The value the caller goes on to route with is the
+/// original, because an escaped id is not the id.
+///
+/// Two families are escaped, and the second is why this exists rather than
+/// a bare `is_control` filter. The first is Unicode's `Cc` category
+/// ([`char::is_control`]) — a newline that forges a whole extra log line
+/// being the case that matters. The second is the set of characters that
+/// are not control codes at all but still change what a reader SEES: the
+/// bidi overrides and isolates (U+202A–U+202E, U+2066–U+2069, U+061C),
+/// which can silently reverse the apparent order of a line so an id reads
+/// as another id; the zero-width and invisible formatting characters
+/// (U+200B–U+200F, U+2060–U+2064, U+00AD, U+FEFF), which let two different
+/// ids render identically; and the line/paragraph separators (U+2028,
+/// U+2029), which some log viewers break lines on exactly as they would on
+/// a newline.
+///
+/// An explicit list rather than a whole-category test because the standard
+/// library exposes no Unicode general-category API, and the alternative
+/// available without a dependency — escaping everything non-ASCII — would
+/// mangle every legitimately non-English id for no gain. This is the set
+/// with a known presentation attack behind it.
+fn escape_for_log(id: &str) -> String {
+    fn is_presentation_bending(c: char) -> bool {
+        matches!(
+            c,
+            '\u{00AD}'
+                | '\u{061C}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
+    }
+    // The common case is an id with nothing to escape, and the borrow-free
+    // early return keeps this off the allocation path for it.
+    if !id
+        .chars()
+        .any(|c| c.is_control() || is_presentation_bending(c))
+    {
+        return id.to_string();
+    }
+    let mut out = String::with_capacity(id.len());
+    for c in id.chars() {
+        if c.is_control() || is_presentation_bending(c) {
+            out.push_str(&format!("\\u{{{:04x}}}", c as u32));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Project a session a lifecycle verb just mutated into the same
+/// [`AgentSession`] shape the `sessions` listing uses, so a rename/archive
+/// reply and a later listing agree about the row they both describe.
+///
+/// Built from the [`crate::manager::SessionClaim`] `route_session` already
+/// resolved while performing the mutation, rather than by re-listing the
+/// fleet: the mutation's own reply already carries the fresh `SessionInfo`,
+/// and asking again would be an extra round trip to relearn what the
+/// supervisor just said.
+///
+/// The host's display NAME, though, is NOT read from a fresh, unchecked
+/// snapshot lookup — a prior version did exactly that, and it was wrong
+/// twice over. A snapshot lookup that finds no row for `claim.host` (the
+/// row was removed between the mutation returning and this projection
+/// running) used to fall back to an empty string while still asserting
+/// `stale: false` — a silent lie about a name nobody could vouch for. And a
+/// snapshot lookup that DOES find a row says nothing about whether it is
+/// the SAME install `route_session` just sent the mutation to: a retarget
+/// or adoption in that same window keeps the row but swaps the machine
+/// behind it, so a fresh lookup would combine THIS session's freshly
+/// mutated data with a DIFFERENT connection's host name and call the
+/// mix current.
+///
+/// The fix is to require the snapshot's own
+/// [`crate::manager::HostSnapshot::incarnation`] to still match
+/// [`crate::manager::SessionClaim::incarnation`] —
+/// the same connection identity `route_session` captured before the
+/// mutation went out — before trusting its name at all. A mismatch (or no
+/// row) means there is no name this reply can vouch for, so it answers
+/// `host: None` and marks itself `stale` rather than asserting freshness
+/// the mutation cannot back up. The `None` is load-bearing: this used to be
+/// an empty string, which a reader could not tell from a host whose name
+/// really was empty.
+fn agent_session_reply(
+    state: &AppState,
+    claim: &crate::manager::SessionClaim,
+    info: farhelm_proto::SessionInfo,
+    asking_host: HostId,
+    asking_session: &str,
+) -> AgentReply {
+    let current =
+        state.manager.snapshots().into_iter().find(|snapshot| {
+            snapshot.id == claim.host && snapshot.incarnation == claim.incarnation
+        });
+    let (host_name, stale) = match current {
+        Some(snapshot) => (
+            Some(crate::aggregate::host_display_name(
+                snapshot.kind,
+                snapshot.destination.as_deref(),
+            )),
+            false,
+        ),
+        None => (None, true),
+    };
+    let row = crate::aggregate::SessionRow {
+        info,
+        host: claim.host,
+        host_identity: None,
+        // The row's own copy of the name is unused by the projection below,
+        // which takes it as a parameter precisely so absence can be said
+        // out loud; this keeps the struct's field consistent with what is
+        // reported rather than leaving a stale second copy beside it.
+        host_name: host_name.clone().unwrap_or_default(),
+        stale,
+    };
+    AgentReply::Session {
+        session: agent_session(&row, host_name, asking_host, asking_session),
+    }
 }
 
 /// Drain the merged fleet listing into one reply, up to whichever of
@@ -339,7 +660,12 @@ async fn session_listing(
         )
         .await?;
         for row in &page.sessions {
-            let row = agent_session(row, asking_host, asking_session);
+            let row = agent_session(
+                row,
+                Some(row.host_name.clone()),
+                asking_host,
+                asking_session,
+            );
             // The ENCODED size, because that is what has to fit in a frame;
             // a struct's in-memory footprint says nothing about it. A row
             // that will not encode at all is charged the whole budget
@@ -405,14 +731,25 @@ fn agent_host(view: &crate::hosts::HostView, asking: HostId) -> AgentHost {
 /// the other host — as the asker's own. Requiring the host to match too
 /// makes that state produce no marker at all, which is the fail-closed
 /// answer the merge already chose.
+///
+/// The host NAME is a parameter rather than read from `row.host_name`, and
+/// the redundancy is deliberate: `SessionRow` has no way to say "there is
+/// no name I can vouch for", so the reply path that discovers exactly that
+/// ([`agent_session_reply`], when the mutation's connection is no longer
+/// the row's current one) had to encode absence as an empty string —
+/// indistinguishable, on the wire, from a host actually named nothing.
+/// Passing the name in makes the absence a `None` the caller states
+/// explicitly. Listing callers pass the row's own name, which is always one
+/// the fleet snapshot vouched for.
 fn agent_session(
     row: &crate::aggregate::SessionRow,
+    host_name: Option<String>,
     asking_host: HostId,
     asking_session: &str,
 ) -> AgentSession {
     AgentSession {
         id: row.info.id.clone(),
-        host: row.host_name.clone(),
+        host: host_name,
         title: row.info.title.clone(),
         cwd: row.info.cwd.clone(),
         agent: agent_label(&row.info),
@@ -544,6 +881,201 @@ mod tests {
         }
     }
 
+    /// [`agent_session`] as the LISTING path calls it: with the row's own
+    /// host name, which is the name a fleet snapshot already vouched for.
+    ///
+    /// A helper rather than the argument spelled out at a dozen call sites
+    /// because the interesting variable in these tests is never the name —
+    /// it is `current`, `agent`, `archived`, `stale`. The one caller that
+    /// passes something else is `agent_session_reply`, whose own test
+    /// exercises the `None` case deliberately.
+    fn projected(
+        row: &crate::aggregate::SessionRow,
+        asking_host: HostId,
+        asking_session: &str,
+    ) -> AgentSession {
+        agent_session(
+            row,
+            Some(row.host_name.clone()),
+            asking_host,
+            asking_session,
+        )
+    }
+
+    /// Spec: a lost target-supervisor connection is classified by PHASE and
+    /// by verb class — never enqueued is retry-safe `Unavailable` for both
+    /// classes, and a MUTATION that was enqueued and never answered is
+    /// `Timeout` carrying the check-before-retrying remedy.
+    ///
+    /// This is the far hop's half of the vocabulary the near hop already
+    /// speaks (`service::agent_relay`), and the table is asserted whole
+    /// rather than by its interesting cell: the three non-mutating outcomes
+    /// are what keep the remedy from spreading to callers who cannot act on
+    /// it, and the `Internal` fallback is what keeps this classifier from
+    /// swallowing failures that have nothing to do with the transport — an
+    /// unknown session, a refused title — whose own kinds a caller needs.
+    ///
+    /// The error is wrapped in anyhow CONTEXT rather than handed over bare,
+    /// because that is how it arrives in production (every call site adds
+    /// which operation it was attempting) and because a `downcast_ref` on
+    /// the chain alone would not see through it — the reason
+    /// [`crate::find_cause`] exists.
+    #[test]
+    fn a_dead_target_connection_is_classified_by_phase_and_verb_class() {
+        let wrapped = |lost: crate::SupervisorTransportError| {
+            anyhow::Error::new(lost).context("stopping session s9 on host builder")
+        };
+
+        for mutating in [true, false] {
+            let outcome =
+                transport_outcome(&wrapped(crate::SupervisorTransportError::NotSent), mutating)
+                    .expect("a transport failure must be classified");
+            let AgentOutcome::Err { kind, message } = outcome else {
+                panic!("a dead connection cannot succeed");
+            };
+            assert_eq!(
+                kind,
+                ErrorKind::Unavailable,
+                "nothing was sent, so nothing happened, whatever the verb was"
+            );
+            assert!(
+                !message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+                "an unsent request has no outcome to check: {message}"
+            );
+            assert!(
+                message.contains("stopping session s9"),
+                "the chain names what was attempted and must survive: {message}"
+            );
+        }
+
+        let AgentOutcome::Err { kind, message } = transport_outcome(
+            &wrapped(crate::SupervisorTransportError::SentUnanswered),
+            true,
+        )
+        .expect("a transport failure must be classified") else {
+            panic!("a dead connection cannot succeed");
+        };
+        assert_eq!(
+            kind,
+            ErrorKind::Timeout,
+            "a mutation the target may already have applied is outcome-unknown, not retry-safe"
+        );
+        assert!(
+            message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+            "and must say what to do about it: {message}"
+        );
+
+        let AgentOutcome::Err { kind, .. } = transport_outcome(
+            &wrapped(crate::SupervisorTransportError::SentUnanswered),
+            false,
+        )
+        .expect("a transport failure must be classified") else {
+            panic!("a dead connection cannot succeed");
+        };
+        assert_eq!(
+            kind,
+            ErrorKind::Unavailable,
+            "a listing has nothing to double-apply however far it got"
+        );
+
+        assert!(
+            transport_outcome(&anyhow::anyhow!("no such session: s9"), true).is_none(),
+            "a refusal that is not a transport failure must keep its own classification"
+        );
+    }
+
+    /// Spec: a target supervisor that answers a MUTATION with a correlated
+    /// reply of the wrong variant is the same outcome-unknown ending a dead
+    /// connection is, while the same fault on a LISTING keeps its own
+    /// classification.
+    ///
+    /// The asymmetry is the content. Both cases are a peer violating the
+    /// protocol, but only one of them is a question about durable state: the
+    /// `stop` was sent, and a peer broken enough to answer it with a rename
+    /// confirmation is exactly as likely to have stopped the session first
+    /// as not. An `Internal` there — which is what an untyped "unexpected
+    /// reply" error classifies as — hands the agent the one kind that says
+    /// nothing about retrying, for the situation where that is the whole
+    /// question. A listing has nothing to double-apply, so this classifier
+    /// declines it and `error_kind`'s `Internal` stands, which is the honest
+    /// word for a peer that should not have said that.
+    #[test]
+    fn a_wrong_lifecycle_reply_is_outcome_unknown_for_a_mutation_only() {
+        let wrapped = anyhow::Error::new(crate::SupervisorTransportError::SentWrongReply {
+            request: "StopSession",
+            reply: "SessionRenamed",
+        })
+        .context("stopping session s9 on host builder");
+
+        let AgentOutcome::Err { kind, message } = transport_outcome(&wrapped, true)
+            .expect("a wrong reply to a mutation must be classified")
+        else {
+            panic!("a wrong reply cannot succeed");
+        };
+        assert_eq!(
+            kind,
+            ErrorKind::Timeout,
+            "the request was sent, so its outcome is unknown rather than retry-safe"
+        );
+        assert!(
+            message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+            "and must say what to do about it: {message}"
+        );
+        assert!(
+            message.contains("stopping session s9"),
+            "the chain names what was attempted and must survive: {message}"
+        );
+
+        assert!(
+            transport_outcome(&wrapped, false).is_none(),
+            "a listing's wrong reply is a protocol fault, not an unavailability"
+        );
+    }
+
+    /// Spec: [`escape_for_log`] neutralizes the two families that can forge
+    /// an audit line's PRESENTATION — control characters and the invisible
+    /// or direction-changing formatting characters — and leaves ordinary
+    /// text, including ordinary non-ASCII text, exactly as it was.
+    ///
+    /// The last clause is half the point. An escaper that mangled every
+    /// non-ASCII character would be trivially "safe" and would make the
+    /// audit trail useless for any fleet whose session ids or hosts are not
+    /// English, so the test pins what must NOT be touched as firmly as what
+    /// must. The bidi and zero-width cases are the ones a bare
+    /// `is_control` filter misses: U+202E reverses how the rest of the line
+    /// renders, and U+200B lets two visibly identical ids be different
+    /// strings — both of which turn "which session acted on which" into a
+    /// question the log answers wrongly rather than not at all.
+    #[test]
+    fn log_escaping_covers_bidi_and_zero_width_as_well_as_control_characters() {
+        assert_eq!(escape_for_log("ordinary-id"), "ordinary-id");
+        assert_eq!(
+            escape_for_log("café-Ω-日本"),
+            "café-Ω-日本",
+            "ordinary non-ASCII text must survive intact"
+        );
+        assert_eq!(
+            escape_for_log("one\ntwo"),
+            "one\\u{000a}two",
+            "a newline must not be able to forge a second log line"
+        );
+        assert_eq!(
+            escape_for_log("a\u{202e}b"),
+            "a\\u{202e}b",
+            "a bidi override must not reorder the line around it"
+        );
+        assert_eq!(
+            escape_for_log("a\u{200b}b"),
+            "a\\u{200b}b",
+            "a zero-width space must not make two ids look like one"
+        );
+        assert_eq!(
+            escape_for_log("a\u{2028}b"),
+            "a\\u{2028}b",
+            "a line separator breaks lines in some viewers exactly as a newline does"
+        );
+    }
+
     /// A profile snapshot in a given existence state, for the two rows that
     /// differ only in whether the profile still exists.
     fn snapshot(name: &str, existence: ProfileExistence) -> SourceProfile {
@@ -629,13 +1161,13 @@ mod tests {
         // `session_info`'s invocation is `claude --dangerously`; only the
         // program survives.
         let raw = session_row(session_info("s1", SessionStatus::Running), "this machine");
-        assert_eq!(agent_session(&raw, 1, "s1").agent, "claude");
+        assert_eq!(projected(&raw, 1, "s1").agent, "claude");
 
         let mut with_secret = session_info("s2", SessionStatus::Running);
         with_secret.invocation = "/opt/bin/codex --api-key sk-secret-value".to_string();
         let row = session_row(with_secret, "this machine");
         assert_eq!(
-            agent_session(&row, 1, "s1").agent,
+            projected(&row, 1, "s1").agent,
             "codex",
             "arguments must never reach this wire"
         );
@@ -644,7 +1176,7 @@ mod tests {
         unparsable.invocation = "claude --title 'unbalanced".to_string();
         let row = session_row(unparsable, "this machine");
         assert_eq!(
-            agent_session(&row, 1, "s1").agent,
+            projected(&row, 1, "s1").agent,
             "claude",
             "an invocation that does not shell-split still yields only its program"
         );
@@ -654,7 +1186,7 @@ mod tests {
             from_profile.source_profile = Some(snapshot("Claude", existence));
             let row = session_row(from_profile, "this machine");
             assert_eq!(
-                agent_session(&row, 1, "s1").agent,
+                projected(&row, 1, "s1").agent,
                 "Claude",
                 "the snapshotted name stands regardless of the profile's existence"
             );
@@ -679,15 +1211,15 @@ mod tests {
     fn only_the_asking_session_on_the_asking_host_is_current() {
         let mine = session_row(session_info("s1", SessionStatus::Idle), "this machine");
         let other = session_row(session_info("s2", SessionStatus::Idle), "builder");
-        assert!(agent_session(&mine, 1, "s1").current);
-        assert!(!agent_session(&other, 1, "s1").current);
-        assert_eq!(agent_session(&other, 1, "s1").host, "builder");
+        assert!(projected(&mine, 1, "s1").current);
+        assert!(!projected(&other, 1, "s1").current);
+        assert_eq!(projected(&other, 1, "s1").host.as_deref(), Some("builder"));
 
         // Same id, different host: the collision case. `session_row` puts
         // every row on host 1, so asking as host 2 is the same shape as a
         // retained row belonging to someone else.
         assert!(
-            !agent_session(&mine, 2, "s1").current,
+            !projected(&mine, 2, "s1").current,
             "a row on another host must not be marked as the asker's own"
         );
     }
@@ -709,18 +1241,18 @@ mod tests {
         let mut row = session_row(archived, "builder");
         row.stale = true;
 
-        let projected = agent_session(&row, 1, "other");
-        assert!(projected.archived);
-        assert!(projected.stale);
+        let filed = projected(&row, 1, "other");
+        assert!(filed.archived);
+        assert!(filed.stale);
         assert_eq!(
-            projected.status, "running",
+            filed.status, "running",
             "the status word stays a word; the two flags say the rest"
         );
 
         let live = session_row(session_info("s2", SessionStatus::Running), "this machine");
-        let projected = agent_session(&live, 1, "other");
-        assert!(!projected.archived);
-        assert!(!projected.stale);
+        let live = projected(&live, 1, "other");
+        assert!(!live.archived);
+        assert!(!live.stale);
     }
 
     /// Spec: every live and ended status becomes the word the UI shows, and
@@ -841,6 +1373,79 @@ mod tests {
         h.await_state(remote, |state| state.phase() != "connected")
             .await;
         (h, local, remote)
+    }
+
+    /// Spec: `agent_session_reply` names a host ONLY when the claim's own
+    /// incarnation still matches the CURRENT snapshot for that host id, and
+    /// otherwise reports no name at all and marks the row `stale` — rather
+    /// than either an empty-string name asserted as fresh (the row's host
+    /// vanished between the mutation and this projection) or a retargeted
+    /// host's NEW name asserted as fresh (the row's machine changed in that
+    /// same window). Both used to slip through a fresh, unchecked snapshot
+    /// lookup with no incarnation check at all.
+    #[tokio::test]
+    async fn agent_session_reply_only_trusts_a_host_name_pinned_to_the_claims_incarnation() {
+        let (h, local, _remote) = two_host_fleet().await;
+        let state = &h.state;
+        let info = session_info("local-live", SessionStatus::Idle);
+        let live_incarnation = h
+            .manager
+            .status(local)
+            .expect("the local host has a status")
+            .incarnation;
+
+        // The claim matches the connection that is STILL current: the
+        // reply carries the real name and asserts freshness.
+        let fresh_claim = crate::manager::SessionClaim {
+            host: local,
+            incarnation: live_incarnation,
+            identity: None,
+        };
+        let AgentReply::Session { session } =
+            agent_session_reply(state, &fresh_claim, info.clone(), local, "local-live")
+        else {
+            panic!("agent_session_reply always answers with a Session");
+        };
+        assert_eq!(session.host.as_deref(), Some("this machine"));
+        assert!(!session.stale);
+
+        // The claim's incarnation no longer matches — the shape a retarget
+        // or reconnect leaves behind — so the reply carries NO name rather
+        // than whatever now occupies the row, and marks itself stale.
+        let retargeted_claim = crate::manager::SessionClaim {
+            host: local,
+            incarnation: live_incarnation + 1,
+            identity: None,
+        };
+        let AgentReply::Session { session } =
+            agent_session_reply(state, &retargeted_claim, info.clone(), local, "local-live")
+        else {
+            panic!("agent_session_reply always answers with a Session");
+        };
+        assert_eq!(
+            session.host, None,
+            "no name it can vouch for is said as None, not as an empty name"
+        );
+        assert!(session.stale);
+
+        // A claim naming a host id that is not registered at all — the
+        // shape a removed row leaves behind — is the same failure and gets
+        // the same honest answer rather than a silently different one.
+        let missing_host_claim = crate::manager::SessionClaim {
+            host: local + 9999,
+            incarnation: live_incarnation,
+            identity: None,
+        };
+        let AgentReply::Session { session } =
+            agent_session_reply(state, &missing_host_claim, info, local, "local-live")
+        else {
+            panic!("agent_session_reply always answers with a Session");
+        };
+        assert_eq!(
+            session.host, None,
+            "no name it can vouch for is said as None, not as an empty name"
+        );
+        assert!(session.stale);
     }
 
     /// Spec: `sessions` answered by the production handler carries the
@@ -1336,6 +1941,996 @@ mod tests {
                 );
             }
             other => panic!("expected a shutdown refusal, got {other:?}"),
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // The lifecycle verbs — Rename, Stop, Archive — against the same
+    // production handler and the same real fleet machinery as the read-only
+    // verbs above. Each drives `do_rename_session`/`do_stop_session`/
+    // `do_archive_session` (`sessions.rs`) through a REAL routed call to a
+    // scripted supervisor, so what is under test is the whole seam: origin
+    // validation, `session_id: None` resolving to the asker, the shared
+    // helper functions the REST handlers also call, and the reply's
+    // projection back into an `AgentSession`.
+    // ---------------------------------------------------------------
+
+    /// A single local host spliced to `client_side`, with `sessions`
+    /// already cached — the fixture every scripted-exchange lifecycle test
+    /// below needs. `route_session` requires a cached owner before it will
+    /// forward anything.
+    ///
+    /// A thin wrapper over `rest_harness::spliced_helm_listing`, which
+    /// builds the identical fleet for the REST-side splice tests; the only
+    /// thing this adds is handing back the local host's id alongside the
+    /// harness, which every lifecycle test here needs to build an
+    /// `AgentOrigin` and none of `spliced_helm_listing`'s own callers do.
+    ///
+    /// Takes the duplex HALF rather than creating the pair itself, and that
+    /// is load-bearing rather than a style choice: the splice relays the
+    /// manager's own hello handshake across to whatever answers on the
+    /// OTHER half (`rest_harness::run_spliced`'s crossing-hellos relay), so
+    /// this function's own `await_refreshed` call (inside
+    /// `spliced_helm_listing`) cannot resolve until a task is already
+    /// running on that other half to complete it. A caller that built the
+    /// duplex, awaited THIS function, and only then spawned its responder
+    /// would deadlock — the responder's `tokio::spawn` line would never run
+    /// because the awaiting test task is itself blocked inside this
+    /// function. Every call site below therefore spawns its responder on
+    /// the peer half FIRST and passes the other half in here second, so the
+    /// two race properly instead of strictly sequencing.
+    async fn spliced_local_fleet(
+        client_side: tokio::io::DuplexStream,
+        sessions: Vec<SessionInfo>,
+    ) -> (Harness, HostId) {
+        let harness = crate::rest_harness::spliced_helm_listing(client_side, sessions).await;
+        let local = local_id(&harness.store).await;
+        (harness, local)
+    }
+
+    /// How long a scripted supervisor gets to finish its exchange before
+    /// the test calls it a routing regression.
+    ///
+    /// Generous rather than tight, for the same reason `silent_supervisor`'s
+    /// window is: the failure this bounds is a request that was never sent
+    /// at all, which is instant, so a long wait costs nothing except on a
+    /// machine slow enough that the whole suite is already suspect.
+    const RESPONDER_JOIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// Join a scripted supervisor, turning "it is still waiting for a frame"
+    /// into a failure with a diagnosis instead of a hang.
+    ///
+    /// Every lifecycle test below ends by joining the peer it scripted, and
+    /// an unbounded join is the wrong shape for that: the responder blocks
+    /// in `read_frame()` until the request arrives, so ANY regression that
+    /// makes the handler answer without forwarding — the wrong routing
+    /// decision, a target the owner cache has not learned yet, a refusal
+    /// raised too early — wedges the join forever rather than failing. That
+    /// is not hypothetical: the cross-host archive test hung exactly this
+    /// way under a loaded suite, and the hang carried no clue as to why.
+    ///
+    /// The handler's own answer goes into the panic because it is the whole
+    /// diagnosis. A responder that never heard anything plus an outcome of
+    /// `NotFound` says "routing resolved locally"; the same silence plus an
+    /// `Ok` would say something far stranger. Printing it turns a wedged
+    /// run into a one-line explanation.
+    async fn join_responder(responder: tokio::task::JoinHandle<()>, outcome: &AgentOutcome) {
+        match tokio::time::timeout(RESPONDER_JOIN_BUDGET, responder).await {
+            Ok(joined) => joined.expect("the scripted supervisor's own assertions"),
+            Err(_) => panic!(
+                "the scripted supervisor is still waiting for the request it was written to \
+                 answer, so the handler resolved without forwarding one. It answered: {outcome:?}"
+            ),
+        }
+    }
+
+    /// Spec: `Rename` can target ANY session the helm knows, not only the
+    /// asking one — the wider authority `AgentVerb`'s own docs describe —
+    /// and the reply is the RENAMED row, current-marked against the
+    /// ASKING session rather than the one it acted on.
+    ///
+    /// Two sessions are cached so the asker and the target are provably
+    /// different rows: a fixture with only one session could not
+    /// distinguish "targeted the named session" from "always acts on the
+    /// asker and ignored the field".
+    #[tokio::test]
+    async fn rename_can_target_any_named_session_and_returns_its_updated_row() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        // Spawned BEFORE the fleet is built — see `spliced_local_fleet`'s
+        // own docs for why the order is load-bearing rather than cosmetic.
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::RenameSession {
+                req_id,
+                session_id,
+                title,
+            } = parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected RenameSession");
+            };
+            assert_eq!(session_id, "other", "the NAMED target, not the asker");
+            assert_eq!(title, "new title");
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: SessionInfo {
+                        title,
+                        ..session("other", 2)
+                    },
+                })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) =
+            spliced_local_fleet(client_side, vec![session("other", 2), session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Rename {
+                    session_id: Some("other".to_string()),
+                    title: "new title".to_string(),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Session { session },
+            } => {
+                assert_eq!(session.id, "other");
+                assert_eq!(session.title, "new title");
+                assert!(
+                    !session.current,
+                    "the row acted on is not the asking session's own"
+                );
+            }
+            other => panic!("expected a session reply, got {other:?}"),
+        }
+    }
+
+    /// Spec: a lifecycle verb naming no `session_id` acts on the ASKING
+    /// session — the substitution `AgentVerb`'s own docs promise.
+    ///
+    /// Observed from the far end rather than only from the reply: the
+    /// scripted supervisor asserts the `RenameSession` it received named
+    /// "asker" explicitly, which is the only way to tell "the helm
+    /// substituted the asker" apart from "the helm forwarded an empty or
+    /// missing id and got lucky with a single-session fleet".
+    #[tokio::test]
+    async fn rename_with_no_session_id_targets_the_asking_session() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::RenameSession {
+                req_id,
+                session_id,
+                title,
+            } = parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected RenameSession");
+            };
+            assert_eq!(session_id, "asker", "None must resolve to the asker");
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: SessionInfo {
+                        title,
+                        ..session("asker", 1)
+                    },
+                })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) = spliced_local_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Rename {
+                    session_id: None,
+                    title: "self-renamed".to_string(),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Session { session },
+            } => {
+                assert_eq!(session.id, "asker");
+                assert!(session.current, "the asker's own row is current");
+            }
+            other => panic!("expected a session reply, got {other:?}"),
+        }
+    }
+
+    /// Spec: naming your OWN session id explicitly is the same request as
+    /// omitting `--session` — there is no "you may not name yourself" rule,
+    /// and [`resolve_target`] treats the two paths identically.
+    ///
+    /// The module docs make that promise out loud ("including the asking
+    /// session's own id, which `resolve_target` accepts exactly as it would
+    /// an explicit `None`"), and nothing tested it: every self-targeting
+    /// test above reaches the substitution through `None`, so a future
+    /// self-reference check bolted onto the explicit path would break a
+    /// documented behavior with no failure to show for it. This is the
+    /// twin of [`rename_with_no_session_id_targets_the_asking_session`],
+    /// asserted from the same place — the far end, where the forwarded
+    /// `RenameSession` names the id.
+    ///
+    /// `Rename` rather than `Stop`/`Archive` on purpose: it is the one
+    /// lifecycle verb whose self-targeting form does not also end the
+    /// asking session, so the scenario stays about target resolution.
+    #[tokio::test]
+    async fn naming_the_asking_session_explicitly_matches_omitting_the_target() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::RenameSession {
+                req_id,
+                session_id,
+                title,
+            } = parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected RenameSession");
+            };
+            assert_eq!(
+                session_id, "asker",
+                "an explicit self-target forwards the same id the omitted form would"
+            );
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: SessionInfo {
+                        title,
+                        ..session("asker", 1)
+                    },
+                })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) = spliced_local_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Rename {
+                    session_id: Some("asker".to_string()),
+                    title: "explicitly self-renamed".to_string(),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Session { session },
+            } => {
+                assert_eq!(session.id, "asker");
+                assert_eq!(session.title, "explicitly self-renamed");
+                assert!(
+                    session.current,
+                    "the asker's own row is current whichever way it was named"
+                );
+            }
+            other => panic!("expected a session reply, got {other:?}"),
+        }
+    }
+
+    /// Spec: an ALREADY-ARCHIVED session is a legal lifecycle target —
+    /// `AgentSession::archived`'s own docs promise rename/stop/archive may
+    /// all name one — and the helm forwards such a request rather than
+    /// short-circuiting it.
+    ///
+    /// The promise was documented and untested, which is the combination
+    /// that rots: a future "archived sessions are read-only" guard added
+    /// anywhere on this path would contradict the wire's own documentation
+    /// with nothing failing. Asserted at the far end, because the whole
+    /// question is whether the request LEAVES the helm — a reply-only
+    /// assertion could not tell a forwarded request from a locally
+    /// synthesized one.
+    ///
+    /// `Rename` is the verb, for [`naming_the_asking_session_explicitly_matches_omitting_the_target`]'s
+    /// reason: it leaves the asking session alive and keeps the test about
+    /// the one property it names.
+    #[tokio::test]
+    async fn a_lifecycle_verb_may_target_an_already_archived_session() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let archived = SessionInfo {
+            archived: true,
+            ..session("filed-away", 2)
+        };
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::RenameSession {
+                req_id,
+                session_id,
+                title,
+            } = parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected RenameSession");
+            };
+            assert_eq!(
+                session_id, "filed-away",
+                "an archived session is forwarded like any other target"
+            );
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: SessionInfo {
+                        title,
+                        archived: true,
+                        ..session("filed-away", 2)
+                    },
+                })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) =
+            spliced_local_fleet(client_side, vec![archived, session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Rename {
+                    session_id: Some("filed-away".to_string()),
+                    title: "renamed while archived".to_string(),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Session { session },
+            } => {
+                assert_eq!(session.id, "filed-away");
+                assert_eq!(session.title, "renamed while archived");
+                assert!(
+                    session.archived,
+                    "the row is still archived; renaming it does not un-file it"
+                );
+            }
+            other => panic!("expected a session reply, got {other:?}"),
+        }
+    }
+
+    /// Spec: a title the supervisor refuses (SPEC.md's control-character
+    /// rule) reaches the agent as the supervisor's OWN refusal text,
+    /// verbatim — the same passthrough contract `rename_session`'s REST
+    /// route holds, now proven over the agent path.
+    ///
+    /// A sentinel string stands in for the refusal so the assertion checks
+    /// the exact bytes crossed the relay rather than merely that SOME
+    /// error came back — `rename_session_invalid_title_returns_400_with_
+    /// supervisor_message` in `sessions_tests.rs` pins the identical
+    /// contract on the REST route with the same technique.
+    #[tokio::test]
+    async fn rename_refusal_reaches_the_agent_verbatim() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        const SENTINEL: &str = "SENTINEL-agent-rename: title must not contain control characters";
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::RenameSession { req_id, .. } =
+                parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected RenameSession");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::InvalidRequest,
+                })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) = spliced_local_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Rename {
+                    session_id: None,
+                    title: "bad\u{7}title".to_string(),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert_eq!(
+                    message, SENTINEL,
+                    "the supervisor's own refusal must reach the agent verbatim"
+                );
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// Spec: `Stop` routes to the target's owning host as `StopSession` and
+    /// answers with [`AgentReply::Stopped`] — empty, matching the REST
+    /// route's own empty-object success body.
+    ///
+    /// Despite this test's session starting `Running`, what it proves is
+    /// ROUTING and the REPLY SHAPE, not that any process actually stopped:
+    /// the scripted responder answers `SessionStopped` unconditionally,
+    /// without touching a real pane or process tree, so a `Stop` that
+    /// routed correctly and one that silently no-op'd would look identical
+    /// here. (This is a renamed, re-scoped version of what used to be
+    /// called `stop_ends_a_running_sessions_agent`, whose name overclaimed
+    /// exactly this.) Proving a real kill happened is
+    /// `tests/e2e/agent_listing_real_stack.rs`'s job, against a real
+    /// supervisor and a real fake-agent process.
+    #[tokio::test]
+    async fn stop_routes_to_the_target_and_returns_the_empty_stopped_reply() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::StopSession { req_id, session_id } =
+                parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected StopSession");
+            };
+            assert_eq!(session_id, "asker");
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) = spliced_local_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Stop { session_id: None },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Stopped {}
+                }
+            ),
+            "expected an empty Stopped reply, got {outcome:?}"
+        );
+    }
+
+    /// Spec: `Stop`, like `Rename`, can target ANY session the helm knows,
+    /// not only the asking one.
+    ///
+    /// `Rename`'s own cross-session test
+    /// (`rename_can_target_any_named_session_and_returns_its_updated_row`)
+    /// covers this for `Rename`; before this test, `Stop`'s only coverage
+    /// used `session_id: None`, which cannot distinguish "targeted the
+    /// named session" from "always acts on the asker and ignored the
+    /// field" — a bug that field-substitution mistake would have shipped
+    /// invisibly.
+    #[tokio::test]
+    async fn stop_can_target_a_named_session_other_than_the_asker() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::StopSession { req_id, session_id } =
+                parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected StopSession");
+            };
+            assert_eq!(session_id, "other", "the NAMED target, not the asker");
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) =
+            spliced_local_fleet(client_side, vec![session("other", 2), session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Stop {
+                    session_id: Some("other".to_string()),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Stopped {}
+                }
+            ),
+            "expected an empty Stopped reply, got {outcome:?}"
+        );
+    }
+
+    /// Spec: a self-targeting `Archive` reaches the owning supervisor as an
+    /// `ArchiveSession` naming the asker, and its `SessionArchived` reply is
+    /// projected back through the same [`AgentReply::Session`] shape
+    /// `Rename` uses, `archived` flag and all.
+    ///
+    /// What this does NOT prove, despite the flag assertion below, is that
+    /// anything was actually archived: the flag in the reply is the one the
+    /// SCRIPTED supervisor was told to send back, so a helm that fabricated
+    /// the row without asking anyone would fail this test only because of
+    /// the far-end assertion on the forwarded frame, not because of the
+    /// flag. The earlier name (`archive_flips_the_archived_flag`) claimed
+    /// the stronger property and invited exactly that misreading. Real
+    /// archiving is `do_archive_session`'s own contract, exercised against
+    /// a real supervisor in the e2e suite.
+    #[tokio::test]
+    async fn archive_routes_to_the_owner_and_projects_the_reply() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::ArchiveSession { req_id, session_id } =
+                parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected ArchiveSession");
+            };
+            assert_eq!(session_id, "asker");
+            writer
+                .write_control(&ControlMsg::SessionArchived {
+                    req_id,
+                    session: SessionInfo {
+                        archived: true,
+                        ..session("asker", 1)
+                    },
+                })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) = spliced_local_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Archive { session_id: None },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Session { session },
+            } => {
+                assert!(
+                    session.archived,
+                    "the owner's archived flag must survive the projection"
+                );
+            }
+            other => panic!("expected a session reply, got {other:?}"),
+        }
+    }
+
+    /// Spec: `Archive`, like `Rename` and `Stop`, can target ANY session
+    /// the helm knows, not only the asking one — see
+    /// `stop_can_target_a_named_session_other_than_the_asker`'s docs for
+    /// why `session_id: None` alone cannot prove this.
+    #[tokio::test]
+    async fn archive_can_target_a_named_session_other_than_the_asker() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::ArchiveSession { req_id, session_id } =
+                parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected ArchiveSession");
+            };
+            assert_eq!(session_id, "other", "the NAMED target, not the asker");
+            writer
+                .write_control(&ControlMsg::SessionArchived {
+                    req_id,
+                    session: SessionInfo {
+                        archived: true,
+                        ..session("other", 2)
+                    },
+                })
+                .await
+                .expect("write reply");
+        });
+        let (h, local) =
+            spliced_local_fleet(client_side, vec![session("other", 2), session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Archive {
+                    session_id: Some("other".to_string()),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Session { session },
+            } => {
+                assert_eq!(session.id, "other");
+                assert!(session.archived, "the archived flag must flip in the reply");
+                assert!(
+                    !session.current,
+                    "the row acted on is not the asking session's own"
+                );
+            }
+            other => panic!("expected a session reply, got {other:?}"),
+        }
+    }
+
+    /// Spec: a lifecycle verb can target a session on a DIFFERENT host than
+    /// the asker's own — the fleet-wide authority every prior cross-session
+    /// test in this module (`rename_can_target_any_named_session_...`,
+    /// `stop_can_target_a_named_session_...`,
+    /// `archive_can_target_a_named_session_...`) exercised only within ONE
+    /// host's cache.
+    ///
+    /// This matters as its own case because routing a MUTATION across
+    /// hosts touches machinery the same-host tests never reach:
+    /// `route_session` resolving an owner from helm.db rather than from
+    /// the asking host's own in-memory list, and the mutation traveling
+    /// out over a DIFFERENT supervisor connection than the one the request
+    /// arrived on. Only the REMOTE host needs a scripted peer — the
+    /// mutation is the only frame that ever reaches it; the local
+    /// (asking) host is served standalone, exactly as every read-only
+    /// fleet test above already does.
+    #[tokio::test]
+    async fn archive_can_target_a_session_on_a_different_host_than_the_asker() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        // Spawned BEFORE the fleet is built — see `spliced_local_fleet`'s
+        // docs for why the order is load-bearing rather than cosmetic; the
+        // same ordering constraint applies here even though the spliced
+        // host is `ssh` rather than `local`.
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read frame")
+                .expect("a request");
+            let ControlMsg::ArchiveSession { req_id, session_id } =
+                parse_control(&frame).expect("decode request")
+            else {
+                panic!("expected ArchiveSession");
+            };
+            assert_eq!(session_id, "remote-target");
+            writer
+                .write_control(&ControlMsg::SessionArchived {
+                    req_id,
+                    session: SessionInfo {
+                        archived: true,
+                        ..session("remote-target", 2)
+                    },
+                })
+                .await
+                .expect("write reply");
+        });
+
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![session("asker", 1)],
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("identity-builder".to_string()),
+                    sessions: vec![session("remote-target", 2)],
+                    peer: Some(client_side),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        // BOTH refreshes, and the remote one is the load-bearing half. The
+        // owner cache this dispatch routes by is written when a host's
+        // first refresh lands, and the target lives on the REMOTE host —
+        // so waiting only for the local host's refresh (which is all this
+        // test used to do) left the dispatch racing the very lookup it
+        // depends on. Losing that race did not fail the test; it HUNG it,
+        // because `route_session` then answered `NotFound` without
+        // forwarding anything and the scripted responder below waited
+        // forever for a frame that was never going to be sent. Rare when
+        // the test ran alone and reproducible under a loaded suite: two of
+        // twenty-four concurrent runs wedged before this line existed.
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Archive {
+                    session_id: Some("remote-target".to_string()),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Session { session },
+            } => {
+                assert_eq!(session.id, "remote-target");
+                assert_eq!(
+                    session.host.as_deref(),
+                    Some("user@builder"),
+                    "the reply names the TARGET's host, not the asker's"
+                );
+                assert!(session.archived);
+                assert!(
+                    !session.current,
+                    "a session on another host is never the asker's own row"
+                );
+            }
+            other => panic!("expected a session reply, got {other:?}"),
+        }
+    }
+
+    /// Spec: a lifecycle verb naming a session whose owning host is CACHED
+    /// but not currently connected is refused `Conflict`, naming that
+    /// host's state — the same refusal `route_session` produces for the
+    /// REST routes, now proven over the agent path.
+    ///
+    /// Distinct from [`a_lifecycle_verb_on_an_unknown_session_is_not_found`]
+    /// below: that case is a session nothing has ever heard of (`NotFound`,
+    /// caught before any routing decision), while this one is a session
+    /// the helm knows perfectly well but currently has no live connection
+    /// to act through (`Conflict`, caught BY routing) — two different
+    /// refusals a caller needs to tell apart, since only one of them
+    /// clears on its own once the host reconnects.
+    #[tokio::test]
+    async fn a_lifecycle_verb_on_a_disconnected_hosts_session_is_a_conflict() {
+        let (h, local, _remote) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+
+        // `remote-a` is cached from before `two_host_fleet` took the
+        // remote host down, so this is a session the helm knows about —
+        // unlike the unknown-session case below — with no live connection
+        // to send the mutation through.
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "local-live",
+                AgentVerb::Stop {
+                    session_id: Some("remote-a".to_string()),
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::Conflict);
+                // NOT a check for the specific phase word ("unreachable-
+                // reprobing"): `take_down` marks the host permanently
+                // unreachable, but the manager still cycles it through a
+                // brief `connecting` re-dial attempt on every retry
+                // interval before it settles back to unreachable, and
+                // asserting the exact phase would make this test flaky
+                // against whichever one it happened to land on. What
+                // `refusal_text` actually promises — and what this checks
+                // — is the shared phrase EVERY non-connected state
+                // produces, which is the very contract that lets a caller
+                // treat them uniformly (see `sessions::route_session`'s
+                // module docs).
+                assert!(
+                    message.contains("nothing was queued"),
+                    "every non-connected state must refuse with the shared refusal shape: \
+                     {message}"
+                );
+            }
+            other => panic!("expected a Conflict refusal, got {other:?}"),
+        }
+    }
+
+    /// Spec: a lifecycle verb naming a session the helm has never heard of
+    /// is refused `NotFound`, before any supervisor is ever asked.
+    ///
+    /// A STANDALONE fleet (no scripted peer) is deliberate: if this ever
+    /// regressed into forwarding the request anyway, there would be no
+    /// script to answer it. Without the explicit timeout below, that
+    /// regression would hang this ONE test (and, on a suite run without
+    /// per-test isolation, potentially the whole binary) rather than
+    /// failing cleanly with a diagnosis pointing at what actually broke.
+    #[tokio::test]
+    async fn a_lifecycle_verb_on_an_unknown_session_is_not_found() {
+        let harness = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![session("asker", 1)],
+                ..HostScript::default()
+            })
+            .await
+            .start()
+            .await;
+        let local = local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+
+        let handler = HelmAgentRequests::for_state(&harness.state);
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            handler.handle(
+                origin_of(&harness, local),
+                "asker",
+                AgentVerb::Stop {
+                    session_id: Some("ghost".to_string()),
+                },
+            ),
+        )
+        .await
+        .expect(
+            "an unknown-session refusal must be immediate, with no supervisor ever asked; a hang \
+             here means the request was forwarded anyway",
+        );
+
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::NotFound);
+                assert!(
+                    message.contains("ghost"),
+                    "the refusal must name the id it could not place: {message}"
+                );
+            }
+            other => panic!("expected a NotFound refusal, got {other:?}"),
         }
     }
 }

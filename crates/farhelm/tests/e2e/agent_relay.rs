@@ -480,8 +480,16 @@ async fn a_peer_may_not_ask_as_another_session() {
         AgentOutcome::Err { kind, message } => {
             assert_eq!(kind, ErrorKind::Unauthorized);
             assert!(
-                message.contains("only as itself"),
+                message.contains("under its own identity"),
                 "the refusal must say what the rule is, got: {message}"
+            );
+            // The rule bounds WHO IS ASKING, not what may be acted on, and
+            // the refusal has to make that clear: a reader who took it as
+            // "you may not touch another session" would conclude the
+            // lifecycle verbs' documented fleet-wide target was a lie.
+            assert!(
+                message.contains("name that session as the verb's own target"),
+                "the refusal must point at the target field it is NOT about, got: {message}"
             );
         }
         other => panic!("expected an authorization refusal, got {other:?}"),
