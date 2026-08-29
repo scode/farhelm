@@ -60,12 +60,18 @@
 //! is where that rule is enforced once instead of at each render.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 
 use crate::api::{
     Commit, ProbeResponse, ProvisioningSubmission, adopt_host, probe_ssh_host, provision_host,
     remove_host, retry_host, set_host_destination,
+};
+use crate::menu_panel::{
+    self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
+    closed_toggle_key_intent, focus_menu_toggle, handle_menu_key, measurement_outcome,
+    menu_panel_placement_style, remember_menu_item, should_measure_on_mount,
 };
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
@@ -658,6 +664,34 @@ type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Com
 /// `ListView`'s signal, since it is also what points the catalog surface at a
 /// host, and a section open while another host's read is in flight would be a
 /// section showing profiles that are not its own.
+///
+/// ## One row menu open, across BOTH panels
+///
+/// `host_menu_open`/`session_menu_open` are the same discipline
+/// `profiles_open` above already keeps, extended to cover a second signal
+/// this panel does not own: `ListView` holds both (see its own doc), because
+/// only the component both the session list and this panel mount underneath
+/// is in a position to say "opening yours closes mine". A fully unified
+/// `Option<RowMenuKey>` (one signal, tagged by which kind of row it names)
+/// was the more elegant-looking alternative and was rejected: the session
+/// list's existing `menu_open: Signal<Option<String>>` is read and written
+/// in roughly a dozen places in `list/view.rs` — the reorder-detection
+/// reconciliation in `commit_listing`, the layout-shift closer, the vanish
+/// check — and folding an enum in there would touch every one of those call
+/// sites for a session row's own menu, which is exactly the "must pass
+/// unchanged" surface this change is not supposed to touch. Two coordinated
+/// signals that close each other on open cost one extra line per toggle
+/// callback and avoid converting those dozen SIGNAL consumers to a tagged
+/// enum.
+///
+/// That is narrower than saying the session menu's own machinery went
+/// untouched, and it did not: the ordering, focus, and measurement helpers
+/// both rows now share moved out of the list-local module into
+/// `menu_panel.rs`, and `ListView`'s own toggle and dismissal logic changed
+/// to read and write `host_menu_open` alongside its existing signal. What
+/// this decision actually preserved is the session menu's ACTION SET and
+/// its `Signal<Option<String>>` shape — the dozen call sites above keep
+/// comparing against a plain session id, never against a variant tag.
 #[component]
 pub(crate) fn HostsPanel(
     hosts: Signal<HostsRead>,
@@ -668,6 +702,13 @@ pub(crate) fn HostsPanel(
     /// surface's target, which is what keeps "what is on screen" and "what is
     /// being read" one fact rather than two.
     mut profiles_open: Signal<Option<HostId>>,
+    /// Which host row's "⋯" menu is open, if any — `ListView`'s signal, kept
+    /// in step with `session_menu_open` below so at most one row menu is
+    /// ever open across the whole sidebar (see this component's own doc).
+    mut host_menu_open: Signal<Option<HostId>>,
+    /// The session list's own open-menu signal — written (never read) here,
+    /// purely to close a session row's menu when a host row's opens.
+    mut session_menu_open: Signal<Option<String>>,
     /// The one-door reader behind that section (`profiles::CatalogSurface`).
     profiles: CatalogSurface,
     on_changed: EventHandler<()>,
@@ -692,6 +733,30 @@ pub(crate) fn HostsPanel(
     // An add that committed with an unreadable reply, which has no row to
     // sit on — see the form's `on_added`.
     let mut add_warning = use_signal(|| None::<String>);
+
+    // Closes BOTH row-menu signals every time the add form mounts,
+    // unmounts, or (via `on_added` setting `adding` back to `false`)
+    // commits: `AddHostForm` sits ABOVE `.host-list` in the rsx below, so
+    // toggling it moves the vertical position of every host row beneath it.
+    // Any row menu open at that instant is a `position: fixed` panel
+    // measured at its toggle's OLD coordinates (see `menu_panel_style`),
+    // and this component's own signals are exactly what a click on either
+    // menu's items still carries the ORIGINAL host or session id inside —
+    // so a stale panel here is not merely misplaced, it is a control aimed
+    // at whichever row visually slides underneath it, including this
+    // panel's own destructive `remove`.
+    //
+    // `ListView` closes both signals for the layout changes IT causes
+    // directly (the hosts panel or filter bar opening, the create form,
+    // …) — see its own effect's doc — but `adding` is this component's
+    // OWN private state, invisible to that effect, which is why this has
+    // to be a second, narrower use_effect here rather than one more read
+    // added to that list.
+    use_effect(move || {
+        adding();
+        host_menu_open.set(None);
+        session_menu_open.set(None);
+    });
 
     // One shared shape for the ordinary host-row mutations: claim the page's
     // operation token, clear this host's stale lines, run the request, then
@@ -761,6 +826,15 @@ pub(crate) fn HostsPanel(
 
     let retry_base = base.clone();
     let on_retry = move |host: HostId| {
+        // Closes the menu unconditionally, before the request is even
+        // built: a retry that lost the race to an in-flight operation is
+        // already a no-op with nothing to undo (see the comment on the
+        // ignored `run` outcome below), but the user still chose an action
+        // from the menu, and leaving the panel open over whatever the row
+        // renders next — including a refusal this same click could produce
+        // — would hide it behind the very panel that triggered it. See
+        // `on_adopt` just below for the identical reasoning.
+        host_menu_open.set(None);
         let base = retry_base.clone();
         // The started/refused answer is ignored here and in the two verbs
         // below: their controls simply stay as they are, so a click that
@@ -780,6 +854,11 @@ pub(crate) fn HostsPanel(
     // escaped form the button displays — because that is the whole content
     // of the promise the helm checks (see `api::adopt_host`).
     let on_adopt = move |(host, reported): (HostId, String)| {
+        // See `on_retry`'s own comment: the menu closes on the choice
+        // itself, not on the request's outcome, so an adopt refused because
+        // the identity changed again renders its refusal where the user can
+        // actually see it.
+        host_menu_open.set(None);
         let base = adopt_base.clone();
         let started = run(
             host,
@@ -946,6 +1025,7 @@ pub(crate) fn HostsPanel(
                             controls: HostRowControls {
                                 confirming_remove: *confirming_remove.read() == Some(host.id),
                                 editing: *editing.read() == Some(host.id),
+                                menu_open: *host_menu_open.read() == Some(host.id),
                                 showing_profiles: *profiles_open.read() == Some(host.id),
                             },
                             activity: HostRowActivity {
@@ -966,6 +1046,11 @@ pub(crate) fn HostsPanel(
                                 {
                                     return;
                                 }
+                                // Profiles opens its own management surface
+                                // directly below the row; leaving the "⋯"
+                                // panel open would let it cover the very
+                                // section this click asked to see.
+                                host_menu_open.set(None);
                                 confirming_remove.set(None);
                                 editing.set(None);
                                 let open = *profiles_open.peek() == Some(id);
@@ -1011,6 +1096,17 @@ pub(crate) fn HostsPanel(
                                     return;
                                 }
                                 confirming_remove.set(None);
+                                // This is the ONE place that closes the menu
+                                // for an edit — the item's own click in
+                                // `HostRow` only requests the edit, never
+                                // closes anything itself, so there is one
+                                // state change to account for rather than
+                                // two. It has to run only past the guard
+                                // above: an edit refused because a request
+                                // is already in flight must leave the menu
+                                // exactly as it was, not close it out from
+                                // under a click that did nothing.
+                                host_menu_open.set(None);
                                 destination_draft.set(destination);
                                 editing.set(Some(id));
                             },
@@ -1023,10 +1119,24 @@ pub(crate) fn HostsPanel(
                                     return;
                                 }
                                 editing.set(None);
+                                // See `on_edit_start` just above: the same
+                                // single-owner close, past the same guard.
+                                host_menu_open.set(None);
                                 confirming_remove.set(Some(id));
                             },
                             on_remove_confirm: on_remove_confirm.clone(),
                             on_remove_cancel: move |_| confirming_remove.set(None),
+                            on_menu_toggle: move |id: HostId| {
+                                let currently = *host_menu_open.peek() == Some(id);
+                                host_menu_open.set(if currently { None } else { Some(id) });
+                                // Opening a host row's menu must close
+                                // whichever session row's menu is open —
+                                // see this component's own "one row menu
+                                // open, across BOTH panels" doc.
+                                if !currently {
+                                    session_menu_open.set(None);
+                                }
+                            },
                             host,
                         }
                     }
@@ -1040,16 +1150,130 @@ pub(crate) fn HostsPanel(
 // One host row
 // ---------------------------------------------------------------------
 
+// ===== The row's "⋯" menu ============================================
+//
+// TODO.md's near-term entry this section closes: `edit destination` and
+// `remove` used to sit on `.host-row-main` as ordinary flex children
+// beside `adopt`/`retry`/`profiles`, and on an ssh host the five of them
+// together ran wider than the 340px sidebar leaves room for — `remove`
+// rendered clipped off the right edge by `.app-sidebar`'s
+// `overflow: hidden auto`, invisible and unclickable, with nothing in the
+// DOM or in Playwright's `toBeVisible` to notice. Folding every verb but
+// the always-visible name/chip into one "⋯" menu — built the same way as
+// the session row's (PR #239, mechanics shared via `menu_panel`) — leaves
+// `.host-row-main` exactly three children regardless of host kind, so
+// there is no longer a control count for the sidebar's width to run out
+// on.
+
+/// One command in a host row's actions menu, in the order the menu offers
+/// them.
+///
+/// `Profiles` and `Retry` are offered in every phase, like the buttons
+/// they replace; `Adopt` only when [`adoptable`] names an identity;
+/// `Edit`/`Remove` only on an ssh row (see `HostRow`'s own doc for why an
+/// unmanageable kind gets neither). The separator before `Remove` is
+/// drawn in the rsx, not modeled here — see `MenuOrder` in `menu_panel`
+/// for why a separator is never counted as an item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum HostMenuAction {
+    Profiles,
+    Retry,
+    Adopt,
+    Edit,
+    Remove,
+}
+
+/// Every action a host row's menu can offer, in the order it offers them —
+/// the host row's counterpart to `list::row`'s `MENU_ACTIONS`, and for the
+/// identical reason: the canonical order lives in one place so the
+/// rendered list and the navigable list cannot disagree about what "the
+/// first item" or "the last item" means.
+const HOST_MENU_ACTIONS: [HostMenuAction; 5] = [
+    HostMenuAction::Profiles,
+    HostMenuAction::Retry,
+    HostMenuAction::Adopt,
+    HostMenuAction::Edit,
+    HostMenuAction::Remove,
+];
+
+/// One render's host-menu item list — this row's instantiation of the
+/// shared, generic `menu_panel::MenuOrder` (see that type's own doc for
+/// the packing rule and for why the mechanics live there rather than
+/// being copied from the session row). The const generic argument is
+/// `HOST_MENU_ACTIONS`'s own length rather than a restated literal, so the
+/// array stays the single source of truth for this menu's capacity.
+type HostMenuOrder = menu_panel::MenuOrder<HostMenuAction, { HOST_MENU_ACTIONS.len() }>;
+
+/// Handles for this row's mounted menu items — the host row's
+/// instantiation of `menu_panel::MenuItemHandles`.
+type HostMenuItemHandles = menu_panel::MenuItemHandles<HostMenuAction>;
+
+/// This row's menu wiring, bound to [`HostMenuAction`] and to [`HostId`]
+/// (a plain `i64`, unlike the session row's `String` id) — see
+/// `menu_panel::MenuWiring`'s own doc for what it bundles.
+type HostMenuWiring = menu_panel::MenuWiring<HostMenuAction, HostId, { HOST_MENU_ACTIONS.len() }>;
+
+/// Builds this render's host-menu item list from the row's own state: the
+/// bridge between `adoptable`/`manageable`'s booleans and the shared
+/// `MenuOrder::pack`'s generic `(action) -> bool` predicate.
+fn host_menu_order(adoptable: bool, manageable: bool) -> HostMenuOrder {
+    HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| match action {
+        HostMenuAction::Profiles | HostMenuAction::Retry => true,
+        HostMenuAction::Adopt => adoptable,
+        HostMenuAction::Edit | HostMenuAction::Remove => manageable,
+    })
+}
+
+/// The host row menu toggle's accessible name: the host's display name (or
+/// ssh destination), escaped and clamped — the host row's counterpart to
+/// `list::row::menu_label`, built on the same shared [`clamp_title`]
+/// (`menu_panel::clamp_title`) so both rows' accessible names clamp
+/// identically.
+///
+/// Run through [`display_peer`] BEFORE clamping, never after: `name` is
+/// peer-supplied (an ssh destination, and under `--ssh` a value the remote
+/// end chose), and this label names a menu whose commands include Adopt,
+/// Edit, and Remove — a live bidi override or zero-width run here would let
+/// assistive technology announce a different host than the row visibly
+/// shows, exactly the hazard `display_peer` exists to close everywhere else
+/// this value renders. `clamp_title`'s own escape-token safety is what
+/// keeps clamping that escaped form from ever cutting a `<U+XXXX>` token in
+/// half.
+///
+/// Named "display name", not "identity": in this codebase IDENTITY is the
+/// recorded/reported value [`adoptable`] compares, a distinct thing from
+/// the name or destination a menu happens to be labeled with.
+fn host_menu_label(name: &str) -> String {
+    format!("host actions for {}", clamp_title(&display_peer(name)))
+}
+
+/// The host row's class list for its one independent visual state beyond
+/// its own phase chip — the host row's counterpart to
+/// `list::row::row_class`, narrower because a host row has neither a
+/// `stale` nor a `selected` concept of its own.
+fn host_row_class(menu_open: bool) -> &'static str {
+    if menu_open {
+        "host-row menu-open"
+    } else {
+        "host-row"
+    }
+}
+
 /// Which of the host row's optional surfaces the user has opened.
 ///
-/// Grouped because all three answer one question — what does this row offer
+/// Grouped because all four answer one question — what does this row offer
 /// beyond its ordinary control strip right now — and because `HostsPanel`
-/// narrows all three from at-most-one-row signals to a boolean here: its own
-/// `confirming_remove` and `editing`, and the `profiles_open` that `ListView`
-/// owns and hands it to coordinate the profiles surface. Not one enum, because
-/// they do not fully exclude each other: the removal prompt and the
-/// destination field do (the panel's own handlers close one to open the
-/// other), but an expanded profiles section survives both.
+/// narrows all four from at-most-one-row signals to a boolean here: its own
+/// `confirming_remove` and `editing`, the `profiles_open` that `ListView`
+/// owns and hands it to coordinate the profiles surface, and the
+/// `host_menu_open` `ListView` owns to keep at most one row menu open across
+/// BOTH the session list and the hosts panel (see `HostsPanel`'s own doc for
+/// that single-open discipline). Not one enum, because they do not fully
+/// exclude each other: the removal prompt and the destination field do (the
+/// panel's own handlers close one to open the other, and both close the
+/// menu itself — see `HostRow`'s own doc), but an expanded profiles section
+/// survives both, and the menu is what OFFERS the other two in the first
+/// place.
 ///
 /// State only, like every group here — see [`HostRowActivity`] for why no
 /// group may ever carry a callback.
@@ -1059,6 +1283,9 @@ struct HostRowControls {
     confirming_remove: bool,
     /// Whether this row is showing its destination field instead of controls.
     editing: bool,
+    /// Whether this row's "⋯" menu is the (at most one, across sessions AND
+    /// hosts) open one.
+    menu_open: bool,
     /// Whether THIS row's profiles section is the expanded one. Inside the row
     /// it picks the toggle's LABEL and nothing else, since the section itself
     /// arrives as built markup — but the row needs the fact to write that
@@ -1164,7 +1391,7 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// changes together, one for what the user has opened and one for what the
 /// helm is doing about it, so that a change to either says which.
 ///
-/// Everything else stays a direct prop, each for its own reason. The nine
+/// Everything else stays a direct prop, each for its own reason. The ten
 /// event handlers must (see [`HostRowActivity`]) — four of them are host
 /// verbs, the rest move local UI state. The two `Element` sections are
 /// rendered markup rather than state, and the panel builds them. The draft is
@@ -1173,6 +1400,46 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// cause with an automatic remedy — derived by the panel because the
 /// provisioning section it also builds needs the same answer, so it belongs
 /// beside `host` rather than inside a group describing what the row is doing.
+///
+/// ## The menu, and what stays outside it
+///
+/// `profiles`/`retry`/`adopt`/`edit destination`/`remove` render inside one
+/// "⋯" menu (`.host-row-menu` toggle, `.host-row-menu-panel` panel) built on
+/// the same generic mechanics the session row's menu uses (`menu_panel`) —
+/// see that module's own doc for what is shared and why. The name and phase
+/// chip stay on the row line outside the menu, and so do the
+/// `confirming_remove`/`editing` sub-states: unlike the session row's
+/// confirm/rename, which swap the CONTENTS of an already-open panel, a host
+/// row's confirm-remove and edit-destination REPLACE the whole row line —
+/// exactly as they did before this menu existed — because the destination
+/// field and the delete consequence both need more room than a menu item
+/// affords, and neither is a command among others the way `remove`'s own
+/// menu entry is. The row's own kebab menu therefore has no internal
+/// sub-states at all: opening the item list is the only thing an open panel
+/// ever shows.
+///
+/// Every one of the five items closes the menu when chosen, but the two
+/// GROUPS do it for different reasons and from different layers.
+///
+/// `edit destination` and `remove` swap out the branch that contains the
+/// menu entirely (this row's `confirming_remove`/`editing` sub-states, see
+/// above), so closing is a correctness requirement: nothing does it
+/// automatically, the menu would otherwise keep whatever `menu_open` it
+/// last had, and cancelling back out of either flow would silently reopen a
+/// menu the user never asked to reopen. `HostsPanel`'s own `on_edit_start`/
+/// `on_remove_start` are where that close happens, past their own busy
+/// guard — the item's click here only REQUESTS the flow, so there is one
+/// state change to account for rather than the item and the panel each
+/// closing it.
+///
+/// `retry`, `adopt`, and `profiles` do NOT replace the row's branch — the
+/// row stays exactly as it is, and `profiles` only expands a section below
+/// it — so nothing here is stale to protect against the way the two above
+/// are. They close the menu anyway, from `HostsPanel`'s own callbacks, for a
+/// visibility reason instead: all three can produce something the user must
+/// actually see right where the "⋯" panel sits — Profiles' management
+/// surface, or a Retry/Adopt refusal rendered in this row's own error line —
+/// and an opaque, still-open panel would cover exactly that.
 #[component]
 fn HostRow(
     host: Host,
@@ -1196,10 +1463,15 @@ fn HostRow(
     on_remove_start: EventHandler<HostId>,
     on_remove_confirm: EventHandler<HostId>,
     on_remove_cancel: EventHandler<()>,
+    /// Open or close THIS row's "⋯" menu — `HostsPanel`'s toggle callback,
+    /// built the same way the session row's `on_menu_toggle` is (see
+    /// `HostsPanel`'s own doc for the single-open discipline it keeps).
+    on_menu_toggle: EventHandler<HostId>,
 ) -> Element {
     let HostRowControls {
         confirming_remove,
         editing,
+        menu_open,
         showing_profiles,
     } = controls;
     let HostRowActivity {
@@ -1229,98 +1501,466 @@ fn HostRow(
     let detail = state_detail(&host.state);
     let shown_name = display_peer(&host.name);
     let edit_start = (id, host.destination.clone().unwrap_or_default());
+    // This render's menu item list — see `host_menu_order`'s own doc. Read
+    // every render, not only while the menu is open, because the `use_effect`
+    // below has to notice an item withdrawn (a poll turning `adoptable` off)
+    // even while a menu built against the wider list is still up.
+    let adoptable_now = adopt_identity.is_some();
+    let menu_order = host_menu_order(adoptable_now, manageable);
+
+    // ===== This row's own "⋯" menu state ================================
+    //
+    // Mirrors `list::row::SessionRow`'s menu apparatus field for field —
+    // see that component's own docs for what each signal means and why it
+    // is shaped this way; only the names below are host-specific. Row-local
+    // (not `ListView`'s or `HostsPanel`'s business): the PARENT decides only
+    // WHETHER this row's menu is open (`controls.menu_open`), never where
+    // its panel is measured to be or which of its items currently has
+    // keyboard focus.
+    let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
+    let placement = use_signal(|| PanelPlacement::Unmeasured);
+    let mut item_handles: HostMenuItemHandles = use_signal(HashMap::new);
+    let mut menu_focus = use_signal(|| None::<usize>);
+    // The last position a keyboard step asked focus to move TO — see
+    // `MenuWiring::requested`'s own doc for why this has to exist
+    // separately from `menu_focus` (F5/COR-FOCUS-BURST follow-up: an older
+    // in-flight focus request's `onfocusin` can land after a newer press
+    // already moved `menu_focus` on, and only a signal DOM events never
+    // touch survives that). Cleared alongside `menu_focus` wherever the
+    // menu opens or closes, below, and NOT reconciled against a mid-open
+    // item-set change the way `menu_focus` is: `next_menu_focus`'s existing
+    // out-of-range handling already treats a stale index as "not on an
+    // item" and re-enters at an end, the same tolerance a stale
+    // `event_origin` already relies on, so a request left pointing at a
+    // withdrawn action's old slot degrades no worse than that.
+    let mut menu_requested = use_signal(|| None::<usize>);
+    // The order `menu_focus`'s stored position was last recorded against —
+    // seeded from THIS render's own list, so the first run of the
+    // reconciliation effect below (on mount) compares a list against
+    // itself and correctly finds nothing to reconcile. Updated at the end
+    // of that same effect, never anywhere else: this is bookkeeping for one
+    // consumer, not a value any other part of the row should read.
+    let mut previous_menu_order = use_signal(|| menu_order);
+    let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
+    let focus_queue = MenuFocusQueue {
+        target: use_signal(|| None::<Rc<MountedData>>),
+        draining: use_signal(|| false),
+    };
+    let open_generation = use_signal(|| 0_u64);
+    let spawn_measurement = move || {
+        let handle = toggle_handle;
+        let mut placement = placement;
+        let generation = open_generation();
+        spawn(async move {
+            let measured = match handle.peek().clone() {
+                Some(handle) => handle.get_client_rect().await.ok(),
+                None => None,
+            };
+            if let Some(outcome) =
+                measurement_outcome(generation, *open_generation.peek(), measured)
+            {
+                placement.set(outcome);
+            }
+        });
+    };
+    let begin_open = move |intent: MenuOpenIntent| {
+        let mut open_generation = open_generation;
+        let mut placement = placement;
+        let mut item_handles = item_handles;
+        let mut menu_focus = menu_focus;
+        let mut menu_requested = menu_requested;
+        let mut open_intent = open_intent;
+        open_generation += 1;
+        placement.set(PanelPlacement::Unmeasured);
+        item_handles.write().clear();
+        cancel_menu_focus(focus_queue);
+        menu_focus.set(None);
+        menu_requested.set(None);
+        open_intent.set(Some(intent));
+        spawn_measurement();
+    };
+    let menu_tab_stop = menu_focus()
+        .and_then(|position| menu_order.get(position))
+        .or_else(|| menu_order.get(0));
+    let menu_wiring: HostMenuWiring = menu_panel::MenuWiring {
+        order: menu_order,
+        handles: item_handles,
+        focus: focus_queue,
+        focused: menu_focus,
+        requested: menu_requested,
+        open_intent,
+        close_menu: on_menu_toggle,
+    };
+    // The item set can change UNDER an open menu exactly the way the
+    // session row's can: a poll landing while the menu is open can flip
+    // `adoptable` (a successful adopt resolves the mismatch, or a retry
+    // discovers the recorded identity again — an ordinary background
+    // re-probe does NOT, since `IdentityMismatch` is frozen until a user
+    // decision resolves it; see `adopt_is_offered_only_for_an_identity_mismatch`
+    // and the state's own doc), which is the host row's version of the
+    // session row's "archiving withdraws stop and archive" hazard — see
+    // that component's own `use_effect` for the stale-handle reasoning this
+    // mirrors exactly.
+    //
+    // Stale FOCUS, though, is reconciled by ACTION identity rather than by
+    // comparing the stored position against the new list's length: an
+    // action withdrawn from the MIDDLE of the list (Adopt, here) shifts
+    // every later action's index down, so the slot Adopt vacates is
+    // immediately reoccupied by Edit — a numeric length check never
+    // notices that, and would leave the row believing Edit was focused
+    // while the browser had already dropped focus off the removed Adopt
+    // button, stranding arrow keys and Escape. See
+    // `menu_panel::reconcile_menu_focus`'s own doc for the general rule
+    // this applies.
+    use_effect(use_reactive(
+        (&adoptable_now, &manageable),
+        move |(adoptable, manageable)| {
+            let order = host_menu_order(adoptable, manageable);
+            item_handles
+                .write()
+                .retain(|action, _| order.position(*action).is_some());
+            let focused_position = *menu_focus.peek();
+            // `menu_open` is this render's own belief about whether THIS
+            // row's menu is the open one — passed through so
+            // `reconcile_menu_focus` can gate `Withdrawn` on it
+            // (F3/COR-HOST-WITHDRAWAL-REOPEN): `on_menu_toggle` below is an
+            // ordinary click TOGGLE, not an idempotent close, and calling
+            // it when some OTHER dismissal (a layout closer, a newer
+            // session-menu choice) has already closed this row's menu
+            // since this prop was computed would reopen it instead.
+            match menu_panel::reconcile_menu_focus(
+                *previous_menu_order.peek(),
+                order,
+                focused_position,
+                menu_open,
+            ) {
+                menu_panel::MenuFocusReconciliation::Unchanged => {}
+                menu_panel::MenuFocusReconciliation::Moved(position) => {
+                    menu_focus.set(Some(position));
+                }
+                // No surviving item to aim focus at. Left as-is rather than
+                // cleared here: closing through the row's own toggle
+                // callback is what the dismissal effect below keys its
+                // focus-return on (`was_inside`), and clearing `menu_focus`
+                // first would make that check see nothing to return focus
+                // FROM. Only ever reached while `menu_open` is true (see
+                // the call above), so this toggle call is always a genuine
+                // close of THIS row's own open menu, never a reopen.
+                menu_panel::MenuFocusReconciliation::Withdrawn => {
+                    on_menu_toggle.call(id);
+                }
+            }
+            previous_menu_order.set(order);
+        },
+    ));
+    // The dismissal teardown — see `SessionRow`'s own effect for the
+    // reasoning behind every line; only the DOM marker and toggle selector
+    // handed to `focus_menu_toggle` are host-specific.
+    let dismiss_id = id;
+    use_effect(use_reactive((&menu_open,), move |(menu_open,)| {
+        if menu_open {
+            return;
+        }
+        cancel_menu_focus(focus_queue);
+        let was_inside = menu_focus.peek().is_some();
+        menu_focus.set(None);
+        menu_requested.set(None);
+        open_intent.set(None);
+        item_handles.write().clear();
+        if was_inside {
+            focus_menu_toggle("data-host-id", &dismiss_id.to_string(), ".host-row-menu");
+        }
+    }));
 
     rsx! {
         div {
-            class: "host-row",
+            class: host_row_class(menu_open),
             "data-host-id": "{id}",
             "data-host-phase": "{phase_label(&host.state)}",
             "data-host-kind": "{kind_attribute}",
             div { class: "host-row-main",
                 span { class: "host-name peer-value", dir: "ltr", "{shown_name}" }
                 span { class: "host-chip {phase_class(&host.state)}", "{phase_label(&host.state)}" }
-                if confirming_remove {
-                    // Consequence first and never truncated, then the host
-                    // it is about — the reading order the delete prompt
-                    // established, for the reason recorded there: a long
-                    // name must not be able to clip the sentence that says
-                    // what the button does.
-                    span { class: "confirm-consequence",
-                        "forgetting a host leaves its supervisor and sessions running; re-adding \
-                         the destination finds them again:"
-                    }
-                    span { class: "confirm-title peer-value", dir: "ltr", "\"{shown_name}\"" }
-                    button {
-                        r#type: "button",
-                        class: "btn confirm-delete host-confirm-remove",
-                        disabled: busy,
-                        onclick: move |_| on_remove_confirm.call(id),
-                        "confirm remove"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn confirm-cancel host-cancel-remove",
-                        // Focus lands on the way OUT of the destructive
-                        // action, through the plain HTML attribute rather
-                        // than a fallible `set_focus` whose discarded
-                        // `Result` could drop the safety behavior silently.
-                        autofocus: true,
-                        onclick: move |_| on_remove_cancel.call(()),
-                        "cancel"
-                    }
-                } else if editing {
+                // While confirming a removal, the header line shows only
+                // the name and chip — no third element here at all. The
+                // confirmation itself renders as a SIBLING block below
+                // `.host-row-main` (see it just past this div's own close),
+                // never as a branch competing for room on this line
+                // (F2/COR-HOST-MENU-OFFSCREEN): this line has to stay
+                // `flex-wrap: nowrap` (see `.host-row-main` in app.css) so
+                // the "⋯" toggle can never be pushed onto a second line at
+                // the row's LEFT edge by a long phase word, which is what
+                // used to drag its floating menu off-screen with it.
+                if editing {
                     HostDestinationForm {
                         draft: destination_draft,
                         busy,
                         on_submit: move |destination| on_edit_submit.call((id, destination)),
                         on_cancel: move |_| on_edit_cancel.call(()),
                     }
-                } else {
-                    if let (Some(reported), Some(label)) = (adopt_identity, adopt_label) {
-                        button {
-                            r#type: "button",
-                            class: "btn host-adopt",
-                            disabled: busy,
-                            onclick: move |_| on_adopt.call((id, reported.clone())),
-                            // Its own isolated run inside the button, so an
-                            // identity cannot rearrange the verb around it
-                            // and make "adopt X" read as something else.
-                            span { class: "peer-value", dir: "ltr", "{label}" }
-                        }
-                    }
+                } else if !confirming_remove {
                     button {
                         r#type: "button",
-                        class: "btn host-retry",
-                        disabled: busy,
-                        onclick: move |_| on_retry.call(id),
-                        "retry"
+                        class: "btn host-row-menu",
+                        aria_label: host_menu_label(&host.name),
+                        aria_expanded: menu_open,
+                        aria_haspopup: "menu",
+                        onkeydown: move |evt| {
+                            if !menu_open {
+                                let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
+                                    return;
+                                };
+                                evt.prevent_default();
+                                on_menu_toggle.call(id);
+                                begin_open(intent);
+                                return;
+                            }
+                            handle_menu_key(&evt, None, menu_wiring, &id);
+                        },
+                        onmounted: move |element| {
+                            toggle_handle.set(Some(element.data()));
+                            if should_measure_on_mount(menu_open, *placement.peek()) {
+                                spawn_measurement();
+                            }
+                        },
+                        onclick: move |_| {
+                            let opening = !menu_open;
+                            on_menu_toggle.call(id);
+                            if !opening {
+                                return;
+                            }
+                            begin_open(MenuOpenIntent::First);
+                        },
+                        "⋯"
                     }
-                    // Offered in every phase, exactly like retry and for a
-                    // related reason: a catalog read against a host that is
-                    // not connected is refused by the helm in words that name
-                    // the state, which is a better answer than a control that
-                    // is simply missing whenever a host is down.
-                    button {
-                        r#type: "button",
-                        class: "btn host-profiles-toggle",
-                        disabled: busy,
-                        onclick: move |_| on_profiles_toggle.call(id),
-                        if showing_profiles { "hide profiles" } else { "profiles" }
+                    if menu_open {
+                        div {
+                            class: "host-row-menu-panel",
+                            style: menu_panel_placement_style(placement()),
+                            div {
+                                class: "host-row-menu-items",
+                                role: "menu",
+                                aria_label: host_menu_label(&host.name),
+                                button {
+                                    r#type: "button",
+                                    class: "btn host-row-menu-item host-profiles-toggle",
+                                    role: "menuitem",
+                                    aria_disabled: if busy { "true" },
+                                    tabindex: if menu_tab_stop == Some(HostMenuAction::Profiles) { "0" } else { "-1" },
+                                    onmounted: move |element| {
+                                        remember_menu_item(menu_wiring, HostMenuAction::Profiles, element.data())
+                                    },
+                                    onfocusin: move |_| {
+                                        menu_focus.set(menu_order.position(HostMenuAction::Profiles));
+                                    },
+                                    onfocusout: move |_| menu_focus.set(None),
+                                    onkeydown: move |evt| {
+                                        handle_menu_key(
+                                            &evt,
+                                            menu_order.position(HostMenuAction::Profiles),
+                                            menu_wiring,
+                                            &id,
+                                        );
+                                    },
+                                    onclick: move |_| {
+                                        if busy {
+                                            return;
+                                        }
+                                        on_profiles_toggle.call(id);
+                                    },
+                                    if showing_profiles { "hide profiles" } else { "profiles" }
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn host-row-menu-item host-retry",
+                                    role: "menuitem",
+                                    aria_disabled: if busy { "true" },
+                                    tabindex: if menu_tab_stop == Some(HostMenuAction::Retry) { "0" } else { "-1" },
+                                    onmounted: move |element| {
+                                        remember_menu_item(menu_wiring, HostMenuAction::Retry, element.data())
+                                    },
+                                    onfocusin: move |_| {
+                                        menu_focus.set(menu_order.position(HostMenuAction::Retry));
+                                    },
+                                    onfocusout: move |_| menu_focus.set(None),
+                                    onkeydown: move |evt| {
+                                        handle_menu_key(
+                                            &evt,
+                                            menu_order.position(HostMenuAction::Retry),
+                                            menu_wiring,
+                                            &id,
+                                        );
+                                    },
+                                    onclick: move |_| {
+                                        if busy {
+                                            return;
+                                        }
+                                        on_retry.call(id);
+                                    },
+                                    "retry"
+                                }
+                                if let (Some(reported), Some(label)) = (adopt_identity, adopt_label) {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn host-row-menu-item host-adopt",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Adopt) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(menu_wiring, HostMenuAction::Adopt, element.data())
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(HostMenuAction::Adopt));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(HostMenuAction::Adopt),
+                                                menu_wiring,
+                                                &id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            on_adopt.call((id, reported.clone()));
+                                        },
+                                        // Its own isolated run inside the
+                                        // button, so an identity cannot
+                                        // rearrange the verb around it and
+                                        // make "adopt X" read as something
+                                        // else.
+                                        span { class: "peer-value", dir: "ltr", "{label}" }
+                                    }
+                                }
+                                if manageable {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn host-row-menu-item host-edit",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Edit) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(menu_wiring, HostMenuAction::Edit, element.data())
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(HostMenuAction::Edit));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(HostMenuAction::Edit),
+                                                menu_wiring,
+                                                &id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            // Only REQUESTS the edit —
+                                            // `on_edit_start` (`HostsPanel`)
+                                            // is the one place that closes
+                                            // the menu, once its own busy
+                                            // guard has actually let the
+                                            // request through (see this
+                                            // component's own doc).
+                                            on_edit_start.call(edit_start.clone());
+                                        },
+                                        "edit destination"
+                                    }
+                                    // The boundary before the destructive
+                                    // item — see `list::row`'s own separator
+                                    // for the accessibility argument, which
+                                    // applies identically here. Not counted
+                                    // by `MenuOrder`, so arrow navigation
+                                    // steps straight past it.
+                                    div { class: "host-row-menu-separator", role: "separator" }
+                                    button {
+                                        r#type: "button",
+                                        class: "btn host-row-menu-item host-remove",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Remove) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(menu_wiring, HostMenuAction::Remove, element.data())
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(HostMenuAction::Remove));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(HostMenuAction::Remove),
+                                                menu_wiring,
+                                                &id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            // See `edit destination` above:
+                                            // only requests the confirm
+                                            // prompt; `on_remove_start`
+                                            // closes the menu.
+                                            on_remove_start.call(id);
+                                        },
+                                        "remove"
+                                    }
+                                }
+                            }
+                        }
                     }
-                    if manageable {
+                }
+            }
+            // The removal prompt: a full-width block BELOW the name/chip
+            // header line, not a flex child squeezed onto it (see the
+            // guard on that line, just above). It has to fit an
+            // unshrinkable warning sentence, a second copy of the
+            // (unbounded) host name, AND both buttons, which is more room
+            // than the 340px sidebar has on one line regardless of how
+            // short the name is — `confirm remove`/`cancel` rendered
+            // clipped and unclickable off the sidebar's edge exactly the
+            // way `remove` itself used to before the row's other verbs
+            // folded into the "⋯" menu (see the section banner above this
+            // component). `cancel` is the safe default here, so keeping it
+            // reachable is not a cosmetic concern.
+            if confirming_remove {
+                div { class: "host-confirm-remove-panel",
+                    // Consequence first and never truncated, then the
+                    // host it is about — the reading order this prompt
+                    // established, for the reason recorded there: a
+                    // long name must not be able to clip the sentence
+                    // that says what the button does.
+                    span { class: "confirm-consequence",
+                        "forgetting a host leaves its supervisor and sessions running; \
+                         re-adding the destination finds them again:"
+                    }
+                    span { class: "confirm-title peer-value", dir: "ltr", "\"{shown_name}\"" }
+                    div { class: "host-confirm-remove-actions",
                         button {
                             r#type: "button",
-                            class: "btn host-edit",
+                            class: "btn confirm-delete host-confirm-remove",
                             disabled: busy,
-                            onclick: move |_| on_edit_start.call(edit_start.clone()),
-                            "edit destination"
+                            onclick: move |_| on_remove_confirm.call(id),
+                            "confirm remove"
                         }
                         button {
                             r#type: "button",
-                            class: "btn host-remove",
-                            disabled: busy,
-                            onclick: move |_| on_remove_start.call(id),
-                            "remove"
+                            class: "btn confirm-cancel host-cancel-remove",
+                            // Focus lands on the way OUT of the
+                            // destructive action, through the plain
+                            // HTML attribute rather than a fallible
+                            // `set_focus` whose discarded `Result`
+                            // could drop the safety behavior silently.
+                            autofocus: true,
+                            onclick: move |_| on_remove_cancel.call(()),
+                            "cancel"
                         }
                     }
                 }
@@ -1862,6 +2502,71 @@ mod tests {
         }
     }
 
+    /// The host menu's item order and visibility follow the row's own
+    /// state — the host row's version of the fixed-numbering hazard
+    /// `list::row`'s
+    /// `menu_order_follows_the_retention_state_rather_than_a_fixed_numbering`
+    /// pins for the session row, applied to `HOST_MENU_ACTIONS`'s five
+    /// items instead of the session row's four.
+    ///
+    /// An adoptable ssh host offers every action there is (up to five); an
+    /// ordinary ssh host offers four, since `adopt` only ever joins an
+    /// identity mismatch. The reserved local row (never `manageable` — see
+    /// [`HostRow`]'s own doc) drops `edit` and `remove` entirely regardless,
+    /// which must move `adopt`'s position rather than leave a gap where
+    /// `edit` would have sat — the same packing `MenuOrder::pack` guarantees
+    /// for the session row.
+    #[test]
+    fn the_host_menu_follows_manageability_and_adoptability() {
+        use HostMenuAction::{Adopt, Edit, Profiles, Remove, Retry};
+
+        // Ssh, adoptable: every item, in the declared order.
+        let ssh_adoptable = host_menu_order(true, true);
+        assert_eq!(ssh_adoptable.len(), 5);
+        assert_eq!(ssh_adoptable.get(0), Some(Profiles));
+        assert_eq!(ssh_adoptable.get(1), Some(Retry));
+        assert_eq!(ssh_adoptable.get(2), Some(Adopt));
+        assert_eq!(ssh_adoptable.get(3), Some(Edit));
+        assert_eq!(ssh_adoptable.get(4), Some(Remove));
+        assert_eq!(ssh_adoptable.last(), Some(Remove));
+
+        // Ssh, not adoptable (the ordinary case: most phases offer no
+        // adopt): `adopt` drops out and `edit`/`remove` shift up to fill
+        // the gap rather than leaving one at position 2.
+        let ssh_plain = host_menu_order(false, true);
+        assert_eq!(ssh_plain.len(), 4);
+        assert_eq!(ssh_plain.get(0), Some(Profiles));
+        assert_eq!(ssh_plain.get(1), Some(Retry));
+        assert_eq!(ssh_plain.get(2), Some(Edit));
+        assert_eq!(ssh_plain.get(3), Some(Remove));
+        assert_eq!(ssh_plain.position(Adopt), None);
+
+        // The local row's identity-mismatch menu shape: unmanageable, so
+        // `edit`/`remove` never appear regardless of `adoptable`. This is a
+        // real, reachable state — the local row's connection actor compares
+        // its recorded and reported identities exactly like an ssh row's
+        // (`farhelm-helm::manager`), so a local supervisor restarted behind
+        // a changed install lands here too — not a hypothetical `pack` has
+        // to merely tolerate. `host_menu_order` takes `adoptable` and
+        // `manageable` as two independent facts rather than encoding "local
+        // implies never adoptable" itself, which is what lets this case be
+        // exercised directly instead of only through the ssh fixtures above.
+        let local = host_menu_order(true, false);
+        assert_eq!(local.len(), 3);
+        assert_eq!(local.get(0), Some(Profiles));
+        assert_eq!(local.get(1), Some(Retry));
+        assert_eq!(local.get(2), Some(Adopt));
+        assert_eq!(local.position(Edit), None);
+        assert_eq!(local.position(Remove), None);
+
+        // The ordinary local row: just the two unconditional items.
+        let local_plain = host_menu_order(false, false);
+        assert_eq!(local_plain.len(), 2);
+        assert_eq!(local_plain.get(0), Some(Profiles));
+        assert_eq!(local_plain.get(1), Some(Retry));
+        assert_eq!(local_plain.last(), Some(Retry));
+    }
+
     /// The value an adopt SENDS is the raw one; the value it SHOWS is
     /// escaped. Collapsing the two either way is a real failure: sending the
     /// escaped form turns every unusual identity into a spurious 409, and
@@ -1884,6 +2589,28 @@ mod tests {
             shown.contains("<U+202E>") && !shown.contains('\u{202E}'),
             "the label must not carry a live directional override: {shown}"
         );
+    }
+
+    /// The host menu's accessible names must go through the same
+    /// escaping every other rendered peer value does — a live bidi
+    /// override or zero-width character surviving into `aria-label` would
+    /// let assistive technology announce a host other than the one the
+    /// sighted row shows, for a menu whose commands include Adopt, Edit,
+    /// and Remove.
+    #[test]
+    fn host_menu_label_escapes_bidi_and_zero_width_characters() {
+        let name = "safe\u{202E}evil\u{200B}host";
+        let label = host_menu_label(name);
+        assert!(
+            !label.contains('\u{202E}') && !label.contains('\u{200B}'),
+            "no live control character may reach the accessible name: {label:?}"
+        );
+        assert_eq!(
+            label,
+            format!("host actions for {}", display_peer(name)),
+            "short enough not to clamp, so the label is exactly the escaped name"
+        );
+        assert!(label.contains("<U+202E>") && label.contains("<U+200B>"));
     }
 
     /// The mismatch's two identities must each be their own isolated run,
@@ -2290,6 +3017,7 @@ mod tests {
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: ()| {});
+            let on_menu_toggle = use_callback(|_: HostId| {});
             rsx! {
                 HostRow {
                     host: row_specimen(1),
@@ -2297,6 +3025,7 @@ mod tests {
                     controls: HostRowControls {
                         confirming_remove: false,
                         editing: false,
+                        menu_open: false,
                         showing_profiles: false,
                     },
                     activity: HostRowActivity {
@@ -2316,6 +3045,7 @@ mod tests {
                     on_remove_start,
                     on_remove_confirm,
                     on_remove_cancel,
+                    on_menu_toggle,
                 }
             }
         }
@@ -2370,6 +3100,7 @@ mod tests {
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: ()| {});
+            let on_menu_toggle = use_callback(|_: HostId| {});
             let confirming = CONFIRMING.with(std::cell::Cell::get);
             let refused = REFUSED.with(std::cell::Cell::get);
             rsx! {
@@ -2381,6 +3112,7 @@ mod tests {
                         controls: HostRowControls {
                             confirming_remove: confirming == id,
                             editing: false,
+                            menu_open: false,
                             showing_profiles: false,
                         },
                         activity: HostRowActivity {
@@ -2401,6 +3133,7 @@ mod tests {
                         on_remove_start,
                         on_remove_confirm,
                         on_remove_cancel,
+                        on_menu_toggle,
                     }
                 }
             }

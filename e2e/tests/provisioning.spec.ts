@@ -13,7 +13,7 @@ import { expect, Page, APIRequestContext, test, TestInfo } from "@playwright/tes
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { openHostsPanel, stubFeed, type FeedStub } from "./helpers/fleet";
+import { openHostMenu, openHostsPanel, stubFeed, type FeedStub } from "./helpers/fleet";
 
 const BUILD = "0.0.3";
 
@@ -421,7 +421,13 @@ test("accepted ADD registers before execution and releases the page lock while r
     "running",
   );
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
-  await expect(page.locator(`[data-host-id="${registered.id}"] .host-edit`)).toBeDisabled();
+  // `.host-edit` lives inside the row's own "⋯" menu now, and it is
+  // `aria-disabled` there rather than natively `disabled` (see `HostRow`'s
+  // own doc — the menu leaves busy items focusable, like the session row's
+  // menu) — `toBeDisabled()` honours `aria-disabled="true"` the same way.
+  const registeredRow = page.locator(`[data-host-id="${registered.id}"]`);
+  await openHostMenu(registeredRow);
+  await expect(registeredRow.locator(".host-edit")).toBeDisabled();
   await expect(page.locator(`[data-host-id="${registered.id}"] .provisioning-update`)).toHaveCount(
     0,
   );
@@ -700,6 +706,9 @@ test("UPDATE plans once, binds to the row, and releases OpLock at acceptance", a
   await row.locator(".provisioning-confirm").dispatchEvent("click");
   await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  // `.host-edit` lives inside the row's own "⋯" menu now — see the
+  // earlier ADD case's comment for why `toBeDisabled()` still applies.
+  await openHostMenu(row);
   await expect(row.locator(".host-edit")).toBeDisabled();
 });
 
@@ -931,13 +940,24 @@ test("two provisioning-busy rows reconcile independently", async ({
   await openHostsPanel(page);
   const rowOne = page.locator(`[data-host-id="${one.host_id}"]`);
   const rowTwo = page.locator(`[data-host-id="${two.host_id}"]`);
+  // `.host-edit` lives inside each row's own "⋯" menu now, and only one
+  // row menu is ever open at a time (see `HostsPanel`'s own "one row menu
+  // open" doc) — opening the SECOND row's closes the first's, so the two
+  // rows are checked one at a time rather than simultaneously. That is a
+  // change to how this test OBSERVES the two rows, not to what it proves:
+  // each row's own busy state still reconciles independently of the
+  // other's, which is what every assertion below still pins.
+  await openHostMenu(rowOne);
   await expect(rowOne.locator(".host-edit")).toBeDisabled();
+  await openHostMenu(rowTwo);
   await expect(rowTwo.locator(".host-edit")).toBeDisabled();
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
 
   await configureBackend({ targets: { [target(second)]: { hold_actions: true } } });
   await waitForProgress(request, one.host_id, "completed");
+  await openHostMenu(rowOne);
   await expect(rowOne.locator(".host-edit")).toBeEnabled();
+  await openHostMenu(rowTwo);
   await expect(rowTwo.locator(".host-edit")).toBeDisabled();
 });
 

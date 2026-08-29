@@ -902,19 +902,23 @@ samp {
 }
 
 /* The row whose actions menu is open, for as long as it is open (the
-   `menu-open` class comes from `row_class` in list/row.rs). The panel
-   hangs below-LEFT of its own "⋯" and covers the rows under it — their
-   toggles stay clear, deliberately (see `menu_panel_style`'s anchor doc
-   in list/menu_panel.rs), which is exactly why several live "⋯" can be on
-   screen at once with one menu up. That makes "which one did I open?" a
-   question the ROW has to answer rather than the small glyph alone, and
-   it is exactly the question the menu redesign was asked to fix.
+   `menu-open` class comes from `row_class` in list/row.rs, and from
+   `hosts::host_row_class` for the host row's own menu). The panel hangs
+   below-LEFT of its own "⋯" and covers the rows under it — their toggles
+   stay clear, deliberately (see `menu_panel_style`'s anchor doc in
+   `menu_panel.rs`, shared by both rows), which is exactly why several live
+   "⋯" can be on screen at once with one menu up. That makes "which one did
+   I open?" a question the ROW has to answer rather than the small glyph
+   alone, and it is exactly the question the menu redesign was asked to
+   fix — the host row inherits the same answer once its own "⋯" existed to
+   ask it of.
 
    The same tint hover and focus use, deliberately: this is one more way
    of saying "the pointer's attention is here", not a fourth row state
    with a look of its own. It holds while the pointer is elsewhere, which
    is the whole point — a menu stays up after the mouse has moved off. */
-.session-row.menu-open {
+.session-row.menu-open,
+.host-row.menu-open {
   background: var(--bg-2);
 }
 
@@ -1065,7 +1069,8 @@ samp {
   max-width: 55%;
 }
 
-/* The row's actions-menu toggle: deliberately small — the row IS the open
+/* Either row's actions-menu toggle (built on the same generic mechanics —
+   see `menu_panel.rs`'s own doc): deliberately small — the row IS the open
    affordance, and this is the one square that is not. Its top margin
    tracks the open button's top padding so the toggle sits on the title
    line rather than floating above or below it.
@@ -1085,7 +1090,8 @@ samp {
    `click()` is not a shortcut here, it is the only check that means
    anything. This rule only changes what a SIGHTED mouse user sees at
    rest. */
-.session-row-menu {
+.session-row-menu,
+.host-row-menu {
   flex: 0 0 auto;
   align-self: flex-start;
   margin: 4px 8px 0 0;
@@ -1110,11 +1116,19 @@ samp {
    from under a menu that is still visibly open. Once the menu closes,
    `aria-expanded` reverts and this selector stops matching on its own;
    whatever keeps the toggle visible after that falls to the other three
-   conditions above. */
+   conditions above.
+
+   The host row's own three conditions follow directly below, minus the
+   "current selection" clause: a host row has no `.selected` counterpart
+   (there is no notion of "the current host" the way there is a current
+   session), so hover/focus-within/expanded are its whole reveal set. */
 .session-row:hover .session-row-menu,
 .session-row:focus-within .session-row-menu,
 .session-row.selected .session-row-menu,
-.session-row-menu[aria-expanded="true"] {
+.session-row-menu[aria-expanded="true"],
+.host-row:hover .host-row-menu,
+.host-row:focus-within .host-row-menu,
+.host-row-menu[aria-expanded="true"] {
   opacity: 1;
 }
 
@@ -1137,7 +1151,8 @@ samp {
    header triggers as one category, not as separate exceptions. It costs
    the selection nothing — one glyph of accent text cannot compete with a
    whole row's accent fill. */
-.session-row-menu[aria-expanded="true"] {
+.session-row-menu[aria-expanded="true"],
+.host-row-menu[aria-expanded="true"] {
   background: var(--control-hover-bg);
   color: var(--accent);
 }
@@ -1157,7 +1172,8 @@ samp {
    which is what determines whether touch is a real path to this control,
    not merely "which pointer is primary right now". */
 @media (hover: none), (any-pointer: coarse) {
-  .session-row-menu {
+  .session-row-menu,
+  .host-row-menu {
     opacity: 1;
   }
 }
@@ -1186,10 +1202,11 @@ samp {
    invariant future ancestor CSS on this panel's chain must not break.
 
    `top`/`right` are NOT set here for the MEASURED case: `SessionRow`
-   (list.rs) measures the toggle's own `get_client_rect()` on open and
-   writes them as an inline `style`, computed by `menu_panel_style` via
-   `menu_panel_placement_style` (list.rs) — see `PanelPlacement`'s own doc
-   for the three states that function renders and why. This rule's own
+   (list/row.rs) and `HostRow` (hosts.rs) each measure their own toggle's
+   `get_client_rect()` on open and write the result as an inline `style`,
+   computed by `menu_panel_style` via `menu_panel_placement_style` (both in
+   `menu_panel.rs`) — see `PanelPlacement`'s own doc for the three states
+   that function renders and why. This rule's own
    `top`/`left` below apply in exactly one of those states —
    `PanelPlacement::Fallback`, when the measurement itself FAILED (no
    mounted handle, or the renderer's `get_client_rect()` returned `Err`)
@@ -1252,7 +1269,8 @@ samp {
    stale one open across any of these would visibly detach it from the
    toggle it supposedly belongs to — a regression this fix must not trade
    the clipping bug for. */
-.session-row-menu-panel {
+.session-row-menu-panel,
+.host-row-menu-panel {
   position: fixed;
   /* Content-box sizing (the default) would put the padding and border
      below OUTSIDE both `max-height` values above — an 18px overrun
@@ -1261,7 +1279,7 @@ samp {
      sizing keeps `max-height` describing the box actually painted. */
   box-sizing: border-box;
   /* NO positional properties here, deliberately: coordinates are emitted
-     per placement state by `menu_panel_placement_style` (list.rs) — the
+     per placement state by `menu_panel_placement_style` (menu_panel.rs) — the
      measured state anchors to the toggle's rect, the fallback state pins
      top-left over the sidebar. A class-level `top`/`left` fallback (an
      earlier revision of this fix) leaked into the MEASURED state too:
@@ -1288,7 +1306,8 @@ samp {
      the rows it belongs to, and a panel painted at the rows' own level
      would have only its 1px border to say it is in front of them. The
      shadow is the other half of that claim — see `--shadow-menu`, which
-     exists for this one surface. */
+     exists for exactly this one KIND of surface (both row menus' panels,
+     nothing else). */
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1329,8 +1348,12 @@ samp {
    here": several engines have historically dropped `display: contents`
    elements from the accessibility tree entirely, and this element exists
    for no other reason than to be IN that tree. A real box that adds
-   nothing is the safe version of the same intent. */
-.session-row-menu-items {
+   nothing is the safe version of the same intent — needed by
+   `.host-row-menu-items` too, even though the host panel never grows a
+   profile footer or error line to separate the `role="menu"` list from in
+   the first place. */
+.session-row-menu-items,
+.host-row-menu-items {
   display: flex;
   flex-direction: column;
 }
@@ -1385,25 +1408,29 @@ samp {
 
 /* ===== Row actions and confirmations ============================== */
 
-/* The items of the row's actions menu (four on an active row, two on an
-   archived one). Full-width rows that light up edge to edge on hover, not
-   a stack of small centered boxes: with a border and a padded box each,
-   they read as unrelated buttons that happened to land in the same
-   rectangle, which is the complaint the menu redesign answers — see
-   SPEC_impl.md's session-row actions menu for the contract this
-   implements. The look is
-   `.btn`'s ghost tier already — transparent border, `--control-hover-bg`
-   on hover AND focus — so this rule only has to change the SHAPE.
+/* The items of either row's actions menu (up to four on an active session
+   row, two on an archived one; up to five on an adoptable ssh host, down to
+   two on the reserved local row — see `hosts::host_menu_order`). Full-width
+   rows that light up edge to edge on hover, not a stack of small centered
+   boxes: with a border and a padded box each, they read as unrelated
+   buttons that happened to land in the same rectangle, which is the
+   complaint the menu redesign answers — see SPEC_impl.md's session-row
+   actions menu for the contract this implements; the shape itself is a
+   property of being a full-bleed row in a `role="menu"` panel, not of being
+   a session's row specifically. The look is `.btn`'s ghost tier already —
+   transparent border, `--control-hover-bg` on hover AND focus — so this
+   rule only has to change the SHAPE.
 
    `display: block` plus `width: 100%` rather than letting the panel's
    flex column stretch them: a stretched flex item still centers its own
-   text, and left alignment is what makes four rows scannable as a list.
+   text, and left alignment is what makes several rows scannable as a list.
 
    The square corners are structural, not a design choice the token block
    should have to name: these rows run the full width of a container that
    has its own radius and clips them, so a rounded item inside would show
    its corners against the panel's fill as four notches. */
-.session-row-menu-item {
+.session-row-menu-item,
+.host-row-menu-item {
   display: block;
   width: 100%;
   /* `width: 100%` is a CONTENT width by default, and this button carries
@@ -1423,37 +1450,43 @@ samp {
 }
 
 /* An item the shared operation token has made inert. It is
-   `aria-disabled`, never natively `disabled` (list/row.rs, with the
-   reasoning), which means the browser will still focus it and still fire
-   its `onclick` — the handler's own guard is what refuses — so this rule
-   has to carry the whole visual message on its own AND suppress the hover
-   and focus fills `.btn` would otherwise give a control that cannot act.
-   The 0.5 opacity is `.btn:disabled`'s own, deliberately: a user should
-   not be able to tell the two mechanisms apart by looking. */
-.session-row-menu-item[aria-disabled="true"] {
+   `aria-disabled`, never natively `disabled` (list/row.rs and hosts.rs,
+   with the same reasoning in both), which means the browser will still
+   focus it and still fire its `onclick` — the handler's own guard is what
+   refuses — so this rule has to carry the whole visual message on its own
+   AND suppress the hover and focus fills `.btn` would otherwise give a
+   control that cannot act. The 0.5 opacity is `.btn:disabled`'s own,
+   deliberately: a user should not be able to tell the two mechanisms
+   apart by looking. */
+.session-row-menu-item[aria-disabled="true"],
+.host-row-menu-item[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
 
 .session-row-menu-item[aria-disabled="true"]:hover,
-.session-row-menu-item[aria-disabled="true"]:focus {
+.session-row-menu-item[aria-disabled="true"]:focus,
+.host-row-menu-item[aria-disabled="true"]:hover,
+.host-row-menu-item[aria-disabled="true"]:focus {
   background: transparent;
 }
 
-/* The divider before the destructive item — the one place in this menu
+/* The divider before the destructive item — the one place in either menu
    where the reading has to slow down. A rule, not a red box: the two-tier
    button system keeps destructive actions ghost (see `.session-row-delete`
-   below for the red TEXT they get instead), so the separation is done by
-   the quiet `--border-dim` rule rather than by dressing the item up as a
-   third tier.
+   and `.host-remove` for the red TEXT they get instead), so the
+   separation is done by the quiet `--border-dim` rule rather than by
+   dressing the item up as a third tier.
 
    Its own element, carrying `role="separator"`, rather than a `border-top`
-   on the delete item: drawn on the item, the boundary existed for sighted
-   users only, and the accessibility tree showed four consecutive commands
-   with nothing to mark the last as different in kind. The element is not
-   focusable and is not counted by the menu's focus arithmetic (see
-   `MenuOrder` in list/row.rs), so arrow keys step straight past it. */
-.session-row-menu-separator {
+   on the delete/remove item: drawn on the item, the boundary existed for
+   sighted users only, and the accessibility tree showed the destructive
+   command as just another one in the list with nothing to mark it as
+   different in kind. The element is not focusable and is not counted by
+   either menu's focus arithmetic (see `MenuOrder` in `menu_panel.rs`), so
+   arrow keys step straight past it in both menus. */
+.session-row-menu-separator,
+.host-row-menu-separator {
   margin: 4px 0 0;
   border-top: 1px solid var(--border-dim);
 }
@@ -1539,6 +1572,53 @@ samp {
   font-size: 12px;
   color: var(--warn-bright);
   margin-right: 6px;
+}
+
+/* The host row's own removal prompt, stacked full-width under the name and
+   chip rather than squeezed onto their line: a non-wrapping row could
+   never fit a warning sentence, a repeated host name, AND two buttons in a
+   340px sidebar, so `confirm remove`/`cancel` rendered clipped off the
+   edge, invisible and unclickable — the same class of bug `remove` itself
+   had before it moved into the "⋯" menu.
+   A markup SIBLING of `.host-row-main` (see `hosts::HostRow`'s rsx), not
+   a child of it — `.host-row`'s own `flex-direction: column` is what gives
+   this block its full row width via the container's default cross-axis
+   stretch, so no `flex-basis` trick is needed here to claim it the way an
+   in-line child once needed `flex: 1 1 100%` to force a wrap onto its own
+   line. That in-line, wrap-forcing placement was tried and reverted
+   (F2/COR-HOST-MENU-OFFSCREEN): letting `.host-row-main` wrap to make room
+   for this panel also let the row's ordinary header line wrap on a long
+   phase word, sending the "⋯" toggle onto its own line at the row's LEFT
+   edge and its floating menu off-screen with it — see that rule's own
+   comment. `flex-direction: column` here is this block's OWN internal
+   layout, stacking the consequence, the title, and the actions row instead
+   of racing them for one line's width. */
+.host-confirm-remove-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The ONE override this column container needs: `.confirm-title`'s shared
+   `flex: 1 1 0` was written for a horizontal row, and in a COLUMN a zero
+   flex basis is a zero HEIGHT — combined with the shared rule's
+   `overflow: hidden`, the host name would vanish from this prompt entirely.
+   `.session-row-menu-panel .confirm-title` two rules up is the identical
+   fix for the identical axis flip, in the session row's own column panel;
+   everything else — ellipsis, nowrap, color — still comes from the shared
+   rule. */
+.host-confirm-remove-panel .confirm-title {
+  flex: none;
+}
+
+/* The confirm/cancel pair, allowed to wrap onto their own second line as a
+   backstop: ordinarily two short buttons fit the sidebar's width easily,
+   but nothing here assumes it, so a narrower host font or an unusually
+   wide button label never reintroduces the clipping this whole block
+   exists to end. */
+.host-confirm-remove-actions {
+  display: flex;
+  flex-wrap: wrap;
 }
 
 /* ===== Inline rename ============================================== */
@@ -2043,12 +2123,48 @@ samp {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  /* `nowrap`, deliberately, and load-bearing rather than the default left
+     alone (F2/COR-HOST-MENU-OFFSCREEN): this line holds the row's header —
+     the name, the phase chip, and (outside the confirm/edit branches) the
+     "⋯" toggle — and `.host-name`'s own ellipsis floor just below is what
+     is supposed to absorb any width pressure. `wrap` was tried here once,
+     to let the removal confirmation drop onto its own line without a
+     second container, and it broke the ordinary case instead: the longest
+     real phase word (`unreachable-reprobing`) plus the toggle's own fixed
+     width can exceed one line even at `.host-name`'s floor, and a WRAPPING
+     row sends the "⋯" onto a line of its own starting at the row's LEFT
+     edge — dragging its `position: fixed` floating menu (anchored off the
+     toggle's measured rect) off the sidebar's left edge with it. The
+     removal confirmation now renders as its own block BELOW this one
+     (`.host-confirm-remove-panel`, a sibling in the markup, not a child
+     of this row) instead of relying on this row wrapping to make room for
+     it — see that rule's own comment. */
+  flex-wrap: nowrap;
 }
 
 /* Same shrink discipline as the session row's fields: an ssh destination
    is user data of unbounded length, and without a floor plus ellipsis it
-   would push this row's controls off the viewport — out of reach of the
-   only affordances (edit, remove) that could fix a mistyped one. */
+   would push `.host-row-main`'s other two children — the phase chip and
+   the "⋯" toggle — off the viewport. That used to be the live version of
+   this hazard (TODO.md's near-term entry this row's menu closes): with
+   `edit`/`remove`/`adopt`/`retry`/`profiles` all inline, a long
+   destination plus every one of them ran past the 340px sidebar, and
+   `remove` in particular rendered clipped off the right edge, invisible
+   and unclickable. Folding those five into one "⋯" menu removed the
+   arithmetic that could ever run out of room again — three children,
+   whatever the destination's length — but the ellipsis floor stays: an
+   unbounded name pushing even the toggle out of reach would trade one
+   overflow bug for a smaller one.
+
+   The floor itself was lowered from 8em (F2/COR-HOST-MENU-OFFSCREEN,
+   follow-up): with `.host-row-main`'s `nowrap` above, an 8em name floor
+   plus the longest real phase word (`unreachable-reprobing`)'s chip, the
+   "⋯" toggle, and the row's own margins and gaps needed roughly 318px —
+   a few pixels more than the sidebar's ~312px content area — so the
+   toggle still clipped at the right edge for exactly that phase. The name
+   is the child that can give up the width safely, since it already
+   ellipsizes at its floor; 4em leaves enough of a truncated name visible
+   to stay recognizable while handing the toggle the room it needed. */
 .host-name {
   font-weight: 600;
   font-size: 13px;
@@ -2056,7 +2172,7 @@ samp {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1 1 0;
-  min-width: 8em;
+  min-width: 4em;
 }
 
 /* Every run of peer-supplied text — an identity, a build string, an ssh
@@ -2169,10 +2285,11 @@ samp {
   min-width: 0;
 }
 
-.host-adopt,
-.host-retry,
-.host-edit,
-.host-remove,
+/* Only the destination FORM's own two buttons keep this small pill sizing
+   now — `adopt`/`retry`/`edit destination`/`remove`/`profiles` all moved
+   into the "⋯" menu below and take `.host-row-menu-item`'s full-width row
+   shape instead (shared with the session row's menu items — see that
+   rule's own comment). */
 .host-save-destination,
 .host-cancel-edit {
   font-size: 12px;
@@ -2180,6 +2297,10 @@ samp {
   flex-shrink: 0;
 }
 
+/* `remove` keeps the same danger color it had as an inline button, now
+   applied to the menu item instead — the two-tier system's rule (ghost by
+   default, red TEXT for the one destructive command) does not change just
+   because the command moved into a menu. */
 .host-remove {
   color: var(--danger);
 }
@@ -2374,8 +2495,7 @@ samp {
 .profile-edit,
 .profile-delete,
 .profile-save,
-.profile-cancel,
-.host-profiles-toggle {
+.profile-cancel {
   font-size: 12px;
   padding: 2px 8px;
   flex-shrink: 0;

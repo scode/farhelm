@@ -43,7 +43,6 @@
 //! pages here would scramble them into an order no cursor agrees with.
 
 mod create_form;
-mod menu_panel;
 mod row;
 mod shared;
 mod view;

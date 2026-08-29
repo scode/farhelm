@@ -64,17 +64,6 @@ a bucket, no order.
   is cheap afterwards, so probably yes). A "replace" (delete+clone) variant was considered and deferred: its cost is
   ordering (create-then-delete is the safe failure) and the confirm-when-live gate, not the create itself.
 
-- Make the host row's `remove` (and `edit destination`) reachable. On an ssh host the buttons exist (`hosts.rs`
-  `HostRow`, gated on `HostKind::Ssh`) but are clipped off the sidebar's right edge: `.host-row-main` is one
-  non-wrapping flex line whose fixed-size children — name at `min-width: 8em`, phase chip, `profiles`,
-  `edit destination`, `remove`, plus `retry`/`adopt` when not connected — add up to roughly 430px, inside the 312px that
-  the 340px sidebar leaves after `.hosts-panel`'s padding, and `.app-sidebar`'s `overflow: hidden auto` clips rather
-  than scrolls horizontally. The `.host-name` comment guards against a long NAME pushing the controls off; the controls
-  do it on their own. The e2e assertion `terminal-multihost.spec.ts` makes on `.host-remove` passes regardless, because
-  Playwright's `toBeVisible` ignores clipping by an ancestor's `overflow: hidden` — a fixed test should assert the
-  button's bounding box lies inside the sidebar's. Candidate fixes: wrap the actions onto a second line, or fold them
-  into the same `…` menu the session row got in PR #239.
-
 ## Maybe later
 
 - Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
