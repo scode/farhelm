@@ -221,6 +221,12 @@ pub struct SupervisorError {
 /// changes what a caller may safely do next: whether the frame had already
 /// been handed to the writer queue when the answer was lost.
 ///
+/// The split is two-phase and the variants are four, because the post-send
+/// half has three shapes that look nothing alike and mean exactly the same
+/// thing to a caller: no reply, a reply of the wrong variant, and a reply
+/// of the right variant this side had to throw away. They stay separate so
+/// the sentence a human reads names what actually happened.
+///
 /// A typed error rather than the bare `anyhow` string this replaces,
 /// because the two halves of that split are indistinguishable in prose and
 /// the distinction is exactly the one an agent's `Rename`/`Stop`/`Archive`
@@ -262,10 +268,13 @@ pub enum SupervisorTransportError {
     /// or hostile enough to answer a `StopSession` with a `SessionRenamed`
     /// may well have performed the stop, so a caller that reads this as
     /// "something is broken, try again" can kill an agent somebody restarted
-    /// in between. Only the lifecycle wrappers whose verbs travel the agent
-    /// relay construct it; everywhere else a wrong reply stays the untyped
-    /// protocol error it has always been, because `Internal` is the right
-    /// reading when nothing durable was at stake.
+    /// in between — and one that answers a `CreateSession` with anything but
+    /// a `SessionCreated` may well have started a session whose id the
+    /// caller can now never be told. Only the wrappers for verbs that travel
+    /// the agent relay AND change something construct it — the three
+    /// lifecycle ones and the three creates; everywhere else a wrong reply
+    /// stays the untyped protocol error it has always been, because
+    /// `Internal` is the right reading when nothing durable was at stake.
     #[error("the supervisor answered {request} with an unexpected {reply}")]
     SentWrongReply {
         /// The request this client sent, named as its `ControlMsg` variant.
@@ -288,6 +297,95 @@ pub enum SupervisorTransportError {
         /// The variant name is the whole of what a caller can act on.
         reply: &'static str,
     },
+    /// The frame reached the writer queue, the supervisor answered with the
+    /// RIGHT reply variant, and the payload inside it was unusable — the
+    /// ingress rules refused it, so this client threw the answer away.
+    ///
+    /// The same post-send phase [`Self::SentWrongReply`] records, reached
+    /// one step later, and it is here for exactly that reason: the facts a
+    /// caller can act on are identical. The request went out, something
+    /// came back, and nothing that came back says what became of it. A
+    /// `SessionCreated` whose id is empty, over the ingress cap, or
+    /// carrying control characters is the case this exists for — the target
+    /// has in all likelihood STARTED the session, and the one thing that
+    /// could address it afterwards is the id this client just refused. A
+    /// caller told "internal error" retries an unkeyed create and gets a
+    /// second real session; a caller told "outcome unknown, go look" does
+    /// not.
+    ///
+    /// Refusing the payload rather than sanitizing it is
+    /// [`created_session`]'s decision and its docs carry the reasoning;
+    /// this variant only carries the classification consequence of that
+    /// refusal.
+    #[error("the supervisor answered {request} with an unusable {reply}: {problem}")]
+    SentInvalidReply {
+        /// The request this client sent, named as its `ControlMsg` variant.
+        request: &'static str,
+        /// The reply variant that carried the unusable payload, named the
+        /// same way. Not "wrong" — it is the variant this request asked
+        /// for, which is what separates this from [`Self::SentWrongReply`].
+        reply: &'static str,
+        /// WHICH rule the payload broke, as a fixed phrase.
+        ///
+        /// A `&'static str` for [`Self::SentWrongReply::reply`]'s reason:
+        /// this text is re-encoded into the asking agent's own reply frame,
+        /// so anything derived from the peer's bytes could push that frame
+        /// past `MAX_FRAME_LEN` and cost the caller the very
+        /// outcome-unknown vocabulary this variant exists to deliver. The
+        /// refused id itself is therefore never quoted, and neither is its
+        /// length: which rule it broke is the whole of what a reader can do
+        /// anything with, and the value that broke it belongs to the peer.
+        problem: &'static str,
+    },
+}
+
+/// Bound and sanity-check a session a supervisor says it just created,
+/// before it is cached, projected, or printed.
+///
+/// The same ingress rule `manager::drain_sessions` applies to every id in a
+/// LISTING, applied to the one id that never travels through a listing.
+/// Nothing before this point checks a `SessionCreated` reply's id at all,
+/// and the value goes on to three places that each assume it is well
+/// formed: the helm's own cursors (an id near the frame limit produces a
+/// cursor no client could replay), a REST body, and — through the agent
+/// relay — a CLI that prints it on stdout as its machine-readable answer.
+/// That last one is why the control-character rule is here and not only the
+/// length one: an id carrying a newline forges a second line of output in
+/// whatever captured it, and an ESC reaches the terminal that captured it.
+///
+/// Refused rather than sanitized. A truncated or scrubbed id is not the
+/// session's id, and every later use of it — stopping it, naming it as a
+/// parent — would address something that does not exist. A create whose
+/// reply cannot be trusted is a create that failed, and the session it
+/// nonetheless started shows up in the next listing, where the same rules
+/// apply to it.
+///
+/// The refusal is a TYPED post-send failure
+/// ([`SupervisorTransportError::SentInvalidReply`]) rather than the bare
+/// string error it started as, because "the session it nonetheless started"
+/// is the whole problem: this is a create that reached its target, and the
+/// agent relay has to say "outcome unknown, look before you retry" rather
+/// than the `Internal` an unclassified error becomes. See that variant and
+/// `agent_requests::transport_outcome` for the vocabulary.
+fn created_session(session: SessionInfo) -> anyhow::Result<SessionInfo> {
+    use crate::manager::MAX_SESSION_ID_BYTES;
+    let refuse = |problem: &'static str| {
+        anyhow::Error::new(SupervisorTransportError::SentInvalidReply {
+            request: "CreateSession",
+            reply: "SessionCreated",
+            problem,
+        })
+    };
+    if session.id.is_empty() {
+        return Err(refuse("the session id is empty"));
+    }
+    if session.id.len() > MAX_SESSION_ID_BYTES {
+        return Err(refuse("the session id is past the ingress cap"));
+    }
+    if session.id.chars().any(char::is_control) {
+        return Err(refuse("the session id contains control characters"));
+    }
+    Ok(session)
 }
 
 /// `list_sessions`'s return value: the sessions themselves plus the
@@ -871,18 +969,21 @@ fn not_ready(message: &str) -> farhelm_proto::AgentOutcome {
     }
 }
 
-/// The error for a LIFECYCLE request answered with a correlated reply of
+/// The error for a MUTATING request answered with a correlated reply of
 /// the wrong variant — see [`SupervisorTransportError::SentWrongReply`].
 ///
-/// A function rather than three inline constructions because the phase
-/// claim it makes is the load-bearing part and must be made identically by
-/// every wrapper that makes it: `stop`, `rename` and `archive` are the
-/// verbs an agent can drive across two hops, so each of them is a place
-/// where a wrong answer has to keep the request's own "it was sent" fact
-/// rather than degrading into an untyped protocol complaint. Verbs whose
-/// wrong replies stay untyped (`list_sessions`, `restart`, the tab and
-/// upload calls) are deliberately not routed here; nothing above them turns
-/// the distinction into advice.
+/// A function rather than an inline construction at each site because the
+/// phase claim it makes is the load-bearing part and must be made
+/// identically by every wrapper that makes it: `stop`, `rename`, `archive`
+/// and the three creates are the verbs an agent can drive across two hops,
+/// so each of them is a place where a wrong answer has to keep the
+/// request's own "it was sent" fact rather than degrading into an untyped
+/// protocol complaint. A create is the sharpest case of it — a peer that
+/// answered `CreateSession` with something other than `SessionCreated` may
+/// still have started a session, whose id the caller now has no way to
+/// learn. Verbs whose wrong replies stay untyped (`list_sessions`,
+/// `restart`, the tab and upload calls) are deliberately not routed here;
+/// nothing above them turns the distinction into advice.
 ///
 /// BOTH sides are `ControlMsg` variant NAMES rather than messages, because
 /// this string is rendered into an agent-facing error chain and re-encoded
@@ -959,9 +1060,10 @@ fn panic_fallback(is_mutation: bool) -> farhelm_proto::AgentOutcome {
 /// "delivered, outcome unknown" verdict on a mutation, built by
 /// [`crate::agent_requests`]'s `transport_outcome` out of an error chain
 /// this side does not control the length of. Rewriting that to `Internal`
-/// tells the asking agent "this should not happen" about a rename/stop/
-/// archive that may well have taken effect — the exact substitution the
-/// mutation vocabulary exists to prevent, arrived at through a size check.
+/// tells the asking agent "this should not happen" about a mutation — a
+/// rename/stop/archive, or a create/clone — that may well have taken
+/// effect: the exact substitution the mutation vocabulary exists to
+/// prevent, arrived at through a size check.
 /// So the kind and the check-before-retrying remedy survive the
 /// replacement; only the oversized prose is dropped.
 ///
@@ -1958,23 +2060,27 @@ impl SupervisorClient {
     /// someone else — so the answer is dropped for a refusal the agent can
     /// retry.
     ///
-    /// A `Rename`/`Stop`/`Archive` that came back `Ok` skips this second
-    /// check entirely, and that is not an oversight: by the time `Ok`
-    /// reaches here the mutation has already happened, non-retriably, at
-    /// its target. Reporting it as [`not_ready`]'s `Unavailable` — which
+    /// A MUTATING verb that came back `Ok` skips this second check
+    /// entirely, and that is not an oversight: by the time `Ok` reaches
+    /// here the mutation has already happened, non-retriably, at its
+    /// target. Reporting it as [`not_ready`]'s `Unavailable` — which
     /// callers read as "never happened, safe to repeat" — would be false
     /// for an action that just took effect; a retry could re-rename,
     /// re-stop, or re-target the wrong session on the strength of a lie
-    /// this connection told about its own liveness. The ENTRY check inside
+    /// this connection told about its own liveness, and for a
+    /// `Create`/`Clone` it would strand a session that is already running
+    /// under an id nobody was told. The ENTRY check inside
     /// `handle` already refused the mutation outright if the connection
     /// was stale before any of it ran (see that function's own docs); there
     /// is no honest "undo" once it has run, so the exit check is skipped
     /// rather than made to lie. This also sidesteps the one thing the exit
-    /// check could still have caught for these verbs — a `Rename`/`Archive`
-    /// reply's own host name going stale in the same window — because
-    /// `agent_requests::agent_session_reply` now pins that name (and marks
-    /// the row `stale` when it cannot) against the SAME incarnation the
-    /// mutation itself routed through, rather than a fresh, unchecked
+    /// check could still have caught for these verbs — a
+    /// `Rename`/`Archive`/`Create`/`Clone` reply's own host name going
+    /// stale in the same window — because
+    /// `agent_requests::agent_row_of_mutation` (behind both
+    /// `agent_session_reply` and `agent_created_reply`) pins that name (and
+    /// marks the row `stale` when it cannot) against the SAME incarnation
+    /// the mutation itself routed through, rather than a fresh, unchecked
     /// lookup this check would otherwise be guarding.
     ///
     /// Fire-and-forget on the writer queue: a response that cannot be
@@ -2425,8 +2531,8 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::SessionCreated { session, .. } => Ok(session),
-            other => bail!("unexpected reply to create_session: {other:?}"),
+            ControlMsg::SessionCreated { session, .. } => created_session(session),
+            other => Err(wrong_reply("CreateSession", &other)),
         }
     }
 
@@ -2484,8 +2590,67 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::SessionCreated { session, .. } => Ok(session),
-            other => bail!("unexpected reply to create_session_from_profile: {other:?}"),
+            ControlMsg::SessionCreated { session, .. } => created_session(session),
+            other => Err(wrong_reply("CreateSession", &other)),
+        }
+    }
+
+    /// Create a session from a profile NAME, resolved by the supervisor
+    /// being asked rather than by this helm.
+    ///
+    /// The distinction from [`Self::create_session_from_profile`] is the
+    /// whole reason this exists, and it is about WHEN the name becomes an
+    /// id. Resolving here means reading the target's catalog, picking an
+    /// id, and then sending a create that names that id — three steps with
+    /// two gaps a rename, an edit or a delete can land in, after which the
+    /// create either fails on a name the caller can still see or launches
+    /// settings the caller's name no longer describes. The supervisor
+    /// resolves the name INSIDE creation, under the same lock that reserves
+    /// the intent key, so there is no window at all.
+    ///
+    /// It also makes a keyed retry mean what a caller expects. The
+    /// supervisor fingerprints the SELECTOR it was sent, so two attempts
+    /// under one key carrying one name agree by construction; a helm-side
+    /// lookup would fingerprint whatever id the catalog happened to hold at
+    /// each attempt, and a rename between them would turn a replay into a
+    /// conflict.
+    ///
+    /// The refusals — no such name, an ambiguous name — are the
+    /// supervisor's own and arrive as ordinary [`SupervisorError`]s. They
+    /// name the profile but say only "this host", so a caller that reached
+    /// a host by NAME is expected to say which host it meant.
+    pub async fn create_session_from_profile_name(
+        &self,
+        cwd: &str,
+        profile_name: &str,
+        title: Option<String>,
+        cols: u16,
+        rows: u16,
+        intent_key: Option<String>,
+    ) -> anyhow::Result<SessionInfo> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::CreateSession {
+                    req_id,
+                    parent: None,
+                    profile_name: Some(profile_name.to_string()),
+                    cwd: cwd.to_string(),
+                    invocation: None,
+                    profile_id: None,
+                    title,
+                    cols,
+                    rows,
+                    intent_key,
+                    agent_kind: None,
+                    resume_template: None,
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionCreated { session, .. } => created_session(session),
+            other => Err(wrong_reply("CreateSession", &other)),
         }
     }
 
@@ -4554,6 +4719,76 @@ mod tests {
         assert!(
             !rendered.contains("secret-project") && !rendered.contains("skip-permissions"),
             "the error must not carry fields the agent surfaces redact: {rendered}"
+        );
+        let _peer = peer.await.expect("peer task");
+    }
+
+    /// Spec: a CREATE answered with a correlated reply of the wrong variant
+    /// keeps the fact that it was sent, as
+    /// [`SupervisorTransportError::SentWrongReply`] naming `CreateSession`.
+    ///
+    /// The lifecycle sibling above pins the same shape, and this one is not
+    /// redundant with it: a create is the mutation whose lost outcome is
+    /// least recoverable. A stop that may or may not have landed can be
+    /// settled by looking at the session; a create that may or may not have
+    /// landed leaves a session running on some host under an id the asking
+    /// agent was never told, and the only kind that says so is the
+    /// outcome-unknown one `agent_requests::transport_outcome` derives from
+    /// this variant. An untyped "unexpected reply" here reads as `Internal`
+    /// and would invite the retry that starts the second session.
+    ///
+    /// All three create wrappers send `ControlMsg::CreateSession` and share
+    /// this arm, so the raw-invocation one stands in for the profile ones.
+    #[tokio::test]
+    async fn a_create_reply_of_the_wrong_variant_is_reported_as_sent() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let frame = reader
+                .read_frame()
+                .await
+                .unwrap()
+                .expect("the helm sent nothing to read");
+            let ControlMsg::CreateSession { req_id, .. } =
+                parse_control(&frame).expect("decode the request")
+            else {
+                panic!("expected a CreateSession");
+            };
+            // Correlated and well formed, and it says nothing about whether
+            // a session was started.
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: session("s1"),
+                })
+                .await
+                .expect("answer with the wrong variant");
+            // Held so the connection stays alive: this failure is not a
+            // connection loss.
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = timeout(
+            Duration::from_secs(5),
+            client.create_session("/tmp", "claude", None, 80, 24),
+        )
+        .await
+        .expect("the request hung on a wrong reply")
+        .expect_err("a wrong reply cannot succeed");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentWrongReply { request, reply })
+                    if *request == "CreateSession" && *reply == "SessionRenamed"
+            ),
+            "a correlated wrong reply to a create must keep the request's own phase: {error:#}"
         );
         let _peer = peer.await.expect("peer task");
     }
@@ -7068,9 +7303,16 @@ mod tests {
     /// structural about the outcome. A verb dropped from that list would
     /// fail no test that only exercised its neighbors, which is exactly the
     /// failure mode centralizing the list was meant to end — so the test
-    /// enumerates the set too. `Stop` and the two `Session`-shaped replies
-    /// are both represented, since they take different arms of the reply
-    /// match on the way out.
+    /// enumerates the set too. `Stop`, the two `Session`-shaped replies and
+    /// the two `Created`-shaped ones are all represented, since they take
+    /// different arms of the reply match on the way out.
+    ///
+    /// The CREATING verbs are the costliest case to get wrong and the
+    /// newest, which is why they are here rather than assumed to follow.
+    /// Downgrading a completed create to `Unavailable` tells the caller no
+    /// session was made while one is already running on some host, and the
+    /// id it would have needed to find it was in the answer that was
+    /// thrown away.
     #[tokio::test]
     async fn a_stale_origin_does_not_downgrade_a_completed_mutation() {
         let renamed = |id: &str| farhelm_proto::AgentSession {
@@ -7102,6 +7344,30 @@ mod tests {
                 farhelm_proto::AgentVerb::Archive { session_id: None },
                 farhelm_proto::AgentReply::Session {
                     session: renamed("s1"),
+                },
+            ),
+            (
+                farhelm_proto::AgentVerb::Create {
+                    host: None,
+                    cwd: "/w".to_string(),
+                    profile_name: None,
+                    invocation: Some("sh".to_string()),
+                    title: None,
+                    intent_key: None,
+                },
+                farhelm_proto::AgentReply::Created {
+                    session: renamed("created-1"),
+                },
+            ),
+            (
+                farhelm_proto::AgentVerb::Clone {
+                    host: None,
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                },
+                farhelm_proto::AgentReply::Created {
+                    session: renamed("created-2"),
                 },
             ),
         ];

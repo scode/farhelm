@@ -693,18 +693,30 @@ verb added later cannot be fenced on one side and not the other.
 That vocabulary is a rule about a PHASE, not a list of failures, and every hop applies it the same way: once a mutation
 has been handed to the next hop, the only endings that may speak plainly are the expected success reply and a refusal
 the peer itself authored. Everything else — the link dying, a frame that will not decode, a reply correlated to another
-request, a well-formed reply of the wrong shape, a refusal that could not be enqueued — is delivered-outcome-unknown for
-a mutating verb, because each of them leaves the same question unanswered and a peer broken enough to produce one is not
-thereby proof that nothing happened. The helm's own connection to a target supervisor enforces this by ending rather
-than by guessing: an agent answer it cannot even refuse (its writer queue full) closes the connection instead of
-dropping the refusal, since the link dying is the terminal event a mutation's retained fence is waiting for, and a
-silent drop on a link that then recovers holds that fence until the retention's own last-resort bound expires. A
-wrong-shape reply is named by its `ControlMsg` VARIANT and nothing else, for the same reason the phase rule exists at
-all: the full rendering of a legal near-frame-limit listing pushed the agent's own reply frame past the protocol limit,
-whereupon the size backstop replaced the whole outcome and the mutation vocabulary was lost to a bare `Internal` — and
-it carried a session's raw invocation and cwd into an agent-facing error chain besides. That backstop now preserves an
-outcome-unknown verdict's kind and remedy when it has to drop oversized prose, for the same reason: a size check must
-not be able to revoke a claim about durable state.
+request, a well-formed reply of the wrong shape, a reply of the RIGHT shape whose payload this side has to refuse (a
+created session id that is empty, past the ingress cap, or carrying control characters), a refusal that could not be
+enqueued — is delivered-outcome-unknown for a mutating verb, because each of them leaves the same question unanswered
+and a peer broken enough to produce one is not thereby proof that nothing happened. The refused-payload case is the one
+where "the peer probably did it" is strongest rather than weakest: the target answered with the very reply that says the
+session was started, and the id that could address it afterwards is precisely what got thrown away. The helm's own
+connection to a target supervisor enforces this by ending rather than by guessing: an agent answer it cannot even refuse
+(its writer queue full) closes the connection instead of dropping the refusal, since the link dying is the terminal
+event a mutation's retained fence is waiting for, and a silent drop on a link that then recovers holds that fence until
+the retention's own last-resort bound expires. A wrong-shape reply is named by its `ControlMsg` VARIANT and nothing
+else, for the same reason the phase rule exists at all: the full rendering of a legal near-frame-limit listing pushed
+the agent's own reply frame past the protocol limit, whereupon the size backstop replaced the whole outcome and the
+mutation vocabulary was lost to a bare `Internal` — and it carried a session's raw invocation and cwd into an
+agent-facing error chain besides. That backstop now preserves an outcome-unknown verdict's kind and remedy when it has
+to drop oversized prose, for the same reason: a size check must not be able to revoke a claim about durable state. The
+phase rule is confined to the AGENT path (`agent_requests::transport_outcome`) rather than folded into `error_kind`, so
+the REST surface keeps mapping the same transport failure to `Internal`: an HTTP caller has its own idempotency story,
+and inventing a status for this would be a contract change no client asked for.
+
+The class that decides the vocabulary is the failed REQUEST's, not the verb's, and clone is where the two come apart: it
+snapshots its source with an ordinary listing before any create is dispatched, so a transport failure there is a
+listing's — retry-safe, with no remedy attached — even though the verb around it mutates. The helm marks that phase at
+the read itself rather than inferring it at the classifier, since only the caller knows which of its requests had
+nothing at stake.
 
 The trust boundary is the CONNECTION, not the message. The supervisor authenticates the per-session credential and
 refuses a peer asking as a session it is not; from there the helm accepts the forwarded `session_id`, and the claim that
@@ -714,25 +726,105 @@ helm's own provisioned install, holding complete authority over every session on
 it for a fleet-wide read could not route a single operation to it either. What the helm does check is that the
 connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. So 13 is
 the current protocol version, and the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/
-`Archive`, added additively within the version rather than as a version bump of their own — which was possible ONLY
-because 13 itself had not yet shipped when they landed, still being developed on this branch with no released build
-speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to keep adding to 13
-after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own, same as any
-other. The same allowance covers the one thing in 13 that is not an addition at all: `AgentSession::host` became
-`Option<String>`, so a lifecycle reply can say "there is a session here but no host name I can vouch for" instead of
-encoding that as an empty string indistinguishable from a real value. A decoder built against 13 EARLIER IN ITS OWN
-DEVELOPMENT rejects `host: null` outright — the running additive rule does not stretch to cover it under any reading —
-so it is allowed here only because nothing released speaks 13 yet. It must not be carried forward the same way once 13
-ships: the identical edit made afterwards needs a version of its own. Each verb is routed and recorded through the exact
-same `sessions.rs` functions (`route_session`, the client call, `record_session`) the REST `/rename`/`/stop`/`/archive`
-routes use, so a refusal that comes out of the SHARED operation — an unknown session, a disconnected host, a title the
-owning supervisor rejects — is the identical sentence the UI would have shown. The equivalence covers that shared path
-and stops there, deliberately, in two places. The relay adds a doorway check of its own (`validate_agent_verb`) that the
-REST surface has no counterpart for, since only the relay puts an attacker-chosen target and title onto two
-byte-unbounded queues before anything downstream can look at them; its refusals are relay-specific by construction. And
-the agent CLI escapes and caps a refusal before printing it, because the destination is a terminal rather than a browser
-— so the WORDING is the UI's, while the bytes may be escaped and the tail cut. Both divergences are one-directional:
-they can refuse something the UI would have allowed through to the same shared code, never the reverse.
+`Archive` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added
+additively within the version rather than as version bumps of their own — which was possible ONLY because 13 itself had
+not yet shipped when they landed, still being developed on this branch with no released build speaking it yet. That is a
+one-time allowance for a version still in flight, not a standing license to keep adding to 13 after it ships; once a
+protocol version has shipped, a wire-shape addition needs a version of its own, same as any other. The same allowance
+covers the one thing in 13 that is not an addition at all: `AgentSession::host` became `Option<String>`, so a reply
+carrying a row the helm just mutated or created can say "there is a session here but no host name I can vouch for"
+instead of encoding that as an empty string indistinguishable from a real value. A decoder built against 13 EARLIER IN
+ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not stretch to cover it under any
+reading — so it is allowed here only because nothing released speaks 13 yet. It must not be carried forward the same way
+once 13 ships: the identical edit made afterwards needs a version of its own. Each verb is routed and recorded through
+the exact same `sessions.rs` functions the corresponding REST route uses — `route_session`, the client call and
+`record_session` for the lifecycle three, and `do_create_session` (the shared internal function `POST /api/sessions` was
+refactored onto) for the creating two. So a refusal that comes out of the SHARED operation — an unknown session, a
+disconnected host, a title the owning supervisor rejects — is the identical sentence the UI would have shown, and a
+session an agent creates is seeded into the helm's cache and published exactly as one the create dialog made.
+
+The equivalence covers that shared path and stops there, deliberately, in two places. The relay adds a doorway check of
+its own (`validate_agent_verb`) that the REST surface has no counterpart for, since only the relay puts an
+attacker-chosen target, title, directory and host name onto two byte-unbounded queues before anything downstream can
+look at them; its refusals are relay-specific by construction. And the agent CLI escapes and caps a refusal before
+printing it, because the destination is a terminal rather than a browser — so the WORDING is the UI's, while the bytes
+may be escaped and the tail cut. Both divergences are one-directional: they can refuse something the UI would have
+allowed through to the same shared code, never the reverse.
+
+`Created` is a distinct reply tag from `Session` even though the payload is identical, because the tag is the only thing
+separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
+is not a novelty claim: a create or clone carrying an idempotency key the target has already served replays that
+session, which arrives under this same tag. The helm draws the one distinction that matters from it — a clone whose
+result is the ASKING session is refused rather than reported, before anything durable is recorded for the replayed row.
+The two creating verbs name their target host by DISPLAY NAME, matching `AgentHost::name` — an agent has never been
+shown a registry id and could not have one. A name matching TWO registered hosts is refused as a `Conflict` naming the
+collision, never resolved to whichever row the listing ordered first: display names are not unique by construction (the
+local row renders as `this machine`, and an ssh destination may be spelled the same), and guessing between them would
+put a session on a machine nobody chose. A registered name carrying a control character can never be typed back at all,
+since the relay refuses one in `--host`; the not-found refusal says so by count, because the fix is a rename and an
+agent has no rename verb for hosts.
+
+Their agent selector travels as a NAME and is resolved by the TARGET supervisor inside creation
+(`CreateMode::ProfileName`), never by carrying an id across hosts and never by a lookup on this side: starter profile
+ids collide between installs by construction, so an id would resolve on the wrong catalog rather than fail, and a
+helm-side name lookup would put two windows around the resolution — one before the create is sent, one before the target
+reserves the intent key — in which a rename or an edit changes what the caller's name meant. The refusals (no such name,
+an ambiguous name) are the target's own, prefixed with the host name the agent asked for, because the target's sentence
+can only say "this host". A clone follows its source's profile ID when the target is the source's own host, and does so
+UNCONDITIONALLY — a deleted profile's id is sent and refused rather than resolved onto whatever now carries the old
+name.
+
+`Clone` reads its source LIVE from the asking session's host, by the same drain `GET /api/sessions/{id}` uses for a
+connected host, rather than from the helm's cache — the cache is for the stale list, and a clone built from it could
+copy a title or a directory the session no longer has. It also refuses a result whose id is the ASKING session: a
+same-host clone with no overrides rebuilds the exact fingerprint that created the asker, so an agent reusing that
+create's key triggers a legitimate reservation replay, and reporting the replayed row as `Created` would hand the caller
+its own id as a new one. Both verbs take the fence on `agent_request_locks` that the lifecycle verbs take, since a
+create that completes while the asking credential is being invalidated would otherwise leave a session running that
+nobody was told about.
+
+A KEYED RETRY IS BOUND TO THE SELECTOR IT NAMES, not to a snapshot of what that selector once meant. The target
+fingerprints the selector it was sent, so two attempts under one key carrying one profile NAME agree by construction —
+which is the second reason the name is forwarded rather than resolved here. The converse is the caveat an agent has to
+know: if the retry names something DIFFERENT from the first attempt — the remembered default has changed, the source
+session has been renamed or moved, a profile name was swapped for an invocation — the target sees a different
+fingerprint and answers with a conflict rather than replaying the first outcome. That is the same contract
+`farhelm spawn` has; nothing in the agent path softens it. An agent that wants a retry to be safe should name its
+selector explicitly rather than lean on the "no selector" fallback, whose value the helm re-reads on every attempt.
+
+The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, the same
+number every session id is held to). It is routing metadata the helm consumes and no supervisor ever sees, so charging
+it against SPEC.md's 64 KiB create-field allowance would let a long registered host name make an otherwise-legal create
+fail through the agent surface alone. What the aggregate covers is exactly what a create carries: directory, selector
+and title, summed.
+
+And a created session's id is checked at INGRESS, where the reply enters the helm — non-empty, control-free, and inside
+the same length cap `manager::drain_sessions` holds every listed id to. That id is the one value on this path with a
+machine consumer: it is printed on the CLI's stdout as the answer, and an id carrying a newline forges a second line in
+whatever captured it. A reply that fails the check is refused rather than sanitized, because a scrubbed id is not the
+session's id and everything done with it afterwards would address something that does not exist.
+
+One deliberate difference from `farhelm spawn` is worth stating rather than discovering. Spawn's `intent_key` gets
+`CreateAdmission::Spawn`'s session-lifetime reservation scope, because the create arrives on the asking session's own
+credential. An agent's `create`/`clone` reaches the target supervisor over the HELM's full-authority connection, so the
+key gets the same permanent, interactive scope any other helm-mediated create gets. Session-lifetime scoping is not
+merely unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking
+session. Likewise the "no selector" fallback: spawn's is the supervisor's own `latest_source_profile()`, while the agent
+verbs use the HELM's per-host remembered default from helm.db, which is the same value the create dialog preselects and
+the one this feature's mental model calls for. `ControlMsg::CreateSession`'s own docs already state that a remembered
+default never travels on that wire — the helm resolves one into a concrete id before sending. That is why a remembered
+default is the one selector on this path that still crosses as an id: it is the helm's own memory of what worked on that
+host, so there is an id to send and no name to defer.
+
+One divergence is worth stating rather than discovering later. A RAW clone — one whose source came from no profile —
+copies the invocation and nothing else, so the target re-derives the integrated kind from the invocation's first token
+and takes that kind's default resume template. A source created with an explicit `agent_kind` (including the explicit
+"no integration" the tri-state can express) or a custom `resume_template` therefore clones into a session whose
+conversation capture, status classification and restart behavior may differ from the original's. Nothing the helm can
+read carries those values: `SessionInfo` — the shape `drain_sessions` returns and the helm's only view of another host's
+session — exposes `invocation` and `source_profile` and no integration fields at all. Copying them means putting them on
+the wire, populating them everywhere a supervisor builds a session row, and persisting them for a reload to find.
+Refusing the raw clone instead is not available: SPEC.md promises a raw session "clones as that invocation".
 
 The two read verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is drained by cursor under two ceilings — a fixed
@@ -1380,10 +1472,37 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   session asked to act on which before the request leaves it (`agent_requests::resolve_target`), so an archive an
   operator did not expect is attributable rather than anonymous. The same reasoning covers `stop`, whose SPEC wording
   puts the confirmation on restart rather than on the stop itself.
+- `farhelm agent create --cwd <dir> [--host <name>] [--profile <name> | --invocation <cmd>] [--title ...]
+  [--idempotency-key ...]`
+  and `farhelm agent clone [--host <name>] [--cwd <dir>] [--title ...]
+  [--idempotency-key ...]` — the in-session
+  CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs follow: stdout
+  is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation line on stderr
+  (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells). The id is the
+  one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as `--session` — so a
+  confirmation on stdout would make the two verbs that need parsing the two that cannot be. The listings are parsed too
+  (the relay fixture reads the hosts table, and the README shows the same), but they are parsed as TABLES: a table that
+  grew a column is still a table, while an id that grew a sentence beside it is not an id. The stderr line is written
+  through a fallible `write!` whose result is discarded rather than through `eprintln!`, because the macro panics on an
+  unwritable stderr and the session already exists by then — turning a create that succeeded into a command that failed
+  would tell a caller holding the id to retry a create it must not repeat.
+
+  `--host` takes a NAME from `farhelm agent hosts`, printed there WHOLE: the NAME column is exempt from the truncation
+  every other non-final column takes, because that column is a selector rather than a description and a name cut at 48
+  characters is a host an agent can see and can never target. `--cwd` is required on `create` and has no default, since
+  inheriting the asking session's directory would make it a `clone` under another name. `--profile` and `--invocation`
+  are mutually exclusive, refused by clap before anything is sent (the helm refuses the same shape for every other
+  client), and naming neither falls back to the target host's remembered default. Every value-taking option on both
+  verbs carries `allow_hyphen_values`, because every one of these values is judged downstream — by the registry, by the
+  target's catalog, by its filesystem — and every one of them may legally begin with `-`; refusing such a value locally
+  would be this CLI declining to carry a name the far end would have explained.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer
-  line and has no way yet to know whether anything is attached.
+  line and has no way yet to know whether anything is attached. The generated verb list is padded into two columns only
+  up to a 52-character usage width; past it a verb carries its description right behind itself, because alignment pads
+  every row to the widest one and `create`'s full command line would otherwise spend a slice of the manual's context
+  budget on whitespace.
 
 Internal commands live under a hidden-from-help `internal` namespace — `farhelm internal stdio` is the ssh-exec stdio
 proxy. (An underscore prefix like `_stdio` was considered; it is not a recognized convention, while an explicit
@@ -1546,13 +1665,18 @@ constraint (see the GUI section's motivation), not an afterthought:
 - **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
   Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
   path for agents.
-- **A fake agent** — `farhelm internal fake-agent --script basic|altscreen|binary|mouse-modes|spawn`, a hidden
-  subcommand of the one binary rather than a separate artifact — stands in for Claude Code/Codex across this suite's
-  integration and e2e tests. Its deterministic scripts cover prompt/echo input, terminal modes, alternate-screen
+- **A fake agent** — `farhelm internal fake-agent --script basic|altscreen|binary|mouse-modes|spawn|agent-relay`, a
+  hidden subcommand of the one binary rather than a separate artifact — stands in for Claude Code/Codex across this
+  suite's integration and e2e tests. Its deterministic scripts cover prompt/echo input, terminal modes, alternate-screen
   rendering, byte-clean live output, and mouse-mode reporting, without vendor auth. Later milestones extend this fixture
-  with fake on-disk records for status heuristics, conversation capture, and resume. The spawn suite also has an
-  automated real-Claude leg that creates a jj workspace and spawns into it; CI leaves it gated because vendor
-  credentials and network access are absent, and a developer enables it manually with `FARHELM_REAL_AGENT=1`.
+  with fake on-disk records for status heuristics, conversation capture, and resume. The `agent-relay` script goes
+  further than the rest: it reads the `SessionStart` hook out of its own launch's injected `--settings` argv, runs it,
+  obeys the pointer line that hook prints by running `farhelm agent instructions`, and then serves `$farhelm ...`
+  requests typed into its terminal by running the shipped `farhelm agent` verbs. Everything on either side of one link
+  is the real product; the single stand-in is what DECIDES a conversation started, which is the part CI cannot have.
+  That script is what makes the whole agent-relay chain testable end to end (`e2e/tests/agent-relay.spec.ts`). The spawn
+  suite also has an automated real-Claude leg that creates a jj workspace and spawns into it; CI leaves it gated because
+  vendor credentials and network access are absent, and a developer enables it manually with `FARHELM_REAL_AGENT=1`.
 - Rust integration tests exercise supervisor+tmux directly (CI provides tmux) and the framing protocol with golden
   cases; farhelm-proto keeps wire compatibility testable.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside

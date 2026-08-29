@@ -1518,6 +1518,8 @@ fn instructions_print_every_verb_without_a_session() {
         "rename",
         "stop",
         "archive",
+        "create",
+        "clone",
         "instructions",
         "help",
     ] {
@@ -1572,5 +1574,526 @@ fn the_help_flag_still_prints_clap_usage() {
     assert!(
         !text.contains("$farhelm"),
         "--help must not be the agent instructions: {text}"
+    );
+}
+
+/// Spec: `farhelm agent create` puts every flag on the wire under its
+/// protocol spelling, prints ONLY the new session's id on stdout, and puts
+/// the human-readable confirmation on stderr.
+///
+/// The split streams are the contract, and they invert what every
+/// lifecycle verb in this file does. `create` and `clone` are the two verbs
+/// whose stdout is meant to be captured as a SINGLE VALUE — the id is what
+/// a caller goes on to pass as `--session`, exactly as `farhelm spawn`'s
+/// single stdout line is — so a confirmation sentence on stdout would make
+/// the two verbs that need parsing the two that cannot be. The listings are
+/// parsed too, but as tables, where an extra line is survivable.
+///
+/// The `--profile` → `profile_name` spelling is checked because it is the
+/// one place the CLI's word and the wire's word deliberately differ: the
+/// helm resolves that value against the TARGET host's catalog, and sending
+/// it as an id would resolve on the wrong catalog rather than fail (ids
+/// collide across installs by construction).
+#[test]
+fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id,
+            session_id,
+            request,
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(session_id, "session-1", "the asking session's own id");
+        assert_eq!(
+            request,
+            AgentVerb::Create {
+                host: Some("builder".to_string()),
+                cwd: "/srv/work".to_string(),
+                profile_name: Some("Claude Code".to_string()),
+                invocation: None,
+                title: Some("over there".to_string()),
+                intent_key: Some("key-1".to_string()),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Created {
+                    session: AgentSession {
+                        id: "new-session".to_string(),
+                        host: Some("builder".to_string()),
+                        title: "over there".to_string(),
+                        cwd: "/srv/work".to_string(),
+                        agent: "Claude Code".to_string(),
+                        status: String::new(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "create",
+            "--cwd",
+            "/srv/work",
+            "--host",
+            "builder",
+            "--profile",
+            "Claude Code",
+            "--title",
+            "over there",
+            "--idempotency-key",
+            "key-1",
+        ],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "new-session\n",
+        "stdout is the id and nothing else — spawn's contract"
+    );
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "created new-session \"over there\" on builder in /srv/work\n"
+    );
+}
+
+/// Spec: `farhelm agent clone` with no flags sends every field absent,
+/// which is how "another one of these, right here" is spelled on the wire.
+///
+/// Every one of those `None`s is a DEFAULT the helm resolves, not an
+/// omission: no host means the asking session's own, no cwd and no title
+/// mean the source's. A CLI that filled any of them in locally — the
+/// asking session's own directory, say, which this process could read —
+/// would be answering a question only the helm has the information to
+/// answer, since the source session may not even be this process's own
+/// working directory.
+#[test]
+fn bare_clone_sends_every_field_absent() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Clone {
+                host: None,
+                cwd: None,
+                title: None,
+                intent_key: None,
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Created {
+                    session: AgentSession {
+                        id: "the-copy".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "the original".to_string(),
+                        cwd: "/srv/project".to_string(),
+                        agent: "Claude".to_string(),
+                        status: String::new(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["clone"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "the-copy\n");
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "created the-copy \"the original\" on this machine in /srv/project\n"
+    );
+}
+
+/// Spec: `farhelm agent clone` puts every option it was given on the wire
+/// — including a `--idempotency-key` beginning with a hyphen — and its
+/// confirmation on stderr escapes every control character in the fields
+/// the helm sent back.
+///
+/// The two halves are here together because they share one round trip and
+/// neither is covered elsewhere for `clone`. Its `--title` and
+/// `--idempotency-key` are declared independently of `create`'s, so either
+/// could be dropped or transposed without failing any test that only drove
+/// `create`; and the key is the field that makes an ambiguous retry safe,
+/// so a key silently swallowed by clap as an unrecognized option is the
+/// worst possible one to lose. The hyphen-leading key is the shape that
+/// needs `allow_hyphen_values`: the downstream contract allows it, so the
+/// CLI must carry it rather than refuse it locally.
+///
+/// The escaping matters here more than on the lifecycle confirmations, and
+/// for a reason specific to this verb: three of the four fields printed
+/// (title, host name, working directory) are text from ANOTHER host on the
+/// fleet, and a newline or an ESC in any of them would forge a line or
+/// reach terminal features in the transcript of a model that is about to
+/// quote this output back to a user.
+#[test]
+fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Clone {
+                host: Some("builder".to_string()),
+                cwd: Some("/srv/elsewhere".to_string()),
+                title: Some("the copy".to_string()),
+                intent_key: Some("-leading-hyphen-key".to_string()),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Created {
+                    session: AgentSession {
+                        id: "the-copy".to_string(),
+                        host: Some("buil\x1b[2Jder".to_string()),
+                        title: "forged\nrow".to_string(),
+                        cwd: "/srv/\tproject".to_string(),
+                        agent: "Claude".to_string(),
+                        status: String::new(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "clone",
+            "--host",
+            "builder",
+            "--cwd",
+            "/srv/elsewhere",
+            "--title",
+            "the copy",
+            "--idempotency-key",
+            "-leading-hyphen-key",
+        ],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "the-copy\n",
+        "the id line is the machine-readable one and is never escaped or decorated"
+    );
+    let confirmation = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        confirmation.lines().count(),
+        1,
+        "one confirmation is one line, whatever the fields contained: {confirmation:?}"
+    );
+    assert!(
+        confirmation.contains("\\n")
+            && confirmation.contains("\\t")
+            && confirmation.contains("\\x1b"),
+        "every control character must survive as a visible escape: {confirmation:?}"
+    );
+}
+
+/// Spec: `farhelm agent create` naming both `--profile` and `--invocation`
+/// is refused by the CLI itself, with nothing sent and nothing on stdout.
+///
+/// Refused HERE rather than only at the helm because clap can: the two are
+/// mutually exclusive on the wire as well, so the round trip would end in
+/// the same refusal, and spending it to learn what a local check knows
+/// costs an agent a supervisor hop and a helm hop. The helm's own refusal
+/// stays in place for every other client — this is a shortcut, not the
+/// authority.
+///
+/// No mock supervisor is started, which is the sharp end: if this ever
+/// regressed into sending the request, there would be no socket to connect
+/// to and the failure would still be an error — so the assertion is
+/// specifically that clap's own conflict message is what came back.
+#[test]
+fn create_naming_both_selectors_is_refused_before_anything_is_sent() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "create",
+            "--cwd",
+            "/srv/work",
+            "--profile",
+            "Claude",
+            "--invocation",
+            "sh",
+        ],
+    ));
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty(), "a refused create prints no id");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--invocation") && stderr.contains("--profile"),
+        "the refusal must name both flags: {stderr}"
+    );
+}
+
+/// Spec: `farhelm agent create` without `--cwd` is refused by clap, since
+/// a create has no default working directory.
+///
+/// Not a defaulted field, and this is the test that keeps it that way. The
+/// tempting default — the asking session's own directory — would make
+/// `create` a `clone` wearing another verb's name, and the CLI is not even
+/// the party that knows it: the asking session's directory lives on the
+/// helm's side of the relay.
+#[test]
+fn create_without_a_cwd_is_refused() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let output = output_with_timeout(agent_command_with_args(&socket, &["create"]));
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--cwd"),
+        "the refusal must name it: {stderr}"
+    );
+}
+
+/// Spec: every hyphen-leading VALUE a create can carry reaches the wire
+/// verbatim rather than being read as an unrecognized flag.
+///
+/// The same hazard `a_rename_title_starting_with_a_hyphen_is_not_misparsed_
+/// as_a_flag` covers for titles, applied to the whole creating surface.
+/// Every one of these values is judged DOWNSTREAM — a profile name by the
+/// target's catalog, an idempotency key by its reservation table, a
+/// directory by the target's filesystem — and every one of them may
+/// legally begin with `-`, so a local refusal here is this CLI declining to
+/// carry a value the far end would have accepted or explained.
+///
+/// The fixture's `--invocation` is deliberately option-shaped
+/// (`--weird-program`) rather than a realistic wrapper: what is under test
+/// is clap's parse of a hyphen-leading VALUE, and a value that merely
+/// contains flags after a normal program name would never have exercised
+/// it.
+#[test]
+fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        let AgentVerb::Create {
+            host,
+            cwd,
+            invocation,
+            title,
+            intent_key,
+            profile_name,
+        } = request
+        else {
+            panic!("expected a Create verb, got {request:?}");
+        };
+        assert_eq!(invocation.as_deref(), Some("--weird-program --flag"));
+        assert_eq!(host.as_deref(), Some("-odd-host"));
+        assert_eq!(cwd, "-odd-dir");
+        assert_eq!(title.as_deref(), Some("-odd-title"));
+        assert_eq!(intent_key.as_deref(), Some("-odd-key"));
+        assert_eq!(
+            profile_name, None,
+            "the invocation selector was chosen, so no profile travels"
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Created {
+                    session: AgentSession {
+                        id: "new-session".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "t".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "weird-program".to_string(),
+                        status: String::new(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "create",
+            "--cwd",
+            "-odd-dir",
+            "--host",
+            "-odd-host",
+            "--invocation",
+            "--weird-program --flag",
+            "--title",
+            "-odd-title",
+            "--idempotency-key",
+            "-odd-key",
+        ],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "clap must carry every hyphen-leading value, got stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "new-session\n");
+}
+
+/// Spec: a `--profile` beginning with a hyphen reaches the wire verbatim.
+///
+/// Separate from the sibling above because `--profile` and `--invocation`
+/// are mutually exclusive: they cannot both be exercised in one command
+/// line, and a profile name is exactly the kind of value whose legality the
+/// TARGET host's catalog decides — refusing it here would tell an agent its
+/// name is malformed when the truth is that this CLI would not carry it.
+#[test]
+fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        let AgentVerb::Create { profile_name, .. } = request else {
+            panic!("expected a Create verb, got {request:?}");
+        };
+        assert_eq!(profile_name.as_deref(), Some("-dash-profile"));
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Created {
+                    session: AgentSession {
+                        id: "new-session".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "t".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "-dash-profile".to_string(),
+                        status: String::new(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["create", "--cwd", "/w", "--profile", "-dash-profile"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "clap must carry the hyphen-leading profile name, got stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "new-session\n");
+}
+
+/// Spec: a `Session` reply to a CREATING verb is refused — nothing on
+/// stdout, and the error names both the shape that came back and the one
+/// expected.
+///
+/// Driven through `clone` because both creating verbs share one expectation
+/// and one refusal; the test is about the reply TAG, not about which of the
+/// two asked. (It says `clone` for the same reason the CLI's own arm is
+/// shared: there is nothing verb-specific left to distinguish here.)
+///
+/// `AgentReply::Session` and `AgentReply::Created` carry byte-identical
+/// payloads, so the tag is the entire difference between "a row that did
+/// not exist a moment ago" and "the row you renamed". Accepting the wrong
+/// one would print an EXISTING session's id as though this command had
+/// created it — a target an agent might then go on to stop or archive. No
+/// other test in the stack can see this: the relay hands a response back by
+/// `req_id` alone across two hops, and neither hop re-checks the shape.
+#[test]
+fn a_session_reply_to_a_creating_verb_is_refused() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let req_id = asked_req_id(&request);
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "an-existing-session".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "t".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["clone"]));
+    finish_server(done, thread);
+
+    assert_ne!(output.status.code(), Some(0));
+    assert!(
+        output.stdout.is_empty(),
+        "an id that was never created must not be printed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("answered with a session row where a created session row was expected"),
+        "the error names the shape that came back and the one expected, in words that read the \
+         same whichever pair they describe: {stderr}"
     );
 }

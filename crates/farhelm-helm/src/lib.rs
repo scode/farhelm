@@ -1650,11 +1650,13 @@ const BUILD_STAMP_HEADER: &str = "x-farhelm-build";
 ///
 /// One family is deliberately absent: a [`SupervisorTransportError`], the
 /// shape of a target supervisor failing to give a usable answer — its
-/// connection dying, or a correlated reply of the wrong variant.
+/// connection dying, a correlated reply of the wrong variant, or the right
+/// variant carrying a payload the ingress rules refuse.
 /// Classifying it needs a fact this function is not given — whether the
-/// verb CHANGED anything — because the same lost answer means "retry
-/// freely" for a listing and "the outcome is unknown" for a
-/// rename/stop/archive. The agent caller asks that question first
+/// failed REQUEST changed anything — because the same lost answer means
+/// "retry freely" for a listing and "the outcome is unknown" for a
+/// mutation, be it a rename/stop/archive or a create/clone. The agent
+/// caller asks that question first
 /// (`agent_requests::transport_outcome`) and only falls back here; the
 /// REST caller keeps the `Internal` it has always produced, since a
 /// browser's retry decision is the user's own.

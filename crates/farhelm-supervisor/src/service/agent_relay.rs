@@ -228,7 +228,8 @@ impl HelmLink {
     /// clock, and that is the intended shape rather than a leak: while a
     /// mutation's outcome is genuinely unknown, letting a delete proceed
     /// would be choosing to tear down a session that a still-running
-    /// rename/stop/archive was authorized against.
+    /// mutation was authorized against — a rename/stop/archive, or a
+    /// create/clone that is about to put a real session on some host.
     ///
     /// ## Why the link's life needed a bound of its own
     ///
@@ -427,7 +428,8 @@ impl HelmLink {
     /// queue — the pre-queue endings are all handled inside
     /// [`Self::upcall`] itself, which never observes a value deposited here
     /// unless the send succeeded — so the helm may well have received a
-    /// rename/stop/archive, performed it, and lost only the answer. Calling
+    /// mutation (a rename/stop/archive, or a create/clone that puts a new
+    /// session on some host), performed it, and lost only the answer. Calling
     /// that `Unavailable`, whose whole contract is "the request was never
     /// delivered and nothing happened", would invite the asking agent to
     /// repeat a mutation that already took effect. `Timeout` is the kind
@@ -455,7 +457,7 @@ impl HelmLink {
 /// remedy, for the same reason [`connection_lost_after_queueing`] adds it:
 /// the neutral "a retry may or may not repeat the request" is an accurate
 /// description of the ambiguity and no advice at all, and the two normal
-/// post-queue endings of a rename/stop/archive must not answer the "what do
+/// post-queue endings of a MUTATION must not answer the "what do
 /// I do now?" question differently depending on whether the link died or
 /// merely went quiet. A listing keeps the bare sentence, having nothing to
 /// double-apply.

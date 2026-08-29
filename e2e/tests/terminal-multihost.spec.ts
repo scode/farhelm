@@ -38,6 +38,7 @@ import {
   openHostMenu,
   openHostsPanel,
   openRowMenu,
+  selfSshAvailable,
   stubFeed,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
@@ -350,42 +351,6 @@ function requireFleet() {
   );
 }
 
-/**
- * Whether passwordless `ssh localhost` works, probed DIRECTLY rather than
- * inferred from the helm.
- *
- * Independence is the whole value: inferring it from "the ssh host never
- * reached connected" conflates the one condition this suite may skip for
- * with every condition it must not — a broken transport, a supervisor that
- * will not start, a helm that mis-registers the ensure file. Those are bugs
- * this suite exists to catch, and a fleet probe that treats them as "no
- * self-ssh here" reports them as a skip.
- *
- * The options mirror the Rust suite's own probe exactly: `BatchMode=yes` so
- * every interactive fallback fails instead of hanging, and
- * `StrictHostKeyChecking=yes` rather than `accept-new` because a test suite
- * must not write to the developer's `known_hosts`.
- */
-async function selfSshAvailable(): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
-    const probe = spawn(
-      "ssh",
-      [
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        "ConnectTimeout=10",
-        "localhost",
-        "true",
-      ],
-      { stdio: "ignore" },
-    );
-    probe.on("error", () => resolve(false));
-    probe.on("exit", (code) => resolve(code === 0));
-  });
-}
 
 /** The replacement supervisor a down-host test started, if any. */
 let restartedRemote: ChildProcess | undefined;

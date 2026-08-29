@@ -38,13 +38,36 @@ function discoverSpecFiles(directory = testsDir): string[] {
 const specFiles = discoverSpecFiles();
 const terminalMultihostSpec = "terminal-multihost.spec.ts";
 
-// The multihost suite stops its replacement remote supervisor when it exits.
-// Keep that teardown last within each engine without project dependencies,
-// which would make a directly selected multihost project run unrelated tests.
-const orderedSpecFiles = [
-  ...specFiles.filter((spec) => spec !== terminalMultihostSpec),
-  ...specFiles.filter((spec) => spec === terminalMultihostSpec),
-];
+// The multihost suite stops its replacement remote supervisor when it exits,
+// and nothing puts one back. That teardown must therefore be last across the
+// WHOLE run, not merely last within its own engine: an engine-local ordering
+// left chromium's multihost teardown ahead of every webkit project — and the
+// specs that need the second host (`agent-relay`, `filters`, `profiles`) can
+// only wait for it, never restore it. The symptom was a WebKit relay suite
+// that failed in its `beforeAll` or skipped its whole point.
+//
+// WHAT THIS RELIES ON, precisely: that a run with `workers: 1` executes
+// projects in the order this array lists them. That is Playwright's observed
+// scheduling — it builds one test group per project in configuration order and
+// hands them to the single worker in that order — but it is not a documented
+// contract the way project `dependencies` is, and the docs describe projects
+// as running in parallel subject to the worker limit. So this is an
+// implementation behavior we depend on, not a guarantee. If a Playwright
+// upgrade ever reorders projects, the failure is loud and localized: every
+// spec above that needs the ssh host fails or skips in its own `beforeAll`
+// after the multihost teardown has already run.
+//
+// Expressed as an ordering rather than through project `dependencies`, which
+// would make a directly selected multihost project drag every unrelated
+// project into the run. The two ways out, if this ever breaks, are both
+// bigger than a config change: teach `terminal-multihost.spec.ts` to restore
+// the supervisor in its `afterAll` (which needs a reaper for the restored
+// process, since a supervisor spawned by a worker outlives the run and
+// `start-stack.sh` reaps only the pids it started itself), or give every spec
+// that needs the second host the restore-if-absent `beforeAll` the multihost
+// suite already has.
+const specFilesNeedingTheRemote = specFiles.filter((spec) => spec !== terminalMultihostSpec);
+const specFilesTearingDownTheRemote = specFiles.filter((spec) => spec === terminalMultihostSpec);
 
 const engines = [
   { name: "chromium", use: { ...devices["Desktop Chrome"] } },
@@ -91,13 +114,25 @@ export default defineConfig({
   // `--project='webkit-*'` run. A `beforeAll` runs at each project's entry
   // into the file, in order by construction, and its failure fails the
   // file's tests rather than letting them run against half-reset state.
-  projects: engines.flatMap((engine) =>
-    orderedSpecFiles.map((spec) => ({
-      name: `${engine.name}-${spec.replace(/\.spec\.ts$/, "")}`,
-      testMatch: spec,
-      use: engine.use,
-    })),
-  ),
+  // Every engine's ordinary specs first, then every engine's remote-teardown
+  // spec — see `specFilesTearingDownTheRemote` for why the split is global
+  // rather than per engine.
+  projects: [
+    ...engines.flatMap((engine) =>
+      specFilesNeedingTheRemote.map((spec) => ({
+        name: `${engine.name}-${spec.replace(/\.spec\.ts$/, "")}`,
+        testMatch: spec,
+        use: engine.use,
+      })),
+    ),
+    ...engines.flatMap((engine) =>
+      specFilesTearingDownTheRemote.map((spec) => ({
+        name: `${engine.name}-${spec.replace(/\.spec\.ts$/, "")}`,
+        testMatch: spec,
+        use: engine.use,
+      })),
+    ),
+  ],
   webServer: {
     command: "bash ./start-stack.sh",
     // The API correctly answers 401 before global setup has exchanged the

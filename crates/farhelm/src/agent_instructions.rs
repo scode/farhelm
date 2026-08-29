@@ -111,38 +111,52 @@ fn render(agent: &Command) -> String {
     }
     out.push_str(
         "\n\
-         You never have to pass a credential or a host: this session's own credential is\n\
-         already in your environment, so the lines above ARE complete command lines as\n\
-         written. A session id is different — omitting --session on rename/stop/archive\n\
-         targets THIS session, not \"no session needed\". Stopping this session kills its\n\
-         agent's process tree but leaves the session listed; archiving instead keeps it,\n\
-         listed as archived. A self-stop can kill this command too, if it runs from the\n\
-         agent rather than a terminal tab; use --session <SESSION> for a different target.\n\
+         You never have to pass a credential: this session's own is already in your\n\
+         environment, so the lines above ARE complete command lines. An omitted optional is a\n\
+         DEFAULT, not \"not needed\": no --session on rename/stop/archive means THIS session,\n\
+         and no --host on create/clone means the host you are on. --host takes a name from\n\
+         the hosts listing; create's --profile is resolved by NAME on the target host, and so\n\
+         is a clone's agent when you clone ONTO ANOTHER host (a clone onto your own host keeps\n\
+         the exact profile). A name that is not there is refused rather than guessed at.\n\
          \n\
-         Each listing is an aligned table on stdout, one row per line, under a header row. A\n\
-         \"*\" in the first column marks you — your own session in the sessions listing, the\n\
-         host you are running on in the hosts listing. Warnings and errors go to stderr\n\
-         instead, so what lands on stdout is only ever the answer.\n\
+         A self-stop kills this command too, if it runs from the agent rather than a terminal\n\
+         tab; stop leaves the session listed, archive keeps it listed as archived.\n\
          \n\
-         The answers come from the helm currently attached to this session — not necessarily\n\
-         the machine this host is running on, since a helm can reach a session over SSH from\n\
-         elsewhere — so they cover the whole fleet: every host and every session the helm\n\
-         knows, wherever those are running.\n\
+         Listings are aligned tables on stdout under a header row, and a \"*\" in the first\n\
+         column marks you — your own session, your own host. create and clone print only the\n\
+         new session's id on stdout. Confirmations, warnings and errors go to stderr, so\n\
+         stdout is only ever the answer.\n\
          \n\
-         One failure is worth recognizing. \"no helm is attached to this session\" does not\n\
-         mean anything is broken: the question travels to whichever helm currently holds this\n\
-         session open, and right now no client has it open. Ask the user to open this session\n\
-         in the Farhelm UI, then run the command again.\n",
+         The answers come from the helm attached to this session, not from this machine, so\n\
+         they cover the whole fleet — every host and session the helm knows. One failure is\n\
+         worth recognizing: \"no helm is attached to this session\" is not a broken install,\n\
+         it means no client currently has this session open. Ask the user to open it in the\n\
+         Farhelm UI, then run the command again.\n",
     );
     out
 }
 
+/// The widest the usage column is padded to before alignment is abandoned.
+///
+/// A cap, not a layout preference, and the reasoning is the same
+/// amplification argument `main.rs`'s `MAX_CELL_WIDTH` documents for the
+/// listing tables: alignment pads EVERY row to the widest one, so a single
+/// long verb (`create`, whose full command line runs past 130 characters)
+/// would add that much whitespace to all nine lines — spending a
+/// meaningful slice of this text's context budget on nothing but spaces.
+///
+/// Past the cap a verb's description simply follows its usage after two
+/// spaces, unaligned. That is the right trade for a reader that is a
+/// language model: the short verbs stay in a scannable column, and the
+/// long ones lose a column that was never going to help anyway.
+const MAX_USAGE_WIDTH: usize = 52;
+
 /// One line per verb: its complete command line, then what it does.
 ///
-/// Padded into two columns so a reader can scan the meanings. The usage
-/// half is built from clap's own view of the verb — name plus arguments —
-/// so a verb that grows a `--cwd` shows it here without anyone
-/// remembering to come back.
+/// Padded into two columns so a reader can scan the meanings, up to
+/// [`MAX_USAGE_WIDTH`]. The usage half is built from clap's own view of the
+/// verb — name plus arguments — so a verb that grows a `--cwd` shows it
+/// here without anyone remembering to come back.
 fn verb_lines(agent: &Command) -> Vec<String> {
     let usages: Vec<String> = agent
         .get_subcommands()
@@ -160,7 +174,12 @@ fn verb_lines(agent: &Command) -> Vec<String> {
             usage
         })
         .collect();
-    let width = usages.iter().map(String::len).max().unwrap_or(0);
+    let width = usages
+        .iter()
+        .map(String::len)
+        .filter(|len| *len <= MAX_USAGE_WIDTH)
+        .max()
+        .unwrap_or(0);
     agent
         .get_subcommands()
         .zip(usages)
@@ -295,16 +314,20 @@ mod tests {
     /// A verb carrying arguments renders them, required and optional
     /// spelled differently.
     ///
-    /// Today's real verbs (`rename`, `stop`, `archive`) only ever carry a
-    /// positional and an optional `--session` — see
+    /// The real verbs between them cover a required positional, a required
+    /// long option and optional long options — see
     /// [`a_lifecycle_verb_with_arguments_renders_its_real_command_line`]
-    /// for the literal pin on those. This synthetic command exercises the
-    /// two shapes none of them do: a REQUIRED long option and a boolean
-    /// flag, standing in for the shape a still-hypothetical future verb
-    /// (`clone`) would need. Without this test the required-option and
-    /// boolean-flag branches of [`arg_spelling`] would ship unexercised
-    /// until such a verb landed, at which point a bug here shows up as an
-    /// instruction line telling an agent to run the wrong command.
+    /// and [`a_creating_verb_renders_its_real_command_line`] for the
+    /// literal pins on those. The one shape NO real verb has is a BOOLEAN
+    /// flag, and without a fixture carrying one the valueless branch of
+    /// [`arg_spelling`] would ship unexercised until some future verb grew
+    /// a switch — at which point the bug surfaces as an instruction line
+    /// telling an agent to run a command that does not parse.
+    ///
+    /// Deliberately synthetic names (`demo`, `--detach`) rather than a
+    /// plausible future verb's: the last version of this test borrowed
+    /// `clone`, which then landed for real and left two unrelated things
+    /// with the same name in one file.
     #[test]
     fn a_verb_with_arguments_renders_its_command_line() {
         // Built, and with clap's own help subcommand disabled, for the
@@ -314,8 +337,8 @@ mod tests {
         let mut agent = Command::new("agent")
             .disable_help_subcommand(true)
             .subcommand(
-                Command::new("clone")
-                    .about("Clone this session onto another host.")
+                Command::new("demo")
+                    .about("A synthetic verb carrying every argument shape.")
                     .arg(clap::Arg::new("session").required(true))
                     .arg(
                         clap::Arg::new("host")
@@ -335,8 +358,52 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(
             lines[0],
-            "farhelm agent clone <SESSION> --host <NAME> [--cwd <PATH>] [--detach]  \
-             Clone this session onto another host."
+            "farhelm agent demo <SESSION> --host <NAME> [--cwd <PATH>] [--detach]  \
+             A synthetic verb carrying every argument shape."
+        );
+    }
+
+    /// Spec: a usage line longer than [`MAX_USAGE_WIDTH`] does not widen
+    /// the column every OTHER verb is padded to; it simply carries its
+    /// description two spaces after itself.
+    ///
+    /// This is the amplification guard, and it is invisible in the rendered
+    /// text until someone reads the byte count: alignment pads every row to
+    /// the widest one, so `create`'s 130-character command line would
+    /// otherwise add eighty spaces to all nine lines of a text that is
+    /// budgeted in tokens. A regression here does not break anything a
+    /// reader can see — it quietly spends a chunk of the size bound
+    /// [`the_instructions_stay_within_their_size_bound`] enforces on
+    /// whitespace, which is exactly the kind of thing that goes unnoticed.
+    #[test]
+    fn one_long_verb_does_not_widen_the_column_for_the_short_ones() {
+        let mut agent = Command::new("agent")
+            .disable_help_subcommand(true)
+            .subcommand(Command::new("short").about("Short."))
+            .subcommand(
+                Command::new("verylong")
+                    .about("Long.")
+                    .arg(
+                        clap::Arg::new("one")
+                            .long("a-rather-long-option-name")
+                            .value_name("VALUE"),
+                    )
+                    .arg(
+                        clap::Arg::new("two")
+                            .long("another-rather-long-option-name")
+                            .value_name("VALUE"),
+                    ),
+            );
+        agent.build();
+        let lines = verb_lines(&agent);
+        assert_eq!(
+            lines[0], "farhelm agent short  Short.",
+            "the short verb is padded to its own width, not to the long one's"
+        );
+        assert!(
+            lines[1].ends_with("[--another-rather-long-option-name <VALUE>]  Long."),
+            "the over-wide verb carries its description right behind it: {:?}",
+            lines[1]
         );
     }
 
@@ -367,6 +434,85 @@ mod tests {
             assert!(
                 lines.iter().any(|line| line == expected),
                 "expected exactly this rendered line, got:\n{lines:#?}\nwant: {expected:?}"
+            );
+        }
+    }
+
+    /// The real `create`/`clone` verbs render the exact command lines an
+    /// agent reads, pinned byte-for-byte against production's own
+    /// `AgentCmd`.
+    ///
+    /// The sibling above pins the lifecycle verbs; these two are pinned
+    /// separately because they are the only ones whose usage carries
+    /// information an agent cannot get anywhere else. `create --cwd <DIR>`
+    /// is REQUIRED and must render without brackets — a `[--cwd <DIR>]`
+    /// here would tell a model the directory is optional and it would
+    /// dutifully omit it. `--host <NAME>` must say NAME rather than HOST,
+    /// because the value is a name from the hosts listing and not a host
+    /// id. And both must show `--profile <NAME>`, never `--profile-id`,
+    /// since an id would resolve on the wrong host's catalog (see
+    /// `farhelm-helm`'s `agent_requests`).
+    ///
+    /// Both lines exceed [`MAX_USAGE_WIDTH`], so this also pins what an
+    /// over-wide verb looks like in the REAL text rather than only in
+    /// [`one_long_verb_does_not_widen_the_column_for_the_short_ones`]'s
+    /// synthetic fixture: exactly two spaces before the description.
+    #[test]
+    fn a_creating_verb_renders_its_real_command_line() {
+        let lines = verb_lines(&agent_command());
+        for expected in [
+            "farhelm agent create --cwd <DIR> [--host <NAME>] [--profile <NAME>] \
+             [--invocation <CMD>] [--title <TITLE>] [--idempotency-key <KEY>]  \
+             Create a session on any host; prints its id",
+            "farhelm agent clone [--host <NAME>] [--cwd <DIR>] [--title <TITLE>] \
+             [--idempotency-key <KEY>]  Copy this session onto any host; prints the new id",
+        ] {
+            assert!(
+                lines.iter().any(|line| line == expected),
+                "expected exactly this rendered line, got:\n{lines:#?}\nwant: {expected:?}"
+            );
+        }
+    }
+
+    /// The instructions state the four things the creating verbs add that
+    /// a model cannot infer from a usage line.
+    ///
+    /// All four are conventions rather than syntax, which is why the
+    /// generated verb list cannot carry them: that `create`/`clone` put the
+    /// new session's id on stdout (so an agent can capture it and report it
+    /// back, and knows the sentence it also sees is on stderr); that
+    /// `--host` takes a NAME out of the hosts listing rather than an
+    /// identifier of some other kind; that a profile is resolved on the
+    /// TARGET host, which is what tells an agent to read the target's
+    /// catalog rather than its own; and that a name with no match is
+    /// REFUSED rather than approximated, which is the difference between a
+    /// model retrying with a better name and a model accepting a session
+    /// running something nobody asked for.
+    ///
+    /// The profile needles are worded to keep the SAME-HOST exception
+    /// intact: a clone onto the session's own host follows the snapshotted
+    /// id, and prose flattened into "clones always resolve by name" would
+    /// describe an implementation this one deliberately is not.
+    ///
+    /// Losing any of them in a prose rewrite is the exact failure the
+    /// sibling test on the older conventions
+    /// (`the_instructions_carry_the_conventions_nothing_else_teaches`)
+    /// exists to catch — spelled out rather than linked, because the name
+    /// does not fit on one line and a wrapped intra-doc link resolves to
+    /// nothing.
+    #[test]
+    fn the_instructions_explain_what_the_creating_verbs_print_and_name() {
+        let text = text();
+        for needle in [
+            "new session's id on stdout",
+            "--host takes a name from",
+            "resolved by NAME on the target host",
+            "clone onto your own host keeps",
+            "refused rather than guessed at",
+        ] {
+            assert!(
+                text.contains(needle),
+                "the instructions no longer mention {needle:?}:\n{text}"
             );
         }
     }
