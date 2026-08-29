@@ -50,20 +50,6 @@ a bucket, no order.
   terminal for stderr to land in, so that message currently reaches nobody there. Unverifiable without a Mac to try it
   on, so deferred rather than guessed at.
 
-- Add "clone" to the session row's `…` menu (next to rename/stop/archive/delete): start a FRESH agent — same profile (or
-  same raw invocation when the session has no source profile), same working directory, same host, same title — as a new
-  session with a new conversation, leaving the original alone. Deliberately not restart-with-resume, whose whole point
-  is continuing the captured conversation. UI improvement, not a supervisor feature: the row already carries everything
-  a create needs (`cwd`, `invocation`, `source_profile`, host) and `api::create_session` takes exactly those, so clone
-  is a create pre-filled from the row with a fresh intent key. Also a clone-WITH-EDIT variant that opens the create form
-  pre-filled from the row instead of creating immediately: the common case is "same host, same agent, but in that other
-  directory", so the row's values become the defaults and the user changes the one field that differs — this is probably
-  the more useful of the two and may be all that is needed (a plain clone is then just submitting the form unchanged).
-  Decisions to make when doing it: whether a create from a `source_profile` whose existence is no longer `Present` falls
-  back to the snapshotted invocation or refuses; and whether an identical title is acceptable ("farhelm" twice — rename
-  is cheap afterwards, so probably yes). A "replace" (delete+clone) variant was considered and deferred: its cost is
-  ordering (create-then-delete is the safe failure) and the confirm-when-live gate, not the create itself.
-
 ## Maybe later
 
 - Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
