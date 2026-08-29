@@ -42,6 +42,10 @@ Codex talking, not the hook.
 | `env FOO=1 claude …`                                                                          | generic              | no             | no hook and no scan as written, and no `{cwd}` needed — set the kind, and write the resume invocation out by hand, since the derived default would be `env --resume …`                                                                                                                |
 | `bash -c 'claude …'`                                                                          | generic              | no             | the record scan once you set the kind, and no hook as written: the flags are appended to the argv, so they land as the shell's `$0` and the following positional parameters rather than reaching the agent inside the script string — a script that forwards `"$@"` does pass them on |
 
+One more case skips injection independent of invocation shape entirely: if farhelm's own absolute executable path (the
+one every injected hook command would name) is not valid UTF-8, no kind gets the hook, for any invocation — see
+"`farhelm executable path is not utf-8`" in the troubleshooting section below.
+
 The wrapper path is absolute on purpose: farhelm does not expand `~` in an invocation. The fallback resume invocation
 also has to be runnable as written — one carrying an unfilled `{conversation}` is refused rather than garbled, which
 lands back on the fresh-launch offer. For the generic rows, setting the profile's agent kind is what turns the
@@ -58,14 +62,22 @@ agent-kind field overrides the derivation, and is the supported way to tell farh
 
 ## What the hook does
 
-The farhelm binary itself is the hook, invoked as `farhelm internal hook` by an absolute path. It reads the agent's
-`SessionStart` payload from stdin and forwards two things out of it: the conversation id, and the vendor's own `source`
-word — `startup` on both vendors' first-launch payloads, whatever they choose to call the other events — which is
-carried for diagnostics only: it shows up in the logs and nothing keys on it. Both go to the supervisor over the one
-socket the supervisor listens on, `supervisor.sock` in its state directory, authenticated with the per-session
-credential already in the session's environment. There is no per-session socket. It never prints anything on stdout or
-stderr, always exits 0 — including on a panic — and gives up after two seconds, stdin read included. Outside a farhelm
-session there is no credential, so it exits immediately and silently without touching a socket.
+The farhelm binary itself is the hook, invoked as `farhelm internal hook --announce` by an absolute path — the flag is
+present by default; see "Turning it off" below for the switch that removes it. It reads the agent's `SessionStart`
+payload from stdin and forwards two things out of it: the conversation id, and the vendor's own `source` word —
+`startup` on both vendors' first-launch payloads, whatever they choose to call the other events — which is carried for
+diagnostics only: it shows up in the logs and nothing keys on it. Both go to the supervisor over the one socket the
+supervisor listens on, `supervisor.sock` in its state directory, authenticated with the per-session credential already
+in the session's environment. There is no per-session socket. It always exits 0 — including on a panic — and gives up
+after two seconds, stdin read included. Outside a farhelm session there is no credential, so identity reporting exits
+immediately and touches no socket — though if `--announce` was passed on the command line, the pointer line described
+below still prints regardless, since it needs no credential at all.
+
+It never prints a diagnostic, on either descriptor. It does print one deliberate line, on stdout, unless you have turned
+that off: the pointer telling the agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that
+`farhelm agent instructions` explains it. Both vendors feed a `SessionStart` hook's plain-text stdout into the model's
+context, which is the whole delivery mechanism — nothing is written to disk and nothing reaches your terminal. See the
+README's "Talking to Farhelm from inside a session", and `FARHELM_AGENT_INSTRUCTIONS` below.
 
 ## What you will see
 
@@ -100,10 +112,16 @@ The variable only shapes command lines the supervisor builds after it has read i
 that are already running. A Codex session launched before you switched injection off keeps its bypass flag and keeps
 reporting across every `/new` until that session is restarted.
 
-What you lose by turning it off: resume after `/clear` or `/new` goes back to the old, scan-only behavior, in both of
-its shapes. Where the scan captured the conversation you were in before the clear, restart offers to resume that one —
-the conversation you threw away. Where the scan captured nothing, or found the correlation ambiguous, restart offers a
-fresh launch instead. Everything else about the session is unchanged.
+Turning injection off also silences the instructions pointer for those launches, because the pointer is printed by the
+hook and a launch with no hook has nothing to print it. To keep identity capture and drop only the pointer, use
+`FARHELM_AGENT_INSTRUCTIONS` instead: `on` (the default, and what unset or empty means) or `off`, read once when the
+supervisor starts, same as above. Anything else warns, names what you wrote, and behaves as if it were unset — a switch
+whose off position removes a feature must not be flipped by a typo.
+
+What you lose by turning `FARHELM_AGENT_HOOKS` off: resume after `/clear` or `/new` goes back to the old, scan-only
+behavior, in both of its shapes. Where the scan captured the conversation you were in before the clear, restart offers
+to resume that one — the conversation you threw away. Where the scan captured nothing, or found the correlation
+ambiguous, restart offers a fresh launch instead. Everything else about the session is unchanged.
 
 ## When something goes wrong
 
@@ -141,7 +159,8 @@ uncreatable directory, an unwritable path, or a full disk is ignored rather than
 
 **2. The supervisor log.** Every line here carries the session id.
 
-- `conversation hook flags injected` — at launch, naming the kind.
+- `conversation hook flags injected` — at launch, naming the kind and carrying `announce=true` or `announce=false` for
+  whether `--announce` was included (`FARHELM_AGENT_INSTRUCTIONS`'s only visible effect on this log).
 - `conversation hook flags not injected` — the skip and its reason: `invocation already passes --settings`,
   `invocation already configures codex hooks`, `invocation contains a bare --`, `disabled by FARHELM_AGENT_HOOKS`, or
   `farhelm executable path is not utf-8`. A generic session logs nothing — no integration means there was never a hook

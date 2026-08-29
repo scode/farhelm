@@ -475,8 +475,17 @@ no output on the agent's terminal, no non-zero exit, no error the agent's own UI
 gives up silently within a bounded time and leaves its diagnostics in farhelm's own state directory, never in the user's
 session. The bound is on the part the agent waits for — reading the vendor's payload and reporting the result — because
 that is the whole of what can hold the agent up; writing the diagnostic happens afterwards, is best-effort, and is not
-itself bounded. The one accepted exception to the invisibility rule is a line the vendor itself prints because of a flag
-we pass (Codex's hook-trust warning), which must be documented.
+itself bounded. One accepted exception to the invisibility rule is a line the vendor itself prints because of a flag we
+pass (Codex's hook-trust warning), which must be documented.
+
+The other exception is farhelm's own, and it is deliberate rather than tolerated: on a launch that gets the hook, the
+hook prints exactly one line for the AGENT to read — that `$farhelm <request>` in the user's message means "use the
+`farhelm agent` CLI", and that `farhelm agent instructions` explains the rest. Nothing reaches the user's terminal and
+nothing is written to disk. It is on by default, because an agent that has never heard of the CLI will not go looking
+for it, and `FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment removes it while leaving identity capture
+exactly as it was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it.
+The instructions themselves are printed only when that command is run, so a session where the user never mentions
+farhelm pays one line and nothing more.
 
 For agents without integration, restart falls back to the profile's resume invocation verbatim apart from placeholder
 substitution (which may land in the agent's own picker or most-recent-conversation behavior), or a fresh launch when the
@@ -536,6 +545,12 @@ attached to this session", reported as such, with opening the session in a clien
 fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive — on the
 asking session or on any session named by id, with the helm applying its ordinary rules to the operation exactly as it
 would for a client request.
+
+`farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
+the verbs, the `*` marker, that a session's own credential is what authorizes the question, and what to do about "no
+helm is attached". It is the one verb that reaches nothing — no supervisor, no helm, no credential — because it is what
+an agent runs first, and a manual that fails on an unattached session is a manual nobody reads at the moment they need
+it. The verb list it prints is derived from the CLI itself, so it cannot describe a set of verbs that does not exist.
 
 As with interactive creation, spawning launches the agent without an initial prompt in v1; the spawning agent (or the
 user) interacts with the child through its terminal.
