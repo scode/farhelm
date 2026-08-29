@@ -281,10 +281,35 @@ pub(crate) struct SupervisorProcess {
 /// retries — but it would turn every later assertion into a race with the
 /// reconnect ladder.
 pub(crate) async fn supervisor_process() -> SupervisorProcess {
+    supervisor_process_with_env(std::iter::empty()).await
+}
+
+/// [`supervisor_process`], with `env` applied to the CHILD's environment
+/// before spawn.
+///
+/// Every other real-stack fixture builds a [`SupervisorStartup`] directly
+/// in Rust, which is the right shape for almost everything — but it never
+/// exercises `main.rs`'s own `std::env::var` reads for
+/// `FARHELM_AGENT_HOOKS`/`FARHELM_AGENT_INSTRUCTIONS` at all, since those
+/// reads live in the CLI arm and a struct built by hand skips over them
+/// entirely. `hook_identity`'s `FARHELM_AGENT_INSTRUCTIONS` tests need
+/// exactly that arm exercised, env var and non-UTF-8 fallback included, so
+/// this is the one place in the suite that sets an environment variable on
+/// a spawned `farhelm` process rather than mutating this test process's
+/// own — the two are never confused, because `Command::env` only ever
+/// reaches the CHILD.
+pub(crate) async fn supervisor_process_with_env(
+    env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
+) -> SupervisorProcess {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
-    let child = tokio::process::Command::new(farhelm_bin())
+    let mut command = tokio::process::Command::new(farhelm_bin());
+    command
         .args(["supervisor", "run", "--state-dir"])
-        .arg(state.path())
+        .arg(state.path());
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let child = command
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)

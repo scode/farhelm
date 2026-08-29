@@ -448,11 +448,13 @@ fn injected_settings(argv: &str) -> serde_json::Value {
 /// Assert `settings` is a Claude settings document whose first
 /// `SessionStart` hook runs farhelm's own hook command.
 ///
-/// The command is checked by its `internal hook` tail rather than by an
-/// exact string: the executable path is the test binary's, and quoting is
+/// The command is checked for its `internal hook` subcommand rather than
+/// by an exact string: the executable path is the test binary's, quoting is
 /// the supervisor's business (`ClaudeIntegration::hook_argv` shell-quotes
-/// it because Claude runs the command through a shell). What matters here
-/// is that a launch which claims to be hooked really would run the hook.
+/// it because Claude runs the command through a shell), and the tail may
+/// carry `--announce` depending on the supervisor's instructions setting.
+/// What matters here is that a launch which claims to be hooked really
+/// would run the hook.
 fn assert_declares_session_start_hook(settings: &serde_json::Value) {
     let hooks = &settings["hooks"]["SessionStart"];
     assert!(
@@ -463,7 +465,7 @@ fn assert_declares_session_start_hook(settings: &serde_json::Value) {
         .as_str()
         .unwrap_or_else(|| panic!("the declared hook must carry a command string: {settings}"));
     assert!(
-        command.ends_with("internal hook"),
+        command.contains("internal hook"),
         "the declared hook must run farhelm's own hook command: {command}"
     );
 }
@@ -1715,5 +1717,268 @@ fn a_hook_outside_a_farhelm_session_does_nothing_silently() {
         cmd,
         br#"{"session_id":"conv-x","hook_event_name":"SessionStart"}"#,
         false,
+    );
+}
+
+/// The exact bytes an announcing hook must produce, newline included.
+///
+/// Spelled out here rather than imported, and the duplication is the
+/// point twice over. `farhelm` is a binary crate with no library target,
+/// so `hook::POINTER_LINE` is not reachable from a test process at all —
+/// but even if it were, importing it would turn this assertion into "the
+/// binary printed whatever the binary says", which proves nothing about
+/// the contract. What a vendor splices into a model's context is a
+/// sequence of bytes, and this is the test that reads them from outside
+/// the process that wrote them. A change to the line must be made in both
+/// places, on purpose.
+const EXPECTED_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and \
+     follow its output.\n";
+
+/// With `--announce`, the hook prints exactly the pointer line on stdout,
+/// nothing on stderr, and still exits 0 inside the budget.
+///
+/// The pointer is the only thing farhelm deliberately makes visible from
+/// inside a session, and every property asserted here is one the vendors
+/// key on. Both Claude Code and Codex feed a `SessionStart` hook's
+/// plain-text stdout into the model's context, so a stray second line is
+/// text the model reads at the top of every session; both surface stderr
+/// on failure, so a byte there is the user's problem; and both bound the
+/// hook with a timeout of their own, so a run that slows down to say
+/// something is a run they report as broken.
+///
+/// The supervisor socket deliberately does not exist. That makes the
+/// identity half FAIL — which is the point: the pointer is not conditional
+/// on the report landing, because a session whose supervisor is wedged is
+/// exactly a session whose agent may need to ask farhelm what is going on.
+/// The log line is read to prove the run really did take the failing path
+/// rather than skipping the socket entirely.
+#[test]
+fn an_announcing_hook_prints_exactly_the_pointer_line() {
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let socket = state.path().join("supervisor.sock");
+    let mut cmd = hook_command(&socket, "sess-announce");
+    cmd.arg("--announce");
+
+    let started = std::time::Instant::now();
+    let output = run_hook(cmd, br#"{"session_id":"conv-a","source":"startup"}"#);
+    assert!(
+        started.elapsed() < SILENCE_DEADLINE,
+        "an announcing hook took {:?}; the pointer must not cost the budget",
+        started.elapsed()
+    );
+
+    assert_eq!(output.status.code(), Some(0), "the hook must always exit 0");
+    assert!(
+        output.stderr.is_empty(),
+        "stderr is the agent's own terminal; got {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("the pointer is ASCII");
+    assert_eq!(
+        stdout, EXPECTED_POINTER,
+        "stdout must be the pointer and nothing else"
+    );
+
+    let outcome = sole_hook_log_outcome(state.path(), "sess-announce");
+    assert!(
+        outcome.starts_with("connect-failed "),
+        "the identity half must still have run and failed on the absent socket: {outcome}"
+    );
+}
+
+/// Spawn `cmd`, feed it `payload`, close stdin, and collect what it said.
+///
+/// [`assert_silent`]'s sibling for the cases where output is the point
+/// rather than the defect: it cannot be reused, because it asserts
+/// emptiness. Stdin is closed immediately (no `hold_stdin` equivalent)
+/// because these cases are about the pointer, and a hook that never gets
+/// EOF spends its budget in the read — which is covered by its own test
+/// above.
+///
+/// Polls with `try_wait` under [`SILENCE_DEADLINE`] and reads stdout/stderr
+/// only once a status is in hand — the same two-step [`assert_silent`]
+/// uses, and for the same reason this now shares [`ChildGuard`] with it:
+/// wrapping the `Child` there is what makes a wedged hook (this test's own
+/// failure mode) get killed and reaped on the way out instead of leaking
+/// and holding the state directory's socket path open for the rest of the
+/// suite, whether this function returns normally or panics.
+fn run_hook(mut cmd: std::process::Command, payload: &[u8]) -> std::process::Output {
+    use std::io::{Read, Write};
+    let mut child = ChildGuard(cmd.spawn().expect("spawn the hook binary"));
+    {
+        // Dropped at the end of this block, which is what gives the hook
+        // its EOF. Holding it open is a different test (see
+        // `a_hook_whose_stdin_is_never_closed_still_finishes_in_budget`).
+        let mut pipe = child.0.stdin.take().expect("piped stdin");
+        pipe.write_all(payload).expect("write the payload");
+    }
+    let deadline = std::time::Instant::now() + SILENCE_DEADLINE;
+    let status = loop {
+        match child.0.try_wait().expect("poll the hook child") {
+            Some(status) => break status,
+            None => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the hook did not finish within {SILENCE_DEADLINE:?}; ChildGuard will kill \
+                     and reap it on the way out"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    };
+    // Only now, exactly as `assert_silent` does: reading before the child
+    // exits could block, and the descriptors stay valid until `child`
+    // (the `ChildGuard`) drops at the end of this function.
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    child
+        .0
+        .stdout
+        .take()
+        .expect("piped stdout")
+        .read_to_end(&mut stdout)
+        .expect("read stdout");
+    child
+        .0
+        .stderr
+        .take()
+        .expect("piped stderr")
+        .read_to_end(&mut stderr)
+        .expect("read stderr");
+    std::process::Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
+
+// ---------------------------------------------------------------------
+// `FARHELM_AGENT_INSTRUCTIONS`, through the REAL supervisor CLI
+//
+// Every test above builds a `SupervisorStartup` (or a `SupervisorSeams`)
+// directly in Rust, which never touches `main.rs`'s own environment reads
+// at all — those live one layer up, in the `Cmd::Supervisor::Run` arm that
+// every constructor this file otherwise uses skips straight past. The two
+// tests below spawn `farhelm supervisor run` as a real child process with
+// the variable set on ITS environment (never this test process's own —
+// see the section note near the top of this file), so a bug in the CLI's
+// own `std::env::var` handling — including its `VarError::NotUnicode`
+// fallback — cannot hide behind every other test constructing the parsed
+// value by hand.
+// ---------------------------------------------------------------------
+
+/// Whether a real, out-of-process supervisor's injected Claude hook command
+/// carries `--announce`, for a fresh session created against it over its
+/// actual unix socket.
+///
+/// A `claude`-named symlink around the record fixture is what makes the
+/// supervisor derive and hook the Claude integration exactly as it would
+/// for the genuine CLI (the same trick [`fixture_invocation`] uses), and
+/// dialling through [`farhelm_supervisor::service::connect`] plus
+/// [`SupervisorClient::start`] — rather than any in-process duplex pipe —
+/// is what makes this a client of the SPAWNED process rather than of a
+/// `Supervisor` this test built itself.
+async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) -> bool {
+    let bin = farhelm_teststate::tempdir().expect("bin dir");
+    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join("claude"))
+        .expect("symlink claude onto the farhelm binary");
+    let home = farhelm_teststate::tempdir().expect("record home");
+    let work = farhelm_teststate::tempdir().expect("work dir");
+
+    let stream = farhelm_supervisor::service::connect(supervisor.state.path())
+        .await
+        .expect("dial the real supervisor's socket");
+    let (r, w) = tokio::io::split(stream);
+    let client = SupervisorClient::start(r, w).await.expect("handshake");
+
+    let invocation = format!(
+        "{} internal fake-agent --script claude-record --record-home {}",
+        shell_words::quote(&bin.path().join("claude").to_string_lossy()),
+        shell_words::quote(&home.path().to_string_lossy())
+    );
+    let session = client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &invocation,
+            None,
+            WIDE_COLS,
+            ROWS,
+        )
+        .await
+        .expect("create a claude-kind session against the real supervisor");
+    let (_chan, mut rx) = client
+        .attach(&session.id, WIDE_COLS, ROWS)
+        .await
+        .expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, ARGV_MARKER, 20).await;
+    let argv = argv_marker(&seen);
+    injected_settings(&argv)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        .as_str()
+        .is_some_and(|command| command.contains("--announce"))
+}
+
+/// Spec: `FARHELM_AGENT_INSTRUCTIONS=off` on the spawned `farhelm
+/// supervisor run` process suppresses `--announce` on a real launch's
+/// injected hook command.
+///
+/// This is the merged review's D15 (A's F9/F10, B's F7): every other test
+/// of this switch (`with_hook_argv_*` in `core.rs`, `agent_instructions.rs`'s
+/// own unit tests) exercises the pure parser or the argv builder directly,
+/// and none of them would notice a `main.rs` that read the wrong variable
+/// name, read it twice, or forgot to pass the parsed value into
+/// `SupervisorStartup` at all — only a real process, started the way an
+/// operator actually starts one, can catch that class of bug.
+#[tokio::test]
+async fn farhelm_agent_instructions_off_suppresses_announce_through_the_real_cli() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let supervisor = supervisor_process_with_env([
+        (
+            "FARHELM_AGENT_INSTRUCTIONS",
+            std::ffi::OsString::from("off"),
+        ),
+        // Pinned rather than inherited: this test's assertion is entirely
+        // about `--announce`, and `FARHELM_AGENT_HOOKS` gates whether the
+        // hook is injected AT ALL. A suite run under `FARHELM_AGENT_HOOKS=none`
+        // must not fail this test for that unrelated reason.
+        ("FARHELM_AGENT_HOOKS", std::ffi::OsString::from("all")),
+    ])
+    .await;
+    assert!(
+        !claude_hook_command_carries_announce(&supervisor).await,
+        "FARHELM_AGENT_INSTRUCTIONS=off must reach the real CLI's injected hook command"
+    );
+}
+
+/// Spec: a non-UTF-8 `FARHELM_AGENT_INSTRUCTIONS` value on the real CLI
+/// falls back to the default (`on`, `--announce` present) rather than
+/// silently behaving like `off`.
+///
+/// This exercises the `VarError::NotUnicode` arm in `main.rs` that nothing
+/// else in the suite reaches, because every other test sets the variable
+/// (if at all) as an ordinary Rust `&str`. `OsString::from_vec` builds a
+/// value `std::env::var` cannot parse as UTF-8 at all, standing in for
+/// whatever produces one in a real shell profile (a stray byte from a
+/// copy-paste, a locale mismatch) — the CLI's fallback direction matters
+/// precisely because this switch's OFF position removes a feature, so a
+/// value nobody can even read must not silently become "off".
+#[tokio::test]
+async fn farhelm_agent_instructions_non_utf8_falls_back_to_default_through_the_real_cli() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let malformed = std::ffi::OsString::from_vec(vec![0xff, 0xfe]);
+    let supervisor = supervisor_process_with_env([
+        ("FARHELM_AGENT_INSTRUCTIONS", malformed),
+        // See the sibling test above: pinned so a suite run under
+        // `FARHELM_AGENT_HOOKS=none` cannot fail this assertion for a
+        // reason that has nothing to do with the non-UTF-8 fallback under
+        // test.
+        ("FARHELM_AGENT_HOOKS", std::ffi::OsString::from("all")),
+    ])
+    .await;
+    assert!(
+        claude_hook_command_carries_announce(&supervisor).await,
+        "a non-UTF-8 FARHELM_AGENT_INSTRUCTIONS must fall back to the default (on), not to off"
     );
 }
