@@ -11,11 +11,19 @@
 //! share the injected-environment contract (`spawn_environment`) and
 //! nothing else — a spawn is answered by the supervisor on the other end
 //! of the socket, while an agent request is relayed by it to the helm.
+//!
+//! `farhelm agent instructions` is the exception on both counts, and
+//! deliberately so: its stdout is prose for a language model rather than a
+//! table, and it needs no session at all. It is the command an agent runs
+//! first, on the strength of one line the identity hook printed at it, so
+//! it must work in a session whose relay is broken — see
+//! [`agent_instructions`].
 
 use clap::{Parser, Subcommand};
 use farhelm_proto::AgentReply;
 use std::path::PathBuf;
 
+mod agent_instructions;
 mod fake_agent;
 mod hook;
 mod setup;
@@ -55,6 +63,12 @@ enum Cmd {
         idempotency_key: Option<String>,
     },
     /// Ask the helm about the fleet, from inside a Farhelm session.
+    ///
+    /// `disable_help_subcommand` because [`AgentCmd::Help`] is farhelm's
+    /// own: `farhelm agent help` prints the agent-facing instructions, not
+    /// clap's usage screen. `--help` is untouched and still prints the
+    /// usage screen, which is the surface a human wants.
+    #[command(disable_help_subcommand = true)]
     Agent {
         #[command(subcommand)]
         command: AgentCmd,
@@ -86,6 +100,11 @@ enum Cmd {
 /// same transport once it has carried real lifecycle traffic, and a verb
 /// that decodes and then refuses would be indistinguishable, from here,
 /// from one that is broken.
+///
+/// Each variant's `///` doc comment is AGENT-FACING PROSE, not only help
+/// text: [`agent_instructions`] walks this enum's clap definition and
+/// prints each verb's `about` as its one-line meaning. Write them as
+/// sentences that stand alone, because that is where they are read.
 #[derive(Subcommand)]
 enum AgentCmd {
     /// List the hosts the helm knows, marking this session's own.
@@ -112,6 +131,40 @@ enum AgentCmd {
         #[arg(long = "session")]
         session: Option<String>,
     },
+    /// Print how to use these verbs, for an agent that was told to.
+    Instructions,
+    /// The same as instructions; both spellings print it.
+    Help,
+}
+
+impl AgentCmd {
+    /// The relay question this verb asks, or `None` for one answered
+    /// locally.
+    ///
+    /// The distinction is the whole reason this exists rather than a bare
+    /// `match` at the call site: `instructions` and `help` must work with
+    /// no supervisor, no credential, and no helm anywhere in sight. An
+    /// agent that has just been handed the pointer line has no way to know
+    /// whether its session is attached to anything, and the one command
+    /// that teaches it how to find out must not itself be the command that
+    /// fails.
+    fn verb(&self) -> Option<farhelm_proto::AgentVerb> {
+        match self {
+            AgentCmd::Hosts => Some(farhelm_proto::AgentVerb::Hosts {}),
+            AgentCmd::Sessions => Some(farhelm_proto::AgentVerb::Sessions {}),
+            AgentCmd::Rename { title, session } => Some(farhelm_proto::AgentVerb::Rename {
+                session_id: session.clone(),
+                title: title.clone(),
+            }),
+            AgentCmd::Stop { session } => Some(farhelm_proto::AgentVerb::Stop {
+                session_id: session.clone(),
+            }),
+            AgentCmd::Archive { session } => Some(farhelm_proto::AgentVerb::Archive {
+                session_id: session.clone(),
+            }),
+            AgentCmd::Instructions | AgentCmd::Help => None,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -199,12 +252,24 @@ enum InternalCmd {
     ///
     /// Farhelm injects `<farhelm_exe> internal hook` into the agent's own
     /// launch, so this runs as a child of the agent, inside the user's
-    /// terminal, with the session credential in its environment. It takes
-    /// no flags: everything it needs arrives on stdin or in that
-    /// environment, and a flag would be one more thing the injected
-    /// command line could get wrong. See `hook.rs` for the silence and
-    /// budget contract this arm exists to honour.
-    Hook,
+    /// terminal, with the session credential in its environment.
+    /// Everything it needs to report arrives on stdin or in that
+    /// environment. See `hook.rs` for the silence and budget contract this
+    /// arm exists to honour.
+    Hook {
+        /// Print [`hook::POINTER_LINE`] on stdout after reporting, so the
+        /// agent learns `farhelm agent instructions` exists.
+        ///
+        /// The one flag, and it exists because the decision is the
+        /// SUPERVISOR's: `FARHELM_AGENT_INSTRUCTIONS` is read once when
+        /// the supervisor starts, and a hook process launched by an
+        /// already-running supervisor must obey the setting that
+        /// supervisor started with rather than whatever the variable says
+        /// by the time the agent gets around to firing a hook. Passing it
+        /// on the injected command line is what pins it to the launch.
+        #[arg(long)]
+        announce: bool,
+    },
     /// A scripted TUI standing in for real agents in tests: prompts,
     /// echoes, colors, terminal modes, and raw-byte output — deterministic
     /// and free of vendor auth (PLAN_M1.md's test harness).
@@ -274,90 +339,88 @@ fn main() -> anyhow::Result<()> {
             println!("{child}");
             Ok(())
         }
-        Cmd::Agent {
-            command: AgentCmd::Hosts,
-        } => {
-            let (_asking, reply) =
-                runtime()?.block_on(agent_request(farhelm_proto::AgentVerb::Hosts {}))?;
-            print!("{}", render_agent_reply(&reply));
-            // On stderr, so a script capturing stdout still gets nothing but
-            // the table — the notice is about the ANSWER, not part of it.
-            if let Some(notice) = truncation_notice(&reply) {
-                eprintln!("{notice}");
-            }
-            Ok(())
-        }
-        Cmd::Agent {
-            command: AgentCmd::Sessions,
-        } => {
-            let (_asking, reply) =
-                runtime()?.block_on(agent_request(farhelm_proto::AgentVerb::Sessions {}))?;
-            print!("{}", render_agent_reply(&reply));
-            if let Some(notice) = truncation_notice(&reply) {
-                eprintln!("{notice}");
-            }
-            Ok(())
-        }
-        // The three lifecycle verbs print one confirmation line rather than
-        // a table — there is exactly one row to report, and a script
-        // capturing stdout wants the plain sentence SPEC.md's CLI contract
-        // promises, not a one-row table with headers.
-        Cmd::Agent {
-            command: AgentCmd::Rename { title, session },
-        } => {
-            let verb = farhelm_proto::AgentVerb::Rename {
-                session_id: session,
-                title,
-            };
-            let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
-            let AgentReply::Session { session } = reply else {
-                // `agent_request` already checked the reply's tag against
-                // `ReplyKind::of_verb(&Rename)` before returning it, so this
-                // arm is unreachable in practice; bailing rather than
-                // `unreachable!()` keeps a defect here a clean error instead
-                // of a panic, consistent with every other "the peer sent
-                // something this decode did not expect" case above.
-                anyhow::bail!("the helm answered rename with something other than a session");
-            };
-            println!(
-                "renamed {} to \"{}\"",
-                safe_cell(&session.id),
-                safe_cell(&session.title)
-            );
-            Ok(())
-        }
-        Cmd::Agent {
-            command: AgentCmd::Stop { session },
-        } => {
-            // The reply carries no id (`AgentReply::Stopped` is empty — see
-            // its own docs), so the confirmation's target comes from
-            // whatever this process itself resolved: the `--session` the
-            // caller gave, or else the ASKING session `agent_request`
-            // reports back, exactly the substitution rule the helm applies
-            // on its own side.
-            let explicit_target = session.clone();
-            let verb = farhelm_proto::AgentVerb::Stop {
-                session_id: session,
+        // `command` is consulted twice, for two independent questions.
+        // `AgentCmd::verb` answers "what goes on the wire, if anything" —
+        // `None` for `instructions`/`help`, which must work with no
+        // supervisor, no credential, and no helm anywhere in sight (see its
+        // own docs). The `match command` below answers a different
+        // question, "how does the reply print": a table for the two
+        // listings, or one confirmation line for each lifecycle verb.
+        // Keeping them as two matches over the same value is what lets the
+        // WIRE request live in exactly one place (`AgentCmd::verb`) while
+        // this arm still gets to print `Rename` and `Archive` — which share
+        // one reply shape, [`AgentReply::Session`] — differently.
+        Cmd::Agent { command } => {
+            let Some(verb) = command.verb() else {
+                print!("{}", agent_instructions::text());
+                return Ok(());
             };
             let (asking, reply) = runtime()?.block_on(agent_request(verb))?;
-            let AgentReply::Stopped {} = reply else {
-                anyhow::bail!("the helm answered stop with something other than confirmation");
-            };
-            let target = explicit_target.unwrap_or(asking);
-            println!("stopped {}", safe_cell(&target));
-            Ok(())
-        }
-        Cmd::Agent {
-            command: AgentCmd::Archive { session },
-        } => {
-            let verb = farhelm_proto::AgentVerb::Archive {
-                session_id: session,
-            };
-            let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
-            let AgentReply::Session { session } = reply else {
-                anyhow::bail!("the helm answered archive with something other than a session");
-            };
-            println!("archived {}", safe_cell(&session.id));
+            match command {
+                AgentCmd::Hosts | AgentCmd::Sessions => {
+                    print!("{}", render_agent_reply(&reply));
+                    // On stderr, so a script capturing stdout still gets
+                    // nothing but the table — the notice is about the
+                    // ANSWER, not part of it.
+                    if let Some(notice) = truncation_notice(&reply) {
+                        eprintln!("{notice}");
+                    }
+                }
+                // The three lifecycle verbs print one confirmation line
+                // rather than a table — there is exactly one row to
+                // report, and a script capturing stdout wants the plain
+                // sentence SPEC.md's CLI contract promises, not a one-row
+                // table with headers.
+                AgentCmd::Rename { .. } => {
+                    let AgentReply::Session { session } = reply else {
+                        // `agent_request` already checked the reply's tag
+                        // against `ReplyKind::of_verb(&Rename)` before
+                        // returning it, so this arm is unreachable in
+                        // practice; bailing rather than `unreachable!()`
+                        // keeps a defect here a clean error instead of a
+                        // panic, consistent with every other "the peer sent
+                        // something this decode did not expect" case above.
+                        anyhow::bail!(
+                            "the helm answered rename with something other than a session"
+                        );
+                    };
+                    println!(
+                        "renamed {} to \"{}\"",
+                        safe_cell(&session.id),
+                        safe_cell(&session.title)
+                    );
+                }
+                AgentCmd::Stop { session } => {
+                    // The reply carries no id (`AgentReply::Stopped` is
+                    // empty — see its own docs), so the confirmation's
+                    // target comes from whatever this process itself
+                    // resolved: the `--session` the caller gave, or else
+                    // the ASKING session `agent_request` reports back,
+                    // exactly the substitution rule the helm applies on its
+                    // own side.
+                    let AgentReply::Stopped {} = reply else {
+                        anyhow::bail!(
+                            "the helm answered stop with something other than confirmation"
+                        );
+                    };
+                    let target = session.unwrap_or(asking);
+                    println!("stopped {}", safe_cell(&target));
+                }
+                AgentCmd::Archive { .. } => {
+                    let AgentReply::Session { session } = reply else {
+                        anyhow::bail!(
+                            "the helm answered archive with something other than a session"
+                        );
+                    };
+                    println!("archived {}", safe_cell(&session.id));
+                }
+                // `verb()` returns `None` for both, so the early return
+                // above always fires first; this arm exists only to keep
+                // the match exhaustive against a future `AgentCmd` variant.
+                AgentCmd::Instructions | AgentCmd::Help => {
+                    unreachable!("AgentCmd::verb() never produces a request for these")
+                }
+            }
             Ok(())
         }
         Cmd::Helm {
@@ -435,9 +498,38 @@ fn main() -> anyhow::Result<()> {
                     farhelm_supervisor::agent_kind::AgentHooks::default()
                 }
             };
+            // The same rule again, one variable over: this is the ONLY
+            // read of `FARHELM_AGENT_INSTRUCTIONS` in the codebase. It
+            // decides whether the injected hook carries `--announce`, and
+            // therefore whether an agent is ever told that `farhelm agent`
+            // exists. Reading it once at startup is what makes a launch's
+            // behaviour a property of the supervisor that made it rather
+            // than of whatever the environment happened to say at the
+            // moment a hook fired — which for Codex is the user's first
+            // prompt, arbitrarily long after the launch.
+            //
+            // Unset is the default (`on`), silently. A non-UTF-8 value
+            // gets a line for the same reason its neighbour above does:
+            // nobody types one on purpose, `parse_agent_instructions`
+            // cannot be shown it, and the fallback direction has to be the
+            // default rather than a guess.
+            let agent_instructions = match std::env::var("FARHELM_AGENT_INSTRUCTIONS") {
+                Ok(value) => farhelm_supervisor::agent_kind::parse_agent_instructions(&value),
+                Err(std::env::VarError::NotPresent) => {
+                    farhelm_supervisor::agent_kind::AgentInstructions::default()
+                }
+                Err(std::env::VarError::NotUnicode(_)) => {
+                    tracing::warn!(
+                        "FARHELM_AGENT_INSTRUCTIONS is not valid UTF-8 and cannot be parsed; \
+                         falling back to the default (on) rather than guessing what was meant"
+                    );
+                    farhelm_supervisor::agent_kind::AgentInstructions::default()
+                }
+            };
             let startup = farhelm_supervisor::service::SupervisorStartup {
                 tmux_program: tmux,
                 agent_hooks,
+                agent_instructions,
             };
             runtime()?.block_on(run_supervisor(&dir, startup, exit_on_stdin_close))
         }
@@ -460,7 +552,7 @@ fn main() -> anyhow::Result<()> {
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
             }
-            InternalCmd::Hook => {
+            InternalCmd::Hook { announce } => {
                 // No tracing init, and this one is necessity rather than
                 // belt and braces: init_tracing logs to stderr at `info`,
                 // and this process's stderr is the AGENT's terminal. A
@@ -531,6 +623,16 @@ fn main() -> anyhow::Result<()> {
                 const BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
                 hook::run_with(credential, std::io::stdin(), BUDGET, hook_log);
 
+                // AFTER the report, never before. The identity round trip
+                // is the part the session's correctness depends on, and it
+                // is the part with a deadline; the pointer is a nicety
+                // that costs a small write to a pipe the vendor is
+                // draining. Ordering it second means a stdout that
+                // somehow will not take the line cannot delay the report.
+                if announce {
+                    hook::announce(&mut std::io::stdout());
+                }
+
                 // Exit rather than return, for the STATUS above all: 0 is
                 // decided right here, unconditionally, rather than by
                 // whatever `main`'s shared return path grows later — a
@@ -580,10 +682,11 @@ fn main() -> anyhow::Result<()> {
 /// runtime shutdown cannot wait forever for an uncancellable stdin read.
 ///
 /// `startup` arrives ALREADY resolved — the tmux program (`--tmux` over
-/// `FARHELM_TMUX` over `PATH`) and the `FARHELM_AGENT_HOOKS` opt-out — and
-/// is passed straight through. Resolving either here instead would put the
-/// decision on both sides of the tether branch, which is one place too many
-/// for values that must be identical on every launch path.
+/// `FARHELM_TMUX` over `PATH`), the `FARHELM_AGENT_HOOKS` opt-out, and the
+/// `FARHELM_AGENT_INSTRUCTIONS` switch — and is passed straight through.
+/// Resolving any of them here instead would put the decision on both sides
+/// of the tether branch, which is one place too many for values that must
+/// be identical on every launch path.
 async fn run_supervisor(
     state_dir: &std::path::Path,
     startup: farhelm_supervisor::service::SupervisorStartup,

@@ -63,9 +63,15 @@ The farhelm binary itself is the hook, invoked as `farhelm internal hook` by an 
 word — `startup` on both vendors' first-launch payloads, whatever they choose to call the other events — which is
 carried for diagnostics only: it shows up in the logs and nothing keys on it. Both go to the supervisor over the one
 socket the supervisor listens on, `supervisor.sock` in its state directory, authenticated with the per-session
-credential already in the session's environment. There is no per-session socket. It never prints anything on stdout or
-stderr, always exits 0 — including on a panic — and gives up after two seconds, stdin read included. Outside a farhelm
-session there is no credential, so it exits immediately and silently without touching a socket.
+credential already in the session's environment. There is no per-session socket. It always exits 0 — including on a
+panic — and gives up after two seconds, stdin read included. Outside a farhelm session there is no credential, so it
+exits immediately and silently without touching a socket.
+
+It never prints a diagnostic, on either descriptor. It does print one deliberate line, on stdout, unless you have turned
+that off: the pointer telling the agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that
+`farhelm agent instructions` explains it. Both vendors feed a `SessionStart` hook's plain-text stdout into the model's
+context, which is the whole delivery mechanism — nothing is written to disk and nothing reaches your terminal. See the
+README's "Talking to Farhelm from inside a session", and `FARHELM_AGENT_INSTRUCTIONS` below.
 
 ## What you will see
 
@@ -99,6 +105,12 @@ if the variable were unset. An opt-out with a typo in it must not quietly become
 The variable only shapes command lines the supervisor builds after it has read it, so it changes nothing about agents
 that are already running. A Codex session launched before you switched injection off keeps its bypass flag and keeps
 reporting across every `/new` until that session is restarted.
+
+Turning injection off also silences the instructions pointer for those launches, because the pointer is printed by the
+hook and a launch with no hook has nothing to print it. To keep identity capture and drop only the pointer, use
+`FARHELM_AGENT_INSTRUCTIONS` instead: `on` (the default, and what unset or empty means) or `off`, read once when the
+supervisor starts, same as above. Anything else warns, names what you wrote, and behaves as if it were unset — a switch
+whose off position removes a feature must not be flipped by a typo.
 
 What you lose by turning it off: resume after `/clear` or `/new` goes back to the old, scan-only behavior, in both of
 its shapes. Where the scan captured the conversation you were in before the clear, restart offers to resume that one —

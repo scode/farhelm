@@ -528,6 +528,23 @@ pub struct SupervisorSeams {
     /// every integrated kind, because the opt-out is an operator override
     /// and not a value with a discoverable "real" setting.
     pub agent_hooks: crate::agent_kind::AgentHooks,
+    /// Whether an injected hook also prints the one-line pointer that
+    /// tells the agent `farhelm agent instructions` exists — the
+    /// `FARHELM_AGENT_INSTRUCTIONS` switch. See
+    /// [`crate::agent_kind::AgentInstructions`].
+    ///
+    /// Obeys the same environment-hygiene rule as `agent_hooks` above: the
+    /// single `std::env::var` read happens in `farhelm supervisor run`'s
+    /// CLI arm and the PARSED value arrives here. It is consulted only
+    /// where `agent_hooks` is, in [`Supervisor::with_hook_argv`], and only
+    /// for a launch that is being hooked at all — a skipped launch has no
+    /// hook to announce with, which is why "the user turned hooks off"
+    /// also means "no pointer" without this value having to say so.
+    ///
+    /// [`crate::agent_kind::AgentInstructions::On`] by default, for the
+    /// reason its neighbour defaults to `All`: this is an operator
+    /// override, not a value with a discoverable "real" setting.
+    pub agent_instructions: crate::agent_kind::AgentInstructions,
     /// See [`CreateCrashSeam`]. `None` in production.
     pub create_crash: Option<CreateCrashSeam>,
     /// Where the agents' own record directories are rooted (PLAN_M3.md
@@ -712,6 +729,7 @@ impl Default for SupervisorSeams {
             boot_id: Arc::new(read_host_boot_id),
             tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks: crate::agent_kind::AgentHooks::default(),
+            agent_instructions: crate::agent_kind::AgentInstructions::default(),
             create_crash: None,
             agent_home: None,
             user_home: None,
@@ -1806,10 +1824,22 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
 /// The remaining five skips are all worth a line, because each is a case
 /// where identity capture silently degrades to the record scan and the
 /// only evidence is this log.
+///
+/// ## The instructions pointer rides along
+///
+/// `instructions` decides only whether the injected hook command carries
+/// `--announce`; it never decides WHETHER to inject. That asymmetry is the
+/// design: every skip above already costs the launch its pointer, because
+/// there is no hook to print one from, and nothing here needs to restate
+/// that. The consequence to know is the one an operator will hit — turning
+/// `FARHELM_AGENT_HOOKS` off for a kind also silences the pointer for it,
+/// while `FARHELM_AGENT_INSTRUCTIONS=off` leaves identity capture entirely
+/// alone.
 fn with_hook_argv_using(
     mut argv: Vec<String>,
     snapshot: &IntegrationSnapshot,
     hooks: &crate::agent_kind::AgentHooks,
+    instructions: crate::agent_kind::AgentInstructions,
     exe: Option<&str>,
     session: &str,
 ) -> (Vec<String>, bool) {
@@ -1869,7 +1899,7 @@ fn with_hook_argv_using(
         skip("invocation already configures codex hooks");
         return (argv, false);
     }
-    let tail = integration.hook_argv(exe);
+    let tail = integration.hook_argv(exe, instructions);
     // An integration that offers no tail cannot be hooked — the trait's
     // default `hook_argv` returns exactly this, so a kind that grows a
     // record layout before it grows a hook lands here. Silently, and
@@ -1884,6 +1914,7 @@ fn with_hook_argv_using(
     info!(
         session = %session,
         kind = ?snapshot.kind,
+        announce = instructions.announces(),
         "conversation hook flags injected"
     );
     (argv, true)
@@ -3368,6 +3399,11 @@ pub struct SupervisorStartup {
     /// pass [`crate::agent_kind::AgentHooks::default()`], which hooks every
     /// integrated kind.
     pub agent_hooks: crate::agent_kind::AgentHooks,
+    /// The parsed `FARHELM_AGENT_INSTRUCTIONS` switch (see
+    /// [`crate::agent_kind::parse_agent_instructions`]). Callers with no
+    /// opinion pass [`crate::agent_kind::AgentInstructions::default()`],
+    /// which announces on every hooked launch.
+    pub agent_instructions: crate::agent_kind::AgentInstructions,
 }
 
 impl Supervisor {
@@ -3380,6 +3416,7 @@ impl Supervisor {
             SupervisorStartup {
                 tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
+                agent_instructions: crate::agent_kind::AgentInstructions::default(),
             },
         )
         .await
@@ -3399,6 +3436,7 @@ impl Supervisor {
         let SupervisorStartup {
             tmux_program,
             agent_hooks,
+            agent_instructions,
         } = startup;
         let exe = std::env::current_exe().context("resolving own binary path")?;
         Self::new_with_seams(
@@ -3408,6 +3446,7 @@ impl Supervisor {
             SupervisorSeams {
                 tmux_program,
                 agent_hooks,
+                agent_instructions,
                 ..SupervisorSeams::default()
             },
         )
@@ -8913,6 +8952,7 @@ impl Supervisor {
             argv,
             snapshot,
             &self.seams.agent_hooks,
+            self.seams.agent_instructions,
             self.farhelm_exe_str.as_deref(),
             session,
         )
@@ -15479,10 +15519,14 @@ pub(crate) mod tests {
     /// is appended, and the tail's own content is pinned by
     /// `agent_kind`'s quoting tests. A literal here would be a second
     /// copy of the vendor's flag syntax to keep in sync.
-    fn expected_hook_tail(kind: AgentKind, exe: &str) -> Vec<String> {
+    fn expected_hook_tail(
+        kind: AgentKind,
+        exe: &str,
+        instructions: crate::agent_kind::AgentInstructions,
+    ) -> Vec<String> {
         crate::agent_kind::integration_for(kind)
             .expect("an integrated kind")
-            .hook_argv(exe)
+            .hook_argv(exe, instructions)
     }
 
     /// The injection appends each integrated kind's OWN hook flags after
@@ -15499,24 +15543,123 @@ pub(crate) mod tests {
     /// The user's own argv must survive UNCHANGED and in order: everything
     /// downstream — including the shim's `exec` — treats the leading
     /// elements as the invocation the operator asked for.
+    ///
+    /// Both instruction settings are exercised because the tail's CONTENT
+    /// differs between them (`--announce` inside the vendor's quoted
+    /// command) while its placement does not; running only the default
+    /// would leave the `off` tail's placement unasserted.
     #[test]
     fn with_hook_argv_appends_each_integrated_kinds_own_flags() {
         for kind in [AgentKind::Claude, AgentKind::Codex] {
-            let argv = vec!["agent".to_string(), "--flag".to_string()];
-            let (hooked_argv, hooked) = with_hook_argv_using(
+            for instructions in [
+                crate::agent_kind::AgentInstructions::On,
+                crate::agent_kind::AgentInstructions::Off,
+            ] {
+                let argv = vec!["agent".to_string(), "--flag".to_string()];
+                let (hooked_argv, hooked) = with_hook_argv_using(
+                    argv.clone(),
+                    &hook_snapshot(kind),
+                    &crate::agent_kind::AgentHooks::All,
+                    instructions,
+                    Some("/opt/farhelm"),
+                    "session-1",
+                );
+                assert!(hooked, "{kind:?}: an integrated kind must be hooked");
+                let tail = expected_hook_tail(kind, "/opt/farhelm", instructions);
+                assert_eq!(
+                    hooked_argv,
+                    [argv.clone(), tail].concat(),
+                    "{kind:?}/{instructions:?}: the user's argv must be preserved verbatim \
+                     with the kind's own hook flags appended after it"
+                );
+            }
+        }
+    }
+
+    /// The instructions switch decides whether the injected hook command
+    /// carries `--announce`, for both vendors, and nothing else about the
+    /// launch.
+    ///
+    /// This is the whole of `FARHELM_AGENT_INSTRUCTIONS`'s effect on a
+    /// launch, and it is worth its own test because the flag is buried
+    /// inside a vendor-quoted string rather than sitting in the argv as an
+    /// element — a substring check is the only thing that can see it, and
+    /// nothing else in this file would notice if the switch stopped
+    /// reaching the command. The second half is the part that would
+    /// silently regress: `off` must still hook, because identity capture
+    /// is not what this switch is about. Someone who turns the pointer off
+    /// and loses restart-resume with it has been handed a surprise.
+    #[test]
+    fn with_hook_argv_announces_only_when_instructions_are_on() {
+        for kind in [AgentKind::Claude, AgentKind::Codex] {
+            let announced = expected_hook_tail(
+                kind,
+                "/opt/farhelm",
+                crate::agent_kind::AgentInstructions::On,
+            )
+            .join(" ");
+            assert!(
+                announced.contains("internal hook --announce"),
+                "{kind:?}: an announcing launch must run the hook with --announce: {announced}"
+            );
+
+            let silent = expected_hook_tail(
+                kind,
+                "/opt/farhelm",
+                crate::agent_kind::AgentInstructions::Off,
+            );
+            let joined = silent.join(" ");
+            assert!(
+                !joined.contains("--announce"),
+                "{kind:?}: instructions off must leave the flag off entirely: {joined}"
+            );
+
+            let argv = vec!["agent".to_string()];
+            let (result, hooked) = with_hook_argv_using(
                 argv.clone(),
                 &hook_snapshot(kind),
                 &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::Off,
                 Some("/opt/farhelm"),
                 "session-1",
             );
-            assert!(hooked, "{kind:?}: an integrated kind must be hooked");
-            let tail = expected_hook_tail(kind, "/opt/farhelm");
+            assert!(
+                hooked,
+                "{kind:?}: turning the pointer off must not turn identity capture off"
+            );
+            assert_eq!(result, [argv, silent].concat());
+        }
+    }
+
+    /// A launch that is not hooked at all carries no `--announce` either,
+    /// whatever the instructions switch says.
+    ///
+    /// The pointer has no delivery mechanism of its own — it rides on the
+    /// injected hook command — so every skip in
+    /// [`with_hook_argv_using`]'s list silently costs the launch its
+    /// pointer too. That is documented there rather than enforced by a
+    /// branch, which is exactly why it deserves a test: a future
+    /// "improvement" that delivered the pointer some other way when the
+    /// hook was skipped would be announcing into a session farhelm
+    /// deliberately left alone. The skip chosen here is the operator's own
+    /// (`FARHELM_AGENT_HOOKS=none`) because it is the one someone sets on
+    /// purpose and would notice being ignored.
+    #[test]
+    fn a_skipped_launch_carries_no_announce_flag() {
+        for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Generic] {
+            let argv = vec!["agent".to_string()];
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(kind),
+                &crate::agent_kind::AgentHooks::None,
+                crate::agent_kind::AgentInstructions::On,
+                Some("/opt/farhelm"),
+                "session-1",
+            );
+            assert!(!hooked, "{kind:?}: `none` must hook nothing");
             assert_eq!(
-                hooked_argv,
-                [argv.clone(), tail].concat(),
-                "{kind:?}: the user's argv must be preserved verbatim with the kind's own \
-                 hook flags appended after it"
+                result, argv,
+                "{kind:?}: a skipped launch must be untouched, --announce included"
             );
         }
     }
@@ -15543,6 +15686,7 @@ pub(crate) mod tests {
             argv.clone(),
             &hook_snapshot(AgentKind::Generic),
             &crate::agent_kind::AgentHooks::None,
+            crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
             "session-1",
         );
@@ -15569,6 +15713,7 @@ pub(crate) mod tests {
                 argv.clone(),
                 &hook_snapshot(kind),
                 &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
                 "session-1",
             );
@@ -15583,6 +15728,7 @@ pub(crate) mod tests {
             argv,
             &hook_snapshot(AgentKind::Claude),
             &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
             "session-1",
         );
@@ -15614,6 +15760,7 @@ pub(crate) mod tests {
                 argv.clone(),
                 &hook_snapshot(AgentKind::Claude),
                 &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
                 "session-1",
             );
@@ -15627,6 +15774,7 @@ pub(crate) mod tests {
                 argv.clone(),
                 &hook_snapshot(AgentKind::Codex),
                 &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
                 "session-1",
             );
@@ -15636,7 +15784,15 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 result,
-                [argv, expected_hook_tail(AgentKind::Codex, "/opt/farhelm")].concat()
+                [
+                    argv,
+                    expected_hook_tail(
+                        AgentKind::Codex,
+                        "/opt/farhelm",
+                        crate::agent_kind::AgentInstructions::On,
+                    )
+                ]
+                .concat()
             );
         }
     }
@@ -15675,6 +15831,7 @@ pub(crate) mod tests {
                 argv.clone(),
                 &hook_snapshot(AgentKind::Codex),
                 &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
                 "session-1",
             );
@@ -15691,6 +15848,7 @@ pub(crate) mod tests {
                 argv,
                 &hook_snapshot(AgentKind::Claude),
                 &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
                 "session-1",
             );
@@ -15712,13 +15870,22 @@ pub(crate) mod tests {
                 argv.clone(),
                 &hook_snapshot(AgentKind::Codex),
                 &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
                 "session-1",
             );
             assert!(hooked, "{unrelated:?} does not touch the hook tables");
             assert_eq!(
                 result,
-                [argv, expected_hook_tail(AgentKind::Codex, "/opt/farhelm")].concat()
+                [
+                    argv,
+                    expected_hook_tail(
+                        AgentKind::Codex,
+                        "/opt/farhelm",
+                        crate::agent_kind::AgentInstructions::On,
+                    )
+                ]
+                .concat()
             );
         }
     }
@@ -15741,6 +15908,7 @@ pub(crate) mod tests {
                 argv.clone(),
                 &hook_snapshot(kind),
                 &crate::agent_kind::AgentHooks::None,
+                crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
                 "session-1",
             );
@@ -15753,6 +15921,7 @@ pub(crate) mod tests {
             argv.clone(),
             &hook_snapshot(AgentKind::Codex),
             &codex_only,
+            crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
             "session-1",
         );
@@ -15761,7 +15930,11 @@ pub(crate) mod tests {
             result,
             [
                 argv.clone(),
-                expected_hook_tail(AgentKind::Codex, "/opt/farhelm")
+                expected_hook_tail(
+                    AgentKind::Codex,
+                    "/opt/farhelm",
+                    crate::agent_kind::AgentInstructions::On,
+                )
             ]
             .concat()
         );
@@ -15769,6 +15942,7 @@ pub(crate) mod tests {
             argv.clone(),
             &hook_snapshot(AgentKind::Claude),
             &codex_only,
+            crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
             "session-1",
         );
@@ -15792,6 +15966,7 @@ pub(crate) mod tests {
             argv.clone(),
             &hook_snapshot(AgentKind::Claude),
             &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
             None,
             "session-1",
         );
@@ -15821,6 +15996,7 @@ pub(crate) mod tests {
         let startup = |agent_hooks| SupervisorStartup {
             tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks,
+            agent_instructions: crate::agent_kind::AgentInstructions::default(),
         };
         let argv = vec!["claude".to_string()];
 
@@ -15849,6 +16025,63 @@ pub(crate) mod tests {
         let (_, hooked) =
             default.with_hook_argv(argv, &hook_snapshot(AgentKind::Claude), "session-1");
         assert!(hooked, "the default startup value must still hook");
+    }
+
+    /// The instructions switch a supervisor was STARTED with reaches the
+    /// launch decision too — the same wiring claim, for the second value
+    /// [`SupervisorStartup`] carries.
+    ///
+    /// Worth its own test rather than a line in the one above because the
+    /// two settings travel the same route and a copy-paste that threaded
+    /// `agent_hooks` twice would leave this one permanently at its
+    /// default. The symptom would be an operator who sets
+    /// `FARHELM_AGENT_INSTRUCTIONS=off`, restarts, and still finds the
+    /// pointer in every session — with nothing in the logs to explain it,
+    /// because the injection line would be telling the truth about a value
+    /// that never left the CLI arm.
+    ///
+    /// The flag is checked as a SUBSTRING of the joined tail: it lives
+    /// inside Claude's `--settings` JSON, not as an argv element of its
+    /// own.
+    #[tokio::test]
+    async fn a_startup_instructions_switch_reaches_the_launch_decision() {
+        let state = StateDir::new();
+        let startup = |agent_instructions| SupervisorStartup {
+            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
+            agent_hooks: crate::agent_kind::AgentHooks::default(),
+            agent_instructions,
+        };
+        let argv = vec!["claude".to_string()];
+
+        let silent = Supervisor::new_for_startup(
+            state.path(),
+            startup(crate::agent_kind::AgentInstructions::Off),
+        )
+        .await
+        .expect("supervisor");
+        let (result, hooked) =
+            silent.with_hook_argv(argv.clone(), &hook_snapshot(AgentKind::Claude), "session-1");
+        assert!(
+            hooked,
+            "`off` must still hook; it only silences the pointer"
+        );
+        assert!(
+            !result.join(" ").contains("--announce"),
+            "a supervisor started with `off` must not announce: {result:?}"
+        );
+
+        let announcing = Supervisor::new_for_startup(
+            state.path(),
+            startup(crate::agent_kind::AgentInstructions::default()),
+        )
+        .await
+        .expect("supervisor");
+        let (result, _) =
+            announcing.with_hook_argv(argv, &hook_snapshot(AgentKind::Claude), "session-1");
+        assert!(
+            result.join(" ").contains("--announce"),
+            "the default startup value must announce: {result:?}"
+        );
     }
 
     /// End to end through a real create: a Claude session's launch spec on
@@ -15886,6 +16119,7 @@ pub(crate) mod tests {
         let expected = expected_hook_tail(
             AgentKind::Claude,
             dummy_exe().to_str().expect("a UTF-8 dummy exe"),
+            crate::agent_kind::AgentInstructions::default(),
         );
         assert_eq!(
             spec.argv,

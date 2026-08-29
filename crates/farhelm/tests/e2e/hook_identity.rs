@@ -448,11 +448,13 @@ fn injected_settings(argv: &str) -> serde_json::Value {
 /// Assert `settings` is a Claude settings document whose first
 /// `SessionStart` hook runs farhelm's own hook command.
 ///
-/// The command is checked by its `internal hook` tail rather than by an
-/// exact string: the executable path is the test binary's, and quoting is
+/// The command is checked for its `internal hook` subcommand rather than
+/// by an exact string: the executable path is the test binary's, quoting is
 /// the supervisor's business (`ClaudeIntegration::hook_argv` shell-quotes
-/// it because Claude runs the command through a shell). What matters here
-/// is that a launch which claims to be hooked really would run the hook.
+/// it because Claude runs the command through a shell), and the tail may
+/// carry `--announce` depending on the supervisor's instructions setting.
+/// What matters here is that a launch which claims to be hooked really
+/// would run the hook.
 fn assert_declares_session_start_hook(settings: &serde_json::Value) {
     let hooks = &settings["hooks"]["SessionStart"];
     assert!(
@@ -463,7 +465,7 @@ fn assert_declares_session_start_hook(settings: &serde_json::Value) {
         .as_str()
         .unwrap_or_else(|| panic!("the declared hook must carry a command string: {settings}"));
     assert!(
-        command.ends_with("internal hook"),
+        command.contains("internal hook"),
         "the declared hook must run farhelm's own hook command: {command}"
     );
 }
@@ -1716,4 +1718,135 @@ fn a_hook_outside_a_farhelm_session_does_nothing_silently() {
         br#"{"session_id":"conv-x","hook_event_name":"SessionStart"}"#,
         false,
     );
+}
+
+/// The exact bytes an announcing hook must produce, newline included.
+///
+/// Spelled out here rather than imported, and the duplication is the
+/// point twice over. `farhelm` is a binary crate with no library target,
+/// so `hook::POINTER_LINE` is not reachable from a test process at all —
+/// but even if it were, importing it would turn this assertion into "the
+/// binary printed whatever the binary says", which proves nothing about
+/// the contract. What a vendor splices into a model's context is a
+/// sequence of bytes, and this is the test that reads them from outside
+/// the process that wrote them. A change to the line must be made in both
+/// places, on purpose.
+const EXPECTED_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and \
+     follow its output.\n";
+
+/// With `--announce`, the hook prints exactly the pointer line on stdout,
+/// nothing on stderr, and still exits 0 inside the budget.
+///
+/// The pointer is the only thing farhelm deliberately makes visible from
+/// inside a session, and every property asserted here is one the vendors
+/// key on. Both Claude Code and Codex feed a `SessionStart` hook's
+/// plain-text stdout into the model's context, so a stray second line is
+/// text the model reads at the top of every session; both surface stderr
+/// on failure, so a byte there is the user's problem; and both bound the
+/// hook with a timeout of their own, so a run that slows down to say
+/// something is a run they report as broken.
+///
+/// The supervisor socket deliberately does not exist. That makes the
+/// identity half FAIL — which is the point: the pointer is not conditional
+/// on the report landing, because a session whose supervisor is wedged is
+/// exactly a session whose agent may need to ask farhelm what is going on.
+/// The log line is read to prove the run really did take the failing path
+/// rather than skipping the socket entirely.
+#[test]
+fn an_announcing_hook_prints_exactly_the_pointer_line() {
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let socket = state.path().join("supervisor.sock");
+    let mut cmd = hook_command(&socket, "sess-announce");
+    cmd.arg("--announce");
+
+    let started = std::time::Instant::now();
+    let output = run_hook(cmd, br#"{"session_id":"conv-a","source":"startup"}"#);
+    assert!(
+        started.elapsed() < SILENCE_DEADLINE,
+        "an announcing hook took {:?}; the pointer must not cost the budget",
+        started.elapsed()
+    );
+
+    assert_eq!(output.status.code(), Some(0), "the hook must always exit 0");
+    assert!(
+        output.stderr.is_empty(),
+        "stderr is the agent's own terminal; got {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("the pointer is ASCII");
+    assert_eq!(
+        stdout, EXPECTED_POINTER,
+        "stdout must be the pointer and nothing else"
+    );
+
+    let outcome = sole_hook_log_outcome(state.path(), "sess-announce");
+    assert!(
+        outcome.starts_with("connect-failed "),
+        "the identity half must still have run and failed on the absent socket: {outcome}"
+    );
+}
+
+/// Without `--announce` the same run says nothing at all.
+///
+/// The negative half of the pair, and it is not redundant with the silence
+/// tests above: those predate the flag and would keep passing if
+/// `--announce` were wired to default-on, which is precisely the mistake
+/// that would put a line into every session of every user who turned
+/// instructions off. Same fixture as the announcing case, one argument
+/// apart, so the only thing that can explain a difference is the flag.
+#[test]
+fn a_hook_without_announce_prints_nothing() {
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let socket = state.path().join("supervisor.sock");
+    let output = run_hook(
+        hook_command(&socket, "sess-silent"),
+        br#"{"session_id":"conv-b","source":"startup"}"#,
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        output.stdout.is_empty(),
+        "an unannounced hook must print nothing: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spawn `cmd`, feed it `payload`, close stdin, and collect what it said.
+///
+/// [`assert_silent`]'s sibling for the cases where output is the point
+/// rather than the defect: it cannot be reused, because it asserts
+/// emptiness. Stdin is closed immediately (no `hold_stdin` equivalent)
+/// because these cases are about the pointer, and a hook that never gets
+/// EOF spends its budget in the read — which is covered by its own test
+/// above.
+///
+/// Polls with `try_wait` under [`SILENCE_DEADLINE`], killing and reaping
+/// on the way out, for the reason that helper does: a blocking wait on a
+/// wedged child hangs the run instead of failing it, and a leaked hook
+/// child would hold the state directory open for the rest of the suite.
+fn run_hook(mut cmd: std::process::Command, payload: &[u8]) -> std::process::Output {
+    use std::io::Write;
+    let mut child = cmd.spawn().expect("spawn the hook binary");
+    {
+        // Dropped at the end of this block, which is what gives the hook
+        // its EOF. Holding it open is a different test (see
+        // `a_hook_whose_stdin_is_never_closed_still_finishes_in_budget`).
+        let mut pipe = child.stdin.take().expect("piped stdin");
+        pipe.write_all(payload).expect("write the payload");
+    }
+    let deadline = std::time::Instant::now() + SILENCE_DEADLINE;
+    loop {
+        if child.try_wait().expect("poll the hook child").is_some() {
+            return child.wait_with_output().expect("collect hook output");
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().expect("kill the wedged hook");
+            let output = child.wait_with_output().expect("collect the killed hook");
+            panic!(
+                "the hook did not finish within {SILENCE_DEADLINE:?}; stderr was {:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

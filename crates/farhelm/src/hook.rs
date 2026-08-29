@@ -14,11 +14,15 @@
 //! These rules are not stylistic; each one exists because the alternative
 //! is visible to the human using the agent.
 //!
-//! 1. **Silence.** Nothing is ever written to stdout or stderr. Claude
-//!    injects a `SessionStart` hook's stdout into the model's context as
-//!    text, and shows stderr to the user when the hook exits non-zero.
-//!    A diagnostic printed here is, at best, noise in someone's terminal
-//!    and, at worst, text the model reads as instruction.
+//! 1. **Silence, except for one deliberate line.** The identity work
+//!    itself writes nothing anywhere: both vendors feed a `SessionStart`
+//!    hook's stdout into the model's context as text, and both surface
+//!    stderr when the hook fails, so a diagnostic printed here is at best
+//!    noise in someone's terminal and at worst text the model reads as
+//!    instruction. The single exception is [`POINTER_LINE`], written by
+//!    [`announce`] when the supervisor injected `--announce`; it is
+//!    written on purpose, precisely BECAUSE the model reads it. See that
+//!    constant for what the vendors do with it and why it is one line.
 //! 2. **Exit 0, always** — including on panic. The caller ([`crate`]'s
 //!    `InternalCmd::Hook` arm) installs a no-op panic hook so a panic
 //!    prints nothing, and [`run_with`] catches unwinds so no failure can
@@ -140,6 +144,62 @@ const MAX_LOG_BYTES: u64 = 64 * 1024;
 /// The correlation id every hook request uses. One request per process,
 /// so there is nothing to correlate against.
 const REQUEST_ID: u64 = 1;
+
+/// The one line the hook is allowed to say out loud — the pointer that
+/// tells an agent `farhelm agent instructions` exists.
+///
+/// ## Why stdout reaches the model at all
+///
+/// Both supported vendors treat plain-text stdout from a `SessionStart`
+/// hook as context for the model, and both were checked rather than
+/// assumed:
+///
+/// - Claude Code (<https://code.claude.com/docs/en/hooks>): "For most
+///   events, Claude Code writes stdout to the debug log and doesn't show
+///   it in the transcript. The exceptions are `UserPromptSubmit`,
+///   `UserPromptExpansion`, `SessionStart`, and `PostModelSwitch`, where
+///   Claude Code adds plain-text stdout as context that Claude can see and
+///   act on."
+/// - Codex (<https://learn.chatgpt.com/docs/hooks>), under `SessionStart`:
+///   "Plain text on `stdout` is added as extra developer context." Most
+///   other Codex hook events say the opposite ("Plain text on `stdout` is
+///   ignored"), so this is an event-specific guarantee, not a general one.
+///
+/// That symmetry is why there is no Codex-specific fallback here — no file
+/// under farhelm's state directory, no `model_instructions_file` override.
+/// One mechanism serves both vendors.
+///
+/// ## Why the wording is constrained
+///
+/// Both vendors decide plain-text-versus-JSON by SHAPE: stdout that starts
+/// with `{` and ends with `}` is parsed as JSON, and Codex fails the hook
+/// run outright when that parse does not succeed. So this line must not
+/// begin with `{`. It also stays ASCII and single-line: it is spliced into
+/// a context window by a vendor that wraps it in machinery of its own, and
+/// there is nothing to gain from making that splice interesting.
+///
+/// It is short on purpose. Every session pays for it whether or not the
+/// user ever writes `$farhelm ...`, so the line buys exactly one thing —
+/// knowing the command exists — and the instructions themselves are paid
+/// for only by a session that goes and runs it.
+pub const POINTER_LINE: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and follow \
+     its output.";
+
+/// Write [`POINTER_LINE`] and nothing else, ignoring any failure.
+///
+/// Failure is IGNORED rather than reported, and the distinction matters
+/// more than it looks: `println!` panics when the write fails, and a hook
+/// whose stdout is a closed pipe (a vendor that gave up on us, a
+/// `--announce` run outside any agent) would then unwind out of `main` and
+/// exit non-zero — turning the nicety into exactly the visible hook error
+/// the whole module exists to avoid. There is also nowhere to report to:
+/// stderr belongs to the agent's terminal.
+///
+/// Takes the sink as a parameter so the bytes can be asserted in a unit
+/// test without a process and without touching the real stdout.
+pub fn announce(out: &mut impl std::io::Write) {
+    let _ = writeln!(out, "{POINTER_LINE}");
+}
 
 /// The injected session credential, already extracted from the
 /// environment by the caller.
@@ -1409,6 +1469,52 @@ mod tests {
             Some(log.clone()),
         );
         assert!(single_line(&log).contains(" bad-payload oversized"));
+    }
+
+    /// [`announce`] writes the pointer and exactly one newline.
+    ///
+    /// "Exactly one line" is the contract the vendors' context injection
+    /// is judged against: a second line is a second thing the model reads
+    /// at the top of every session, and a missing newline runs the pointer
+    /// into whatever the vendor appends after it.
+    #[test]
+    fn announce_writes_one_line_and_nothing_else() {
+        let mut out = Vec::new();
+        announce(&mut out);
+        let text = String::from_utf8(out).expect("the pointer is ASCII");
+        assert_eq!(text, format!("{POINTER_LINE}\n"));
+        assert_eq!(text.lines().count(), 1);
+    }
+
+    /// The pointer's SHAPE, which is what decides whether a vendor treats
+    /// it as context or as a failed JSON parse.
+    ///
+    /// Both vendors route a `SessionStart` hook's stdout by shape: text
+    /// starting with `{` and ending with `}` is parsed as JSON, and Codex
+    /// fails the whole hook run when that parse does not succeed (see
+    /// [`POINTER_LINE`] for the citations). So a well-meaning edit that
+    /// wrapped the pointer in braces would turn a helpful line into a
+    /// vendor-visible hook failure — silently, since nothing in farhelm
+    /// would notice. The rest is budget: a pointer every session pays for
+    /// has to stay small, and non-ASCII buys nothing when the reader is a
+    /// tokenizer.
+    #[test]
+    fn the_pointer_line_is_plain_single_line_ascii() {
+        assert!(
+            !POINTER_LINE.starts_with('{'),
+            "a pointer starting with a brace is read as JSON, not as context"
+        );
+        assert!(!POINTER_LINE.contains('\n'));
+        assert!(POINTER_LINE.is_ascii());
+        assert!(
+            POINTER_LINE.len() < 160,
+            "the pointer grew to {} bytes",
+            POINTER_LINE.len()
+        );
+        // The two things the line has to convey: the trigger the user will
+        // type, and the command that explains it.
+        assert!(POINTER_LINE.contains("$farhelm"));
+        assert!(POINTER_LINE.contains("farhelm agent instructions"));
     }
 
     /// Log lines are rendered from one value, so this pins the exact

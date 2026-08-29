@@ -320,10 +320,36 @@ pub trait AgentIntegration: Send + Sync {
     /// this method's problem at all: the caller simply never calls it for
     /// that launch, and logs the skip as one more entry in
     /// `with_hook_argv`'s reason list.
-    fn hook_argv(&self, hook_exe: &str) -> Vec<String> {
-        let _ = hook_exe;
+    ///
+    /// `instructions` selects whether the embedded command gets
+    /// `--announce`, which makes the hook print one pointer line the agent
+    /// reads (`farhelm`'s `hook::POINTER_LINE`). It is a parameter for the
+    /// same reason `hook_exe` is one — the policy is resolved once at
+    /// supervisor startup and handed down — and it rides INSIDE the
+    /// vendor's own quoting rather than beside it, so it cannot be
+    /// appended by a caller after the fact.
+    fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
+        let _ = (hook_exe, instructions);
         Vec::new()
     }
+}
+
+/// The command string both integrations embed in their vendor's hook
+/// configuration: farhelm's own binary, shell-quoted, running
+/// `internal hook`.
+///
+/// Shared rather than written twice because the two vendors differ only in
+/// how they QUOTE this string, never in what it says — and a flag that
+/// reached one vendor's launches but not the other's would be a difference
+/// nobody chose. Shell-quoted because both vendors run a hook's `command`
+/// through a shell rather than exec'ing it, so an unquoted path containing
+/// a space would be split into arguments neither can find (verified).
+fn hook_command(hook_exe: &str, instructions: AgentInstructions) -> String {
+    let mut command = format!("{} internal hook", shell_words::quote(hook_exe));
+    if instructions.announces() {
+        command.push_str(" --announce");
+    }
+    command
 }
 
 /// The integration for a kind, or `None` for [`AgentKind::Generic`] —
@@ -423,10 +449,8 @@ impl AgentIntegration for ClaudeIntegration {
     /// that skip decision does not belong here, which is why this method
     /// never inspects its caller's argv.
     ///
-    /// The `command` string is shell-quoted (`shell_words::quote`) because
-    /// Claude runs a hook's `command` through a shell rather than exec'ing
-    /// it directly — a raw unquoted path containing a space would be
-    /// split into arguments Claude cannot find (verified). The JSON is
+    /// The `command` string comes from [`hook_command`], which owns the
+    /// shell quoting and the `--announce` decision. The JSON is
     /// built with `serde_json::json!` rather than string formatting so a
     /// path that happens to need JSON escaping (a quote, a backslash) can
     /// never produce malformed JSON, only a correctly escaped string. The
@@ -434,8 +458,8 @@ impl AgentIntegration for ClaudeIntegration {
     /// the hook process; `farhelm internal hook` budgets 2 seconds
     /// internally (`hook.rs`, a later step), so this is scheduling margin,
     /// not an expectation that the hook will ever need it.
-    fn hook_argv(&self, hook_exe: &str) -> Vec<String> {
-        let command = format!("{} internal hook", shell_words::quote(hook_exe));
+    fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
+        let command = hook_command(hook_exe, instructions);
         let settings = serde_json::json!({
             "hooks": {
                 "SessionStart": [{
@@ -586,16 +610,18 @@ impl AgentIntegration for CodexIntegration {
     /// session that is created but never prompted never reports at all.
     /// Nothing here compensates for that; it is a property of the
     /// resulting report's TIMING that the supervisor-side handler (a
-    /// later step) has to tolerate, not something this argv can fix.
+    /// later step) has to tolerate, not something this argv can fix. The
+    /// same lag applies to the `--announce` pointer: on Codex the agent
+    /// reads it as developer context alongside the user's first prompt,
+    /// not before it.
     ///
     /// The command is rendered as a TOML basic string
     /// ([`toml_basic_string`]) because Codex's `-c` value is TOML, not
-    /// JSON, and TOML runs a hook's `command` through a shell exactly as
-    /// Claude does, so the path is shell-quoted first and the RESULT of
-    /// that quoting is what gets TOML-escaped.
-    fn hook_argv(&self, hook_exe: &str) -> Vec<String> {
-        let quoted_command = format!("{} internal hook", shell_words::quote(hook_exe));
-        let command = toml_basic_string(&quoted_command);
+    /// JSON, and Codex runs a hook's `command` through a shell exactly as
+    /// Claude does — so [`hook_command`]'s shell quoting comes first and
+    /// the RESULT of that quoting is what gets TOML-escaped.
+    fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
+        let command = toml_basic_string(&hook_command(hook_exe, instructions));
         vec![
             "--dangerously-bypass-hook-trust".to_string(),
             "-c".to_string(),
@@ -1837,6 +1863,80 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
         }
     }
     AgentHooks::Only(kinds)
+}
+
+/// The `FARHELM_AGENT_INSTRUCTIONS` switch: whether the per-launch
+/// identity hook also prints the one-line pointer that tells the agent
+/// `farhelm agent instructions` exists.
+///
+/// A SEAM value on exactly the terms [`AgentHooks`] above is one — set
+/// once from `farhelm supervisor run`'s CLI arm, never read from the
+/// environment below that line — and for one reason beyond consistency:
+/// Codex fires `SessionStart` at the user's first prompt, which can be
+/// hours after the launch. A live environment read would let a session
+/// launched under one setting announce under another.
+///
+/// It is deliberately NOT folded into `AgentHooks`. The two answer
+/// different questions and fail in different directions: turning hooks off
+/// costs identity capture (restart-resume degrades to the record scan),
+/// while turning instructions off costs an agent knowing the CLI exists
+/// and nothing else. Someone who wants a silent launch but working resume
+/// must be able to say so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentInstructions {
+    /// The injected hook carries `--announce` and prints the pointer. The
+    /// default, and what an unset or empty variable means.
+    #[default]
+    On,
+    /// The injected hook prints nothing. Identity capture is untouched:
+    /// the flags still go on the command line, the report still happens,
+    /// and the only difference is a session whose agent was never told
+    /// about `farhelm agent`.
+    Off,
+}
+
+impl AgentInstructions {
+    /// Whether a launch's injected hook should be given `--announce`.
+    pub fn announces(self) -> bool {
+        matches!(self, AgentInstructions::On)
+    }
+}
+
+/// Parse the `FARHELM_AGENT_INSTRUCTIONS` environment variable's value.
+/// THE ONLY PARSER of that variable, on the same terms as
+/// [`parse_agent_hooks`]: pure, `&str` in and a value out, so the
+/// environment READ can live in the CLI arm and no test ever has to mutate
+/// its own process's environment.
+///
+/// ## Grammar
+///
+/// `on` — also what an EMPTY string means, so a variable that is set but
+/// blank behaves like one that is unset — and `off`. Surrounding
+/// whitespace is trimmed and matching is case-insensitive, because this is
+/// a value someone types into a shell profile rather than a wire format.
+///
+/// ## Failure mode: fail open
+///
+/// Anything else warns, names the value, and yields [`AgentInstructions::On`].
+/// Same direction as its neighbour and same reasoning: this is a switch
+/// whose OFF position removes a feature, so a typo must not silently turn
+/// into "off". A user who meant to disable it and mistyped gets a warning
+/// naming what they wrote; a user who gets no warning got what they asked
+/// for.
+pub fn parse_agent_instructions(value: &str) -> AgentInstructions {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("on") {
+        return AgentInstructions::On;
+    }
+    if trimmed.eq_ignore_ascii_case("off") {
+        return AgentInstructions::Off;
+    }
+    tracing::warn!(
+        value,
+        "FARHELM_AGENT_INSTRUCTIONS is neither on nor off; falling back to the default (on) \
+         rather than guessing what was meant"
+    );
+    AgentInstructions::On
 }
 
 /// Recognize an agent kind from the basename of an invocation's first
@@ -3186,14 +3286,17 @@ mod tests {
     #[test]
     fn hook_argv_survives_a_path_hostile_to_both_quoting_layers() {
         let hostile_path = r#"/tmp/a b's "q" \dir/farhelm"#;
+        // The default (announcing) shape, which is what ships. The `off`
+        // shape is checked at the end, against the same path.
         let expected_words = vec![
             hostile_path.to_string(),
             "internal".to_string(),
             "hook".to_string(),
+            "--announce".to_string(),
         ];
 
         // --- Claude: `["--settings", <json>]` ---
-        let claude_argv = ClaudeIntegration.hook_argv(hostile_path);
+        let claude_argv = ClaudeIntegration.hook_argv(hostile_path, AgentInstructions::On);
         assert_eq!(
             claude_argv.len(),
             2,
@@ -3215,7 +3318,7 @@ mod tests {
         assert_eq!(claude_words, expected_words);
 
         // --- Codex: five argv elements, order and identity pinned. ---
-        let codex_argv = CodexIntegration.hook_argv(hostile_path);
+        let codex_argv = CodexIntegration.hook_argv(hostile_path, AgentInstructions::On);
         assert_eq!(codex_argv.len(), 5);
         assert_eq!(
             codex_argv[0], "--dangerously-bypass-hook-trust",
@@ -3248,6 +3351,59 @@ mod tests {
         let codex_words = shell_words::split(codex_command)
             .expect("Codex's rendered command must be one valid shell command line");
         assert_eq!(codex_words, expected_words);
+
+        // --- The same path with the pointer turned off. ---
+        //
+        // `--announce` is appended AFTER the shell-quoted path, so it is
+        // the one part of the command that is not itself quoted. Checking
+        // both settings against the same hostile path is what pins that
+        // the flag rides outside the quoting rather than getting swallowed
+        // into it — a mistake that would produce a path argument nobody
+        // can exec, and only for users with a space in their install
+        // directory.
+        let silent_words: Vec<String> = expected_words
+            .iter()
+            .filter(|word| *word != "--announce")
+            .cloned()
+            .collect();
+        for (kind, argv) in [
+            (
+                "claude",
+                ClaudeIntegration.hook_argv(hostile_path, AgentInstructions::Off),
+            ),
+            (
+                "codex",
+                CodexIntegration.hook_argv(hostile_path, AgentInstructions::Off),
+            ),
+        ] {
+            let rendered = argv.join(" ");
+            assert!(
+                !rendered.contains("--announce"),
+                "{kind}: instructions off must not carry the flag: {rendered}"
+            );
+            let command = match kind {
+                "claude" => serde_json::from_str::<serde_json::Value>(&argv[1])
+                    .expect("valid JSON")["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+                    .as_str()
+                    .expect("a command string")
+                    .to_string(),
+                _ => {
+                    let value = argv[4]
+                        .strip_prefix("hooks.SessionStart=")
+                        .expect("the SessionStart declaration");
+                    toml::from_str::<toml::Value>(&format!("v = {value}")).expect("valid TOML")["v"]
+                        [0]["hooks"][0]["command"]
+                        .as_str()
+                        .expect("a command string")
+                        .to_string()
+                }
+            };
+            assert_eq!(
+                shell_words::split(&command).expect("one valid shell command line"),
+                silent_words,
+                "{kind}: the quoting must survive with the flag absent too"
+            );
+        }
     }
 
     /// `toml_basic_string`'s escaping is only as good as its ability to
@@ -3346,6 +3502,56 @@ mod tests {
                  falling back to the default rather than narrowing the opt-out"
             );
         }
+    }
+
+    /// `parse_agent_instructions`'s full documented grammar, case by case.
+    ///
+    /// The same reasoning as its neighbour above: this is the only parser
+    /// of `FARHELM_AGENT_INSTRUCTIONS`, so the grammar its doc comment
+    /// promises is only real if it is pinned here. The half that matters
+    /// most is the fallback DIRECTION — an unreadable value has to land on
+    /// `On`, because the switch's `off` position removes a feature and a
+    /// typo must not remove it silently. A test that only checked `on` and
+    /// `off` would pass just as happily with the fallback inverted.
+    #[test]
+    fn parse_agent_instructions_covers_the_documented_grammar() {
+        assert_eq!(parse_agent_instructions("on"), AgentInstructions::On);
+        assert_eq!(parse_agent_instructions("off"), AgentInstructions::Off);
+        assert_eq!(
+            parse_agent_instructions(""),
+            AgentInstructions::On,
+            "an empty string means the same as an absent variable, so a profile that SETS \
+             the variable to nothing does not accidentally silence the pointer"
+        );
+        assert_eq!(
+            parse_agent_instructions("  off  "),
+            AgentInstructions::Off,
+            "surrounding whitespace is trimmed; a shell profile is not a wire format"
+        );
+        assert_eq!(parse_agent_instructions("OFF"), AgentInstructions::Off);
+        assert_eq!(parse_agent_instructions("On"), AgentInstructions::On);
+        for value in ["false", "0", "no", "none", "disabled", "of"] {
+            assert_eq!(
+                parse_agent_instructions(value),
+                AgentInstructions::On,
+                "{value:?}: an unrecognized value warns and falls back to the default rather \
+                 than being read as an attempt to turn the pointer off"
+            );
+        }
+        assert_eq!(
+            AgentInstructions::default(),
+            AgentInstructions::On,
+            "the default is unconditional, never a live environment read"
+        );
+    }
+
+    /// `AgentInstructions::announces` is the one question the injection
+    /// asks of this value, pinned directly so a future variant cannot
+    /// quietly change what `On` means.
+    #[test]
+    fn agent_instructions_announces_only_when_on() {
+        assert!(AgentInstructions::On.announces());
+        assert!(!AgentInstructions::Off.announces());
     }
 
     /// `AgentHooks::allows` is what every hook-injection call site actually

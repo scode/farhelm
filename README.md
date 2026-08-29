@@ -288,6 +288,27 @@ The failure worth knowing about is `no helm is attached to this session`. The re
 holds the session open, so a session no client is looking at has no route to ask: open the session in the Farhelm UI and
 run the command again.
 
+### Talking to Farhelm from inside a session
+
+You should not have to explain any of the above to your agent. Write `$farhelm <whatever you want to know>` in a message
+to it — "$farhelm what else is running?", "$farhelm which hosts are up?" — and it should reach for the CLI on its own.
+
+That works because the `SessionStart` hook Farhelm already injects for conversation identity prints one line the agent
+reads: that `$farhelm ...` means the `farhelm agent` CLI, and that `farhelm agent instructions` explains the rest. The
+instructions themselves — the verbs, the `*` marker, what "no helm is attached" means — are printed only when the agent
+runs that command, so a session where you never mention Farhelm costs one line of context and nothing else. Run
+`farhelm agent instructions` yourself if you want to see exactly what your agents are told.
+
+NOTE: an agent that was never hooked is never told. The pointer rides on the identity hook, so the launches that skip
+injection (an invocation of your own that already passes `--settings` or configures Codex's hooks, one containing a bare
+`--`, an agent Farhelm does not recognize, or `FARHELM_AGENT_HOOKS` turning it off) get no pointer either — `$farhelm`
+will not mean anything to those agents until you tell them yourself.
+
+To turn the pointer off and keep identity capture, set `FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment.
+It is read once when the supervisor starts, so it takes effect for launches after a restart and changes nothing about
+agents already running. Any value other than `on` or `off` is a typo rather than an instruction: the supervisor warns,
+names what you wrote, and behaves as if the variable were unset.
+
 ## Development
 
 Development builds carry no provisioning payloads by default. Asking one to install a host with neither payload flag
