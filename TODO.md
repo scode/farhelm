@@ -10,32 +10,6 @@ a bucket, no order.
 
 ## Near term
 
-- Let an agent talk to the helm from inside its session, with injected rules that make `$farhelm <request>` work out of
-  the box. Two halves. (a) Rules injection: DONE. The hook prints a one-line pointer (`--announce`, on by default,
-  `FARHELM_AGENT_INSTRUCTIONS=off` to silence it) and `farhelm agent instructions` prints the manual on demand; both
-  vendors were verified to feed a SessionStart hook's plain stdout into the model's context, so no Codex fallback was
-  needed. (b) The channel. The mental model is that the agent is talking to the HELM — the thing the user is looking at
-  — not to its host's supervisor. The session cannot reach the helm directly (the host has no route, address, or
-  credential back to the laptop), so the supervisor is the proxy: `farhelm` inside the session dials `supervisor.sock`
-  with the per-session credential exactly as `farhelm spawn` does today, and the supervisor forwards the request up the
-  helm↔supervisor control channel as a new upcall message — the first request/response RPC going UPWARD on that
-  protocol, so it needs correlation ids, a timeout, and a clear "no helm is attached to this session" failure. Route to
-  the helm that holds this session's attachment (the supervisor's one-attachment-per-session rule makes that well
-  defined, and it is by construction the helm the user is looking at). Every verb goes via the helm, including same-host
-  ones: one code path, one place for policy, and "no helm attached" is the honest failure rather than a silent downgrade
-  to local semantics. SPEC.md's agent-spawn section says v1 targets the session's own host only; this widens it, and the
-  widening must be recorded there. LITMUS TEST — the entry is not done until this works end to end, from a session on a
-  REMOTE host, driven only by the agent through the injected rules: `$farhelm clone this session onto <other host name>`
-  produces a session on the other host, with the same agent resolved by profile NAME against that host's own catalog
-  (profile ids are per-supervisor and name nothing elsewhere; no matching name means a refusal naming the host, not a
-  silent fallback), in the same cwd unless `--cwd` says otherwise (a directory absent on the target is the helm's normal
-  create refusal, reported verbatim), and the new session appears in the UI without a refresh. That case is chosen
-  because it is exactly what a supervisor-local implementation cannot do: it needs the host list the helm owns
-  (`farhelm hosts`, so the agent can name a target without guessing), the helm's create path, cross-host profile
-  resolution, and the upcall round trip. An implementation that satisfies every other verb but not this one has built
-  the wrong thing. Rough size: three to five days for rules, CLI verbs, and the setting, plus about two for the relay;
-  the multi-helm question in the unbucketized list becomes load-bearing here rather than theoretical.
-
 - Show the missing-or-too-old-tmux refusal in a native window, not just on stderr. `farhelm-desktop`'s tmux preflight
   now prints one plain message and exits (see `desktop.rs`'s `run_tmux_preflight_or_exit`), but a Finder launch has no
   terminal for stderr to land in, so that message currently reaches nobody there. Unverifiable without a Mac to try it

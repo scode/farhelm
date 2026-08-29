@@ -946,51 +946,118 @@ pub(crate) async fn create_session(
     if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
         return http_error(e);
     }
-    let created = match &mode {
+    let spec = CreateSpec {
+        cwd: req.cwd,
+        mode,
+        title: req.title,
+        cols: req.cols,
+        rows: req.rows,
+        intent_key: req.intent_key,
+        agent_kind: req.agent_kind,
+        resume_template: req.resume_template,
+    };
+    match do_create_session(&state, &claim, &client, spec).await {
+        Ok(session) => axum::Json(session).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
+/// One create, with its host and its mode already resolved — everything
+/// [`create_session`] does after routing, and nothing it does before.
+///
+/// Shared VERBATIM with the agent relay's `Create`/`Clone` verbs
+/// (`agent_requests::HelmAgentRequests::handle`), which is the whole reason
+/// it exists as a function. Both callers need the same three things to
+/// happen in the same order — the supervisor call, the cache seed, and the
+/// remembered-default write for a profile create — and a create is exactly
+/// the operation where a second implementation would be most expensive to
+/// get subtly wrong: an agent-initiated create that skipped
+/// [`record_session`] would leave a real session running that the UI could
+/// not route to for a refresh interval, and one that skipped
+/// [`remember_default_profile`] would silently make the two creation
+/// surfaces disagree about what this host's last-used profile is.
+///
+/// What is deliberately NOT here is routing and preconditions. Naming the
+/// target host is where the two callers genuinely differ — the REST edge
+/// takes a registry id from a client that read `GET /api/hosts`, the agent
+/// takes a display NAME — and folding that in would mean one function with
+/// two mutually exclusive halves. The `claim` a caller passes must come
+/// from the SAME [`host_client`] read that produced `client`, which is what
+/// lets every write below revalidate against the connection the create was
+/// actually sent on.
+pub(crate) async fn do_create_session(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    spec: CreateSpec,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let CreateSpec {
+        cwd,
+        mode,
+        title,
+        cols,
+        rows,
+        intent_key,
+        agent_kind,
+        resume_template,
+    } = spec;
+    let session = match &mode {
         CreateMode::Raw(invocation) => {
             client
                 .create_session_with_extras(
-                    &req.cwd,
+                    &cwd,
                     invocation,
-                    req.title,
-                    req.cols,
-                    req.rows,
+                    title,
+                    cols,
+                    rows,
                     CreateExtras {
-                        intent_key: req.intent_key,
-                        agent_kind: req.agent_kind,
-                        resume_template: req.resume_template,
+                        intent_key,
+                        agent_kind,
+                        resume_template,
                     },
                 )
                 .await
         }
         CreateMode::Profile(profile_id) => {
             client
-                .create_session_from_profile(
-                    &req.cwd,
-                    profile_id,
-                    req.title,
-                    req.cols,
-                    req.rows,
-                    req.intent_key,
-                )
+                .create_session_from_profile(&cwd, profile_id, title, cols, rows, intent_key)
                 .await
         }
-    };
-    match created {
-        Ok(session) => {
-            record_session(&state, &claim, &session).await;
-            if let CreateMode::Profile(profile_id) = &mode {
-                remember_default_profile(&state, &claim, profile_id, &session).await;
-            }
-            axum::Json(session).into_response()
-        }
-        Err(e) => http_error(e),
+    }?;
+    record_session(state, claim, &session).await;
+    if let CreateMode::Profile(profile_id) = &mode {
+        remember_default_profile(state, claim, profile_id, &session).await;
     }
+    Ok(session)
 }
 
-/// Which of the two creation modes a request body selected — the choice
+/// Everything one create carries once its host is chosen and its two
+/// mutually exclusive selectors have collapsed into a [`CreateMode`].
+///
+/// A struct rather than eight positional parameters because two of the
+/// fields are `Option<String>` and two more are `u16`: a call site that
+/// transposed `title` and `intent_key`, or `cols` and `rows`, would compile
+/// and be wrong in a way no type could catch.
+///
+/// The three snapshot overrides (`agent_kind`, `resume_template`) and
+/// dimensions are carried even though the agent relay always passes the
+/// defaults for them. Giving the agent path a narrower struct of its own
+/// would be a second shape to keep in step with the supervisor's create
+/// message, which is the drift this function exists to prevent.
+pub(crate) struct CreateSpec {
+    pub(crate) cwd: String,
+    pub(crate) mode: CreateMode,
+    pub(crate) title: Option<String>,
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
+    pub(crate) intent_key: Option<String>,
+    pub(crate) agent_kind: Option<farhelm_proto::AgentKind>,
+    pub(crate) resume_template: Option<Vec<String>>,
+}
+
+/// Which of the two creation modes a caller selected — the choice
 /// PLAN_M6_75.md item 3 made mutually exclusive on the wire, resolved once
-/// at the REST edge.
+/// before [`do_create_session`] runs.
 ///
 /// Owned rather than borrowed from the body, because the mode outlives the
 /// request that produced it: it decides which call to make, and is consulted
@@ -998,7 +1065,15 @@ pub(crate) async fn create_session(
 /// default), by which point the body's other fields have been moved into the
 /// call. Taken out of the body rather than cloned — nothing else reads them
 /// afterwards.
-enum CreateMode {
+///
+/// `Profile` always holds an ID, never a name, and that is a constraint on
+/// its producers rather than an implementation detail: profile ids are
+/// minted per supervisor and every fresh install seeds the same starter
+/// ids, so a name-to-id resolution has to happen against the catalog of the
+/// host the create will actually land on. The agent relay's `create
+/// --profile` and `clone` both resolve names that way before building this
+/// value; see `agent_requests`.
+pub(crate) enum CreateMode {
     Raw(String),
     Profile(String),
 }

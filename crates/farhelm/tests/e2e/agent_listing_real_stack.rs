@@ -575,3 +575,236 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     // assertion — see the read-only test above for why an explicit drop
     // would only invite someone to reorder them.
 }
+
+/// Spec: the shipped `farhelm agent create` and `farhelm agent clone`, run
+/// against the real stack, produce real sessions the helm's own REST
+/// listing reports — the created one from a profile resolved BY NAME on the
+/// target host, and the cloned one carrying the source's directory, title
+/// and profile.
+///
+/// ## What this covers that the unit tests cannot
+///
+/// `farhelm-helm`'s `agent_requests` tests drive the handler directly with
+/// a scripted supervisor on the far end; `tests/agent_cli.rs` drives the
+/// built CLI against a mock that answers whatever frame arrived. Neither
+/// one runs the shipped create path: the profile catalog is a real
+/// supervisor's, the profile-name resolution goes over a real connection,
+/// the create is a real launch, and `record_session` writes into a real
+/// helm.db. A regression in the wiring between those — the handler
+/// resolving a name against the wrong host's catalog, or a created session
+/// that is not routable until the next refresh — is invisible everywhere
+/// else and fails here loudly.
+///
+/// ## Same host only, and why
+///
+/// TODO.md's litmus test is a CROSS-host clone, and it is not exercised
+/// here: a second host in this suite would have to be an ssh row, which
+/// needs passwordless `ssh localhost` — a machine prerequisite this Rust
+/// suite deliberately does not have (see how every other test in this file
+/// settles for the one local row). The Playwright stack DOES provision
+/// that, so the cross-host case lives in `e2e/tests/agent-relay.spec.ts`
+/// and this test covers everything about the two verbs that does not need
+/// a second machine.
+///
+/// ## The stdout/stderr split is asserted here, not only in the CLI tests
+///
+/// `create`/`clone` print the new session's id on stdout and their
+/// confirmation on stderr, which is `farhelm spawn`'s contract rather than
+/// the lifecycle verbs'. Pinning it against the REAL helm as well as the
+/// mock matters because the id on stdout is the only thing that makes
+/// these verbs composable — an agent captures it and passes it back as
+/// `--session`.
+#[tokio::test]
+async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+
+    let supervisor = supervisor_process().await;
+    let helm = helm_process(supervisor.state.path(), None).await;
+    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let client = client_with_secret(&secret);
+    await_local_host(&client, &helm.base).await;
+
+    let local_host = {
+        let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
+        hosts["hosts"]
+            .as_array()
+            .expect("hosts is an array")
+            .iter()
+            .find(|row| row["kind"] == "local")
+            .and_then(|row| row["id"].as_i64())
+            .expect("the helm always has a local row")
+    };
+
+    // A real profile in the real supervisor's catalog: this is what the
+    // agent's `--profile` is resolved against, and its id is minted over
+    // there rather than chosen here.
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/hosts/{local_host}/profiles", helm.base),
+        serde_json::json!({
+            "name": "Relay Fixture",
+            "invocation": agent_cmd("internal fake-agent --script basic"),
+            "agent_kind": "generic",
+        }),
+    )
+    .await;
+    assert!(status.is_success(), "creating the profile failed: {body}");
+    let profile: serde_json::Value = serde_json::from_str(&body).expect("profile JSON");
+    let profile_id = profile["id"].as_str().expect("profile id").to_string();
+
+    let work = farhelm_teststate::tempdir().expect("work dir");
+    let cwd = work.path().to_string_lossy().into_owned();
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/sessions", helm.base),
+        serde_json::json!({
+            "cwd": cwd,
+            "profile_id": profile_id,
+            "title": "the-asking-session",
+        }),
+    )
+    .await;
+    assert!(status.is_success(), "creating the session failed: {body}");
+    let session: serde_json::Value = serde_json::from_str(&body).expect("created session JSON");
+    let asker_id = session["id"].as_str().expect("session id").to_string();
+
+    let _terminal = attach_terminal(&helm, &secret, &asker_id).await;
+    let token = session_token(supervisor.state.path(), &asker_id).await;
+    let socket = supervisor.state.path().join("supervisor.sock");
+    // The same attach race every verb in this file has to wait out; see
+    // `hosts_until_attached`'s own docs.
+    hosts_until_attached(&asker_id, &token, &socket).await;
+
+    // `create`, naming the host by the DISPLAY NAME the hosts listing
+    // reports and the profile by the NAME its catalog reports — the two
+    // values an agent can actually have read.
+    let created_cwd = work.path().join("created");
+    std::fs::create_dir(&created_cwd).expect("the create's target directory");
+    let created_cwd = created_cwd.to_string_lossy().into_owned();
+    let output = spawn_agent_command_args(
+        &[
+            "create",
+            "--host",
+            "this machine",
+            "--cwd",
+            &created_cwd,
+            "--profile",
+            "Relay Fixture",
+            "--title",
+            "made-by-the-agent",
+        ],
+        &asker_id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert!(
+        output.status.success(),
+        "`farhelm agent create` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created_id = String::from_utf8(output.stdout)
+        .expect("stdout is UTF-8")
+        .trim()
+        .to_string();
+    assert!(
+        !created_id.is_empty() && !created_id.contains(' '),
+        "stdout must be the new session's id and nothing else: {created_id:?}"
+    );
+    let confirmation = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(
+        confirmation,
+        format!("created {created_id} \"made-by-the-agent\" on this machine in {created_cwd}\n"),
+        "the confirmation belongs on stderr, in one line, naming what was made"
+    );
+
+    // Read back through `GET /api/sessions/{id}`, which answers LIVE for a
+    // connected host — so this proves the session exists on the supervisor,
+    // not merely that the helm cached a row (`sessions::get_session`).
+    let created = get_json(&client, &format!("{}/api/sessions/{created_id}", helm.base)).await;
+    assert_eq!(created["title"], "made-by-the-agent");
+    assert_eq!(created["cwd"], created_cwd);
+    assert_eq!(
+        created["source_profile"]["id"], profile_id,
+        "the profile NAME must have resolved to the target host's own id: {created}"
+    );
+
+    // `clone`, naming nothing: the asking session's own host, directory and
+    // title.
+    let output = spawn_agent_command_args(&["clone"], &asker_id, &token, &socket).await;
+    assert!(
+        output.status.success(),
+        "`farhelm agent clone` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cloned_id = String::from_utf8(output.stdout)
+        .expect("stdout is UTF-8")
+        .trim()
+        .to_string();
+    assert_ne!(cloned_id, asker_id, "a clone is a NEW session");
+    let cloned = get_json(&client, &format!("{}/api/sessions/{cloned_id}", helm.base)).await;
+    assert_eq!(
+        cloned["title"], "the-asking-session",
+        "a clone copies the source's title verbatim rather than deriving one: {cloned}"
+    );
+    assert_eq!(cloned["cwd"], cwd, "a clone copies the source's directory");
+    assert_eq!(
+        cloned["source_profile"]["id"], profile_id,
+        "a same-host clone follows the source's profile id: {cloned}"
+    );
+
+    // A directory that does not exist is the TARGET supervisor's own
+    // refusal, reported verbatim — TODO.md's litmus test requires those
+    // words rather than a paraphrase assembled on the way back.
+    let absent = work.path().join("no-such-directory");
+    let output = spawn_agent_command_args(
+        &["clone", "--cwd", &absent.to_string_lossy()],
+        &asker_id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert!(
+        !output.status.success(),
+        "a clone into a missing directory must fail"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a refused clone prints no id: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let refusal = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        refusal.contains(&format!(
+            "working directory does not exist: {}",
+            absent.display()
+        )),
+        "the target supervisor's own words must survive both hops: {refusal}"
+    );
+
+    // A profile name the target host does not have is refused by NAME and
+    // by HOST, with no session created — the no-silent-fallback rule.
+    let output = spawn_agent_command_args(
+        &[
+            "create",
+            "--cwd",
+            &created_cwd,
+            "--profile",
+            "No Such Profile",
+        ],
+        &asker_id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert!(!output.status.success());
+    let refusal = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        refusal.contains("No Such Profile") && refusal.contains("this machine"),
+        "the refusal must name the profile AND the host it was looked for on: {refusal}"
+    );
+
+    // `helm`, `supervisor` and `work` deliberately outlive this test's last
+    // assertion — see the read-only test above for why an explicit drop
+    // would only invite someone to reorder them.
+}

@@ -18,14 +18,39 @@
 //!
 //! Every verb here is served from the exact code path its REST counterpart
 //! uses — `hosts::host_views` for hosts, `aggregate::session_page` for
-//! sessions, and `sessions::do_rename_session`/`do_stop_session`/
-//! `do_archive_session` for the three lifecycle verbs. Not for economy: the
-//! point of routing an agent's questions (and now its actions) through the
+//! sessions, `sessions::do_rename_session`/`do_stop_session`/
+//! `do_archive_session` for the three lifecycle verbs, and
+//! `sessions::do_create_session` for `create` and `clone`. Not for economy:
+//! the point of routing an agent's questions (and its actions) through the
 //! helm at all is that the agent and the user see, and act on, one fleet.
 //! Two listings assembled two ways would drift, and the drift would show
 //! up as an agent confidently naming a host that is not in the panel the
 //! user is reading; two rename implementations would drift on exactly the
-//! validation rule that matters (SPEC.md's control-character refusal).
+//! validation rule that matters (SPEC.md's control-character refusal); two
+//! create implementations would drift on the cache seed that makes a new
+//! session appear in the UI without a refresh, and on the remembered-
+//! default write that decides what the user's next create dialog suggests.
+//!
+//! # The creating verbs are what could not have been built anywhere else
+//!
+//! `create` and `clone` name their target host by DISPLAY NAME — the value
+//! `hosts` reports — and that is the capability the whole relay exists for.
+//! A supervisor-local implementation has no fleet, no host names, and no
+//! route to another machine, so "clone this session onto that host" is
+//! precisely the thing it could not do. Everything the verbs need lives on
+//! this side: the host list, the create path, the target host's profile
+//! catalog, and helm.db's remembered default.
+//!
+//! Cross-host profile resolution is the subtle half, and it has exactly one
+//! rule: NAMES cross hosts, IDS do not. A profile id is minted per
+//! supervisor and every fresh install seeds the same starter ids, so an id
+//! carried to another host does not fail — it resolves, onto a profile
+//! nobody chose. So a clone follows the id only when the target IS the
+//! source's host, and otherwise resolves the snapshotted profile NAME
+//! against the target's own catalog, refusing by name when there is no
+//! match. There is deliberately no fallback to the source's raw invocation:
+//! a command line written for one machine may name a binary that is absent,
+//! a different build, or one that takes different flags on another.
 //!
 //! # Lifecycle verbs act on ANY session, not only the asker's own
 //!
@@ -45,6 +70,13 @@
 //! verbs resolve the substitution — so an operator reading the helm's log
 //! can tell an agent renaming itself apart from one reaching across the
 //! fleet.
+//!
+//! `Clone` is deliberately NARROWER, and the asymmetry is not an
+//! oversight: its source is always the asking session, never a named one.
+//! "Clone that other session over there" is already expressible as a
+//! `Create` naming the same profile and directory, so a `source_session`
+//! field would add a second spelling for one thing while doubling the
+//! resolution rules the verb has to carry.
 //!
 //! # What `current` means, and why only this side can compute it
 //!
@@ -289,6 +321,48 @@ impl AgentRequestHandler for HelmAgentRequests {
                         agent_session_reply(&state, &claim, info, origin.host, session_id)
                     })
             }
+            AgentVerb::Create {
+                host,
+                cwd,
+                profile_name,
+                invocation,
+                title,
+                intent_key,
+            } => {
+                create_for_agent(
+                    &state,
+                    origin,
+                    session_id,
+                    CreateRequest {
+                        host,
+                        cwd,
+                        profile_name,
+                        invocation,
+                        title,
+                        intent_key,
+                    },
+                )
+                .await
+            }
+            AgentVerb::Clone {
+                host,
+                cwd,
+                title,
+                intent_key,
+            } => {
+                clone_for_agent(
+                    &state,
+                    origin,
+                    session_id,
+                    CloneRequest {
+                        host,
+                        cwd,
+                        title,
+                        intent_key,
+                    },
+                )
+                .await
+            }
         };
         match reply {
             Ok(reply) => AgentOutcome::Ok { reply },
@@ -366,6 +440,380 @@ fn resolve_target(target: Option<String>, asking: &str, verb: &str) -> String {
     target
 }
 
+/// One `create` verb's fields, moved out of [`AgentVerb`] so the handler
+/// arm stays a dispatch and the policy lives in [`create_for_agent`].
+///
+/// A struct rather than six parameters because four of them are
+/// `Option<String>`: a call site that transposed `profile_name` and
+/// `invocation`, or `title` and `intent_key`, would compile and be wrong.
+struct CreateRequest {
+    host: Option<String>,
+    cwd: String,
+    profile_name: Option<String>,
+    invocation: Option<String>,
+    title: Option<String>,
+    intent_key: Option<String>,
+}
+
+/// One `clone` verb's fields. See [`CreateRequest`] for why it is a struct.
+struct CloneRequest {
+    host: Option<String>,
+    cwd: Option<String>,
+    title: Option<String>,
+    intent_key: Option<String>,
+}
+
+/// The host a creating verb targets: the named one, or the ASKING
+/// session's own when the verb named none.
+///
+/// Resolved against `hosts::host_views` — the very listing `AgentVerb::
+/// Hosts` is projected from — rather than against the registry directly,
+/// so the names an agent can successfully pass here are exactly the names
+/// it was shown. Any other source would let the two drift, and the drift
+/// would surface as an agent being refused a host it can see in its own
+/// `farhelm agent hosts` output.
+///
+/// Matching is EXACT: no case folding, no trimming, no prefix match. Host
+/// names are user-chosen and an ssh host's name is its destination, so
+/// `builder` and `Builder` are two names a fleet may legitimately carry;
+/// guessing between them would put a session on the wrong machine, which
+/// is precisely the mistake SPEC.md's ask-don't-guess rule forbids.
+///
+/// Returns the display NAME alongside the id because every refusal below
+/// this point names the host it was aimed at, and for `host: None` that
+/// name is something only this lookup knows.
+async fn resolve_host(
+    state: &AppState,
+    origin: AgentOrigin,
+    name: Option<String>,
+) -> anyhow::Result<(HostId, String)> {
+    let views = crate::hosts::host_views(state).await?;
+    match name {
+        None => views
+            .iter()
+            .find(|view| view.id == origin.host)
+            .map(|view| (view.id, view.name.clone()))
+            .ok_or_else(|| {
+                // The asking session's own host has no registry row any
+                // more — removed while the request was in flight. Not
+                // `NotFound` on a name the caller supplied (it supplied
+                // none), so it is reported as the transient it is.
+                anyhow::Error::new(crate::SupervisorError {
+                    kind: ErrorKind::Unavailable,
+                    message: "this session's own host is no longer registered with the helm"
+                        .to_string(),
+                })
+            }),
+        Some(name) => views
+            .iter()
+            .find(|view| view.name == name)
+            .map(|view| (view.id, view.name.clone()))
+            .ok_or_else(|| {
+                let known = views
+                    .iter()
+                    .map(|view| view.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                anyhow::Error::new(crate::SupervisorError {
+                    kind: ErrorKind::NotFound,
+                    // The name is quoted back so a typo is visible as a
+                    // typo, and the alternatives are listed because the
+                    // agent's next move is to pick one — the same shape
+                    // the supervisor's own profile-name refusal takes.
+                    message: format!(
+                        "no host named {name:?} is registered with this helm; known hosts: {}",
+                        if known.is_empty() { "none" } else { &known }
+                    ),
+                })
+            }),
+    }
+}
+
+/// Resolve a profile NAME against one host's own catalog, returning the id
+/// a create can use.
+///
+/// Names cross hosts and ids do not, and that asymmetry is the whole
+/// reason this exists. Profile ids are minted per supervisor and every
+/// fresh install seeds the same starter ids, so an id carried from one
+/// host to another does not fail — it RESOLVES, onto a profile the user
+/// never chose. Resolving by name against the target's catalog is the only
+/// cross-host lookup that can be wrong out loud.
+///
+/// A live catalog read, never a cache: this helm keeps none for profiles
+/// (see `profiles::list_profiles`), and a create is exactly the moment a
+/// stale answer would cost the most.
+///
+/// No match and an ambiguous match are both refusals naming the HOST and
+/// the NAME — never a fallback to some other profile or to a raw
+/// invocation. SPEC.md's rule is to ask rather than guess, and for a
+/// cross-host clone the guess would be the worst kind: a command line that
+/// means something different, or nothing, on the other machine.
+///
+/// `InvalidRequest` rather than `NotFound`, matching the kind the
+/// supervisor's own `CreateMode::ProfileName` resolution produces for the
+/// identical mistake — the two paths a name can reach a catalog by must
+/// not classify one failure two ways.
+async fn resolve_profile_by_name(
+    client: &crate::SupervisorClient,
+    host_name: &str,
+    profile_name: &str,
+) -> anyhow::Result<String> {
+    let catalog = client.list_profiles().await?;
+    let mut matches = catalog
+        .iter()
+        .filter(|profile| profile.name == profile_name)
+        .map(|profile| profile.id.clone())
+        .collect::<Vec<_>>();
+    match matches.len() {
+        1 => Ok(matches.pop().expect("one profile match was counted")),
+        0 => {
+            let known = catalog
+                .iter()
+                .map(|profile| profile.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(anyhow::Error::new(crate::SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: format!(
+                    "no profile named {profile_name:?} exists on host {host_name:?}; profiles \
+                     there: {}",
+                    if known.is_empty() { "none" } else { &known }
+                ),
+            }))
+        }
+        n => Err(anyhow::Error::new(crate::SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: format!(
+                "{n} profiles on host {host_name:?} are named {profile_name:?}; rename one, or \
+                 create from an invocation instead"
+            ),
+        })),
+    }
+}
+
+/// `create`: one session on any host, from a profile name, a raw
+/// invocation, or the target host's remembered default.
+///
+/// ## The selector rules, and why each refusal is loud
+///
+/// Naming BOTH a profile and an invocation is refused rather than
+/// arbitrated, exactly as the REST create refuses the same body: a profile
+/// already says what to run, so there is no honest merge, and picking a
+/// winner would launch something the caller did not choose.
+///
+/// Naming NEITHER falls back to this host's remembered default profile —
+/// the same one the create dialog preselects and the same intent
+/// `farhelm spawn` with no `--agent` has. The fallback is the HELM's
+/// memory (helm.db's `remembered_profiles`), not the target supervisor's
+/// own last-used profile, and the difference is worth knowing: a session
+/// created on that host by some other client updates the supervisor's
+/// notion and not this one's. The helm's is the right answer here because
+/// this whole feature is an agent talking to the helm, and it is the
+/// helm's create dialog the user would otherwise have used.
+///
+/// A remembered default naming a profile that has since been DELETED is
+/// not softened: the create fails with the target supervisor's own
+/// "no such profile" refusal. SPEC.md's ask-don't-guess rule applies, and
+/// silently falling through to some other profile is the guess it forbids.
+///
+/// ## What this function does NOT decide
+///
+/// The working directory. A directory that does not exist on the target is
+/// the TARGET supervisor's refusal, reported verbatim through
+/// [`AgentOutcome::Err`] like every other create precondition — this side
+/// never stats a path on another machine, and could not.
+async fn create_for_agent(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    request: CreateRequest,
+) -> anyhow::Result<AgentReply> {
+    let (host, host_name) = resolve_host(state, origin, request.host).await?;
+    // The claim and the client come from ONE read, which is what lets every
+    // write the create goes on to make revalidate against the connection it
+    // was actually sent on (see `sessions::host_client`). The catalog read
+    // below happens after it; a connection replaced in that window makes the
+    // create fail against a dead client, which is the honest error rather
+    // than a create landing on a machine nobody chose.
+    let (claim, client) = crate::sessions::host_client(state, host)?;
+    let mode = match (request.profile_name, request.invocation) {
+        (Some(_), Some(_)) => {
+            return Err(anyhow::Error::new(crate::SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: "a create names either a profile or an invocation, never both: a \
+                          profile already says what to run, and there is no honest way to merge \
+                          the two"
+                    .to_string(),
+            }));
+        }
+        (Some(profile_name), None) => crate::sessions::CreateMode::Profile(
+            resolve_profile_by_name(&client, &host_name, &profile_name).await?,
+        ),
+        (None, Some(invocation)) => crate::sessions::CreateMode::Raw(invocation),
+        (None, None) => {
+            let default = state.store.remembered_profile(host).await?;
+            crate::sessions::CreateMode::Profile(default.ok_or_else(|| {
+                anyhow::Error::new(crate::SupervisorError {
+                    kind: ErrorKind::InvalidRequest,
+                    message: format!(
+                        "no session has been created from a profile on host {host_name:?} yet, \
+                         so there is no default to fall back on; name a profile or an invocation"
+                    ),
+                })
+            })?)
+        }
+    };
+    // The same paper trail [`resolve_target`] leaves for the lifecycle
+    // verbs, and the values are safe for the same reasons: the supervisor
+    // validated `asking_session` before forwarding, and `host_name` is the
+    // REGISTRY's own rendering of the matched row rather than the string
+    // the request carried — `resolve_host` returns the view's name, not the
+    // caller's, so nothing attacker-chosen reaches this line.
+    info!(
+        asking = asking_session,
+        host = host_name.as_str(),
+        verb = "create",
+        "an agent is creating a session"
+    );
+    let session = crate::sessions::do_create_session(
+        state,
+        &claim,
+        &client,
+        crate::sessions::CreateSpec {
+            cwd: request.cwd,
+            mode,
+            title: request.title,
+            cols: crate::sessions::default_cols(),
+            rows: crate::sessions::default_rows(),
+            intent_key: request.intent_key,
+            // Neither override is reachable from an agent, and that is
+            // deliberate rather than an omission: both are profile-editor
+            // concerns (which integrated kind this is, and what its resume
+            // invocation looks like), and a profile already states them.
+            agent_kind: None,
+            resume_template: None,
+        },
+    )
+    .await?;
+    Ok(agent_created_reply(
+        state,
+        &claim,
+        session,
+        origin.host,
+        asking_session,
+    ))
+}
+
+/// `clone`: another session like the asking one, on any host.
+///
+/// ## The source is read LIVE
+///
+/// From the asking session's own host, by draining its session list — the
+/// same live read `sessions::get_session` performs for a connected host,
+/// and for the same reason: the helm's cache is for the stale list, not a
+/// serving layer, and a clone built from a cached row could copy a title
+/// or a working directory the session no longer has.
+///
+/// ## Agent resolution, in order, with no silent fallback
+///
+/// 1. **Same host, profile still there: by ID.** Exact, and the only case
+///    where an id means anything, since the target and the source are one
+///    supervisor. "Still there" is the source row's own
+///    [`farhelm_proto::ProfileExistence`], which is derived fresh by the
+///    supervisor on the reply this drain just read — a `Renamed` profile
+///    still counts, because the id is what is being followed.
+/// 2. **Otherwise, by NAME against the target's catalog.** No match is a
+///    refusal naming the host and the profile
+///    ([`resolve_profile_by_name`]), NEVER a quiet downgrade to the
+///    source's raw invocation: that invocation was written for the source
+///    machine, and on another one it may name a binary that is absent, a
+///    different build, or one that takes different flags. TODO.md's litmus
+///    test calls this out by name as the thing that must not happen.
+/// 3. **A source with no profile at all: its raw invocation.** There is no
+///    name to resolve and nothing to guess — the user created that session
+///    from a command line, and a clone of it is that command line.
+///
+/// ## What is copied and what can be overridden
+///
+/// The working directory and the title default to the source's, which is
+/// what makes a same-host clone mean "another session on this project".
+/// Both can be overridden. A directory that does not exist on the TARGET
+/// is the target supervisor's own refusal, reported verbatim — cloning
+/// onto a machine that does not have the source's checkout is a real and
+/// expected failure, and inventing a directory would be worse.
+async fn clone_for_agent(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    request: CloneRequest,
+) -> anyhow::Result<AgentReply> {
+    // The asking session's own host, by construction of where the upcall
+    // arrived (see the module docs) — so this needs no owner lookup, unlike
+    // the lifecycle verbs, which may name a session anywhere.
+    let (_source_claim, source_client) = crate::sessions::host_client(state, origin.host)?;
+    let source = crate::manager::drain_sessions(&source_client)
+        .await?
+        .into_iter()
+        .find(|session| session.id == asking_session)
+        .ok_or_else(|| {
+            anyhow::Error::new(crate::SupervisorError {
+                kind: ErrorKind::NotFound,
+                message: "this session's own host no longer lists it, so there is nothing to \
+                          clone"
+                    .to_string(),
+            })
+        })?;
+
+    let (host, host_name) = resolve_host(state, origin, request.host).await?;
+    let (claim, client) = crate::sessions::host_client(state, host)?;
+    let mode = match &source.source_profile {
+        Some(profile)
+            if host == origin.host
+                && profile.existence != farhelm_proto::ProfileExistence::Deleted =>
+        {
+            crate::sessions::CreateMode::Profile(profile.id.clone())
+        }
+        Some(profile) => crate::sessions::CreateMode::Profile(
+            resolve_profile_by_name(&client, &host_name, &profile.name).await?,
+        ),
+        None => crate::sessions::CreateMode::Raw(source.invocation.clone()),
+    };
+    // See `create_for_agent`'s own note on why both logged values are safe.
+    info!(
+        asking = asking_session,
+        host = host_name.as_str(),
+        verb = "clone",
+        "an agent is cloning a session"
+    );
+    let session = crate::sessions::do_create_session(
+        state,
+        &claim,
+        &client,
+        crate::sessions::CreateSpec {
+            cwd: request.cwd.unwrap_or(source.cwd),
+            mode,
+            // The source's title is copied VERBATIM, empty string included:
+            // a clone that let the target derive a title from the directory
+            // would silently rename the copy, which is the one thing a user
+            // reading two rows side by side would notice first.
+            title: Some(request.title.unwrap_or(source.title)),
+            cols: crate::sessions::default_cols(),
+            rows: crate::sessions::default_rows(),
+            intent_key: request.intent_key,
+            agent_kind: None,
+            resume_template: None,
+        },
+    )
+    .await?;
+    Ok(agent_created_reply(
+        state,
+        &claim,
+        session,
+        origin.host,
+        asking_session,
+    ))
+}
+
 /// Project a session a lifecycle verb just mutated into the same
 /// [`AgentSession`] shape the `sessions` listing uses, so a rename/archive
 /// reply and a later listing agree about the row they both describe.
@@ -405,6 +853,42 @@ fn agent_session_reply(
     asking_host: HostId,
     asking_session: &str,
 ) -> AgentReply {
+    AgentReply::Session {
+        session: agent_row_of_mutation(state, claim, info, asking_host, asking_session),
+    }
+}
+
+/// [`agent_session_reply`]'s twin for the two CREATING verbs: the same row,
+/// under [`AgentReply::Created`]'s tag.
+///
+/// A separate function rather than a boolean on the one above, because the
+/// tag is the only thing distinguishing "the row you asked me to change"
+/// from "a row that did not exist a moment ago" and a caller keys on it —
+/// see [`AgentReply::Created`]'s own docs. A flag parameter at each call
+/// site would be one `true`/`false` away from telling an agent it created
+/// something it merely renamed.
+fn agent_created_reply(
+    state: &AppState,
+    claim: &crate::manager::SessionClaim,
+    info: farhelm_proto::SessionInfo,
+    asking_host: HostId,
+    asking_session: &str,
+) -> AgentReply {
+    AgentReply::Created {
+        session: agent_row_of_mutation(state, claim, info, asking_host, asking_session),
+    }
+}
+
+/// The row both reply shapes above carry — the projection, and the
+/// incarnation check that decides whether its host name can be vouched
+/// for. See [`agent_session_reply`] for the whole reasoning.
+fn agent_row_of_mutation(
+    state: &AppState,
+    claim: &crate::manager::SessionClaim,
+    info: farhelm_proto::SessionInfo,
+    asking_host: HostId,
+    asking_session: &str,
+) -> AgentSession {
     let current =
         state.manager.snapshots().into_iter().find(|snapshot| {
             snapshot.id == claim.host && snapshot.incarnation == claim.incarnation
@@ -423,9 +907,7 @@ fn agent_session_reply(
         host_name,
         stale,
     };
-    AgentReply::Session {
-        session: agent_session(&row, asking_host, asking_session),
-    }
+    agent_session(&row, asking_host, asking_session)
 }
 
 /// Drain the merged fleet listing into one reply, up to whichever of
@@ -2287,5 +2769,795 @@ mod tests {
             }
             other => panic!("expected a NotFound refusal, got {other:?}"),
         }
+    }
+
+    // ---------------------------------------------------------------
+    // The CREATING verbs.
+    //
+    // These need a scripted supervisor that answers TWO kinds of
+    // request rather than the single one-shot exchange the lifecycle
+    // tests script: a profile-catalog read (which is how a name is
+    // resolved on the target host) and then the create itself. The
+    // shared responder below is what makes that readable; every test
+    // after it is one fleet plus one verb plus assertions on what the
+    // helm actually put on the wire.
+    // ---------------------------------------------------------------
+
+    /// One `CreateSession` the helm sent, reduced to the fields these
+    /// tests judge.
+    ///
+    /// Recorded rather than merely replied to, because almost every
+    /// interesting property of the creating verbs is a property of the
+    /// REQUEST: which profile id a name resolved to on which host, whether
+    /// a clone copied the source's directory, whether the idempotency key
+    /// survived the two hops. A test that only inspected the reply would
+    /// pass against a helm that resolved the wrong profile and echoed the
+    /// right row back.
+    #[derive(Debug, Clone)]
+    struct SeenCreate {
+        cwd: String,
+        invocation: Option<String>,
+        profile_id: Option<String>,
+        title: Option<String>,
+        intent_key: Option<String>,
+    }
+
+    /// A profile with the two fields a name resolution cares about.
+    fn profile(id: &str, name: &str) -> farhelm_proto::Profile {
+        farhelm_proto::Profile {
+            id: id.to_string(),
+            name: name.to_string(),
+            invocation: format!("run-{name}"),
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+        }
+    }
+
+    /// Script a supervisor that serves `catalog` to every `ListProfiles`
+    /// and answers every `CreateSession`, recording what it was asked for.
+    ///
+    /// Spawned on the PEER half of a duplex whose other half is handed to
+    /// [`FleetBuilder`] — and spawned BEFORE the fleet is built, for the
+    /// ordering reason [`spliced_local_fleet`] documents.
+    ///
+    /// Loops rather than answering once, unlike the lifecycle tests'
+    /// one-shot responders, because a single create is TWO exchanges when a
+    /// profile name is involved (catalog, then create) and because the
+    /// remembered-default test deliberately makes two creates in a row.
+    /// Nothing joins this task: a refusal test's helm never sends the
+    /// create at all, so a joinable responder would hang exactly the tests
+    /// that are asserting an early failure. The runtime ends it with the
+    /// test.
+    ///
+    /// The reply ECHOES the request's cwd, title and invocation back as the
+    /// created `SessionInfo`, which is what a real supervisor does and what
+    /// lets a clone test assert the copied values through the reply as well
+    /// as through the recorded request.
+    fn spawn_create_responder(
+        peer: tokio::io::DuplexStream,
+        catalog: Vec<farhelm_proto::Profile>,
+        refusal: Option<String>,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<SeenCreate>>> {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = std::sync::Arc::clone(&seen);
+        tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let mut created = 0usize;
+            while let Ok(Some(frame)) = reader.read_frame().await {
+                let reply = match parse_control(&frame).expect("decode request") {
+                    ControlMsg::ListProfiles { req_id } => ControlMsg::ProfileList {
+                        req_id,
+                        profiles: catalog.clone(),
+                    },
+                    ControlMsg::CreateSession {
+                        req_id,
+                        cwd,
+                        invocation,
+                        profile_id,
+                        title,
+                        intent_key,
+                        ..
+                    } => {
+                        recorded.lock().expect("seen mutex").push(SeenCreate {
+                            cwd: cwd.clone(),
+                            invocation: invocation.clone(),
+                            profile_id: profile_id.clone(),
+                            title: title.clone(),
+                            intent_key,
+                        });
+                        match &refusal {
+                            Some(message) => ControlMsg::Error {
+                                req_id,
+                                message: message.clone(),
+                                kind: ErrorKind::InvalidRequest,
+                            },
+                            None => {
+                                created += 1;
+                                let source_profile = profile_id.as_ref().and_then(|id| {
+                                    catalog.iter().find(|p| &p.id == id).map(|p| SourceProfile {
+                                        id: p.id.clone(),
+                                        name: p.name.clone(),
+                                        existence: ProfileExistence::Present,
+                                    })
+                                });
+                                ControlMsg::SessionCreated {
+                                    req_id,
+                                    session: SessionInfo {
+                                        cwd,
+                                        title: title.unwrap_or_default(),
+                                        invocation: invocation.unwrap_or_default(),
+                                        source_profile,
+                                        ..session(&format!("created-{created}"), 100)
+                                    },
+                                }
+                            }
+                        }
+                    }
+                    // Everything else is the manager's own housekeeping,
+                    // which the splice already answers for us.
+                    _ => continue,
+                };
+                if writer.write_control(&reply).await.is_err() {
+                    return;
+                }
+            }
+        });
+        seen
+    }
+
+    /// A two-host fleet whose SSH host is scripted by
+    /// [`spawn_create_responder`] — the shape every cross-host creating
+    /// test needs.
+    ///
+    /// The local host is standalone: it only has to exist, be connected,
+    /// and list the asking session, which is exactly what a standalone
+    /// script does.
+    async fn creating_fleet(
+        client_side: tokio::io::DuplexStream,
+        local_sessions: Vec<SessionInfo>,
+    ) -> (Harness, HostId, HostId) {
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: local_sessions,
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("identity-builder".to_string()),
+                    sessions: Vec::new(),
+                    peer: Some(client_side),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        (h, local, remote)
+    }
+
+    /// Spec: `create --host <name> --profile <name>` resolves the profile
+    /// against the TARGET host's own catalog and creates there, answering
+    /// with `Created` (not `Session`) and naming the target host.
+    ///
+    /// This is the verb TODO.md's litmus test is built on, minus the
+    /// agent, and every clause is a distinct way to get it wrong. Naming
+    /// the host by DISPLAY NAME is the only handle an agent has, since it
+    /// has never been shown a registry id. Resolving the profile on the
+    /// TARGET is what keeps a create off the wrong machine's catalog: ids
+    /// collide across installs by construction (every fresh supervisor
+    /// seeds the same starter ids), so a helm that resolved the name
+    /// locally and shipped the id would silently launch a profile nobody
+    /// chose. And `Created` rather than `Session` is what tells the CLI
+    /// this row is new — the two payloads are identical, so the tag is the
+    /// whole signal.
+    #[tokio::test]
+    async fn create_resolves_a_profile_name_on_the_named_target_host() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(
+            peer,
+            // The name the test asks for exists here under an id that
+            // means nothing anywhere else — which is the point.
+            vec![
+                profile("remote-p7", "Claude"),
+                profile("remote-p8", "Codex"),
+            ],
+            None,
+        );
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Create {
+                    host: Some("user@builder".to_string()),
+                    cwd: "/srv/work".to_string(),
+                    profile_name: Some("Claude".to_string()),
+                    invocation: None,
+                    title: Some("over there".to_string()),
+                    intent_key: Some("key-1".to_string()),
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Created { session },
+            } => {
+                assert_eq!(session.id, "created-1");
+                assert_eq!(
+                    session.host, "user@builder",
+                    "the reply names the host the session was created on"
+                );
+                assert_eq!(session.title, "over there");
+                assert_eq!(session.cwd, "/srv/work");
+                assert_eq!(
+                    session.agent, "Claude",
+                    "the created row reports the profile it came from"
+                );
+                assert!(
+                    !session.current,
+                    "a freshly created session is never the asking one"
+                );
+            }
+            other => panic!("expected a Created reply, got {other:?}"),
+        }
+
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 1, "exactly one create reached the target");
+        assert_eq!(
+            seen[0].profile_id.as_deref(),
+            Some("remote-p7"),
+            "the NAME resolved against the target host's own catalog"
+        );
+        assert_eq!(seen[0].invocation, None, "profile mode sends no invocation");
+        assert_eq!(seen[0].cwd, "/srv/work");
+        assert_eq!(seen[0].title.as_deref(), Some("over there"));
+        assert_eq!(
+            seen[0].intent_key.as_deref(),
+            Some("key-1"),
+            "the idempotency key survives both hops"
+        );
+    }
+
+    /// Spec: a profile name absent from the TARGET host's catalog is
+    /// refused, naming both the host and the name, with no create sent.
+    ///
+    /// TODO.md's litmus test calls this out by name: "no matching name
+    /// means a refusal naming the host, not a silent fallback". A helm
+    /// that fell back to any other profile — or to some invocation — would
+    /// launch an agent the user did not choose on a machine they did not
+    /// inspect, and the reply would look like a success.
+    ///
+    /// The refusal must name BOTH halves because either alone leaves the
+    /// agent unable to act: the name alone does not say which catalog was
+    /// searched, and the host alone does not say what was looked for.
+    #[tokio::test]
+    async fn create_refuses_a_profile_name_the_target_host_does_not_have() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, vec![profile("remote-p8", "Codex")], None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Create {
+                    host: Some("user@builder".to_string()),
+                    cwd: "/srv/work".to_string(),
+                    profile_name: Some("Claude".to_string()),
+                    invocation: None,
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(
+                    message.contains("user@builder") && message.contains("Claude"),
+                    "the refusal must name the host AND the profile: {message}"
+                );
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert!(
+            seen.lock().expect("seen mutex").is_empty(),
+            "nothing may be created when the profile could not be resolved"
+        );
+    }
+
+    /// Spec: `create --host <name>` naming an unregistered host is
+    /// `NotFound`, quoting the name and listing what does exist.
+    ///
+    /// The known-hosts list is part of the contract rather than decoration:
+    /// the agent's next move after this refusal is to pick a real host, and
+    /// a bare "no such host" would send it back for a second round trip to
+    /// `farhelm agent hosts` — which is the listing this refusal is
+    /// summarizing.
+    #[tokio::test]
+    async fn create_on_an_unknown_host_name_is_not_found() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_create_responder(peer, Vec::new(), None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Create {
+                    host: Some("nowhere".to_string()),
+                    cwd: "/srv/work".to_string(),
+                    profile_name: None,
+                    invocation: Some("sh".to_string()),
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::NotFound);
+                assert!(
+                    message.contains("nowhere"),
+                    "the refusal quotes the name that failed: {message}"
+                );
+                assert!(
+                    message.contains("user@builder") && message.contains("this machine"),
+                    "the refusal lists the names that would have worked: {message}"
+                );
+            }
+            other => panic!("expected a NotFound refusal, got {other:?}"),
+        }
+    }
+
+    /// Spec: `create` naming neither a profile nor an invocation falls back
+    /// to the target host's REMEMBERED default — the profile a successful
+    /// create on that host last used — and naming both is refused.
+    ///
+    /// Driven as two creates in a row, deliberately, rather than by seeding
+    /// helm.db directly: the first create is what WRITES the remembered
+    /// default (`sessions::remember_default_profile`, reached through the
+    /// shared create path), and the second is what reads it. A test that
+    /// seeded the row would pass even if the agent create path had stopped
+    /// recording defaults at all — which would make an agent's creates
+    /// silently diverge from the create dialog's suggestion.
+    ///
+    /// The refusal half is here rather than in its own test because it is
+    /// the same decision point: a body naming both selectors has no honest
+    /// reading (does the profile's invocation win, or the caller's?), so it
+    /// is refused rather than arbitrated, exactly as the REST create
+    /// refuses the same shape.
+    #[tokio::test]
+    async fn create_with_no_selector_uses_the_targets_remembered_default() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, vec![profile("remote-p7", "Claude")], None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+
+        let both = handler
+            .handle(
+                origin,
+                "asker",
+                AgentVerb::Create {
+                    host: Some("user@builder".to_string()),
+                    cwd: "/srv/work".to_string(),
+                    profile_name: Some("Claude".to_string()),
+                    invocation: Some("sh".to_string()),
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+        match both {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(message.contains("never both"), "{message}");
+            }
+            other => panic!("naming both selectors must be refused, got {other:?}"),
+        }
+
+        // A create that establishes the default...
+        let first = handler
+            .handle(
+                origin,
+                "asker",
+                AgentVerb::Create {
+                    host: Some("user@builder".to_string()),
+                    cwd: "/srv/work".to_string(),
+                    profile_name: Some("Claude".to_string()),
+                    invocation: None,
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+        assert!(
+            matches!(
+                first,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "the seeding create must succeed: {first:?}"
+        );
+
+        // ...and one that must find it, naming nothing at all.
+        let second = handler
+            .handle(
+                origin,
+                "asker",
+                AgentVerb::Create {
+                    host: Some("user@builder".to_string()),
+                    cwd: "/srv/other".to_string(),
+                    profile_name: None,
+                    invocation: None,
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+        assert!(
+            matches!(
+                second,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "a selectorless create must fall back to the remembered default: {second:?}"
+        );
+
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(
+            seen.len(),
+            2,
+            "the refused both-selectors create sent nothing"
+        );
+        assert_eq!(seen[1].profile_id.as_deref(), Some("remote-p7"));
+        assert_eq!(seen[1].cwd, "/srv/other");
+    }
+
+    /// Spec: `clone` onto the asking session's OWN host follows the
+    /// source's profile ID, and copies its cwd and title.
+    ///
+    /// By id rather than by name because the target IS the source's
+    /// supervisor: the id is exact, survives a rename, and needs no catalog
+    /// read at all. That last part is what this test really pins — a helm
+    /// that resolved by name even here would break a clone of a session
+    /// whose profile has since been RENAMED, since the snapshotted name no
+    /// longer matches anything in the catalog.
+    #[tokio::test]
+    async fn clone_on_the_same_host_follows_the_sources_profile_id() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        // The catalog is deliberately EMPTY: a name resolution would find
+        // nothing and refuse, so a passing test proves the id path was
+        // taken.
+        let seen = spawn_create_responder(peer, Vec::new(), None);
+
+        let source = SessionInfo {
+            cwd: "/srv/project".to_string(),
+            title: "the original".to_string(),
+            invocation: "should-not-be-used".to_string(),
+            source_profile: Some(SourceProfile {
+                id: "local-p3".to_string(),
+                name: "Claude".to_string(),
+                existence: ProfileExistence::Present,
+            }),
+            ..session("asker", 1)
+        };
+        // The SPLICED host is the local one here: the clone's source drain
+        // and its create both land on the asking session's own host.
+        let harness = crate::rest_harness::spliced_helm_listing(client_side, vec![source]).await;
+        let local = local_id(&harness.store).await;
+
+        let handler = HelmAgentRequests::for_state(&harness.state);
+        let outcome = handler
+            .handle(
+                origin_of(&harness, local),
+                "asker",
+                AgentVerb::Clone {
+                    host: None,
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Created { session },
+            } => {
+                assert_eq!(session.cwd, "/srv/project");
+                assert_eq!(session.title, "the original");
+            }
+            other => panic!("expected a Created reply, got {other:?}"),
+        }
+
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(
+            seen[0].profile_id.as_deref(),
+            Some("local-p3"),
+            "a same-host clone follows the id, with no catalog read"
+        );
+        assert_eq!(
+            seen[0].cwd, "/srv/project",
+            "the source's directory is copied"
+        );
+        assert_eq!(
+            seen[0].title.as_deref(),
+            Some("the original"),
+            "the source's title is copied verbatim, not re-derived from the directory"
+        );
+    }
+
+    /// Spec: `clone --host <other>` resolves the source's profile by NAME
+    /// against the other host's catalog, and `--cwd`/`--title` override
+    /// what would otherwise be copied.
+    ///
+    /// This is TODO.md's litmus test expressed as a unit: the cross-host
+    /// clone is exactly the operation a supervisor-local implementation
+    /// could not perform, and name resolution is what makes it land on the
+    /// right agent. The source's profile id (`local-p3`) is deliberately
+    /// ALSO present in the target's catalog under a DIFFERENT name, which
+    /// is the collision that makes id-carrying dangerous in production and
+    /// would make a lazy implementation pass every other assertion here
+    /// while launching the wrong agent.
+    #[tokio::test]
+    async fn clone_to_another_host_resolves_the_profile_by_name() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(
+            peer,
+            vec![
+                // Same ID as the source's profile, different name: an
+                // implementation that carried the id across hosts would
+                // launch THIS.
+                profile("local-p3", "Something Else"),
+                profile("remote-p9", "Claude"),
+            ],
+            None,
+        );
+
+        let source = SessionInfo {
+            cwd: "/srv/project".to_string(),
+            title: "the original".to_string(),
+            source_profile: Some(SourceProfile {
+                id: "local-p3".to_string(),
+                name: "Claude".to_string(),
+                existence: ProfileExistence::Present,
+            }),
+            ..session("asker", 1)
+        };
+        let (h, local, _remote) = creating_fleet(client_side, vec![source]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Clone {
+                    host: Some("user@builder".to_string()),
+                    cwd: Some("/srv/elsewhere".to_string()),
+                    title: Some("the copy".to_string()),
+                    intent_key: None,
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Created { session },
+            } => {
+                assert_eq!(session.host, "user@builder");
+                assert_eq!(session.cwd, "/srv/elsewhere");
+                assert_eq!(session.title, "the copy");
+            }
+            other => panic!("expected a Created reply, got {other:?}"),
+        }
+
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(
+            seen[0].profile_id.as_deref(),
+            Some("remote-p9"),
+            "the SNAPSHOTTED NAME resolved on the target, never the id carried across"
+        );
+        assert_eq!(
+            seen[0].cwd, "/srv/elsewhere",
+            "--cwd overrides the source's"
+        );
+        assert_eq!(
+            seen[0].title.as_deref(),
+            Some("the copy"),
+            "--title overrides the source's"
+        );
+    }
+
+    /// Spec: a cross-host clone whose profile NAME is absent from the
+    /// target's catalog is refused, naming the host and the name — never
+    /// falling back to the source's raw invocation.
+    ///
+    /// The fallback is the specific mistake TODO.md's litmus test forbids,
+    /// and it is tempting precisely because the source row is carrying a
+    /// perfectly good invocation. That invocation was written for the
+    /// SOURCE machine: on another host it may name a binary that is not
+    /// installed, a different build, or one that takes different flags —
+    /// and the failure would arrive as a broken session rather than as a
+    /// refusal anyone could act on.
+    #[tokio::test]
+    async fn clone_to_another_host_refuses_rather_than_falling_back_to_the_invocation() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, vec![profile("remote-p8", "Codex")], None);
+
+        let source = SessionInfo {
+            cwd: "/srv/project".to_string(),
+            invocation: "/opt/local-only/claude --flag".to_string(),
+            source_profile: Some(SourceProfile {
+                id: "local-p3".to_string(),
+                name: "Claude".to_string(),
+                existence: ProfileExistence::Present,
+            }),
+            ..session("asker", 1)
+        };
+        let (h, local, _remote) = creating_fleet(client_side, vec![source]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Clone {
+                    host: Some("user@builder".to_string()),
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(
+                    message.contains("user@builder") && message.contains("Claude"),
+                    "the refusal names the host and the profile: {message}"
+                );
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert!(
+            seen.lock().expect("seen mutex").is_empty(),
+            "no session may be created from the source's own invocation as a fallback"
+        );
+    }
+
+    /// Spec: cloning a source that came from NO profile sends its raw
+    /// invocation to the target.
+    ///
+    /// There is no name to resolve and nothing to guess here — the user
+    /// created that session from a command line, so a copy of it is that
+    /// command line. This is the one case where the invocation legitimately
+    /// crosses hosts, which is exactly why the refusal above must not.
+    #[tokio::test]
+    async fn clone_of_a_raw_session_sends_its_invocation() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, Vec::new(), None);
+
+        let source = SessionInfo {
+            cwd: "/srv/project".to_string(),
+            invocation: "sh -c 'echo hi'".to_string(),
+            source_profile: None,
+            ..session("asker", 1)
+        };
+        let (h, local, _remote) = creating_fleet(client_side, vec![source]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Clone {
+                    host: Some("user@builder".to_string()),
+                    cwd: None,
+                    title: None,
+                    intent_key: Some("clone-key".to_string()),
+                },
+            )
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "a raw-invocation clone must succeed: {outcome:?}"
+        );
+
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].invocation.as_deref(), Some("sh -c 'echo hi'"));
+        assert_eq!(seen[0].profile_id, None);
+        assert_eq!(seen[0].intent_key.as_deref(), Some("clone-key"));
+    }
+
+    /// Spec: a create the TARGET supervisor refuses — a directory that does
+    /// not exist there is the case this stands for — reaches the agent as
+    /// that supervisor's own refusal text, verbatim.
+    ///
+    /// TODO.md's litmus test requires it in those words ("a directory
+    /// absent on the target is the helm's normal create refusal, reported
+    /// verbatim"), and it is worth pinning because this side has every
+    /// opportunity to paraphrase: the helm knows the host name, the
+    /// directory and the verb, and a friendlier sentence assembled here
+    /// would replace the only description of what actually went wrong on a
+    /// machine nobody is looking at. A sentinel string is what proves the
+    /// exact bytes crossed both hops, the same technique
+    /// [`rename_refusal_reaches_the_agent_verbatim`] uses.
+    #[tokio::test]
+    async fn a_create_refusal_from_the_target_reaches_the_agent_verbatim() {
+        const SENTINEL: &str = "SENTINEL-agent-create: no such directory: /srv/absent";
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(
+            peer,
+            vec![profile("remote-p7", "Claude")],
+            Some(SENTINEL.to_string()),
+        );
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Create {
+                    host: Some("user@builder".to_string()),
+                    cwd: "/srv/absent".to_string(),
+                    profile_name: Some("Claude".to_string()),
+                    invocation: None,
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(
+                    message.contains(SENTINEL),
+                    "the target's own refusal must arrive verbatim: {message}"
+                );
+            }
+            other => panic!("expected the target's refusal, got {other:?}"),
+        }
+        assert_eq!(
+            seen.lock().expect("seen mutex").len(),
+            1,
+            "the create really was attempted on the target before it refused"
+        );
     }
 }

@@ -172,6 +172,23 @@ pub enum Script {
     ///
     /// See [`hook_report`] for the markers and what each one proves.
     HookReport,
+    /// The whole agent-facing chain, acted out end to end: read the
+    /// injected `SessionStart` hook out of this launch's own `--settings`
+    /// argv, RUN it, obey the pointer line it prints by running `farhelm
+    /// agent instructions`, and then serve `$farhelm ...` requests typed
+    /// into the terminal by running the `farhelm agent` verbs.
+    ///
+    /// This is the only fixture that exercises the feature the way a real
+    /// vendor would, and every link is genuine except one. The settings
+    /// JSON is the supervisor's own; the hook is the shipped `farhelm
+    /// internal hook` binary; the pointer line is the one it prints; the
+    /// instructions are the shipped manual; the verbs are the shipped CLI,
+    /// resolved BY NAME so the launch shim's PATH is under test too. The
+    /// single stand-in is *what decides a conversation started* — a fixture
+    /// that reads its own argv, rather than a vendor that fires the hook.
+    ///
+    /// See [`agent_relay`] for the markers and the stdin grammar.
+    AgentRelay,
     /// Echoes one rc-file-sourced environment variable
     /// ([`RC_MARKER_VAR`]) at startup, then behaves like [`Script::Basic`].
     ///
@@ -257,6 +274,7 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
         Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home, false),
         Script::CodexRecord => record_agent(RecordShape::Codex, record_home, false),
         Script::HookReport => record_agent(RecordShape::Claude, record_home, true),
+        Script::AgentRelay => agent_relay(),
         Script::EnvEcho => env_echo(),
     }
 }
@@ -310,6 +328,313 @@ fn spawn_session() -> anyhow::Result<()> {
         out.flush()?;
     }
     Ok(())
+}
+
+/// The marker prefix [`agent_relay`] prints the injected hook's own stdout
+/// under.
+///
+/// Named as a constant rather than spelled at the one write site because a
+/// test asserts on it, and because the three markers below travel together
+/// as one contract — the same discipline the record markers follow.
+pub const AGENT_RELAY_POINTER_MARKER: &str = "POINTER:";
+
+/// The marker [`agent_relay`] prints once it has read the manual the
+/// pointer line told it to read.
+pub const AGENT_RELAY_INSTRUCTIONS_MARKER: &str = "INSTRUCTIONS:";
+
+/// The marker carrying a successful clone's new session id.
+pub const AGENT_RELAY_CLONED_MARKER: &str = "CLONED:";
+
+/// The marker carrying whatever went wrong instead — a refusal from any of
+/// the three hops, verbatim.
+pub const AGENT_RELAY_ERROR_MARKER: &str = "CLONE-ERROR:";
+
+/// Act out the whole chain a real agent walks: hook, pointer, manual, then
+/// `$farhelm ...` requests from the terminal.
+///
+/// ## Why this fixture reads its own argv
+///
+/// The supervisor injects the `SessionStart` hook by APPENDING
+/// `--settings <json>` to a Claude-kind launch's command line
+/// (`agent_kind::ClaudeIntegration::hook_argv`). A real vendor parses that
+/// JSON and fires the hook when a conversation starts. CI cannot have a
+/// real vendor, so this fixture does the parsing itself and fires the hook
+/// at startup — which is the ONE faked link in the chain. Everything on
+/// either side of it is the shipped product: the settings JSON is the
+/// supervisor's, the hook is `farhelm internal hook`, the pointer line is
+/// the one that hook prints, and the verbs below are the shipped CLI.
+///
+/// Reading `std::env::args()` rather than the parsed `extra` tail is
+/// deliberate: what is under test is the argv the SUPERVISOR built, so the
+/// fixture should see exactly what a vendor would, not a re-parse of it.
+///
+/// ## Markers, and what each one proves
+///
+/// - `POINTER:<line>` — the injected hook ran and wrote to stdout. A real
+///   vendor splices that stdout into the model's context; printing it here
+///   is this fixture standing in for that splice, and it is what makes
+///   "the hook fired and said something" observable to a test.
+/// - `INSTRUCTIONS:ok` (or `INSTRUCTIONS:missing-...`) — the fixture did
+///   what the pointer told it to and got a manual that actually documents
+///   the verb it is about to use. The failure spelling matters: a manual
+///   that no longer mentions `clone` would otherwise show up three steps
+///   later as an unexplained clone failure.
+/// - `CLONED:<id>` / `CLONE-ERROR:<text>` — the result of one request.
+///
+/// Every line ends `\r` because this runs on a pty, where a bare `\n`
+/// leaves the cursor in the wrong column and the next line renders
+/// staircased.
+///
+/// ## The stdin grammar
+///
+/// One request per line, in the shape a user would actually type at an
+/// agent:
+///
+/// ```text
+/// $farhelm clone this session onto <host name>
+/// $farhelm clone this session onto <host name> in <directory>
+/// ```
+///
+/// The host name is the LAST field precisely so it may contain spaces —
+/// `user@host` names do not, but a local host is called `this machine`.
+/// The `in <directory>` suffix is what a test uses to aim a clone at a
+/// directory the target does not have, which is the create refusal
+/// TODO.md's litmus test requires to arrive verbatim.
+///
+/// A request is served in two steps, and the first is not ceremony: the
+/// fixture runs `farhelm agent hosts` and refuses a name that is not in
+/// that listing. That is the behavior the feature is FOR — an agent naming
+/// a target it read out of the fleet rather than one it guessed — and
+/// doing it here is what makes the listing part of the tested chain
+/// instead of an untested sibling.
+fn agent_relay() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+
+    // Step one: the hook the supervisor injected into THIS launch.
+    match run_injected_hook() {
+        Ok(pointer) => writeln!(out, "{AGENT_RELAY_POINTER_MARKER}{pointer}\r")?,
+        Err(error) => writeln!(out, "{AGENT_RELAY_POINTER_MARKER}ERROR:{error:#}\r")?,
+    }
+    // Step two: obey it. `farhelm` by NAME, never `current_exe`, because
+    // the pointer line tells a model to run `farhelm agent instructions`
+    // and the launch shim's PATH prepend is what makes that resolvable —
+    // exactly the contract `spawn_session` above exists to prove.
+    let instructions = std::process::Command::new("farhelm")
+        .args(["agent", "instructions"])
+        .output();
+    let verdict = match &instructions {
+        Ok(result) if !result.status.success() => {
+            format!("failed:{}", String::from_utf8_lossy(&result.stderr).trim())
+        }
+        Ok(result) => {
+            let text = String::from_utf8_lossy(&result.stdout);
+            if text.contains("farhelm agent clone") {
+                "ok".to_string()
+            } else {
+                "missing-clone-verb".to_string()
+            }
+        }
+        Err(error) => format!("failed:{error}"),
+    };
+    writeln!(out, "{AGENT_RELAY_INSTRUCTIONS_MARKER}{verdict}\r")?;
+
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    for line in std::io::stdin().lock().lines() {
+        let line = line.context("reading an agent-relay fixture request")?;
+        match clone_request(line.trim()) {
+            Some((host, cwd)) => {
+                let result = run_clone(&host, cwd.as_deref());
+                match result {
+                    Ok(id) => writeln!(out, "{AGENT_RELAY_CLONED_MARKER}{id}\r")?,
+                    Err(message) => writeln!(out, "{AGENT_RELAY_ERROR_MARKER}{message}\r")?,
+                }
+            }
+            None if line.trim().is_empty() => continue,
+            None => writeln!(
+                out,
+                "{AGENT_RELAY_ERROR_MARKER}unrecognized request: {}\r",
+                line.trim()
+            )?,
+        }
+        out.flush()?;
+    }
+    Ok(())
+}
+
+/// Find this launch's injected `--settings` JSON, run the `SessionStart`
+/// hook it declares, and return the hook's stdout.
+///
+/// Both `--settings <json>` and `--settings=<json>` are accepted, because
+/// both are the same flag to the vendor — the same pair the supervisor's
+/// own injection-skip check treats as equivalent, and a fixture that
+/// understood only one spelling would silently stop testing anything if
+/// that injection ever changed shape.
+///
+/// The hook is run through `sh -c` because the command in that JSON is a
+/// SHELL command line, quoted by the supervisor's `hook_command`; running
+/// it any other way would re-parse quoting the supervisor already did.
+///
+/// The payload on stdin is a Claude-shaped `SessionStart` body, so the
+/// hook's identity half does real work rather than bailing on an empty
+/// payload — this fixture stands in for the vendor, and a vendor sends one.
+fn run_injected_hook() -> anyhow::Result<String> {
+    let argv: Vec<String> = std::env::args().collect();
+    let settings = argv
+        .iter()
+        .enumerate()
+        .find_map(|(index, element)| {
+            if let Some(inline) = element.strip_prefix("--settings=") {
+                return Some(inline.to_string());
+            }
+            if element == "--settings" {
+                return argv.get(index + 1).cloned();
+            }
+            None
+        })
+        .context(
+            "this launch carries no --settings; it was not started under a Claude-kind profile",
+        )?;
+
+    let settings: serde_json::Value =
+        serde_json::from_str(&settings).context("the injected --settings is not JSON")?;
+    let command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        .as_str()
+        .context("the injected settings declare no SessionStart hook command")?
+        .to_string();
+
+    let session = std::env::var("FARHELM_SESSION_ID").unwrap_or_default();
+    let cwd = std::env::current_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let payload = serde_json::json!({
+        // A conversation id shaped like the vendor's, derived from the
+        // session so two fixtures never collide and a test can predict it.
+        "session_id": format!("fake-conversation-{session}"),
+        "source": "startup",
+        "cwd": cwd,
+    })
+    .to_string();
+
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&command)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        // Inherited on purpose: the hook's contract is that it writes
+        // NOTHING to stderr, and letting it reach the pane is what would
+        // make a violation visible in a test's transcript.
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .context("running the injected SessionStart hook")?;
+    child
+        .stdin
+        .take()
+        .context("the hook child has no stdin")?
+        .write_all(payload.as_bytes())
+        .context("writing the hook payload")?;
+    let output = child.wait_with_output().context("awaiting the hook")?;
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
+}
+
+/// Parse one `$farhelm clone this session onto <host>[ in <dir>]` line.
+///
+/// Returns the host name and the optional directory, or `None` for
+/// anything else — an unrecognized line is answered rather than ignored
+/// (see [`agent_relay`]'s loop), so a test that mistypes its request gets
+/// told rather than timing out.
+///
+/// The ` in ` separator is searched for from the RIGHT, so a host name
+/// containing the word survives; a directory containing it is fine either
+/// way, since only the last occurrence separates the two fields.
+fn clone_request(line: &str) -> Option<(String, Option<String>)> {
+    let tail = line.strip_prefix("$farhelm clone this session onto ")?;
+    match tail.rsplit_once(" in ") {
+        Some((host, cwd)) => Some((host.trim().to_string(), Some(cwd.trim().to_string()))),
+        None => Some((tail.trim().to_string(), None)),
+    }
+}
+
+/// Confirm `host` is a real host and clone this session onto it.
+///
+/// The `Err` string is whatever actually refused, verbatim, from whichever
+/// hop produced it: this fixture's own "not in the hosts listing", the
+/// helm's "no host named", or the TARGET supervisor's own create refusal
+/// relayed back through two hops. Paraphrasing here would defeat the point
+/// — a test asserting the refusal text is asserting that the far side's
+/// sentence survived the trip.
+fn run_clone(host: &str, cwd: Option<&str>) -> Result<String, String> {
+    let hosts = std::process::Command::new("farhelm")
+        .args(["agent", "hosts"])
+        .output()
+        .map_err(|error| format!("running farhelm agent hosts: {error}"))?;
+    if !hosts.status.success() {
+        return Err(format!(
+            "farhelm agent hosts failed: {}",
+            String::from_utf8_lossy(&hosts.stderr).trim()
+        ));
+    }
+    let listing = String::from_utf8_lossy(&hosts.stdout).into_owned();
+    if !listing_names_host(&listing, host) {
+        return Err(format!(
+            "no host named {host} in the hosts listing: {}",
+            listing.replace('\n', " | ")
+        ));
+    }
+
+    let mut command = std::process::Command::new("farhelm");
+    command.args(["agent", "clone", "--host", host]);
+    if let Some(cwd) = cwd {
+        command.args(["--cwd", cwd]);
+    }
+    let cloned = command
+        .output()
+        .map_err(|error| format!("running farhelm agent clone: {error}"))?;
+    if !cloned.status.success() {
+        return Err(String::from_utf8_lossy(&cloned.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&cloned.stdout).trim().to_string())
+}
+
+/// Whether `farhelm agent hosts`' table has a row whose NAME column is
+/// exactly `host`.
+///
+/// Column-sliced rather than whitespace-split, and that is not fussiness:
+/// the very first host every fleet has is called `this machine`, so a
+/// splitter would read its name as `this` and refuse the one target that
+/// always exists. The NAME column runs from the two-character marker
+/// column to wherever the header's `KIND` label begins, which is exact —
+/// `aligned` pads every non-final cell to its column's width.
+///
+/// Offsets are taken in CHARS, not bytes, because that padding counts
+/// chars; a non-ASCII host name anywhere in the listing would otherwise
+/// put byte offsets and column boundaries out of step for every row after
+/// it.
+///
+/// Whole-cell equality rather than a prefix or substring test, so a fleet
+/// holding both `builder` and `builder-2` cannot answer for the wrong one.
+fn listing_names_host(listing: &str, host: &str) -> bool {
+    let mut rows = listing.lines();
+    let Some(header) = rows.next() else {
+        return false;
+    };
+    let Some(name_end) = header
+        .find("KIND")
+        .map(|byte| header[..byte].chars().count())
+    else {
+        return false;
+    };
+    rows.any(|row| {
+        let name: String = row
+            .chars()
+            .skip(2)
+            .take(name_end.saturating_sub(2))
+            .collect();
+        name.trim_end() == host
+    })
 }
 
 /// Report [`RC_MARKER_VAR`] as the launch's shell resolved it, then run
@@ -1969,5 +2294,73 @@ mod tests {
             vec!["\x1b[?1000h\x1b[?1006h", "\x1b[?1006l\x1b[?1000h"],
             "the second cue must actively turn 1006 back off, not just re-assert 1000"
         );
+    }
+
+    /// Spec: the hosts-listing name check reads the NAME COLUMN whole, so a
+    /// name containing a space matches and a name that merely prefixes
+    /// another does not.
+    ///
+    /// Both clauses have a concrete failure behind them. `this machine` is
+    /// the name of the local host in EVERY fleet, so a whitespace-splitting
+    /// check refuses the one target that is always present — which is
+    /// exactly how the first hand-run of this fixture failed. And a fleet
+    /// holding `builder` beside `builder-2` would, under a prefix test,
+    /// have one row answer for the other and clone onto the wrong machine.
+    #[test]
+    fn the_hosts_listing_check_matches_a_whole_name_column() {
+        // Byte-for-byte what `farhelm agent hosts` prints (main.rs's
+        // `aligned`): a two-character marker column, then each non-final
+        // cell padded to its column's width plus one space.
+        //
+        // Joined rather than written as one multi-line literal, because a
+        // literal's backslash continuation eats exactly the leading
+        // whitespace this fixture is about — the same trap
+        // `agent_cli.rs`'s table assertions call out.
+        let listing = [
+            "  NAME         KIND  STATE",
+            "* this machine local connected",
+            "  builder      ssh   connected",
+            "",
+        ]
+        .join("\n");
+        let listing = listing.as_str();
+        assert!(listing_names_host(listing, "this machine"));
+        assert!(listing_names_host(listing, "builder"));
+        assert!(
+            !listing_names_host(listing, "this"),
+            "a prefix of a real name is not a host"
+        );
+        assert!(!listing_names_host(listing, "nowhere"));
+        assert!(
+            !listing_names_host("", "builder"),
+            "an empty listing names nothing, rather than panicking on a missing header"
+        );
+    }
+
+    /// Spec: the fixture's stdin grammar takes the host name as the last
+    /// field, with an optional ` in <directory>` suffix.
+    ///
+    /// The host name is last precisely so it may contain spaces (see
+    /// above); the suffix is separated from the RIGHT for the same reason,
+    /// so a host or a directory containing the word "in" survives. A
+    /// grammar that split on the first ` in ` would make `this machine` an
+    /// unnameable target the moment anyone typed a path with that word in
+    /// it.
+    #[test]
+    fn the_agent_relay_grammar_takes_the_host_last_and_a_directory_after_it() {
+        assert_eq!(
+            clone_request("$farhelm clone this session onto this machine"),
+            Some(("this machine".to_string(), None))
+        );
+        assert_eq!(
+            clone_request("$farhelm clone this session onto builder in /srv/work"),
+            Some(("builder".to_string(), Some("/srv/work".to_string())))
+        );
+        assert_eq!(
+            clone_request("$farhelm clone this session onto builder in /srv/in/nested"),
+            Some(("builder".to_string(), Some("/srv/in/nested".to_string()))),
+            "only the LAST separator splits, so a path containing the word survives"
+        );
+        assert_eq!(clone_request("hello"), None);
     }
 }

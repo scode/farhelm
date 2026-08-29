@@ -675,13 +675,38 @@ helm's own provisioned install, holding complete authority over every session on
 it for a fleet-wide read could not route a single operation to it either. What the helm does check is that the
 connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. So 13 is
 the current protocol version, and the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/
-`Archive`, added additively within the version rather than as a version bump of their own — which was possible ONLY
-because 13 itself had not yet shipped when they landed, still being developed on this branch with no released build
-speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to keep adding to 13
-after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own, same as any
-other. Each verb is routed and recorded through the exact same `sessions.rs` functions (`route_session`, the client
-call, `record_session`) the REST `/rename`/`/stop`/`/archive` routes use, so a refusal an agent reads is the identical
-sentence the UI would have shown.
+`Archive` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added
+additively within the version rather than as version bumps of their own — which was possible ONLY because 13 itself had
+not yet shipped when they landed, still being developed on this branch with no released build speaking it yet. That is a
+one-time allowance for a version still in flight, not a standing license to keep adding to 13 after it ships; once a
+protocol version has shipped, a wire-shape addition needs a version of its own, same as any other. Each verb is routed
+and recorded through the exact same `sessions.rs` functions the corresponding REST route uses — `route_session`, the
+client call and `record_session` for the lifecycle three, and `do_create_session` (the shared internal function
+`POST /api/sessions` was refactored onto) for the creating two — so a refusal an agent reads is the identical sentence
+the UI would have shown, and a session an agent creates is seeded into the helm's cache and published exactly as one the
+create dialog made.
+
+`Created` is a distinct reply tag from `Session` even though the payload is identical, because the tag is the only thing
+separating "a row that did not exist" from "the row you changed" and the CLI checks it before printing an id. The two
+creating verbs name their target host by DISPLAY NAME, matching `AgentHost::name` — an agent has never been shown a
+registry id and could not have one. Their agent selector is resolved by profile NAME against the TARGET host's catalog
+(a live `ListProfiles` on that host's connection), never by carrying an id across hosts: starter profile ids collide
+between installs by construction, so an id would resolve on the wrong catalog rather than fail. A clone follows its
+source's profile id only when the target is the source's own host. `Clone` reads its source LIVE from the asking
+session's host, by the same drain `GET /api/sessions/{id}` uses for a connected host, rather than from the helm's cache
+— the cache is for the stale list, and a clone built from it could copy a title or a directory the session no longer
+has. Both verbs take the fence on `agent_request_locks` that the lifecycle verbs take, since a create that completes
+while the asking credential is being invalidated would otherwise leave a session running that nobody was told about.
+
+One deliberate difference from `farhelm spawn` is worth stating rather than discovering. Spawn's `intent_key` gets
+`CreateAdmission::Spawn`'s session-lifetime reservation scope, because the create arrives on the asking session's own
+credential. An agent's `create`/`clone` reaches the target supervisor over the HELM's full-authority connection, so the
+key gets the same permanent, interactive scope any other helm-mediated create gets. Session-lifetime scoping is not
+merely unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking
+session. Likewise the "no selector" fallback: spawn's is the supervisor's own `latest_source_profile()`, while the agent
+verbs use the HELM's per-host remembered default from helm.db, which is the same value the create dialog preselects and
+the one this feature's mental model calls for. `ControlMsg::CreateSession`'s own docs already state that a remembered
+default never travels on that wire — the helm resolves one into a concrete id before sending.
 
 The two read verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is drained by cursor under two ceilings — a fixed
@@ -1320,10 +1345,26 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   the host-wide marker sweep that reaches can SIGTERM the `farhelm agent` process itself before it prints anything at
   all. That is not a bug in the CLI — stopping or archiving yourself is supposed to end the whole tree, calling CLI
   included — so a caller that needs the confirmation line should target a session other than its own.
+- `farhelm agent create --cwd <dir> [--host <name>] [--profile <name> | --invocation <cmd>] [--title ...]
+  [--idempotency-key ...]`
+  and `farhelm agent clone [--host <name>] [--cwd <dir>] [--title ...]
+  [--idempotency-key ...]` — the in-session
+  CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs follow: stdout
+  is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation line on stderr
+  (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells). They are the
+  only agent verbs whose output has a machine consumer — an agent captures the id and hands it back as `--session` — so
+  a confirmation on stdout would make the one verb that needs parsing the one verb that cannot be. `--host` takes a NAME
+  from `farhelm agent hosts`; `--cwd` is required on `create` and has no default, since inheriting the asking session's
+  directory would make it a `clone` under another name. `--profile` and `--invocation` are mutually exclusive, refused
+  by clap before anything is sent (the helm refuses the same shape for every other client), and naming neither falls
+  back to the target host's remembered default.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer
-  line and has no way yet to know whether anything is attached.
+  line and has no way yet to know whether anything is attached. The generated verb list is padded into two columns only
+  up to a 52-character usage width; past it a verb carries its description right behind itself, because alignment pads
+  every row to the widest one and `create`'s full command line would otherwise spend a slice of the manual's context
+  budget on whitespace.
 
 Internal commands live under a hidden-from-help `internal` namespace — `farhelm internal stdio` is the ssh-exec stdio
 proxy. (An underscore prefix like `_stdio` was considered; it is not a recognized convention, while an explicit
@@ -1486,13 +1527,18 @@ constraint (see the GUI section's motivation), not an afterthought:
 - **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
   Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
   path for agents.
-- **A fake agent** — `farhelm internal fake-agent --script basic|altscreen|binary|mouse-modes|spawn`, a hidden
-  subcommand of the one binary rather than a separate artifact — stands in for Claude Code/Codex across this suite's
-  integration and e2e tests. Its deterministic scripts cover prompt/echo input, terminal modes, alternate-screen
+- **A fake agent** — `farhelm internal fake-agent --script basic|altscreen|binary|mouse-modes|spawn|agent-relay`, a
+  hidden subcommand of the one binary rather than a separate artifact — stands in for Claude Code/Codex across this
+  suite's integration and e2e tests. Its deterministic scripts cover prompt/echo input, terminal modes, alternate-screen
   rendering, byte-clean live output, and mouse-mode reporting, without vendor auth. Later milestones extend this fixture
-  with fake on-disk records for status heuristics, conversation capture, and resume. The spawn suite also has an
-  automated real-Claude leg that creates a jj workspace and spawns into it; CI leaves it gated because vendor
-  credentials and network access are absent, and a developer enables it manually with `FARHELM_REAL_AGENT=1`.
+  with fake on-disk records for status heuristics, conversation capture, and resume. The `agent-relay` script goes
+  further than the rest: it reads the `SessionStart` hook out of its own launch's injected `--settings` argv, runs it,
+  obeys the pointer line that hook prints by running `farhelm agent instructions`, and then serves `$farhelm ...`
+  requests typed into its terminal by running the shipped `farhelm agent` verbs. Everything on either side of one link
+  is the real product; the single stand-in is what DECIDES a conversation started, which is the part CI cannot have.
+  That script is what makes the whole agent-relay chain testable end to end (`e2e/tests/agent-relay.spec.ts`). The spawn
+  suite also has an automated real-Claude leg that creates a jj workspace and spawns into it; CI leaves it gated because
+  vendor credentials and network access are absent, and a developer enables it manually with `FARHELM_REAL_AGENT=1`.
 - Rust integration tests exercise supervisor+tmux directly (CI provides tmux) and the framing protocol with golden
   cases; farhelm-proto keeps wire compatibility testable.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside

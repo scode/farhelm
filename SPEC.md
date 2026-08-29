@@ -520,9 +520,14 @@ farhelm spawn --cwd /home/user/ws/auth-followup \
 ```
 
 The spawn CLI talks to the session's own supervisor, authenticated by a per-session credential present in the session's
-environment — any process inside the session may spawn, and that is the point. Spawning targets the session's own host
-only in v1. The helm learns of new sessions automatically; they appear in all clients without manual registration or
-refresh.
+environment — any process inside the session may spawn, and that is the point. `farhelm spawn` targets the session's own
+host, and only that host: it is answered by the supervisor on the other end of its socket, which knows nothing about any
+other machine. That is a property of this command rather than a limit on what an agent can create —
+`farhelm agent
+create` and `farhelm agent clone` below go through the helm and reach any host in the fleet. The two
+coexist on purpose: spawn is the scripting primitive that works with no helm attached, and the agent verbs are the
+fleet-aware ones. The helm learns of new sessions automatically; they appear in all clients without manual registration
+or refresh.
 
 The CLI's contract, since agents will script against it: on success it prints the child session id to stdout and exits
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
@@ -545,6 +550,26 @@ attached to this session", reported as such, with opening the session in a clien
 fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive — on the
 asking session or on any session named by id, with the helm applying its ordinary rules to the operation exactly as it
 would for a client request.
+
+The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
+`farhelm agent create` makes a session on any host, and `farhelm agent clone` copies the asking session onto any host —
+in both cases naming the target by the display NAME the hosts listing reports, since that is the only handle an agent
+has ever been shown. Both print the new session's id on stdout and nothing else, matching spawn's contract, with the
+human-readable confirmation on stderr. Omitting the host means the asking session's own, which is a legitimate ask
+rather than a degenerate case. The preconditions are the helm's ordinary ones: a directory that does not exist on the
+target is that supervisor's own refusal, reported verbatim rather than paraphrased on the way back, and an unreachable
+target is refused with its state named. The new session appears in every client the way any other create does.
+
+The agent is resolved by NAME, never by profile id. Profile ids are minted per supervisor and every fresh install seeds
+the same starter profiles, so an id carried to another host does not fail — it resolves, onto a profile nobody chose.
+`create --profile` therefore looks the name up in the TARGET host's catalog, and a clone follows its source's profile id
+only when the target is the source's own host, resolving by the snapshotted name otherwise. No match is a refusal naming
+the host and the profile. There is deliberately no fallback to the source's raw invocation: a command line written for
+one machine may name a binary that is absent, a different build, or one that takes different flags on another, and
+SPEC.md's ask-don't-guess rule applies to machines as much as to profiles. A session created from a raw invocation in
+the first place has no name to resolve and clones as that invocation. A create naming neither a profile nor an
+invocation falls back to the target host's remembered default, exactly as interactive creation and `farhelm spawn --cwd`
+alone do.
 
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
 the verbs, the `*` marker, that a session's own credential is what authorizes the question, and what to do about "no

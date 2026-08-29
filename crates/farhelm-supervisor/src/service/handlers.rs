@@ -3177,7 +3177,7 @@ pub(crate) async fn handle_restricted_control(
             // unrelated restart or stop behind a peer that may be waiting
             // out the full upcall budget, for no correctness gain.
             //
-            // What IS held, for the three MUTATING verbs only, is a claim
+            // What IS held, for the MUTATING verbs only, is a claim
             // on `agent_request_locks` keyed by THIS connection's OWN
             // asking session id — see that field's docs for the full
             // reasoning. In short: `authenticates_session` below is a
@@ -3194,9 +3194,21 @@ pub(crate) async fn handle_restricted_control(
             // `Error`: this exchange has two hops and refusals from both,
             // and one reply shape means the asking CLI decodes exactly one
             // thing (see `ControlMsg::AgentRequest`'s docs).
+            // The two CREATING verbs are mutations for exactly the reason
+            // the lifecycle three are, and the stakes are higher: a create
+            // that completes while this credential is being invalidated
+            // leaves a real session running on some host with the asking
+            // process told nothing about it. `AgentVerb`'s own docs are the
+            // authority on which verbs create; this is the one place that
+            // knowledge is spelled as a predicate, so a verb added to the
+            // enum without being added here silently loses the fence.
             let is_mutation = matches!(
                 request,
-                AgentVerb::Rename { .. } | AgentVerb::Stop { .. } | AgentVerb::Archive { .. }
+                AgentVerb::Rename { .. }
+                    | AgentVerb::Stop { .. }
+                    | AgentVerb::Archive { .. }
+                    | AgentVerb::Create { .. }
+                    | AgentVerb::Clone { .. }
             );
             let outcome = match sup
                 .store
@@ -3275,10 +3287,26 @@ pub(crate) async fn handle_restricted_control(
 ///
 /// The bounds mirror ones enforced elsewhere for the SAME kind of value —
 /// [`MAX_SESSION_ID_BYTES`] is the connection hello's own cap on a session
-/// id, and [`CREATE_FIELD_CAP`] is `RenameSession::title`'s existing 64 KiB
-/// field cap — rather than inventing new numbers: a target or a title that
-/// would be refused when read straight off the wire elsewhere should be
-/// refused here too, before it ever leaves this process a second time.
+/// id, [`CREATE_FIELD_CAP`] is `RenameSession::title`'s existing 64 KiB
+/// field cap, and [`INTENT_KEY_CAP`] is what `handle_create_session`
+/// already holds an idempotency key to — rather than inventing new numbers:
+/// a value that would be refused when read straight off the wire elsewhere
+/// should be refused here too, before it ever leaves this process a second
+/// time.
+///
+/// The CREATING verbs are bounded as a GROUP, the way
+/// `handle_create_session` bounds a create's fields: cwd, selector and
+/// title are summed against one cap rather than each given its own, because
+/// what the cap protects against is the total a single request can push
+/// through the two queues downstream, and three individually-legal fields
+/// can add up to three times the intended ceiling. The intent key is
+/// separate for the same reason it is separate over there — it bounds a
+/// durable table keyed by whatever the caller sent, not a reply.
+///
+/// A host NAME is bounded by the same total. It is caller-supplied text
+/// that the helm compares against its registry and quotes back in a
+/// not-found refusal, so it is exactly the kind of field this function
+/// exists to stop early.
 ///
 /// Read-only verbs carry no such field and always pass.
 fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
@@ -3322,6 +3350,89 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         AgentVerb::Stop { session_id } | AgentVerb::Archive { session_id } => {
             validate_target(session_id)
         }
+        AgentVerb::Create {
+            host,
+            cwd,
+            profile_name,
+            invocation,
+            title,
+            intent_key,
+        } => validate_create_fields(
+            host.as_deref(),
+            cwd,
+            [profile_name.as_deref(), invocation.as_deref()],
+            title.as_deref(),
+            intent_key.as_deref(),
+        ),
+        AgentVerb::Clone {
+            host,
+            cwd,
+            title,
+            intent_key,
+        } => validate_create_fields(
+            host.as_deref(),
+            cwd.as_deref().unwrap_or_default(),
+            [None, None],
+            title.as_deref(),
+            intent_key.as_deref(),
+        ),
+    }
+}
+
+/// The shared bound on everything a CREATING verb can push downstream.
+///
+/// Factored out because `Create` and `Clone` carry overlapping subsets of
+/// the same fields and must be held to identical limits: a clone is a
+/// create whose selector the helm derives, so a looser cap on one of them
+/// would be a way to send through the other's doorway.
+///
+/// Summed rather than checked field by field for the reason
+/// [`validate_agent_verb`] documents, and control characters are refused in
+/// the host name alone — the one field of these that this process's own
+/// downstream (the helm's not-found refusal) echoes back as free text.
+/// `cwd`, `invocation` and `title` are the TARGET supervisor's to judge,
+/// with rules this one has no business duplicating; what happens to them
+/// here is a size bound and nothing else.
+fn validate_create_fields(
+    host: Option<&str>,
+    cwd: &str,
+    selectors: [Option<&str>; 2],
+    title: Option<&str>,
+    intent_key: Option<&str>,
+) -> Result<(), String> {
+    if let Some(host) = host {
+        if host.is_empty() {
+            return Err(
+                "an explicit --host must not be empty; omit --host to act on this session's own \
+                 host instead"
+                    .to_string(),
+            );
+        }
+        if host.chars().any(char::is_control) {
+            return Err("an explicit --host must not contain control characters".to_string());
+        }
+    }
+    let field_len = host.map_or(0, str::len)
+        + cwd.len()
+        + selectors
+            .iter()
+            .flatten()
+            .map(|value| value.len())
+            .sum::<usize>()
+        + title.map_or(0, str::len);
+    if field_len > CREATE_FIELD_CAP {
+        return Err(format!(
+            "host, cwd, profile or invocation, and title together are {field_len} bytes, \
+             exceeding the {CREATE_FIELD_CAP}-byte limit"
+        ));
+    }
+    match intent_key {
+        Some("") => Err("intent key must not be empty".to_string()),
+        Some(key) if key.len() > INTENT_KEY_CAP => Err(format!(
+            "intent key is {} bytes, exceeding the {INTENT_KEY_CAP}-byte limit",
+            key.len()
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -4434,6 +4545,102 @@ mod tests {
             oversized_title
                 .unwrap_err()
                 .contains(&CREATE_FIELD_CAP.to_string())
+        );
+    }
+
+    /// Spec: the two CREATING verbs pass with every optional absent, refuse
+    /// an empty or control-laced `--host`, refuse a field TOTAL past
+    /// [`CREATE_FIELD_CAP`] even when no single field exceeds it, and hold
+    /// an intent key to [`INTENT_KEY_CAP`] — with `Clone` bounded
+    /// identically to `Create`.
+    ///
+    /// The SUM clause is the one worth a test of its own. Each of cwd,
+    /// selector and title is individually free to be large, and a
+    /// per-field check would let a request three times the intended
+    /// ceiling through the two byte-unbounded queues this validation
+    /// exists to protect (this connection's writer queue, then the helm's)
+    /// — the same reasoning `handle_create_session` applies to a create
+    /// arriving on the wire directly.
+    ///
+    /// The identical-bounds clause matters because `Clone` is a create
+    /// whose selector the HELM derives: a looser cap on it would be a way
+    /// to push bytes through the other verb's doorway, and the two field
+    /// lists overlapping only partially is exactly how such a gap gets
+    /// written by accident.
+    #[test]
+    fn validate_agent_verb_bounds_the_creating_verbs() {
+        // A builder rather than one base value spread with `..`: struct
+        // ENUM variants have no functional-update syntax, so varying one
+        // field at a time needs a closure.
+        let create = |host: Option<&str>,
+                      cwd: &str,
+                      invocation: Option<&str>,
+                      intent_key: Option<&str>| AgentVerb::Create {
+            host: host.map(str::to_string),
+            cwd: cwd.to_string(),
+            profile_name: None,
+            invocation: invocation.map(str::to_string),
+            title: None,
+            intent_key: intent_key.map(str::to_string),
+        };
+        assert!(
+            validate_agent_verb(&create(None, "/w", None, None)).is_ok(),
+            "a create naming only a directory is the ordinary shape"
+        );
+        assert!(
+            validate_agent_verb(&AgentVerb::Clone {
+                host: None,
+                cwd: None,
+                title: None,
+                intent_key: None,
+            })
+            .is_ok(),
+            "a clone naming nothing at all means \"another one of these, here\""
+        );
+
+        let empty_host = validate_agent_verb(&create(Some(""), "/w", None, None));
+        assert!(empty_host.unwrap_err().contains("empty"));
+
+        let control_host = validate_agent_verb(&AgentVerb::Clone {
+            host: Some("evil\nhost".to_string()),
+            cwd: None,
+            title: None,
+            intent_key: None,
+        });
+        assert!(control_host.unwrap_err().contains("control character"));
+
+        // Neither half exceeds the cap alone; together they do. A per-field
+        // check would accept this.
+        let half = "x".repeat(CREATE_FIELD_CAP / 2 + 1);
+        let summed = validate_agent_verb(&create(None, &half, Some(&half), None));
+        assert!(summed.unwrap_err().contains(&CREATE_FIELD_CAP.to_string()));
+
+        let summed_clone = validate_agent_verb(&AgentVerb::Clone {
+            host: Some(half.clone()),
+            cwd: Some(half),
+            title: None,
+            intent_key: None,
+        });
+        assert!(
+            summed_clone
+                .unwrap_err()
+                .contains(&CREATE_FIELD_CAP.to_string()),
+            "a clone is bounded by the same total a create is"
+        );
+
+        let empty_key = validate_agent_verb(&create(None, "/w", None, Some("")));
+        assert!(empty_key.unwrap_err().contains("empty"));
+
+        let oversized_key = validate_agent_verb(&AgentVerb::Clone {
+            host: None,
+            cwd: None,
+            title: None,
+            intent_key: Some("k".repeat(INTENT_KEY_CAP + 1)),
+        });
+        assert!(
+            oversized_key
+                .unwrap_err()
+                .contains(&INTENT_KEY_CAP.to_string())
         );
     }
 

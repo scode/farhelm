@@ -1300,11 +1300,30 @@ pub enum RestartMode {
 /// Internally tagged by `verb`, and every variant is a struct variant even
 /// where it currently carries nothing, so that giving a verb an argument
 /// later is an additive edit to that variant rather than a change of shape
-/// on the wire. This version adds the three lifecycle verbs — `rename`,
-/// `stop`, `archive` — beside the two read-only ones; the CREATING verbs
-/// (`create`, `clone`) stay deliberately absent rather than stubbed,
-/// because a verb that decodes and then refuses is indistinguishable, from
-/// the agent's side, from one that is broken.
+/// on the wire. The set is now complete for version 13: the two read-only
+/// listings, the three lifecycle verbs (`rename`, `stop`, `archive`), and
+/// the two CREATING verbs (`create`, `clone`) that were held back until
+/// the transport had carried real mutating traffic. All seven were added
+/// within one protocol version, so nothing on the wire distinguishes a
+/// build that has the creating verbs from one that does not — the
+/// version bump belongs to the relay as a whole, and a peer that speaks
+/// 13 speaks all of it.
+///
+/// ## The two creating verbs, and why they take a host NAME
+///
+/// `Create` and `Clone` both carry `host: Option<String>`, where `None`
+/// means the ASKING session's own host and `Some(name)` names any host in
+/// the fleet by the DISPLAY NAME [`AgentHost::name`] reports. A name
+/// rather than an id because ids are per-helm registry rows an agent has
+/// never been shown; the `hosts` listing is the catalog an agent reads a
+/// target out of, and the two verbs join to it on the one value that
+/// appears in both.
+///
+/// That widening is the point of routing creates through the helm at all.
+/// A supervisor-local implementation could create on the asking session's
+/// own host and nowhere else — it has no fleet, no host names, and no
+/// route to another machine — so "create over there" is precisely the
+/// capability this relay exists to add.
 ///
 /// EVERY verb is answered by the helm, including questions about the
 /// asking session's own host. One code path and one place for policy is
@@ -1371,6 +1390,79 @@ pub enum AgentVerb {
         /// `None` for the asking session; see the enum's own docs.
         session_id: Option<String>,
     },
+    /// Create a session on any host in the fleet — SPEC.md's creation verb
+    /// reached from inside a session. Answered with [`AgentReply::Created`].
+    ///
+    /// The agent selector is EXACTLY ONE of `profile_name` and
+    /// `invocation`, or neither. Naming both is refused rather than
+    /// arbitrated (a profile already says what to run, so there is no
+    /// honest merge), and naming neither falls back to the target host's
+    /// remembered default profile — the same "no `--agent`" behavior
+    /// `farhelm spawn` has, so an agent that just wants another session
+    /// like the ones already there does not have to name anything.
+    Create {
+        /// The target host's display NAME, or `None` for the asking
+        /// session's own host. See the enum's docs for why a name.
+        host: Option<String>,
+        /// Required: SPEC.md's creation contract has no default working
+        /// directory, and inheriting the asking session's would make
+        /// `create` a silent `clone`.
+        cwd: String,
+        /// A profile NAME resolved against the TARGET host's own catalog.
+        ///
+        /// A name, never an id: profile ids are minted per supervisor and
+        /// every fresh install seeds the same starter ids, so an id
+        /// carried across hosts does not fail — it RESOLVES, onto a
+        /// profile nobody chose. See [`AgentVerb::Clone`] for the same
+        /// rule stated as a resolution order.
+        profile_name: Option<String>,
+        /// A raw command line, the other half of the mutually exclusive
+        /// selector.
+        invocation: Option<String>,
+        /// Optional display title; absent lets the target host derive one
+        /// from the directory exactly as an interactive create does.
+        title: Option<String>,
+        /// The create's idempotency key, forwarded to the target
+        /// supervisor unchanged: a retry under the same key returns the
+        /// session the first attempt made rather than a second one.
+        intent_key: Option<String>,
+    },
+    /// Create a copy of the ASKING session on any host — same working
+    /// directory, same title, and the same agent — answered with
+    /// [`AgentReply::Created`].
+    ///
+    /// The source is always the asking session, never a named one. That is
+    /// narrower than the lifecycle verbs deliberately: "clone that session
+    /// over there" is expressible as a `Create` naming the same profile and
+    /// directory, so a `source_session` field would add a second way to
+    /// spell one thing while doubling the resolution rules below.
+    ///
+    /// AGENT RESOLUTION is the whole substance of this verb, and it has no
+    /// silent fallback:
+    ///
+    /// - Same host, and the source's profile id still exists there: by ID,
+    ///   which is exact.
+    /// - Otherwise, if the source came from a profile at all: by that
+    ///   profile's NAME against the TARGET host's catalog. No match is a
+    ///   refusal naming the host and the name — never a quiet downgrade to
+    ///   the source's raw invocation, which on another machine may point at
+    ///   a binary that is not there, or is a different build, or takes
+    ///   different flags.
+    /// - A source with no profile: its raw invocation, run on the target.
+    Clone {
+        /// The target host's display NAME, or `None` for the asking
+        /// session's own host — which is a legitimate ask ("another one of
+        /// these, right here"), not a degenerate case.
+        host: Option<String>,
+        /// Override the source's working directory. Absent copies it,
+        /// which is what makes a same-host clone mean "another session on
+        /// this project".
+        cwd: Option<String>,
+        /// Override the source's title. Absent copies it.
+        title: Option<String>,
+        /// See [`AgentVerb::Create::intent_key`].
+        intent_key: Option<String>,
+    },
 }
 
 /// The two ways an [`ControlMsg::AgentResponse`] can land.
@@ -1430,6 +1522,24 @@ pub enum AgentReply {
     /// `sessions` listing observes rather than something this reply could
     /// know synchronously.
     Stopped {},
+    /// Answers `Create` and `Clone`: the session that now exists, in the
+    /// same [`AgentSession`] shape a listing would show it in.
+    ///
+    /// A DISTINCT tag from [`AgentReply::Session`] even though the payload
+    /// is identical, because the two answer different questions and the tag
+    /// is the only thing a caller can check. `Session` means "the row you
+    /// asked me to change, as it is now"; this means "a row that did not
+    /// exist before". A CLI that printed the id of an existing session
+    /// under `create` — the confusion one shared tag invites — would hand
+    /// an agent a target it never made and might then go on to stop.
+    ///
+    /// `current` on this row is always false: the created session is not
+    /// the asking one. It is carried anyway rather than special-cased,
+    /// because this is the listing's projection and a reply that dropped
+    /// fields would be a second, nearly-identical shape to keep true.
+    Created {
+        session: AgentSession,
+    },
 }
 
 /// The recovery sentence every relay-produced [`ErrorKind::Unavailable`]
@@ -1456,9 +1566,9 @@ pub const AGENT_UNAVAILABLE_REMEDY: &str = "open the session in the farhelm UI a
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentHost {
     /// The host's display name — the same string the UI shows and the
-    /// value a later `create`/`clone` verb will name a target by. Names,
-    /// not ids, because ids are per-helm registry rows an agent has no way
-    /// to have learned.
+    /// value [`AgentVerb::Create`] and [`AgentVerb::Clone`] name a target
+    /// by. Names, not ids, because ids are per-helm registry rows an agent
+    /// has no way to have learned.
     pub name: String,
     /// `"local"` or `"ssh"`.
     pub kind: String,
@@ -7274,6 +7384,172 @@ mod tests {
         );
     }
 
+    /// Golden JSON for the two CREATING verbs and the `created` reply tag,
+    /// pinned for the reason [`lifecycle_agent_verbs_have_pinned_json_tags`]
+    /// gives: three independently built programs encode and decode these
+    /// bytes, so a field or tag renamed in one of them is invisible to any
+    /// test that round-trips through a single crate's own serializer.
+    ///
+    /// Two clauses here are not merely shape-pinning and are worth stating
+    /// as the spec they are.
+    ///
+    /// **`host` is a NAME and it is nullable.** Null means "the asking
+    /// session's own host", which is the ONLY way an agent can say "here" —
+    /// it has never been told what its own host is called. A serde change
+    /// that made the field required, or that skipped it when absent, would
+    /// turn every `--host`-less create into a decode failure at the helm.
+    ///
+    /// **Absent selectors serialize as explicit nulls.** `profile_name`,
+    /// `invocation`, `title` and `intent_key` are all `Option`, and the
+    /// helm distinguishes "neither selector" (fall back to the target's
+    /// remembered default) from "both" (a refusal). A `skip_serializing_if`
+    /// added to any of them would still decode, so the mistake would show
+    /// up only as behavior — which is exactly the kind of drift a golden
+    /// test is for.
+    #[test]
+    fn creating_agent_verbs_have_pinned_json_tags() {
+        let create = ControlMsg::AgentRequest {
+            req_id: 9,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Create {
+                host: Some("builder".to_string()),
+                cwd: "/srv/work".to_string(),
+                profile_name: Some("Claude Code".to_string()),
+                invocation: None,
+                title: Some("a title".to_string()),
+                intent_key: Some("key-1".to_string()),
+            },
+        };
+        assert_eq!(create.request_req_id(), Some(9));
+        assert_eq!(create.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&create).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 9,
+                "session_id": "s1",
+                "request": {
+                    "verb": "create",
+                    "host": "builder",
+                    "cwd": "/srv/work",
+                    "profile_name": "Claude Code",
+                    "invocation": null,
+                    "title": "a title",
+                    "intent_key": "key-1",
+                },
+            })
+        );
+
+        // Every optional absent: the "create one here, like the last one"
+        // shape, which is the one an agent sends when it names nothing but
+        // a directory.
+        let bare_create = ControlMsg::AgentRequest {
+            req_id: 10,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Create {
+                host: None,
+                cwd: "/srv/work".to_string(),
+                profile_name: None,
+                invocation: None,
+                title: None,
+                intent_key: None,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&bare_create).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 10,
+                "session_id": "s1",
+                "request": {
+                    "verb": "create",
+                    "host": null,
+                    "cwd": "/srv/work",
+                    "profile_name": null,
+                    "invocation": null,
+                    "title": null,
+                    "intent_key": null,
+                },
+            })
+        );
+
+        let clone = ControlMsg::AgentRequest {
+            req_id: 11,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Clone {
+                host: Some("builder".to_string()),
+                cwd: None,
+                title: None,
+                intent_key: None,
+            },
+        };
+        assert_eq!(clone.request_req_id(), Some(11));
+        assert_eq!(clone.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&clone).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 11,
+                "session_id": "s1",
+                "request": {
+                    "verb": "clone",
+                    "host": "builder",
+                    "cwd": null,
+                    "title": null,
+                    "intent_key": null,
+                },
+            })
+        );
+
+        let created = ControlMsg::AgentResponse {
+            req_id: 9,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Created {
+                    session: AgentSession {
+                        id: "s2".to_string(),
+                        host: "builder".to_string(),
+                        title: "a title".to_string(),
+                        cwd: "/srv/work".to_string(),
+                        agent: "Claude Code".to_string(),
+                        status: "running".to_string(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        };
+        assert_eq!(created.reply_req_id(), Some(9));
+        assert_eq!(created.request_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&created).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 9,
+                "outcome": {
+                    "result": "ok",
+                    "reply": {
+                        // `created`, NOT `session` — the distinct tag is the
+                        // only thing that tells a caller "this row is new"
+                        // apart from "this row is the one you changed".
+                        "reply": "created",
+                        "session": {
+                            "id": "s2",
+                            "host": "builder",
+                            "title": "a title",
+                            "cwd": "/srv/work",
+                            "agent": "Claude Code",
+                            "status": "running",
+                            "current": false,
+                            "archived": false,
+                            "stale": false,
+                        },
+                    },
+                },
+            })
+        );
+    }
+
     /// Both listing replies round-trip with every field intact, including
     /// the booleans a decoder could plausibly default away.
     ///
@@ -7359,6 +7635,23 @@ mod tests {
                 },
             },
             AgentReply::Stopped {},
+            // The created row carries `current: false` and nothing else
+            // distinguishing it from a `Session` payload, so the TAG is the
+            // whole difference — round-tripping it is what proves the tag
+            // survives a decode rather than collapsing into `session`.
+            AgentReply::Created {
+                session: AgentSession {
+                    id: "created".to_string(),
+                    host: "builder".to_string(),
+                    title: "fresh".to_string(),
+                    cwd: "/srv/work".to_string(),
+                    agent: "Claude Code".to_string(),
+                    status: String::new(),
+                    current: false,
+                    archived: false,
+                    stale: false,
+                },
+            },
         ] {
             let msg = ControlMsg::AgentResponse {
                 req_id: 9,
@@ -7377,17 +7670,48 @@ mod tests {
     /// The same rule `unknown_control_message_tag_fails_decode` pins one
     /// level up, restated for the inner enum because the outer message tag
     /// (`agent_request`) IS one this build knows: a lenient inner decode
-    /// would turn "clone this session", sent by a newer CLI once that verb
-    /// lands, into whatever arm happened to be first, which is the one
-    /// class of wire error the version-skew handshake cannot catch on its
-    /// own. `clone` is used here, rather than `rename`, precisely because
-    /// this version now HAS a `rename` arm — the enum's own docs name
-    /// `create`/`clone` as the still-absent verbs this test needs one of.
+    /// would turn a verb a newer CLI sends into whatever arm happened to be
+    /// first, which is the one class of wire error the version-skew
+    /// handshake cannot catch on its own.
+    ///
+    /// The verb name is an INVENTED one rather than a real-but-unreleased
+    /// one, and that is now a permanent property of this test rather than a
+    /// style choice. Version 13 shipped every verb the design calls for, so
+    /// there is no longer a genuine "next verb" to borrow; any name picked
+    /// from a roadmap would silently stop testing anything the day that
+    /// verb landed — which is exactly what happened to the `clone` this
+    /// test used to name.
+    ///
+    /// The second case is the complement, and it is the reason the first
+    /// one needs an unknown NAME rather than a known name with missing
+    /// fields: every field of `create`/`clone` past `cwd` is optional, so a
+    /// body naming a real verb and omitting them decodes to all-`None`.
+    /// That leniency is deliberate — a peer that omits nulls is speaking
+    /// the same protocol — and pinning it here keeps a future
+    /// `deny_unknown_fields`-style tightening from breaking such a peer
+    /// without anyone noticing.
     #[test]
     fn unknown_agent_verb_fails_decode() {
         let body = br#"{"type":"agent_request","req_id":1,"session_id":"s1",
-                        "request":{"verb":"clone"}}"#;
+                        "request":{"verb":"teleport"}}"#;
         serde_json::from_slice::<ControlMsg>(body)
             .expect_err("a verb this build has no arm for must not decode");
+
+        let omitted = br#"{"type":"agent_request","req_id":1,"session_id":"s1",
+                          "request":{"verb":"clone"}}"#;
+        assert_eq!(
+            serde_json::from_slice::<ControlMsg>(omitted)
+                .expect("omitted optionals decode as absent"),
+            ControlMsg::AgentRequest {
+                req_id: 1,
+                session_id: "s1".to_string(),
+                request: AgentVerb::Clone {
+                    host: None,
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                },
+            }
+        );
     }
 }
