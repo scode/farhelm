@@ -4,9 +4,112 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Three buckets, assigned by the maintainer: "near term" is what should be picked up next; "maybe later" is wanted but not
-soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either way. Within
-a bucket, no order.
+Four buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
+the decision is made, only the work remains; "near term" is what should be picked up next; "maybe later" is wanted but
+not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either way.
+Within a bucket, no order.
+
+## Definite simplification
+
+- Serve the session list WHOLE instead of paginating it at every layer. The user experience stays exactly as it is —
+  three sort orders, the "N matching of M" count, cross-client refresh, stale rows from unreachable hosts, the "could
+  not read to the end" notice — but the fleet this product is for is tens of sessions on a few hosts, not thousands, and
+  the machinery built to scale past that is the largest source of incidental complexity in the codebase: keyset cursors
+  at the wire AND at the helm (deliberately incompatible encodings), per-order database indexes with a per-host
+  `UNION ALL` page query, Rust-side Unicode title folding cut to 128 chars with a batched backfill migration, cursors
+  bound to order and filter, byte budgets as a second page cut, a bounded matching-count cache keyed to a store
+  generation, drain-to-exhaustion refresh with three termination bounds and wire-order validation, and in the UI the
+  "underfilled listing" predicate with its three readers plus a one-row creation-order fallback request — all of it
+  existing because sorting by mutable keys under pagination lets a row cross the cursor between two pages. The
+  replacement: each supervisor returns its list in one reply up to a hard cap (a few hundred rows); the helm merges the
+  hosts in memory, sorts in Rust, and hands the browser one array; a whole reply is a snapshot, so rows cannot move
+  between pages and the drift edge cases disappear with the pages. The cap is where the spec's "could not read to the
+  end" notice lives. Wire pagination contract goes too (protocol bump). SPEC EDITS, in the same PR: SPEC.md's Session
+  list section must state the scale assumption and the prohibition in so many words — the fleet is tens of sessions, the
+  list is served and rendered WHOLE up to a fixed cap of a few hundred, "could not read to the end" means the cap was
+  hit, and no pagination, cursors, streaming or incremental listing, or per-order server-side indexing is wanted at any
+  layer; it is fine for the helm and every client to hold and sort the entire fleet in memory. Without that sentence the
+  next agent re-derives pagination from "a list the client could not read to the end". SPEC_impl.md: delete "The page is
+  a PAGE all the way down", the three-orders/cursor/collation/matching-count bullets under Helm internals, the
+  drain-then-replace and wire-order-validation bullets, and the GUI section's underfilled-listing paragraphs; replace
+  with one paragraph describing the whole-list reply and cap. Write-up:
+  https://claude.ai/code/artifact/1352315d-aab4-43e9-8cb9-2f58c06b8b4e
+
+- Move the remembered sort order and last-selected session into the HELM, as one preference every client reads and
+  writes, and delete the per-client persistence. Today the browser keeps `farhelm.sort` and `farhelm.last-selected` in
+  localStorage and the desktop app mirrors both into `desktop-client.json` beside its credentials through a coalesced
+  eval round trip with an acknowledgement, a native in-memory mirror, and a read-merge under the auth state-file lock —
+  about 700 lines plus 1,000 of tests (`desktop.rs`, `desktop-auth.js`), all for the four words "and desktop relaunches"
+  in SPEC.md's session-list section. The replacement is a two-column row in helm.db behind a small REST pair; every
+  client fetches it once after authentication, which both engines already block the tree on, so first render is seeded
+  with no flicker, and writes it on change. Preferences then share no file with credentials at all. Two visible changes,
+  both to be recorded in SPEC.md, which today says "remembered per client": the values are shared across clients (a
+  browser tab and the desktop app open in the same order and on the same session — for one user and one helm, "where I
+  left off" rather than "where this window left off"), and opening a second client attaches to whatever was most
+  recently selected ANYWHERE, taking it over per the one-attached-client rule, where today it takes over that client's
+  own remembered session. Survival becomes a helm-restart story rather than a client one; a helm reinstall loses the
+  preference, which the best-effort clause in Errors and diagnostics already covers. SPEC EDITS, in the same PR: SPEC.md
+  Session list — replace "remembered per client across browser reloads and desktop relaunches" with "remembered by the
+  helm as one preference shared by every client", and say outright that no client keeps its own copy and that per-client
+  persistence (browser storage, a desktop state file, anything letting two clients remember different answers) is not
+  wanted. Terminal experience — "the session the user most recently had selected there — including after a desktop
+  relaunch" becomes "most recently selected from any client", with the takeover consequence named. Errors and
+  diagnostics — the best-effort exception is reworded from "desktop selection and sort across relaunches" to the
+  helm-side preference (a helm that lost it falls back to defaults). SPEC_impl.md GUI section: delete the
+  localStorage/`desktop-client.json`/eval-round-trip paragraphs. Write-up:
+  https://claude.ai/code/artifact/7d64a1a0-64fe-41f6-b9a3-610fd7b75434
+
+- Store the helm's remembered profile default as a bare id per registry row, and drop the install-identity binding, the
+  request preconditions, and the commit-after-cancel task around it (`crates/farhelm-helm/src/profiles.rs`, ~900 lines
+  plus ~2,200 of tests, and the `remembered_profiles.host_identity` column with its revalidation on every read). What
+  this touches is ONLY which entry the create dialog preselects; the catalog itself always comes live from whichever
+  supervisor the row currently reaches, and editing, deleting, and what a session snapshots at creation are untouched.
+  The binding exists for one moment: a row that once reached supervisor install A, where the last create used profile id
+  N, later reaches install B (wipe-and-reprovision, retarget, adopt). Every fresh supervisor seeds the same starter ids,
+  so B also has an id N under the same name; today the helm notices the identity changed and asks, whereas a bare id
+  preselects B's N — identical to A's unless the user had customised that starter on A, and even then a wrong DEFAULT in
+  a dropdown they can change before clicking create. SPEC.md's "asks instead of guessing" is about a profile that no
+  longer exists, which a bare id still honours (the catalog lookup fails, the dialog asks); the "exists but on another
+  install" extension is what goes. Also gone: the precondition on profile edits ("only if the host is still the
+  connection I prepared against" — an edit landing after a retarget just applies to the install that is there now, which
+  is where the catalog on screen came from on any realistic timescale) and the detached commit task (a save whose
+  browser disconnected mid-request relies on the next 3-second refresh to reach other clients instead of an immediate
+  push). SPEC EDITS, in the same PR: SPEC.md Sessions/Creation, after "defaults to the last-used profile on the target
+  host; if that profile no longer exists, the client asks" — add that "last-used" is a plain profile id remembered per
+  registry entry and that is the whole mechanism: not bound to the install behind the entry, no precondition, no
+  revalidation beyond the host's current catalog; a reinstalled or retargeted host with a profile under the same id gets
+  it preselected, accepted because a default is a suggestion in a dropdown, never an action; machinery to detect "same
+  id, different install" is not wanted. SPEC_impl.md: the profiles paragraph under Supervisor internals keeps its
+  per-host catalog rules; remove the "a default belongs to an INSTALL" reasoning wherever it appears. Write-up:
+  https://claude.ai/code/artifact/6476812c-681b-4d06-9b08-59911451f1e0
+
+- Remove every mechanism that preserves a terminal's last visible screen across the end of the process that drew it. The
+  whole feature, in user terms: when you stop or restart an agent that is on the alternate (full-screen) screen, its
+  final frame stays on screen instead of vanishing. Three mechanisms deliver it and all three go: (1) the stop-time
+  snapshot — `capture_alt_screen_before_stop` in `handlers.rs`/`core.rs`, the SGR-sanitising parser in
+  `tmux/snapshot.rs`, the 2 MiB-capped private store in `service/snapshots.rs` with its temp-file sweep, and
+  `send_dead_pane_snapshot` in `connection.rs` that appends it to a dead pane's replay; (2) the restart carry-over — the
+  same capture taken before the kill (`live_frame` in `restart_session`), `PaneRelaunchPlan::carry_over` read off a dead
+  pane, and `LaunchSpec::preamble`, which the launch shim writes into the new terminal BEFORE it execs the agent; (3)
+  the one-row shrink-and-restore in `plan_pane_relaunch` that pushes a primary-screen pane's visible grid into history
+  before `respawn-pane` wipes it. Roughly 1,250 lines for (1) plus the plan/preamble plumbing across `tmux.rs`,
+  `launch.rs`, and `core.rs`, and the e2e coverage of each. Mechanism (2) is the one the maintainer has been hitting as
+  a bug: after a restart the old agent's final screen is painted by the shim with no process behind it, looks ready,
+  accepts typing, and is then replaced when the real agent draws — a picture of a dead process presented as live. After
+  removal: stop leaves the pane showing whatever the terminal itself still holds (for a full-screen app, the primary
+  screen from before it started), restart leaves the pane blank until the new agent draws, and scrollback is whatever
+  tmux retained on its own. Reconnect replay of a LIVE terminal is a different thing and stays. SPEC EDITS, in the same
+  PR, and this one needs the negative language most because the feature was invented from a permissive sentence: SPEC.md
+  Lifecycle operations/Restart currently says "the previous run's output stays in scrollback" — change to "whatever
+  scrollback the terminal itself retained is still there" and add that restart does NOT preserve the previous run's last
+  visible screen: the pane is blank until the new agent draws, a full-screen program's final frame (never in scrollback
+  to begin with) is gone, losing it is accepted, and Farhelm must never capture a terminal's screen and paint it back
+  into a relaunched terminal ahead of the new process — a frame with no process behind it looks live, accepts typing,
+  and is overwritten when the real program draws, which is worse than blank. Terminal experience, beside "a stopped or
+  exited session's terminal stays viewable" — add that viewable means what the terminal itself holds; a full-screen
+  program's last frame is not retained after it exits and no snapshot of it is taken or stored. SPEC_impl.md: delete the
+  `PaneRelaunchPlan`/shrink paragraph and every mention of the stop-time alt-screen snapshot and the launch preamble.
+  Write-up: https://claude.ai/code/artifact/9422fb9d-2cc2-4a1f-a8dd-5876b9dda930
 
 ## Near term
 
@@ -95,6 +198,50 @@ a bucket, no order.
   edges, so the tooltip needs a body-level portal or `position: fixed` with measured coordinates — the row `…` menu's
   popover is the pattern to copy. If the native delay turns out tolerable, a `title` pass over the terse actions (stop /
   archive / delete, the host row's buttons) is an hour and needs none of this.
+
+- Consider dropping conversation-identity SCAN support and keeping only the per-launch hook. The resume promise stays;
+  what goes is the second mechanism. The hook is the agent's own answer and covers `/clear` and `/new`, which the scan
+  cannot see at all; the scan (`agent_kind/capture.rs`, `service/capture.rs`, and their e2e suites — roughly 6k lines)
+  exists only for launches where the hook cannot be attached (a profile already passing `--settings` or Codex hook
+  config, a bare `--`, or `FARHELM_AGENT_HOOKS` opting out) and for a hook that failed. Those launches would take the
+  fallback SPEC.md already defines for an uncaptured identity — restart says so and offers the resume template or a
+  fresh launch — and the vendor-record parsing that breaks whenever a vendor changes its on-disk layout goes away. The
+  spec edit is one clause in Durability and resume ("and scanned from the outside … otherwise", plus "Scanning stays the
+  fallback …"). Write-up: https://claude.ai/code/artifact/554790ce-c744-4daa-b9a5-151facdb1f42
+
+- Consider dropping the race-proofing around host identity, keeping the identity itself. To be clear about what stays:
+  the per-install identity the supervisor mints on first run and stores in its own database, independent of hostname and
+  address, so a retargeted row or a state directory moved to another machine is recognized as the same install; "never
+  silently merge" as a user-visible rule; and the mismatch surfaced with both identities and an adopt choice. What goes
+  is the machinery that closes millisecond windows in RECORDING it: the empty-slot-only compare-and-swap in
+  `record_first_contact`, the dialed-configuration check inside the same transaction (a retarget straddling a
+  handshake), the separate adopt CAS with in-transaction cache purge, the never-reused connection tokens that every
+  session-cache and mutation write carries, and the split of one "something is off" situation into three connection
+  states (`identity-mismatch`, `duplicate`, `identity-unverified`) each with its own remedy text and re-probe policy —
+  about 1,500 lines of helm implementation plus ~2,000 of tests across `store.rs`, `manager.rs`, and `hosts.rs`. The
+  replacement is check-and-ask: on connect, compare the reported identity with the stored one; equal or empty means
+  record and proceed, different means freeze and ask. The races it stops defending against need a retarget or a second
+  first-contact to land within one handshake of another, and even then the consequence is a wrong identity the next
+  connect flags as a mismatch, not a merge nobody sees. SPEC_impl.md's "structurally impossible at the storage layer"
+  and "SCHEMA invariant" paragraphs under Helm internals would be rewritten to say the check is a check. Write-up:
+  https://claude.ai/code/artifact/c3d3a74b-ae55-45c7-b3ca-fe30f9f97432
+
+- Replace `install.sh`'s park/journal/rollback with plain idempotency. The floor to keep: re-running the installer from
+  ANY intermediate state converges to a correct install, and no single binary is ever torn — download and extract into a
+  staging directory inside `$INSTALL_DIR`, verify, then `mv` each binary into place, which is an atomic rename on one
+  filesystem. Keep the outer brace group too; it is two lines and is what makes a truncated `curl | sh` execute nothing.
+  What goes is the transactional layer built on top of that: the `mkdir` lock with ownership checks, the
+  `PARK`/`INSTALL`/`UNDONE` journal, `rollback_from_journal`, the two rollback branches in the replacement loop, the
+  `.old` parking files and the refuse-unless helpers around them — about 220 of the script's 527 logic lines (the other
+  ~570 lines of the file are comments). Be honest about the size: the ~300 logic lines that remain are things any
+  correct installer needs — target detection with the Rosetta case, prerequisite probing, latest-version discovery,
+  `SHA256SUMS` handling, tar member validation, the `--version` cross-check, PATH and tmux advice, the closing messages
+  — and `test-install-sh.sh` mostly tests THOSE (404, checksum mismatch, malformed archives, versions, prerequisites,
+  the closing-message contract, the nothing-outside-`$INSTALL_DIR` diff); only the forced-failure rollback leg goes.
+  Given up: a kill between the two macOS binaries' renames leaves one new and one old until the next run (the desktop
+  shell finds its sibling by path, so a mismatch shows as a refusal, not silence), and a failure after placement no
+  longer restores the previous binaries — re-run instead. A modest cut, worth taking when someone is in the file anyway
+  rather than on its own.
 
 ## Unbucketized
 
