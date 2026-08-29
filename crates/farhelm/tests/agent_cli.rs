@@ -132,7 +132,12 @@ fn output_with_timeout(mut command: Command) -> Output {
 
 /// Start with no inherited Farhelm launch contract, then let each case add
 /// exactly the values it means to exercise.
-fn agent_command(socket: &std::path::Path, verb: &str) -> Command {
+///
+/// Every call site passes a single-element slice for `hosts`/`sessions`
+/// (no lifecycle verb's extra positional or `--session` arguments) —
+/// there is no separate single-verb wrapper, since a slice literal at the
+/// call site is exactly as short as a forwarding function would be.
+fn agent_command_with_args(socket: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
     for name in [
         "FARHELM_SESSION_ID",
@@ -142,7 +147,8 @@ fn agent_command(socket: &std::path::Path, verb: &str) -> Command {
         command.env_remove(name);
     }
     command
-        .args(["agent", verb])
+        .arg("agent")
+        .args(args)
         .env("FARHELM_SESSION_ID", "session-1")
         .env("FARHELM_SESSION_TOKEN", "secret")
         .env("FARHELM_SUPERVISOR_SOCK", socket);
@@ -201,7 +207,7 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "hosts"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["hosts"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(0));
@@ -292,7 +298,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "sessions"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["sessions"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(0));
@@ -350,7 +356,7 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "sessions"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["sessions"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(0));
@@ -396,7 +402,7 @@ fn a_refusal_is_the_supervisors_own_sentence_on_stderr() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "hosts"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["hosts"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(1));
@@ -486,7 +492,7 @@ fn agent_run_against(
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let (done, thread) = mock_supervisor(&socket, reply);
-    let output = output_with_timeout(agent_command(&socket, verb));
+    let output = output_with_timeout(agent_command_with_args(&socket, &[verb]));
     finish_server(done, thread);
     output
 }
@@ -625,4 +631,491 @@ fn a_reply_for_the_other_verb_is_refused() {
             "{case} must say what went wrong: {stderr}"
         );
     }
+}
+
+// ---------------------------------------------------------------
+// The three lifecycle verbs: what `farhelm agent rename/stop/archive`
+// sends, and the one confirmation line each prints on success.
+// ---------------------------------------------------------------
+
+/// Spec: `farhelm agent rename <title> --session <id>` sends exactly one
+/// `Rename` verb naming the given title and target, and prints the
+/// updated row's id and title as one plain confirmation line.
+///
+/// The confirmation reads from the REPLY's own fields (`AgentSession::id`/
+/// `title`), not from the CLI's own arguments — proving the helm's answer
+/// is what reaches the terminal rather than an echo of what was typed,
+/// which would still look right if the helm silently renamed something
+/// else. The mock's reply deliberately answers with an id and a title
+/// NEITHER of which equal what the CLI sent, which is what makes that
+/// distinction one this test can actually fail on: a reply that echoed the
+/// request's own `session_id`/`title` back would pass just as well whether
+/// the confirmation prints the reply or the argument.
+#[test]
+fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id,
+            session_id,
+            request,
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(session_id, "session-1", "the asking session's own id");
+        assert_eq!(
+            request,
+            AgentVerb::Rename {
+                session_id: Some("other-session".to_string()),
+                title: "new title".to_string(),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "resolved-session".to_string(),
+                        host: "this machine".to_string(),
+                        title: "the helm's own title".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["rename", "new title", "--session", "other-session"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "renamed resolved-session to \"the helm's own title\"\n",
+        "the confirmation must print the REPLY's fields, not an echo of the arguments sent"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: `farhelm agent stop`, with no `--session`, sends `Stop` naming no
+/// target — the substitution the helm resolves to the asking session — and
+/// the confirmation names the ASKING session, since `Stopped` itself
+/// carries no id to read one back from.
+#[test]
+fn stop_with_no_session_flag_sends_none_and_names_the_asking_session() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(request, AgentVerb::Stop { session_id: None });
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Stopped {},
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["stop"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "stopped session-1\n",
+        "with no --session, the confirmation names the injected asking session"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: `farhelm agent archive --session <id>` sends `Archive` naming that
+/// target and prints the archived row's id.
+#[test]
+fn archive_sends_the_named_target_and_prints_its_id() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Archive {
+                session_id: Some("other-session".to_string()),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "other-session".to_string(),
+                        host: "this machine".to_string(),
+                        title: "auth".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "exited".to_string(),
+                        current: false,
+                        archived: true,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["archive", "--session", "other-session"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "archived other-session\n"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: a rename confirmation is sanitized through the SAME cell-escaping
+/// the listing tables use — SPEC_impl.md's contract for every dynamic cell
+/// this CLI ever prints, extended here to the lifecycle confirmations.
+///
+/// A title is user-supplied fleet-wide text (the same field the `sessions`
+/// table's TITLE column escapes), so a control character in it must not
+/// reach the terminal raw: a bare `\x07` rings the bell and a raw newline
+/// would let a hostile or careless title split the confirmation into two
+/// lines, the second of which a script parsing "one line means success"
+/// would not expect.
+#[test]
+fn a_rename_confirmation_escapes_control_characters_in_the_title() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "sess-1".to_string(),
+                        host: "this machine".to_string(),
+                        title: "line one\nline two".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["rename", "line one\nline two"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout, "renamed sess-1 to \"line one\\nline two\"\n",
+        "the embedded newline must be escaped, not printed raw"
+    );
+    assert_eq!(
+        stdout.lines().count(),
+        1,
+        "one confirmation must stay one line even when the title is not: {stdout:?}"
+    );
+}
+
+/// Spec: a stop confirmation escapes control characters the same way a
+/// rename confirmation does — the sibling coverage
+/// [`a_rename_confirmation_escapes_control_characters_in_the_title`]
+/// establishes for `rename` alone.
+///
+/// `Stop`'s reply carries no fields (`AgentReply::Stopped` is empty), so
+/// the escaped value here is the TARGET id this process itself resolved —
+/// in this case the explicit `--session` argument — rather than anything
+/// read back from the helm. That argument is still fleet-wide-reachable
+/// text in the sense that matters: an agent forwarding an id it read from
+/// elsewhere (another session's listing, say) could carry one, and the
+/// printed confirmation must not let it forge a second line.
+#[test]
+fn a_stop_confirmation_escapes_control_characters_in_the_target() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Stopped {},
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["stop", "--session", "line one\nline two"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout, "stopped line one\\nline two\n",
+        "the embedded newline in the target id must be escaped, not printed raw"
+    );
+    assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
+}
+
+/// Spec: an archive confirmation escapes control characters the same way a
+/// rename confirmation does — the sibling coverage
+/// [`a_rename_confirmation_escapes_control_characters_in_the_title`]
+/// establishes for `rename` alone.
+///
+/// Unlike `stop` above, `archive`'s confirmation prints the REPLY's own
+/// `AgentSession::id` (see `main`'s `Archive` arm), so the control
+/// character here is planted in the mock's reply rather than in a CLI
+/// argument — proving the escaping applies to peer-supplied data, not only
+/// to this process's own resolved target.
+#[test]
+fn an_archive_confirmation_escapes_control_characters_in_the_id() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "line one\nline two".to_string(),
+                        host: "this machine".to_string(),
+                        title: "t".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "exited".to_string(),
+                        current: true,
+                        archived: true,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["archive"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout, "archived line one\\nline two\n",
+        "the embedded newline in the reply's id must be escaped, not printed raw"
+    );
+    assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
+}
+
+/// Spec: bare `farhelm agent rename <title>` (no `--session`) sends
+/// `Rename` with `session_id: None` — the asking-session substitution
+/// every other lifecycle verb already pins at this wire-encoding layer
+/// (see `stop_with_no_session_flag_sends_none_and_names_the_asking_session`
+/// for `Stop`'s own version of this contract), and here for `Rename`,
+/// which previously had no such coverage below the handler-test and e2e
+/// layers.
+#[test]
+fn bare_rename_sends_no_target_and_lets_the_helm_substitute_the_asker() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Rename {
+                session_id: None,
+                title: "new title".to_string(),
+            },
+            "omitting --session must send no target at all"
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "session-1".to_string(),
+                        host: "this machine".to_string(),
+                        title: "new title".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["rename", "new title"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "renamed session-1 to \"new title\"\n"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: bare `farhelm agent archive` (no `--session`) sends `Archive` with
+/// `session_id: None` — the asking-session substitution `Rename` and `Stop`
+/// already pin at this wire-encoding layer, and here for `Archive`, which
+/// previously had no such coverage below the handler-test and e2e layers
+/// (every existing `archive` test here named an explicit `--session`).
+#[test]
+fn bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Archive { session_id: None },
+            "omitting --session must send no target at all"
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "session-1".to_string(),
+                        host: "this machine".to_string(),
+                        title: "t".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "exited".to_string(),
+                        current: true,
+                        archived: true,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["archive"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "archived session-1\n"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: a rename title starting with a hyphen is sent verbatim as the
+/// title, not misparsed as an unrecognized flag.
+///
+/// `title` is a positional argument, and without clap's `allow_hyphen_values`
+/// a leading-hyphen value is indistinguishable to the parser from a flag it
+/// does not recognize — even though the supervisor itself places no such
+/// restriction on a title (SPEC.md's only rename refusal is a control
+/// character). Without the attribute this test's own title would make the
+/// CLI exit before ever opening a socket, and `mock_supervisor`'s
+/// "the agent CLI did not connect" timeout would be the failure, not a
+/// clean assertion on the request actually sent.
+#[test]
+fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Rename {
+                session_id: None,
+                title: "-not-a-flag".to_string(),
+            },
+            "a leading hyphen must reach the wire as ordinary title text"
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "session-1".to_string(),
+                        host: "this machine".to_string(),
+                        title: "-not-a-flag".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["rename", "-not-a-flag"]));
+    finish_server(done, thread);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "clap must accept the leading hyphen, got stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "renamed session-1 to \"-not-a-flag\"\n"
+    );
 }

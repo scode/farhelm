@@ -3294,6 +3294,52 @@ pub struct Supervisor {
     /// (see this struct's lock-discipline docs). Nothing acquires a
     /// lifecycle claim while holding either of the other two.
     pub(crate) lifecycle_locks: Arc<KeyedLocks>,
+    /// One claim per ASKING session id, held for the whole of a MUTATING
+    /// `AgentRequest` upcall (`Rename`/`Stop`/`Archive`) — see
+    /// `handlers::handle_agent_request`'s `AgentRequest` arm.
+    ///
+    /// This is a lease on the CREDENTIAL that admitted the upcall, not on
+    /// whatever the verb ends up acting on. `authenticates_session` is a
+    /// snapshot taken once, at the top of that handler, and the round trip
+    /// to the helm and back can run long enough for `DeleteSession` to
+    /// remove the very row that snapshot vouched for. Without a fence, a
+    /// session deleted in that window keeps its already-spent credential
+    /// good for a mutation that lands afterward — the authority the delete
+    /// was supposed to revoke, exercised on borrowed time. Holding this
+    /// claim across the upcall, and having [`handle_delete_session`]
+    /// (`super::handlers`) wait on the SAME key before it tears a session
+    /// down, closes that window: a delete targeting an id with an
+    /// in-flight fence waits for the fence to clear, by which point the
+    /// mutation it authorized has already completed.
+    ///
+    /// DELIBERATELY SEPARATE from `lifecycle_locks` above, keyed the same
+    /// way (by session id) though the two are never the same lock for the
+    /// same id. The obvious-looking alternative — reuse `lifecycle_locks`
+    /// for this fence too — deadlocks the common case: a self-targeting
+    /// verb (no `--session`, the asking session acting on itself) would
+    /// hold `lifecycle_locks(id)` on the way up while the mutation's OWN
+    /// execution, reached moments later through `StopSession`/
+    /// `RenameSession`/`ArchiveSession`, tries to claim the identical key
+    /// to do the work. Two registries mean the fence and the target's own
+    /// lifecycle claim can never be the same lock, so a self-targeting
+    /// verb cannot block on itself.
+    ///
+    /// LOCK ORDER relative to `lifecycle_locks`: `handle_delete_session` is
+    /// the only site that ever holds both, and it claims THIS registry
+    /// first, `lifecycle_locks` second. No other code path acquires
+    /// `lifecycle_locks` and then reaches for this one, so that single
+    /// fixed order is enough to rule out a cycle — reversing it would
+    /// reintroduce exactly the self-target deadlock the split above avoids
+    /// (a concurrent self-targeting mutation would then hold
+    /// `lifecycle_locks(id)` while waiting on this registry, which
+    /// `handle_delete_session` would be holding while waiting on
+    /// `lifecycle_locks(id)`).
+    ///
+    /// Read-only verbs (`Hosts`/`Sessions`) take no claim here: they change
+    /// nothing durable, so a delete racing a listing has nothing to
+    /// protect against, and serializing them behind an unrelated delete
+    /// would cost latency for no correctness gain.
+    pub(crate) agent_request_locks: Arc<KeyedLocks>,
     /// The home directory the agents' own record trees hang off
     /// (PLAN_M3.md item 8), resolved once at construction from
     /// `SupervisorSeams::agent_home` or `$HOME`.
@@ -3645,6 +3691,7 @@ impl Supervisor {
             may_record: std::sync::atomic::AtomicBool::new(may_record),
             intent_locks: Arc::new(KeyedLocks::default()),
             lifecycle_locks: Arc::new(KeyedLocks::default()),
+            agent_request_locks: Arc::new(KeyedLocks::default()),
             agent_home,
             user_home,
             capture_window,

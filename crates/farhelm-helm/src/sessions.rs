@@ -1101,23 +1101,32 @@ async fn remember_default_profile(
     }
 }
 
-/// `POST /api/sessions/{id}/stop` — kill the agent's process tree, leaving
-/// the session listed and its terminal viewable (SPEC.md's "stop", the
-/// recoverable operation the UI does not confirm). The body carries no
-/// information beyond success — an empty JSON object, so the response
-/// shape stays uniform with `delete_session` below and callers do not
-/// need to special-case "no content" bodies. An `id` the merged view does
-/// not know is a 404 from [`route_session`] before any host is contacted,
-/// and a session whose host is not connected is a 409 naming that state.
+/// Route to `id`'s owning host and kill its agent's process tree, leaving
+/// the session listed and its terminal viewable (SPEC.md's "stop").
+///
+/// Shared verbatim between [`stop_session`] below and the agent relay's
+/// `Stop` verb (`agent_requests::HelmAgentRequests::handle`): both need
+/// exactly "route, then ask the owning supervisor to stop it", and nothing
+/// else — a stop's reply carries no fresh state to record, unlike rename
+/// and archive, which is what keeps this helper simpler than
+/// [`do_rename_session`]/[`do_archive_session`].
+pub(crate) async fn do_stop_session(state: &AppState, id: &str) -> anyhow::Result<()> {
+    let (_claim, client) = route_session(state, id).await?;
+    client.stop_session(id).await
+}
+
+/// `POST /api/sessions/{id}/stop` — the recoverable operation the UI does
+/// not confirm. The body carries no information beyond success — an empty
+/// JSON object, so the response shape stays uniform with `delete_session`
+/// below and callers do not need to special-case "no content" bodies. An
+/// `id` the merged view does not know is a 404 from [`route_session`]
+/// before any host is contacted, and a session whose host is not connected
+/// is a 409 naming that state.
 pub(crate) async fn stop_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    let (_claim, client) = match route_session(&state, &id).await {
-        Ok(routed) => routed,
-        Err(e) => return http_error(e),
-    };
-    match client.stop_session(&id).await {
+    match do_stop_session(&state, &id).await {
         Ok(()) => axum::Json(serde_json::json!({})).into_response(),
         Err(e) => http_error(e),
     }
@@ -1328,61 +1337,85 @@ pub(crate) struct RenameReq {
     title: String,
 }
 
+/// Route to `id`'s owning host, ask it to change the title, and record the
+/// fresh reply — the sequence [`rename_session`] below and the agent
+/// relay's `Rename` verb (`agent_requests::HelmAgentRequests::handle`) both
+/// need, and ONLY that sequence: `title` still reaches
+/// `SupervisorClient::rename_session` VERBATIM, with no trimming or
+/// validation on this side (see [`rename_session`]'s own docs for why).
+///
+/// Returns the [`manager::SessionClaim`] alongside the fresh
+/// `SessionInfo` so a caller that must name the OWNING HOST — the agent
+/// relay's reply needs it for `AgentSession::host` — is not forced to
+/// re-route just to learn what this call already knew; the REST handler
+/// below ignores it.
+pub(crate) async fn do_rename_session(
+    state: &AppState,
+    id: &str,
+    title: &str,
+) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
+    let (claim, client) = route_session(state, id).await?;
+    let session = client.rename_session(id, title).await?;
+    record_session(state, &claim, &session).await;
+    Ok((claim, session))
+}
+
 /// `POST /api/sessions/{id}/rename` — SPEC.md's rename verb (PLAN_M5.md
 /// item 4).
 ///
-/// Pure passthrough, deliberately: `req.title` reaches
-/// `SupervisorClient::rename_session` VERBATIM, with no trimming and no
-/// local validation. The supervisor is the sole authority on what title is
-/// acceptable — control characters are refused, and a title over the 64
-/// KiB field cap is refused, but every value that clears both (including
-/// an explicit empty title) is accepted — so a helm-side check would only
-/// be a second copy of that rule with its own chance to drift; a refused
-/// title comes back through the same `ErrorKind`→status table every other
-/// route uses (`InvalidRequest` 400, `NotFound` 404 for an unknown
-/// session), and the accepted case answers with the session's freshly
-/// recomputed `SessionInfo`, matching `get_session`'s and `restart_session`'s
-/// success shape so a caller can re-render the row without listing again.
+/// Pure passthrough, deliberately: the supervisor is the sole authority on
+/// what title is acceptable — control characters are refused, and a title
+/// over the 64 KiB field cap is refused, but every value that clears both
+/// (including an explicit empty title) is accepted — so a helm-side check
+/// would only be a second copy of that rule with its own chance to drift;
+/// a refused title comes back through the same `ErrorKind`→status table
+/// every other route uses (`InvalidRequest` 400, `NotFound` 404 for an
+/// unknown session), and the accepted case answers with the session's
+/// freshly recomputed `SessionInfo`, matching `get_session`'s and
+/// `restart_session`'s success shape so a caller can re-render the row
+/// without listing again.
 pub(crate) async fn rename_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RenameReq>,
 ) -> impl IntoResponse {
-    let (claim, client) = match route_session(&state, &id).await {
-        Ok(routed) => routed,
-        Err(e) => return http_error(e),
-    };
-    match client.rename_session(&id, &req.title).await {
-        Ok(session) => {
-            record_session(&state, &claim, &session).await;
-            axum::Json(session).into_response()
-        }
+    match do_rename_session(&state, &id, &req.title).await {
+        Ok((_claim, session)) => axum::Json(session).into_response(),
         Err(e) => http_error(e),
     }
+}
+
+/// Route to `id`'s owning host, ask it to archive the session, and record
+/// the fresh reply — [`archive_session`] below and the agent relay's
+/// `Archive` verb share this sequence for the same reason
+/// [`do_rename_session`] documents.
+///
+/// The supervisor returns the durable post-teardown state, including for an
+/// idempotent retry. Recording that exact reply before returning makes the
+/// default list hide the row immediately and publishes the ordinary
+/// changed-only fleet event.
+pub(crate) async fn do_archive_session(
+    state: &AppState,
+    id: &str,
+) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
+    let (claim, client) = route_session(state, id).await?;
+    let session = client.archive_session(id).await?;
+    record_session(state, &claim, &session).await;
+    Ok((claim, session))
 }
 
 /// `POST /api/sessions/{id}/archive` — stop the session's agent and tabs,
 /// remove its terminal, and retain its metadata and attachments.
 ///
-/// The supervisor returns the durable post-teardown state, including for an
-/// idempotent retry. Recording that exact reply before answering makes the
-/// default list hide the row immediately and publishes the ordinary
-/// changed-only fleet event. Owner routing happens first, so an archive on
+/// Owner routing happens first ([`do_archive_session`]), so an archive on
 /// an unreachable host is refused with that host's state rather than
 /// pretending the retained session is missing.
 pub(crate) async fn archive_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    let (claim, client) = match route_session(&state, &id).await {
-        Ok(routed) => routed,
-        Err(e) => return http_error(e),
-    };
-    match client.archive_session(&id).await {
-        Ok(session) => {
-            record_session(&state, &claim, &session).await;
-            axum::Json(session).into_response()
-        }
+    match do_archive_session(&state, &id).await {
+        Ok((_claim, session)) => axum::Json(session).into_response(),
         Err(e) => http_error(e),
     }
 }

@@ -674,7 +674,14 @@ there is nothing on its side to check against. That is sound because a full-auth
 helm's own provisioned install, holding complete authority over every session on its host: a helm that could not trust
 it for a fleet-wide read could not route a single operation to it either. What the helm does check is that the
 connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. So 13 is
-the current protocol version, and the frozen changelog stops at 11.
+the current protocol version, and the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/
+`Archive`, added additively within the version rather than as a version bump of their own — which was possible ONLY
+because 13 itself had not yet shipped when they landed, still being developed on this branch with no released build
+speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to keep adding to 13
+after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own, same as any
+other. Each verb is routed and recorded through the exact same `sessions.rs` functions (`route_session`, the client
+call, `record_session`) the REST `/rename`/`/stop`/`/archive` routes use, so a refusal an agent reads is the identical
+sentence the UI would have shown.
 
 The two read verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is drained by cursor under two ceilings — a fixed
@@ -1278,6 +1285,16 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no timeout of its
   own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see the transport
   section's version-13 paragraph).
+- `farhelm agent rename <title> [--session <id>]`, `farhelm agent stop [--session <id>]`, and
+  `farhelm agent archive [--session <id>]` — the in-session ACTING CLI, on the same relay and credential. Omitting
+  `--session` acts on the asking session itself; naming one acts on any session the helm knows, on any host — the same
+  wider-than-spawn authority the read-only verbs already have. Success prints one plain confirmation line on stdout
+  (`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), its dynamic cells run through the same escaping the
+  listing tables use, so a scripted caller gets exactly one line rather than a table with one row — with one carve-out
+  this contract cannot avoid: a bare `stop`/`archive` (no `--session`) ends the ASKING session's own process tree, and
+  the host-wide marker sweep that reaches can SIGTERM the `farhelm agent` process itself before it prints anything at
+  all. That is not a bug in the CLI — stopping or archiving yourself is supposed to end the whole tree, calling CLI
+  included — so a caller that needs the confirmation line should target a session other than its own.
 
 Internal commands live under a hidden-from-help `internal` namespace — `farhelm internal stdio` is the ssh-exec stdio
 proxy. (An underscore prefix like `_stdio` was considered; it is not a recognized convention, while an explicit

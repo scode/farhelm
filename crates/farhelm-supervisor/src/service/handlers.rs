@@ -70,8 +70,8 @@ impl CreateAdmission {
 }
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, MAX_PROFILES_PER_HOST, RestartMode, SessionInfo,
-    TerminalSelector,
+    AgentKind, AgentVerb, ControlMsg, ErrorKind, Frame, MAX_PROFILES_PER_HOST,
+    MAX_SESSION_ID_BYTES, RestartMode, SessionInfo, TerminalSelector,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1113,6 +1113,17 @@ async fn handle_delete_session(
     // teardown or release its admission slot early.
     let mutation = tokio::spawn(async move {
         let outcome = async {
+            // Claimed BEFORE the lifecycle lock, and that order is load-
+            // bearing (see `Supervisor::agent_request_locks`). An asking
+            // session's own credential is validated once, at the top of
+            // the `AgentRequest` handler, and this delete may be racing a
+            // mutation that credential already authorized — a rename,
+            // stop, or archive still in flight up to the helm and back.
+            // Waiting here for that fence to clear means such a mutation
+            // always finishes against a session this delete has not yet
+            // torn down, rather than the delete invalidating the very
+            // credential mid-flight.
+            let _agent_fence = mutation_sup.agent_request_locks.claim(&mutation_id).await;
             let _lifecycle = mutation_sup.lifecycle_locks.claim(&mutation_id).await;
             let entry = mutation_sup
                 .sessions
@@ -3158,26 +3169,54 @@ pub(crate) async fn handle_restricted_control(
             session_id,
             request,
         } => {
-            // NO lifecycle claim, for `ReportConversation`'s reason and
-            // one more: the two verbs this version carries are read-only
-            // questions answered by another process entirely, so there is
-            // nothing here to serialize against a delete — and holding a
-            // claim across a round trip to the helm would put an unrelated
-            // restart or stop behind a peer that may be waiting out the
-            // full upcall budget.
+            // NO claim on `lifecycle_locks` — that registry is keyed by
+            // the TARGET of a mutation, and this request may not even name
+            // a session on this host (a `Some(id)` target can live
+            // anywhere in the fleet, and the two read-only verbs name no
+            // session at all). Taking it here would also serialize an
+            // unrelated restart or stop behind a peer that may be waiting
+            // out the full upcall budget, for no correctness gain.
+            //
+            // What IS held, for the three MUTATING verbs only, is a claim
+            // on `agent_request_locks` keyed by THIS connection's OWN
+            // asking session id — see that field's docs for the full
+            // reasoning. In short: `authenticates_session` below is a
+            // snapshot taken once, not a lease held for the round trip,
+            // and the trip to the helm and back can run long enough for
+            // `DeleteSession` to remove the very row that snapshot vouched
+            // for. Holding the claim is what keeps a delete from
+            // invalidating this credential out from under a mutation it
+            // already authorized. Read-only verbs take no claim: nothing
+            // they return is durable, so a delete racing a listing has
+            // nothing to protect against.
             //
             // Every refusal below is an `AgentResponse` rather than a bare
             // `Error`: this exchange has two hops and refusals from both,
             // and one reply shape means the asking CLI decodes exactly one
             // thing (see `ControlMsg::AgentRequest`'s docs).
+            let is_mutation = matches!(
+                request,
+                AgentVerb::Rename { .. } | AgentVerb::Stop { .. } | AgentVerb::Archive { .. }
+            );
             let outcome = match sup
                 .store
                 .authenticates_session(&auth.session_id, &auth.token)
                 .await
             {
-                Ok(true) if session_id == auth.session_id => {
-                    sup.relay_agent_request(session_id, request).await
-                }
+                Ok(true) if session_id == auth.session_id => match validate_agent_verb(&request) {
+                    Ok(()) => {
+                        let _fence = if is_mutation {
+                            Some(sup.agent_request_locks.claim(&auth.session_id).await)
+                        } else {
+                            None
+                        };
+                        sup.relay_agent_request(session_id, request).await
+                    }
+                    Err(message) => farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::InvalidRequest,
+                        message,
+                    },
+                },
                 // A credential for one session is not authority to ask
                 // questions as another. The check is here rather than at
                 // the far end because the helm never sees the credential:
@@ -3215,6 +3254,73 @@ pub(crate) async fn handle_restricted_control(
                 },
             )
             .await;
+        }
+    }
+}
+
+/// Bound and sanitize an `AgentRequest`'s TARGET before it is logged or
+/// relayed anywhere.
+///
+/// This is the first hop under this connection's own control, and the only
+/// one able to enforce a bound cheaply: an explicit `session_id` target and
+/// a `Rename` `title` otherwise ride two more shared, byte-unbounded queues
+/// — this connection's writer queue, then the helm's own — before
+/// `route_session` at the far end ever gets a chance to reject an oversized
+/// or unknown one. Rejecting here, before either queue ever sees the
+/// bytes, is also what keeps a control character or an empty string out of
+/// `resolve_target`'s `info!` audit line on the helm side: that function
+/// logs `target` verbatim on the assumption that whatever reaches it has
+/// already been validated, which before this function existed was not
+/// true.
+///
+/// The bounds mirror ones enforced elsewhere for the SAME kind of value —
+/// [`MAX_SESSION_ID_BYTES`] is the connection hello's own cap on a session
+/// id, and [`CREATE_FIELD_CAP`] is `RenameSession::title`'s existing 64 KiB
+/// field cap — rather than inventing new numbers: a target or a title that
+/// would be refused when read straight off the wire elsewhere should be
+/// refused here too, before it ever leaves this process a second time.
+///
+/// Read-only verbs carry no such field and always pass.
+fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
+    fn validate_target(target: &Option<String>) -> Result<(), String> {
+        let Some(target) = target else {
+            return Ok(());
+        };
+        if target.is_empty() {
+            return Err(
+                "an explicit --session target must not be empty; omit --session to act on the \
+                 asking session instead"
+                    .to_string(),
+            );
+        }
+        if target.len() > MAX_SESSION_ID_BYTES {
+            return Err(format!(
+                "an explicit --session target is {} bytes, exceeding the {MAX_SESSION_ID_BYTES}-\
+                 byte limit every session id is already held to",
+                target.len()
+            ));
+        }
+        if target.chars().any(char::is_control) {
+            return Err(
+                "an explicit --session target must not contain control characters".to_string(),
+            );
+        }
+        Ok(())
+    }
+    match verb {
+        AgentVerb::Hosts {} | AgentVerb::Sessions {} => Ok(()),
+        AgentVerb::Rename { session_id, title } => {
+            validate_target(session_id)?;
+            if title.len() > CREATE_FIELD_CAP {
+                return Err(format!(
+                    "title is {} bytes, exceeding the {CREATE_FIELD_CAP}-byte limit",
+                    title.len()
+                ));
+            }
+            Ok(())
+        }
+        AgentVerb::Stop { session_id } | AgentVerb::Archive { session_id } => {
+            validate_target(session_id)
         }
     }
 }
@@ -4185,6 +4291,150 @@ mod tests {
         )
         .await;
         (tasks, rx)
+    }
+
+    /// Spec: an in-flight `AgentRequest` mutation's fence on session `id` —
+    /// `Supervisor::agent_request_locks`, claimed by `handle_restricted_control`
+    /// for the whole of a `Rename`/`Stop`/`Archive` upcall — makes a
+    /// concurrent `DeleteSession` for the SAME id wait, rather than let the
+    /// delete invalidate the credential that mutation was authorized under.
+    ///
+    /// This is the mechanism the `AgentRequest` arm's stale comment used to
+    /// contradict ("the two verbs this version carries are read-only
+    /// questions"): with mutating verbs on the wire, a session deleted
+    /// between its credential's one-time validation and the mutation's
+    /// completion would otherwise keep authority it had already lost. The
+    /// fence is claimed directly here, the way the `AgentRequest` handler
+    /// itself would, rather than by driving a real relay round trip —
+    /// exercising the relay's own routing belongs to
+    /// `tests/e2e/agent_relay.rs`, and this test's whole point is the LOCAL
+    /// ordering guarantee this crate owns end to end.
+    ///
+    /// No session row exists for `s1` in this fixture, which is deliberate:
+    /// the interesting fact is that the delete WAITS while the fence is
+    /// held, not what it finds once it looks — so it resolves to `NotFound`
+    /// the moment it is finally allowed to run, and a `SessionDeleted`
+    /// here would mean the test built a real session by accident and
+    /// stopped exercising the fence.
+    #[tokio::test]
+    async fn restricted_delete_waits_for_an_in_flight_agent_request_fence() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let fence = sup.agent_request_locks.claim("s1").await;
+
+        let (mut delete_tasks, mut delete_rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::DeleteSession {
+                req_id: 1,
+                session_id: "s1".to_string(),
+            },
+        )
+        .await;
+        tokio::task::yield_now().await;
+        assert!(
+            matches!(
+                delete_rx.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "delete must wait while an agent-request fence is held on the same session"
+        );
+
+        drop(fence);
+        delete_tasks.join_next().await.unwrap().unwrap();
+        let reply: ControlMsg =
+            serde_json::from_slice(&delete_rx.try_recv().unwrap().body).unwrap();
+        assert!(
+            matches!(
+                reply,
+                ControlMsg::Error {
+                    req_id: 1,
+                    kind: ErrorKind::NotFound,
+                    ..
+                }
+            ),
+            "expected a not-found refusal once the fence cleared, got {reply:?}"
+        );
+    }
+
+    /// Spec: the `agent_request_locks` fence and a session's own
+    /// `lifecycle_locks` claim are independent locks even for the identical
+    /// id — the property that keeps a self-targeting lifecycle verb (no
+    /// `--session`: the asking session acting on itself) from deadlocking
+    /// against its own fence.
+    ///
+    /// See `Supervisor::agent_request_locks`'s docs for the two-thread
+    /// argument this pins: if the fence reused `lifecycle_locks` for the
+    /// same key, a self-stop's own target-side execution — which claims
+    /// `lifecycle_locks` for that same id — would wait forever on a fence
+    /// held by the very upcall waiting for it to finish. Wrapped in an
+    /// explicit timeout rather than left to hang, so a regression here
+    /// fails this test instead of wedging the run.
+    #[tokio::test]
+    async fn agent_request_fence_does_not_block_the_same_ids_lifecycle_claim() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let _fence = sup.agent_request_locks.claim("s1").await;
+
+        let claimed =
+            tokio::time::timeout(Duration::from_secs(2), sup.lifecycle_locks.claim("s1")).await;
+        assert!(
+            claimed.is_ok(),
+            "a lifecycle claim on the same id must not be blocked by an agent-request fence"
+        );
+    }
+
+    /// Spec: `validate_agent_verb` bounds and sanitizes exactly the fields
+    /// the merged review flagged as unbounded at this hop — an explicit
+    /// `--session` target and a `Rename` title — while leaving the two
+    /// read-only verbs, and every otherwise-legal target/title, untouched.
+    #[test]
+    fn validate_agent_verb_bounds_targets_and_titles() {
+        assert!(validate_agent_verb(&AgentVerb::Hosts {}).is_ok());
+        assert!(validate_agent_verb(&AgentVerb::Sessions {}).is_ok());
+        assert!(
+            validate_agent_verb(&AgentVerb::Stop { session_id: None }).is_ok(),
+            "omitting --session (asking-session substitution) is always valid"
+        );
+        assert!(
+            validate_agent_verb(&AgentVerb::Stop {
+                session_id: Some("other".to_string())
+            })
+            .is_ok()
+        );
+
+        let empty = validate_agent_verb(&AgentVerb::Stop {
+            session_id: Some(String::new()),
+        });
+        assert!(empty.unwrap_err().contains("empty"));
+
+        let oversized = validate_agent_verb(&AgentVerb::Archive {
+            session_id: Some("x".repeat(MAX_SESSION_ID_BYTES + 1)),
+        });
+        assert!(
+            oversized
+                .unwrap_err()
+                .contains(&MAX_SESSION_ID_BYTES.to_string())
+        );
+
+        let control_char = validate_agent_verb(&AgentVerb::Rename {
+            session_id: Some("evil\nid".to_string()),
+            title: "fine".to_string(),
+        });
+        assert!(control_char.unwrap_err().contains("control character"));
+
+        let oversized_title = validate_agent_verb(&AgentVerb::Rename {
+            session_id: None,
+            title: "x".repeat(CREATE_FIELD_CAP + 1),
+        });
+        assert!(
+            oversized_title
+                .unwrap_err()
+                .contains(&CREATE_FIELD_CAP.to_string())
+        );
     }
 
     /// An archived session still exists, so attach names that state as an

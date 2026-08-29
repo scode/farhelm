@@ -1595,10 +1595,10 @@ impl SupervisorClient {
     /// an answer in progress is a database walk and a multi-megabyte
     /// allocation being done for a dead peer.
     ///
-    /// ## The origin is checked twice
+    /// ## The origin is checked twice — but ONLY for a read-only verb
     ///
     /// The handler checks it on the way in (that is where `current` is
-    /// computed from), and this checks it again with
+    /// computed from), and for `Hosts`/`Sessions` this checks it again with
     /// [`crate::agent_requests::AgentRequestHandler::origin_is_live`]
     /// immediately before an ANSWER is enqueued. The listing between the
     /// two awaits on the database and the manager, and a host that was
@@ -1608,6 +1608,25 @@ impl SupervisorClient {
     /// the old connection's host as `current` while the row now belongs to
     /// someone else — so the answer is dropped for a refusal the agent can
     /// retry.
+    ///
+    /// A `Rename`/`Stop`/`Archive` that came back `Ok` skips this second
+    /// check entirely, and that is not an oversight: by the time `Ok`
+    /// reaches here the mutation has already happened, non-retriably, at
+    /// its target. Reporting it as [`not_ready`]'s `Unavailable` — which
+    /// callers read as "never happened, safe to repeat" — would be false
+    /// for an action that just took effect; a retry could re-rename,
+    /// re-stop, or re-target the wrong session on the strength of a lie
+    /// this connection told about its own liveness. The ENTRY check inside
+    /// `handle` already refused the mutation outright if the connection
+    /// was stale before any of it ran (see that function's own docs); there
+    /// is no honest "undo" once it has run, so the exit check is skipped
+    /// rather than made to lie. This also sidesteps the one thing the exit
+    /// check could still have caught for these verbs — a `Rename`/`Archive`
+    /// reply's own host name going stale in the same window — because
+    /// `agent_requests::agent_session_reply` now pins that name (and marks
+    /// the row `stale` when it cannot) against the SAME incarnation the
+    /// mutation itself routed through, rather than a fresh, unchecked
+    /// lookup this check would otherwise be guarding.
     ///
     /// Fire-and-forget on the writer queue: a response that cannot be
     /// enqueued means the connection is going away, and the supervisor's
@@ -1629,6 +1648,16 @@ impl SupervisorClient {
             );
             return;
         };
+        // Captured before `request` is moved into `handler.handle` below —
+        // see this method's own docs ("The origin is checked twice") for
+        // why a MUTATING verb's successful outcome must not be re-judged
+        // against the origin's liveness the way a listing's is.
+        let is_mutation = matches!(
+            request,
+            farhelm_proto::AgentVerb::Rename { .. }
+                | farhelm_proto::AgentVerb::Stop { .. }
+                | farhelm_proto::AgentVerb::Archive { .. }
+        );
         let writer_tx = self.writer_tx.clone();
         let task = tokio::spawn(async move {
             let outcome = match agent.handler.get() {
@@ -1638,10 +1667,11 @@ impl SupervisorClient {
                     // entry check: the lookup that produced this answer has
                     // been awaiting all along, and the question that matters
                     // is whether the connection is current NOW, one step
-                    // before the frame is queued.
+                    // before the frame is queued. Skipped for a completed
+                    // mutation — see this method's docs.
                     match outcome {
                         farhelm_proto::AgentOutcome::Ok { .. }
-                            if !handler.origin_is_live(agent.origin) =>
+                            if !is_mutation && !handler.origin_is_live(agent.origin) =>
                         {
                             not_ready("the host connection was replaced; retry")
                         }
@@ -5797,6 +5827,102 @@ mod tests {
                 reply: farhelm_proto::AgentReply::Hosts { hosts },
             } => assert_eq!(hosts.len(), 1),
             other => panic!("a filled slot must answer, got {other:?}"),
+        }
+    }
+
+    /// A handler whose ENTRY check would pass but whose EXIT check always
+    /// says the connection is no longer current — the exact shape
+    /// `spawn_agent_answer`'s second `origin_is_live` call exists to catch,
+    /// isolated from any real retarget/adoption race so it can be produced
+    /// on demand.
+    struct StaleExitHandler {
+        reply: farhelm_proto::AgentReply,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::agent_requests::AgentRequestHandler for StaleExitHandler {
+        async fn handle(
+            &self,
+            _origin: crate::agent_requests::AgentOrigin,
+            _session_id: &str,
+            _verb: farhelm_proto::AgentVerb,
+        ) -> farhelm_proto::AgentOutcome {
+            farhelm_proto::AgentOutcome::Ok {
+                reply: self.reply.clone(),
+            }
+        }
+
+        fn origin_is_live(&self, _origin: crate::agent_requests::AgentOrigin) -> bool {
+            false
+        }
+    }
+
+    /// Spec: a completed READ-ONLY listing whose origin has gone stale by
+    /// the time the answer is ready is downgraded to `Unavailable` — the
+    /// exit re-check `spawn_agent_answer`'s docs describe, still armed for
+    /// the two verbs it protects.
+    ///
+    /// This is the control for
+    /// [`a_stale_origin_does_not_downgrade_a_completed_mutation`]: without
+    /// it, a mutating verb skipping the check would be indistinguishable
+    /// from BOTH verb classes never being checked at all.
+    #[tokio::test]
+    async fn a_stale_origin_downgrades_a_completed_listing_to_unavailable() {
+        let handler = Arc::new(StaleExitHandler {
+            reply: farhelm_proto::AgentReply::Hosts { hosts: Vec::new() },
+        });
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
+            handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+        ));
+        let (_client, mut peer) = agent_connection(slot).await;
+
+        peer.ask(1, farhelm_proto::AgentVerb::Hosts {}).await;
+        match peer.outcome(1).await {
+            farhelm_proto::AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, farhelm_proto::ErrorKind::Unavailable);
+                assert!(
+                    message.contains("replaced"),
+                    "the refusal must name the cause, got: {message}"
+                );
+            }
+            other => panic!("a stale-origin listing must be downgraded, got {other:?}"),
+        }
+    }
+
+    /// Spec: a completed MUTATING verb is reported EXACTLY as the handler
+    /// returned it even when the origin has gone stale by the time the
+    /// answer is ready.
+    ///
+    /// This is the regression test for the bug fixed alongside it: before
+    /// the fix, `spawn_agent_answer` downgraded ANY `Ok` outcome whose
+    /// origin had gone stale to `Unavailable` — a kind callers read as
+    /// "never happened, safe to retry". For `Stop` (used here — its reply
+    /// carries nothing that could ever be stale, which is what makes a
+    /// downgrade for it unambiguously wrong rather than merely imprecise)
+    /// that meant a completed stop could be reported as though it had not
+    /// happened, inviting a retry that re-targets or re-applies an action
+    /// already taken. `Rename` and `Archive` share the same `Ok`-outcome
+    /// code path, so this one verb stands for all three.
+    #[tokio::test]
+    async fn a_stale_origin_does_not_downgrade_a_completed_mutation() {
+        let handler = Arc::new(StaleExitHandler {
+            reply: farhelm_proto::AgentReply::Stopped {},
+        });
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
+            handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+        ));
+        let (_client, mut peer) = agent_connection(slot).await;
+
+        peer.ask(1, farhelm_proto::AgentVerb::Stop { session_id: None })
+            .await;
+        match peer.outcome(1).await {
+            farhelm_proto::AgentOutcome::Ok {
+                reply: farhelm_proto::AgentReply::Stopped {},
+            } => {}
+            other => panic!(
+                "a completed mutation must be reported truthfully even with a stale origin, got \
+                 {other:?}"
+            ),
         }
     }
 

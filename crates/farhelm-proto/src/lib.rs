@@ -1300,11 +1300,11 @@ pub enum RestartMode {
 /// Internally tagged by `verb`, and every variant is a struct variant even
 /// where it currently carries nothing, so that giving a verb an argument
 /// later is an additive edit to that variant rather than a change of shape
-/// on the wire. The verbs this version answers are the two read-only ones;
-/// the mutating verbs an agent will want (`rename`, `stop`, `archive`) and
-/// the creating ones (`create`, `clone`) are deliberately absent rather
-/// than stubbed, because a verb that decodes and then refuses is
-/// indistinguishable, from the agent's side, from one that is broken.
+/// on the wire. This version adds the three lifecycle verbs — `rename`,
+/// `stop`, `archive` — beside the two read-only ones; the CREATING verbs
+/// (`create`, `clone`) stay deliberately absent rather than stubbed,
+/// because a verb that decodes and then refuses is indistinguishable, from
+/// the agent's side, from one that is broken.
 ///
 /// EVERY verb is answered by the helm, including questions about the
 /// asking session's own host. One code path and one place for policy is
@@ -1313,6 +1313,17 @@ pub enum RestartMode {
 /// that is the honest trade — a silent downgrade to local semantics would
 /// give an agent a fleet view that is sometimes the fleet and sometimes
 /// one machine, with nothing on the wire saying which.
+///
+/// The three lifecycle verbs share one shape of target: `session_id:
+/// Option<String>`, where `None` means the ASKING session — the one the
+/// relay already proved this connection's credential belongs to, so the
+/// helm can substitute it without a second round of authority-checking —
+/// and `Some(id)` names any session the helm knows, on any host. That is
+/// deliberately wider than "only your own session": the feature's whole
+/// mental model is an agent talking to the HELM, which has fleet-wide
+/// authority already, and narrowing a lifecycle verb to the asker's own row
+/// would need a second, invented notion of per-session permission that
+/// nothing else in this system has.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum AgentVerb {
@@ -1328,6 +1339,38 @@ pub enum AgentVerb {
     /// honest shape when the fleet outgrows one answer is a filter on this
     /// verb rather than paging state on a wire that has none.
     Sessions {},
+    /// Change a session's title — SPEC.md's rename verb, reached through
+    /// the same routing and recording the REST `/rename` route uses.
+    /// Answered with [`AgentReply::Session`], the session's freshly
+    /// recomputed row.
+    Rename {
+        /// `None` for the asking session; see the enum's own docs for the
+        /// target-resolution rule this field shares with `Stop` and
+        /// `Archive`.
+        session_id: Option<String>,
+        /// Forwarded to the supervisor VERBATIM, with the exact acceptance
+        /// rule `RenameSession::title` documents (control characters
+        /// refused, otherwise anything up to the field cap, including the
+        /// empty string) — an agent gets no separate, looser rule.
+        title: String,
+    },
+    /// Kill a session's agent process tree, leaving the session listed and
+    /// its terminal viewable — SPEC.md's "stop". Answered with
+    /// [`AgentReply::Stopped`], which carries nothing beyond success: unlike
+    /// `Rename`/`Archive`, a stop's REST counterpart already replies with an
+    /// empty object, so there is no fresher row to hand back.
+    Stop {
+        /// `None` for the asking session; see the enum's own docs.
+        session_id: Option<String>,
+    },
+    /// Stop a session's agent and tabs, remove its terminal, and retain its
+    /// metadata and attachments — SPEC.md's archive. Answered with
+    /// [`AgentReply::Session`], carrying the durable post-teardown state
+    /// (`archived: true`) exactly as the REST `/archive` route does.
+    Archive {
+        /// `None` for the asking session; see the enum's own docs.
+        session_id: Option<String>,
+    },
 }
 
 /// The two ways an [`ControlMsg::AgentResponse`] can land.
@@ -1372,6 +1415,21 @@ pub enum AgentReply {
         /// not deliver it.
         truncated: bool,
     },
+    /// Answers `Rename` and `Archive` alike: the ONE session either verb
+    /// acted on, freshly recomputed by the host that owns it. Sharing a
+    /// reply shape between two verbs is deliberate — both are "here is the
+    /// row now", and inventing `Renamed`/`Archived` twins would only be two
+    /// names for the same fact with no behavioral difference a caller could
+    /// key on.
+    Session {
+        session: AgentSession,
+    },
+    /// Answers `Stop`. Empty on purpose, matching the REST `/stop` route's
+    /// own empty-object success body: a stop has nothing fresher to report
+    /// than "it happened", and the session's `status` is whatever the next
+    /// `sessions` listing observes rather than something this reply could
+    /// know synchronously.
+    Stopped {},
 }
 
 /// The recovery sentence every relay-produced [`ErrorKind::Unavailable`]
@@ -1460,8 +1518,12 @@ pub struct AgentSession {
     /// Archived rows are IN this listing, unlike the UI's default browse
     /// view, because the verb's promise is every session the helm knows and
     /// an agent has no archive switch to flip. The flag is what keeps them
-    /// interpretable: an archived session is durable history, not something
-    /// to go and act on.
+    /// interpretable: an archived session is durable history rather than a
+    /// live one, which a reader should weigh before acting on it — not a
+    /// row the lifecycle verbs refuse to touch. `Rename`, `Stop` and
+    /// `Archive` may all target an archived session's id exactly as they
+    /// would any other (a `Stop` on one is a harmless no-op; a `Rename` or
+    /// a repeat `Archive` still succeeds).
     pub archived: bool,
     /// True when this row is last-known knowledge rather than a live
     /// report — the host it belongs to is not currently connected.
@@ -7055,6 +7117,163 @@ mod tests {
         );
     }
 
+    /// Golden JSON for the three lifecycle verbs and their two reply tags,
+    /// pinned for the same three-independent-programs reason
+    /// `agent_relay_pair_has_pinned_json_tags` documents: the CLI encodes a
+    /// request, the supervisor decodes and re-encodes it unchanged, and the
+    /// helm decodes it, so a tag rename in only one of those builds is
+    /// invisible to every other test that constructs `AgentVerb` in Rust and
+    /// round-trips it through the SAME crate's own serializer.
+    ///
+    /// Also confirms, directly rather than by inference, the requirement
+    /// this addition is easiest to get wrong: adding tagged fields to
+    /// `AgentVerb` must not perturb `ControlMsg::request_req_id`/
+    /// `reply_req_id`, which classify by the OUTER `ControlMsg` variant
+    /// (`AgentRequest`/`AgentResponse`) and never look inside `AgentVerb` at
+    /// all — the same accessors `agent_relay_pair_is_classified_as_request_
+    /// and_reply` already pins for the read-only pair.
+    #[test]
+    fn lifecycle_agent_verbs_have_pinned_json_tags() {
+        let rename = ControlMsg::AgentRequest {
+            req_id: 5,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Rename {
+                session_id: None,
+                title: "new title".to_string(),
+            },
+        };
+        assert_eq!(rename.request_req_id(), Some(5));
+        assert_eq!(rename.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&rename).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 5,
+                "session_id": "s1",
+                "request": { "verb": "rename", "session_id": null, "title": "new title" },
+            })
+        );
+
+        let rename_named = ControlMsg::AgentRequest {
+            req_id: 6,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Rename {
+                session_id: Some("s2".to_string()),
+                title: "new title".to_string(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&rename_named).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 6,
+                "session_id": "s1",
+                "request": { "verb": "rename", "session_id": "s2", "title": "new title" },
+            })
+        );
+
+        let stop = ControlMsg::AgentRequest {
+            req_id: 7,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Stop { session_id: None },
+        };
+        assert_eq!(stop.request_req_id(), Some(7));
+        assert_eq!(stop.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&stop).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 7,
+                "session_id": "s1",
+                "request": { "verb": "stop", "session_id": null },
+            })
+        );
+
+        let archive = ControlMsg::AgentRequest {
+            req_id: 8,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Archive {
+                session_id: Some("s2".to_string()),
+            },
+        };
+        assert_eq!(archive.request_req_id(), Some(8));
+        assert_eq!(archive.reply_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&archive).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 8,
+                "session_id": "s1",
+                "request": { "verb": "archive", "session_id": "s2" },
+            })
+        );
+
+        let session_reply = ControlMsg::AgentResponse {
+            req_id: 5,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "s1".to_string(),
+                        host: "this machine".to_string(),
+                        title: "new title".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        };
+        assert_eq!(session_reply.reply_req_id(), Some(5));
+        assert_eq!(session_reply.request_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&session_reply).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 5,
+                "outcome": {
+                    "result": "ok",
+                    "reply": {
+                        "reply": "session",
+                        "session": {
+                            "id": "s1",
+                            "host": "this machine",
+                            "title": "new title",
+                            "cwd": "/w",
+                            "agent": "claude",
+                            "status": "running",
+                            "current": true,
+                            "archived": false,
+                            "stale": false,
+                        },
+                    },
+                },
+            })
+        );
+
+        let stopped_reply = ControlMsg::AgentResponse {
+            req_id: 7,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Stopped {},
+            },
+        };
+        assert_eq!(stopped_reply.reply_req_id(), Some(7));
+        assert_eq!(stopped_reply.request_req_id(), None);
+        assert_eq!(
+            serde_json::to_value(&stopped_reply).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 7,
+                "outcome": {
+                    "result": "ok",
+                    "reply": { "reply": "stopped" },
+                },
+            })
+        );
+    }
+
     /// Both listing replies round-trip with every field intact, including
     /// the booleans a decoder could plausibly default away.
     ///
@@ -7112,19 +7331,62 @@ mod tests {
         }
     }
 
+    /// The two lifecycle reply shapes round-trip with every field intact —
+    /// `agent_listing_replies_roundtrip`'s twin, for `Session` and
+    /// `Stopped`.
+    ///
+    /// `Session` gets the same `current`/`archived`/`stale` treatment as a
+    /// listing row, for the identical reason: each defaults to `false` on a
+    /// decode, so a field a serde change dropped would silently read as the
+    /// reassuring answer rather than as a decode failure. `Stopped` is here
+    /// mainly to pin that an EMPTY struct variant still needs its `reply`
+    /// tag on the wire to decode back to itself — nothing else about it
+    /// could regress silently, but a tag typo would.
+    #[test]
+    fn agent_lifecycle_replies_roundtrip() {
+        for reply in [
+            AgentReply::Session {
+                session: AgentSession {
+                    id: "s1".to_string(),
+                    host: "builder".to_string(),
+                    title: "renamed".to_string(),
+                    cwd: "/home/u/ws".to_string(),
+                    agent: "codex".to_string(),
+                    status: "idle".to_string(),
+                    current: true,
+                    archived: true,
+                    stale: true,
+                },
+            },
+            AgentReply::Stopped {},
+        ] {
+            let msg = ControlMsg::AgentResponse {
+                req_id: 9,
+                outcome: AgentOutcome::Ok {
+                    reply: reply.clone(),
+                },
+            };
+            let json = serde_json::to_vec(&msg).unwrap();
+            assert_eq!(serde_json::from_slice::<ControlMsg>(&json).unwrap(), msg);
+        }
+    }
+
     /// A verb this build does not know must fail to decode rather than
     /// defaulting to some other verb.
     ///
     /// The same rule `unknown_control_message_tag_fails_decode` pins one
     /// level up, restated for the inner enum because the outer message tag
     /// (`agent_request`) IS one this build knows: a lenient inner decode
-    /// would turn "rename this session", sent by a newer CLI, into whatever
-    /// arm happened to be first, which is the one class of wire error the
-    /// version-skew handshake cannot catch on its own.
+    /// would turn "clone this session", sent by a newer CLI once that verb
+    /// lands, into whatever arm happened to be first, which is the one
+    /// class of wire error the version-skew handshake cannot catch on its
+    /// own. `clone` is used here, rather than `rename`, precisely because
+    /// this version now HAS a `rename` arm — the enum's own docs name
+    /// `create`/`clone` as the still-absent verbs this test needs one of.
     #[test]
     fn unknown_agent_verb_fails_decode() {
         let body = br#"{"type":"agent_request","req_id":1,"session_id":"s1",
-                        "request":{"verb":"rename","title":"x"}}"#;
+                        "request":{"verb":"clone"}}"#;
         serde_json::from_slice::<ControlMsg>(body)
             .expect_err("a verb this build has no arm for must not decode");
     }
