@@ -613,7 +613,10 @@ each supervisor (SSH) — plus one deliberately local one.
   other local processes and users out. The helm generates it on first run; the user views or rotates it on the helm's
   machine (the app UI, or `farhelm helm token show|rotate`), and the browser asks for it once per device and keeps a
   session thereafter. Rotating the token invalidates every device session — that is what rotation is for. The native app
-  embeds its helm; that edge is local.
+  embeds its helm; that edge is local. The token keeps other users OUT of the helm; it does not let the browser tell the
+  helm apart from another local user's process that binds the same port while the helm is down. That gap is accepted in
+  v1: the browser UI is recommended only on a machine with no other, untrusted local users, and the native app is the
+  preferred client wherever it is available. `docs/security.md` records the reasoning.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The

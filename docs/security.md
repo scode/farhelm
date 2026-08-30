@@ -83,3 +83,44 @@ rotation, which revokes all of them at once (there is no per-device revocation);
 unthrottled; the web token is the same value forever until someone rotates it; and the device secret is transmitted in
 the clear on every request, which is acceptable only because the edge is loopback-only and the spec forbids binding
 anything else.
+
+### The gap the browser path does not close, and the position taken on it
+
+Everything above is about who may talk TO the helm. Nothing in it lets the browser confirm that the thing answering on
+the helm's port IS the helm. Port-scoped storage stops a credential from reaching a different port; it does nothing
+about a different process on the same port. Concretely: the helm is down (stopped, restarting, crashed), another user on
+the same machine binds its port, and either a tab left open sends its stored device secret to them on the next
+reconnect, or the user opens the bookmarked URL, sees a page that looks like Farhelm's token prompt, and pastes the web
+token into it. The URL bar shows the same `http://localhost:<port>` either way, so there is nothing for the user to
+notice. The preconditions are all required: another local user, the helm not running at that moment, and (for the paste
+case) a convincing lookalike. On a machine with no other local users, none of this is reachable.
+
+No client-side mechanism closes it. A key the page holds, a challenge the page answers, a token that carries the helm's
+identity for the page to check — all of them are checked by code that, in this scenario, the attacker served. The
+browser has exactly one way to verify a server before running its page, and that is a TLS certificate chained to a trust
+anchor the browser already holds. For `localhost` no public CA will issue one, so it means the user installing a
+Farhelm-minted CA into each browser's trust store on each client machine: a one-time, out-of-band configuration step per
+machine, not something a link click can do. The other complete answer is to not use a browser at all.
+
+The position, decided 2026-08-30 and deliberately: this is an accepted trade-off, not an oversight. The browser
+interface is recommended only in single-user situations, meaning a helm machine (and any machine an SSH forward passes
+through) where nobody else has a local account. The native application is the preferred client wherever it is available;
+it embeds the helm and reads the token from disk, so there is no port and no page to impersonate. Farhelm does not ship
+local TLS or a trust-store installer, and does not plan to for v1; SPEC.md's Security section states the assumption in
+one sentence and points here.
+
+For calibration, this is where nearly every local-web-UI tool sits. Jupyter runs token-authenticated plain HTTP on
+loopback and tells users to add TLS themselves if the machine is shared; most local dev servers and tools with a
+loopback API (Ollama, for one) have no authentication on loopback at all and leave the same-user assumption unstated;
+code-server documents a password and recommends a TLS-terminating proxy in front. Syncthing is the one that ships a
+self-signed certificate by default, and it does so because it targets NAS boxes and shared home servers. Products that
+avoid the problem entirely (Docker Desktop, password managers) do it by being native applications with no browser path.
+Stating the assumption out loud puts Farhelm ahead of most of that list; it does not make Farhelm unusual.
+
+If the deployment story changes — shared machines become a target — the options, in rough order of cost, are: a
+helm-minted CA plus a `cert install` command (the standard answer; friction is per-browser trust stores and managed
+machines that forbid adding CAs); a browser extension using native messaging (no port at all, which is how password
+managers talk to their local apps; heavy); or declaring the browser unsupported on such machines. Proof-of-possession
+keys for the device credential (a DPoP-shaped design) are worth doing on their own merits — they stop an in-origin
+script from exfiltrating a working credential — but they protect sessions after a good bootstrap and do not address the
+impostor case, so they are a separate decision.
