@@ -333,21 +333,6 @@ Within a bucket, no order.
   fresh title, created after any shared fixture) instead of assuming nothing else is being created, or mark the shared
   `e2e-session` so the walk excludes it.
 
-- Review the two security-relevant resolutions made during the M7 run, and record a dated verdict (a note in
-  SPEC_impl.md or a review comment on PR #117). (a) A product-spec/impl-spec conflict over where the web token is stored
-  was resolved in the product spec's favor, with the impl spec amended in #117 — confirm the amendment says what the
-  code does. (b) The web credential's transport was redesigned mid-run from an HttpOnly cookie to localStorage + an
-  Authorization bearer header + a WebSocket subprotocol, because cookies are host-scoped rather than port-scoped:
-  another local user's loopback-port server could lure the browser and replay the cookie under a forged Origin. The
-  deliberate trade: giving up HttpOnly means in-origin XSS can read the credential, judged acceptable because in-origin
-  XSS already has the API authority the credential grants. The review is completable from this checklist alone — verify
-  that: the master token is stored recoverably server-side and `farhelm helm token show|rotate` both work after a helm
-  restart; device secrets are stored hash-only; the browser credential lives in localStorage with no ambient cookie sent
-  or honored anywhere; REST carries it as a bearer header and WebSockets as a subprotocol; and rotation both 401s every
-  existing device session and drops already-open feed/terminal sockets. Implementation surfaces: the helm's auth and
-  middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
-  section as amended in #117.
-
 - Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
   client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
   returns the already-created session instead of double-launching an agent. The durability-era decision made these
