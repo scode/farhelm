@@ -50,38 +50,29 @@ no semantic selectors. Among DOM-based Rust options, Dioxus is the most active a
 Tauri+Leptos would mean gluing two frameworks for no clear gain. Skipping dioxus-fullstack keeps the API a first-class
 tested surface (the spawn CLI and test fixtures need it anyway) and avoids the framework's most churn-prone part.
 
-The session list's chosen ORDER is a per-client preference, kept outside the filter state. The browser keeps it in
-localStorage under `farhelm.sort`, beside the `farhelm.last-selected` record, as the bare word the helm's `?sort=`
-takes; an absent or unrecognized value reads as the UI default (`activity`). Falling back rather than failing matters
-because that storage outlives the build that wrote it: a word a later build stored is one the helm answers with a 400,
-so passing it through unchecked would leave the sidebar unable to list anything until someone cleared their browser
-storage. It is written only when the control changes, so a client that never touches it never writes.
-
-Desktop keeps both that word and the selection's same `{helm, id}` record in the bootstrap state file
-`desktop-client.json`, alongside (not instead of) its two device credentials. Missing fields decode as absent so a file
-from an older build remains valid. At first authentication the native side sends the two values through the existing
-desktop-auth eval exchange, which seeds the SAME localStorage keys the browser uses. localStorage was chosen over a new
-page-only global because it preserves one record shape, key vocabulary, and invalid-value fallback across both engines;
-native Rust also mirrors the values in process memory because it cannot synchronously read the webview's storage. The
-page attempts both localStorage updates before sending `ready`; storage errors are swallowed, so only the native mirrors
-are guaranteed to contain the seed. `AppBody` does not mount before `ready`, and therefore the sort signal and
-auto-select effect see those native remembered values on their first run — there is no frame that selects the newest
-session and then corrects itself.
-
-On a user selection or sort change, the native-rendered component updates that synchronous mirror immediately and queues
-the browser-shaped record. Native coalesces a burst for 150 ms, then runs one one-shot eval that writes the matching
-localStorage values and echoes the update to native; serialized batches prevent an older round trip from landing after a
-newer click. Native then read-merges the acknowledged fields into `desktop-client.json` under the same state-file lock
-as auth: selection cannot discard sort, and neither preference can discard credential material or the webview-auth
-generation. The round trip and state-file replacement are best-effort: IPC and native-file failures are logged under
-`desktop_preferences` and never surface in the UI or roll back the current choice, while JavaScript deliberately
-swallows localStorage failures before acknowledging the attempt. The earlier implementation declined this round trip
-because a nicety alone did not justify owning an eval channel's failure modes; desktop authentication now requires and
-monitors that channel already, so preference persistence adds no new failure class, only a silent loss of next-launch
-convenience when the owned bridge or disk write is unavailable. An ordinary app shutdown drains the native pending and
-in-flight records directly because its webview is already going away; a hard kill can lose the last choice until the
-state-file merge completes, including the debounce, eval, and blocking atomic replacement rather than only the first 150
-ms.
+The session list's chosen ORDER and the last-selected session are one preference the HELM keeps, in a singleton row of
+`helm.db` (`preferences`: `list_sort`, `last_selected`) behind `GET`/`PUT /api/preferences`, device-authenticated like
+every other route. Both clients read it once after authentication — `PreferencesGate` holds the authenticated tree,
+rendering nothing, until the read lands, so the sort control and the auto-select effect see the remembered values on
+their first run and no frame shows a default that is then corrected. On desktop the IPC authentication gate already
+holds the tree and the read is one loopback hop, so nothing is visible; in the browser the first paint deliberately
+waits on that one round trip to the helm — a page with a valid credential used to paint its sidebar synchronously from
+localStorage — so the list never appears in an order that then changes. A write is a sparse patch naming only the field
+the user changed, merged per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two
+clients changing different fields at nearly the same time cannot clobber each other; the signal in the page is updated
+before the request leaves, which is what keeps the choice in force when the write fails. Same-field writes are
+serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse order; the write queue is
+process state outside the remounted tree, and after credential recovery the gate overlays and replays any local choice
+whose write never got through, so reauthentication cannot roll the current client back to the helm's older row. The seed
+read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a stalled preference
+endpoint cannot blank the page for the funnel's full sixty seconds. The sort travels as the bare word `?sort=` takes and
+is validated against that vocabulary at the write; the selection is a bare session id (the browser's old `{helm, id}`
+record was keyed by helm identity only because origin-scoped storage could outlive a state-directory swap, and a row in
+the helm's own database cannot describe another helm's fleet). An absent or unrecognized sort word still reads as the UI
+default (`activity`) on the client, because the row outlives the build that validated it. Nothing is kept per client: no
+localStorage key, no field in `desktop-client.json` (which now holds credentials only), no eval round trip. The visible
+consequences are the ones SPEC.md names — one answer shared by every client, and a second client attaching to whatever
+was selected most recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -1062,7 +1053,8 @@ reports a failed listing rather than a silently shortened one.
 
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities), last-known
   session cache (survives helm restarts per SPEC.md), recoverable web token, hashed browser device sessions, remembered
-  defaults (last-used profile per host).
+  defaults (last-used profile per host), and the one client preference (list order, last-selected session) every client
+  shares.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never user management surface, never removable. It exists specifically so the local host has a cache row to
   serve stale sessions from when its own supervisor is down — the plan's first draft made this row optional, and review

@@ -293,8 +293,10 @@ These were put to the user directly; treat them as settled:
 - Empty right pane: auto-select a session; a placeholder only when the fleet is empty. Three sub-decisions taken during
   triage review (each could reasonably go another way; revisit with the user if they look wrong in practice):
   - "Most recently active" means: the client's own last-selected session, persisted client-side (localStorage, keyed by
-    helm identity), falling back to the newest-created non-archived session. `SessionInfo` carries no last-activity
-    timestamp, and inventing a server-side one is out of scope for this redesign.
+    helm identity), falling back to the newest-created non-archived session. SUPERSEDED: the selection (and the sort
+    order) now live in the helm as one preference shared by every client (SPEC.md, Session list); nothing is persisted
+    client-side any more. `SessionInfo` carries no last-activity timestamp, and inventing a server-side one is out of
+    scope for this redesign.
   - Auto-selection ATTACHES, exactly as clicking the row would. SPEC.md's "takeover is deliberate" rule is satisfied by
     the user's deliberate act of opening the client — the interviewed decision ("most recently active opens
     automatically") already implies a live terminal on launch. Consequence to be aware of: opening a second client

@@ -11,30 +11,6 @@ Within a bucket, no order.
 
 ## Definite simplification
 
-- Move the remembered sort order and last-selected session into the HELM, as one preference every client reads and
-  writes, and delete the per-client persistence. Today the browser keeps `farhelm.sort` and `farhelm.last-selected` in
-  localStorage and the desktop app mirrors both into `desktop-client.json` beside its credentials through a coalesced
-  eval round trip with an acknowledgement, a native in-memory mirror, and a read-merge under the auth state-file lock —
-  about 700 lines plus 1,000 of tests (`desktop.rs`, `desktop-auth.js`), all for the four words "and desktop relaunches"
-  in SPEC.md's session-list section. The replacement is a two-column row in helm.db behind a small REST pair; every
-  client fetches it once after authentication, which both engines already block the tree on, so first render is seeded
-  with no flicker, and writes it on change. Preferences then share no file with credentials at all. Two visible changes,
-  both to be recorded in SPEC.md, which today says "remembered per client": the values are shared across clients (a
-  browser tab and the desktop app open in the same order and on the same session — for one user and one helm, "where I
-  left off" rather than "where this window left off"), and opening a second client attaches to whatever was most
-  recently selected ANYWHERE, taking it over per the one-attached-client rule, where today it takes over that client's
-  own remembered session. Survival becomes a helm-restart story rather than a client one; a helm reinstall loses the
-  preference, which the best-effort clause in Errors and diagnostics already covers. SPEC EDITS, in the same PR: SPEC.md
-  Session list — replace "remembered per client across browser reloads and desktop relaunches" with "remembered by the
-  helm as one preference shared by every client", and say outright that no client keeps its own copy and that per-client
-  persistence (browser storage, a desktop state file, anything letting two clients remember different answers) is not
-  wanted. Terminal experience — "the session the user most recently had selected there — including after a desktop
-  relaunch" becomes "most recently selected from any client", with the takeover consequence named. Errors and
-  diagnostics — the best-effort exception is reworded from "desktop selection and sort across relaunches" to the
-  helm-side preference (a helm that lost it falls back to defaults). SPEC_impl.md GUI section: delete the
-  localStorage/`desktop-client.json`/eval-round-trip paragraphs. Write-up:
-  https://claude.ai/code/artifact/7d64a1a0-64fe-41f6-b9a3-610fd7b75434
-
 ## Near term
 
 - Deflake the browser merge gate: three e2e tests fail on main itself, deterministically — found 2026-08-31 while gating

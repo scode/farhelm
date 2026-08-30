@@ -1,6 +1,7 @@
 /**
- * The session list's ORDER: the sidebar's sort control, the preference it
- * remembers per client, and what re-sorting does not disturb.
+ * The session list's ORDER: the sidebar's sort control, the one preference
+ * the HELM remembers for every client at once, and what re-sorting does
+ * not disturb.
  *
  * Its own spec file per the convention every area has followed since M6.5
  * (see sidebar.spec.ts's header). The subject is close to filters.spec.ts's
@@ -51,6 +52,9 @@ import {
   createSession,
   FeedStub,
   forgetAutoSelect,
+  patchPreferences,
+  readPreferences,
+  resetPreferences,
   openFilterBar,
   SESSION_LISTING,
   stubFeed,
@@ -214,6 +218,15 @@ function syntheticRow(id: string, title: string, createdAt: number) {
 }
 
 test.describe("session list ordering", () => {
+  // The order and the selection are ONE row on the helm shared by every
+  // client (SPEC.md, Session list), and this suite runs every spec against
+  // one helm: without this reset, each test would open in whatever order
+  // the previous test chose. Resetting here is the precondition every test
+  // below states implicitly ("a client that has chosen nothing").
+  test.beforeEach(async ({ request }) => {
+    await resetPreferences(request);
+  });
+
   const created: string[] = [];
 
   test.afterEach(async ({ request }) => {
@@ -336,16 +349,17 @@ test.describe("session list ordering", () => {
   });
 
   /**
-   * The choice survives a reload, because it is stored per client rather than
-   * held in the page.
+   * The choice survives a reload, because the helm remembers it — one
+   * shared row every client reads, not state retained in the page.
    *
    * A preference that had to be re-picked on every load would be worse than
    * none: the list is the first thing a client draws, and re-drawing it in an
    * order the user has already rejected once is the exact annoyance the
-   * control exists to end. The stored value is asserted directly as well as
-   * through its effect — the effect alone would also pass if the page had
-   * simply not reloaded, and the key is a contract the desktop build will
-   * have to honor when its own persistence lands.
+   * control exists to end. The stored row is polled directly as well as
+   * observed through its effect — the effect alone would also pass if the
+   * page had simply not reloaded, and the write is fire-and-forget, so only
+   * the row itself says persistence happened rather than page state
+   * surviving.
    */
   test("the chosen order survives a reload", async ({ page, request }) => {
     const stamp = Date.now();
@@ -357,7 +371,12 @@ test.describe("session list ordering", () => {
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
-    expect(await page.evaluate(() => window.localStorage.getItem("farhelm.sort"))).toBe("title");
+    // Poll rather than read once: the PUT is fire-and-forget and
+    // independent of the listing refresh just observed, so the row can
+    // trail the screen by a moment.
+    await expect
+      .poll(async () => (await readPreferences(request)).list_sort, { timeout: 20_000 })
+      .toBe("title");
 
     const asked = await watchSortParameters(page);
     await page.reload();
@@ -445,16 +464,13 @@ test.describe("session list ordering", () => {
   });
 
   /**
-   * A client that has expressed no preference writes nothing, and choosing
-   * the order already in force is not a choice.
+   * Merely loading a client must not populate the shared row, and
+   * re-choosing the already-active order must write and re-read nothing.
    *
-   * Both halves are about the same promise: the preference is written on
-   * CHANGE, so a client that never touches the control never touches its
-   * storage. The stored key is a contract the desktop build will have to
-   * honor when its own persistence lands, and a UI that wrote the default on
-   * load would make "has this user chosen?" unanswerable from that day on —
-   * every client would look like one that picked activity deliberately, and
-   * a future change of default could never reach them.
+   * The row is the HELM's and is shared: a client that wrote its current
+   * default on every load would stamp "activity" into the row for every
+   * other client the moment it opened, and would also pin today's default
+   * so a future change of default could never reach them.
    *
    * The no-op half also has to hold at the LIST: re-selecting the active
    * option restarts nothing, because a walk restart under a cursor-paginated
@@ -472,9 +488,9 @@ test.describe("session list ordering", () => {
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
 
     expect(
-      await page.evaluate(() => window.localStorage.getItem("farhelm.sort")),
+      (await readPreferences(request)).list_sort,
       "a client that has chosen nothing has nothing to remember",
-    ).toBeNull();
+    ).toBeUndefined();
 
     const before = asked.length;
     await page.locator(".sort-select").selectOption("activity");
@@ -484,9 +500,9 @@ test.describe("session list ordering", () => {
     await page.waitForTimeout(1_500);
     expect(asked.length, "re-choosing the active order must not restart the walk").toBe(before);
     expect(
-      await page.evaluate(() => window.localStorage.getItem("farhelm.sort")),
+      (await readPreferences(request)).list_sort,
       "and must not write a preference either",
-    ).toBeNull();
+    ).toBeUndefined();
   });
 
   /**
@@ -563,12 +579,12 @@ test.describe("session list ordering", () => {
   /**
    * A stored order this build cannot use is the default, not a broken page.
    *
-   * The value survives across builds and is editable by anyone with a
-   * devtools console, and the helm answers an unrecognized `sort` with a
-   * 400 — so passing one through unchecked would not sort the list oddly, it
-   * would leave the sidebar reading "failed to load sessions" until someone
-   * cleared their browser storage. Staged with the word a LATER build might
-   * plausibly have written, which is the case that will actually happen.
+   * The row outlives the build that validated it, and the helm answers an
+   * unrecognized `sort` with a 400 — so passing one through unchecked would
+   * not sort the list oddly, it would leave the sidebar reading "failed to
+   * load sessions" until someone fixed the row by hand. Staged with the word
+   * a LATER build might plausibly have written, which is the case that will
+   * actually happen.
    */
   test("a stored order this build does not know falls back to the default", async ({
     page,
@@ -577,8 +593,23 @@ test.describe("session list ordering", () => {
     const stamp = Date.now();
     const ids = await threeOrderedSessions(request, stamp);
 
-    await page.addInitScript(() => {
-      window.localStorage.setItem("farhelm.sort", "most-recent");
+    // The helm refuses to STORE an unknown word (PUT is a 400), so the only
+    // way such a value reaches a client is a row written by a build with a
+    // different vocabulary — staged here by answering the read as that
+    // helm would: stamped (an unstamped reply latches build-skew state and
+    // this test would run under a compatibility transition it is not
+    // about), same build, different vocabulary.
+    const helm = await helmStamp(request);
+    await page.route("**/api/preferences", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await fulfillAsHelm(route, helm, {
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ list_sort: "most-recent" }),
+      });
     });
     const asked = await watchSortParameters(page);
     await listWithStubbedFeed(page);
@@ -592,32 +623,35 @@ test.describe("session list ordering", () => {
   });
 
   /**
-   * A storage that REFUSES to be read costs the preference, not the list.
+   * A preference read that FAILS costs the preference, not the list.
    *
-   * Reading localStorage throws for real reasons the user did not choose —
-   * a browser configured to block site data, a private window under some
-   * policies — and the whole point of keeping the preference outside the
-   * page's own state is that losing it is a small thing. A page that let the
-   * exception escape would fail to draw a session list because of a feature
-   * that only decides what order the rows are in.
-   *
-   * The stub throws for THIS key only, so the failure under test is the sort
-   * preference's own read rather than a page-wide storage outage that would
-   * take the remembered selection down with it and prove something else.
+   * The preference is best-effort (SPEC.md, Errors and diagnostics): a helm
+   * that cannot answer `GET /api/preferences` — a 500 here — must still get
+   * its session list on screen, in the default order, rather than a page
+   * that refuses to draw because of a feature that only decides what order
+   * the rows are in.
    */
-  test("a storage that refuses to be read still lists, in the default order", async ({
+  test("a preference read that fails still lists, in the default order", async ({
     page,
     request,
   }) => {
     const stamp = Date.now();
     const ids = await threeOrderedSessions(request, stamp);
 
-    await page.addInitScript(() => {
-      const real = Storage.prototype.getItem;
-      Storage.prototype.getItem = function(key: string) {
-        if (key === "farhelm.sort") throw new DOMException("blocked", "SecurityError");
-        return real.call(this, key);
-      };
+    // Stamped like every fabricated reply (see the unknown-word test
+    // above): an unstamped 500 would latch build skew and turn this into a
+    // different test.
+    const helm = await helmStamp(request);
+    await page.route("**/api/preferences", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await fulfillAsHelm(route, helm, {
+        status: 500,
+        contentType: "text/plain",
+        body: "injected preference read failure",
+      });
     });
     const asked = await watchSortParameters(page);
     await listWithStubbedFeed(page);
@@ -630,25 +664,34 @@ test.describe("session list ordering", () => {
   });
 
   /**
-   * A storage that refuses to be WRITTEN costs the next load, not this one.
+   * A preference write that FAILS costs the next load, not this one.
    *
    * The asymmetry is the contract: a failed write means the choice is
    * forgotten by the next visit, and it must not mean the choice was refused
-   * now. A quota-exceeded `setItem` is the realistic shape of this (storage
-   * fills up for reasons that have nothing to do with this page), and a page
-   * that let it escape would leave the user staring at a control that says
-   * "title A–Z" over rows in activity order.
+   * now. A helm answering `PUT /api/preferences` with a 500 is the shape of
+   * this, and a page that let it escape would leave the user staring at a
+   * control that says "title A–Z" over rows in activity order.
    */
-  test("a storage that refuses to be written still re-sorts the page", async ({ page, request }) => {
+  test("a preference write that fails still re-sorts the page", async ({ page, request }) => {
     const stamp = Date.now();
     const ids = await threeOrderedSessions(request, stamp);
 
-    await page.addInitScript(() => {
-      const real = Storage.prototype.setItem;
-      Storage.prototype.setItem = function(key: string, value: string) {
-        if (key === "farhelm.sort") throw new DOMException("full", "QuotaExceededError");
-        return real.call(this, key, value);
-      };
+    // Stamped for the same reason as the failed read above; the captured
+    // bodies are what prove a write was actually ATTEMPTED — without them,
+    // a UI that silently stopped writing preferences would pass this test.
+    const helm = await helmStamp(request);
+    const puts: unknown[] = [];
+    await page.route("**/api/preferences", async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      puts.push(route.request().postDataJSON());
+      await fulfillAsHelm(route, helm, {
+        status: 500,
+        contentType: "text/plain",
+        body: "injected preference write failure",
+      });
     });
     const asked = await watchSortParameters(page);
     await listWithStubbedFeed(page);
@@ -663,10 +706,161 @@ test.describe("session list ordering", () => {
     for (const sort of asked.slice(before)) {
       expect(sort, "the read that follows the choice must carry the new order").toBe("title");
     }
+    await expect.poll(() => puts.length, { timeout: 20_000 }).toBe(1);
     expect(
-      await page.evaluate(() => window.localStorage.getItem("farhelm.sort")),
+      puts[0],
+      "one sparse single-field patch, refused — a failed write is not retried on its own",
+    ).toEqual({ list_sort: "title" });
+    expect(
+      (await readPreferences(request)).list_sort,
       "the write failed, so there is nothing stored — that is the whole cost",
-    ).toBeNull();
+    ).toBeUndefined();
+  });
+
+  /**
+   * The authenticated tree stays UNMOUNTED until the preference seed lands,
+   * and the first render is then governed by the remembered values.
+   *
+   * This is the gate's whole contract, and nothing else pins it: every
+   * other test sees only completed reads. An eager-mount regression would
+   * first render the default order — and auto-attach the fallback session,
+   * then take over the remembered one — before correcting, restoring
+   * exactly the flicker the gate exists to prevent, while every
+   * completed-read test stayed green.
+   */
+  test("nothing mounts before the preference seed, and the seed governs the first render", async ({
+    page,
+    request,
+  }) => {
+    const stamp = Date.now();
+    const ids = await threeOrderedSessions(request, stamp);
+    const helm = await helmStamp(request);
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let seedReads = 0;
+    await page.route("**/api/preferences", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      seedReads += 1;
+      await held;
+      await fulfillAsHelm(route, helm, {
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ list_sort: "title", last_selected: ids.m }),
+      });
+    });
+    const asked = await watchSortParameters(page);
+    const feed = await stubFeed(page);
+    await page.goto("/");
+    await expect.poll(() => seedReads, { timeout: 20_000 }).toBeGreaterThan(0);
+
+    // The read is in flight and held: nothing of the tree may exist yet.
+    // The settle window is what catches an eager mount that corrects
+    // itself; it must stay well inside the seed read's own deadline
+    // (api.rs's PREFERENCE_SEED_TIMEOUT) or the gate gives up and mounts
+    // with defaults, which is the OTHER test's subject.
+    await page.waitForTimeout(500);
+    await expect(page.locator(".sort-select")).toHaveCount(0);
+    expect(asked.length, "no listing read may start before the seed").toBe(0);
+
+    release();
+    await feed.waitForConnection(1);
+    feed.notify(1);
+    await expect(page.locator(".sort-select")).toHaveValue("title", { timeout: 20_000 });
+    await expect(page.locator(".titlebar .title")).toContainText(`sortfix-${stamp}-mmm`, {
+      timeout: 20_000,
+    });
+    for (const sort of asked) {
+      expect(sort, "every read carries the remembered order — no default-then-correct frame").toBe(
+        "title",
+      );
+    }
+  });
+
+  /**
+   * A preference read that STALLS costs seconds and the remembered values,
+   * never the page.
+   *
+   * The gate holds the whole tree behind the seed read, so this endpoint
+   * hanging is the one failure that could blank the application outright.
+   * The seed read therefore runs under its own short deadline
+   * (api.rs's PREFERENCE_SEED_TIMEOUT, seconds) rather than the funnel's
+   * sixty, and expiry reads as "nothing remembered".
+   */
+  test("a preference read that stalls falls back to the defaults within seconds", async ({
+    page,
+    request,
+  }) => {
+    const stamp = Date.now();
+    const ids = await threeOrderedSessions(request, stamp);
+
+    await page.route("**/api/preferences", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      // Held open forever: the gate must give up on its own. The route is
+      // torn down with the page at test end.
+      await new Promise(() => {});
+    });
+    const asked = await watchSortParameters(page);
+    await listWithStubbedFeed(page);
+    await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
+
+    await expect(page.locator(".sort-select")).toHaveValue("activity");
+    for (const sort of asked) {
+      expect(sort, "an unanswerable preference reads as no preference").toBe("activity");
+    }
+  });
+
+  /**
+   * Each user action writes ONLY the field it changed, proved against a
+   * rival client's newer value for the other field.
+   *
+   * The store and route tests prove hand-built sparse patches merge; this
+   * is the missing half — that the real handlers PRODUCE sparse patches. A
+   * client that regressed into sending its whole copy would overwrite the
+   * other field's newer cross-client value while every lower-level
+   * sparse-patch test stayed green. The rival value is written AFTER this
+   * page seeds, so the page's own copy provably differs from the row.
+   */
+  test("a sort write and a selection write each preserve the other field", async ({
+    page,
+    request,
+  }) => {
+    const stamp = Date.now();
+    const ids = await threeOrderedSessions(request, stamp);
+
+    await listWithStubbedFeed(page);
+    await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
+
+    // Another client selects a session; then THIS page changes only the
+    // sort. The row must end with both.
+    await patchPreferences(request, { last_selected: ids.m });
+    await page.locator(".sort-select").selectOption("title");
+    await expect
+      .poll(async () => (await readPreferences(request)).list_sort, { timeout: 20_000 })
+      .toBe("title");
+    expect(
+      (await readPreferences(request)).last_selected,
+      "a sort write must not carry this page's stale copy of the selection",
+    ).toBe(ids.m);
+
+    // The mirror: another client re-sorts; then THIS page clicks a row.
+    await patchPreferences(request, { list_sort: "created" });
+    await row(page, ids.z).locator(".session-row-open").click();
+    await expect
+      .poll(async () => (await readPreferences(request)).last_selected, { timeout: 20_000 })
+      .toBe(ids.z);
+    expect(
+      (await readPreferences(request)).list_sort,
+      "a selection write must not carry this page's stale copy of the order",
+    ).toBe("created");
   });
 
   /**

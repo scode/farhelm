@@ -270,13 +270,16 @@ it shows the session's metadata and says why there is no terminal, rather than a
 
 One flat list across all registered hosts, with filtering and search by host, directory, agent profile, status, and
 title. The list can be ordered by most recent activity, by creation time, or by title, chosen from a control that is
-reachable without opening the filter controls; the order someone picks is remembered per client across browser reloads
-and desktop relaunches, and most recent activity is what a client shows until someone picks otherwise. A client that
-asks the helm for no particular order gets creation time. The filter controls open on demand rather than standing
-permanently above the list; while an applied filter's controls are closed, the list says visibly that a filter is in
-force, so a narrowed list can never masquerade as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see
-below) carry a parent reference usable as a filter, but parentage does not nest the list and implies nothing about VCS
-state.
+reachable without opening the filter controls; the order someone picks is remembered by the helm as one preference
+shared by every client, together with the last-selected session, and most recent activity is what a client shows until
+someone picks otherwise. No client keeps its own copy: every client reads the helm's preference once after
+authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the same
+session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
+different answers — is not wanted. A client that asks the helm for no particular order gets creation time. The filter
+controls open on demand rather than standing permanently above the list; while an applied filter's controls are closed,
+the list says visibly that a filter is in force, so a narrowed list can never masquerade as a small fleet. No mandatory
+hierarchy. Agent-spawned sessions (see below) carry a parent reference usable as a filter, but parentage does not nest
+the list and implies nothing about VCS state.
 
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
 view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That
@@ -369,18 +372,19 @@ whatever the agent renders is what you see. There is no composer, no message abs
   the terminal itself holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is
   taken or stored.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session: with a non-empty fleet, a freshly
-  loaded client selects and attaches the session the user most recently had selected there — including after a desktop
-  relaunch — falling back to the newest-created non-archived one (chosen from the rows the listing carries, so when the
-  list was cut at its cap under an order other than creation time the pick can be the newest the reply reached rather
-  than the fleet's true newest — the accepted edge of the whole-list cap), so launching the app is itself the deliberate
-  act the attach semantics below key off. Opening a second client therefore takes the terminal over exactly as clicking
-  the same session there would. The attached client owns input and terminal dimensions: the PTY resizes to that client,
-  and the last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would
-  have had the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal
-  retains, and replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the
-  selected session's row whenever that session is listed, so which session the main pane is interacting with is readable
-  at a glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark —
-  the titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
+  loaded client selects and attaches the session the user most recently selected from any client — the helm remembers
+  one selection for all of them (see Session list) — falling back to the newest-created non-archived one (chosen from
+  the rows the listing carries, so when the list was cut at its cap under an order other than creation time the pick can
+  be the newest the reply reached rather than the fleet's true newest — the accepted edge of the whole-list cap), so
+  launching the app is itself the deliberate act the attach semantics below key off. Opening a second client therefore
+  attaches to whatever was most recently selected anywhere and takes the terminal over exactly as clicking the same
+  session there would. The attached client owns input and terminal dimensions: the PTY resizes to that client, and the
+  last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would have had
+  the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and
+  replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected
+  session's row whenever that session is listed, so which session the main pane is interacting with is readable at a
+  glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the
+  titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
   deselecting).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
@@ -607,9 +611,10 @@ worktree, workspace, or branch as part of spawning — if the agent wants a `jj 
 ## Errors and diagnostics
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
-  operation succeeded when it failed. Remembering desktop selection and sort across relaunches is the one exception:
-  persistence is best-effort, and failures are logged but silent because losing next-launch convenience must not turn a
-  choice that already took effect into a failed current operation.
+  operation succeeded when it failed. The helm-side preference (list order and last selection) is the one exception:
+  persistence is best-effort, failures are logged but silent because losing next-launch convenience must not turn a
+  choice that already took effect into a failed current operation, and a helm that lost the preference falls back to the
+  defaults.
 - Connection state per host is always visible — at minimum as the session list's compact per-host indicator, with the
   full hosts panel a toggle away; reconnection uses bounded retries followed by periodic low-frequency re-probing, so a
   host that comes back overnight resurfaces by itself. The UI shows which phase it is in either way.
