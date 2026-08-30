@@ -243,6 +243,13 @@ Within a bucket, no order.
   longer restores the previous binaries — re-run instead. A modest cut, worth taking when someone is in the file anyway
   rather than on its own.
 
+- Fly.io Sprites as a host kind: a session backed by a per-second-billed microVM that freezes when idle, with "pause
+  this host" in the UI meaning "stop paying for it". Assessed 2026-08-30 against a real sprite; the findings, the code
+  mapping (a `HostKind::Sprite` over the existing ssh transport via the sprite CLI's ProxyCommand emulation, a
+  provisioning flavor for a host with no systemd and no sftp, a `Paused` host state), the SPEC conflicts to surface, and
+  a build order are in `lore/2026-08-30-fly-sprites-as-a-host-kind.md`. The same entry sizes the related "native app
+  attaches to a remote helm" mode and the cheaper installed-web-app alternative.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
