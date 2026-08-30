@@ -3555,7 +3555,12 @@ mod tests {
     }
 
     /// Wait through the manager's intentional disconnect/retry window until
-    /// a test can issue a command on the current supervisor incarnation.
+    /// the host publishes a connected client.
+    ///
+    /// What it returns is a SNAPSHOT, not a lease. The manager may withdraw
+    /// and retire that connection at any moment — see
+    /// [`through_the_current_connection`], which is what a call issued on
+    /// the result has to be wrapped in.
     async fn wait_real_client(
         manager: &ConnectionManager,
         host: HostId,
@@ -3570,6 +3575,71 @@ mod tests {
         })
         .await
         .expect("the supervisor did not expose a connected client")
+    }
+
+    /// Issue one supervisor call on whatever connection the host has RIGHT
+    /// NOW, retrying it across a reconnect the manager decides to make in
+    /// the middle.
+    ///
+    /// A published `Arc<SupervisorClient>` is a snapshot of a connection the
+    /// manager owns and may end at any moment. `ConnectionManager::retry_now`
+    /// — which `ProvisioningService`'s own `AttachSupervisor` action and
+    /// every rediscovery `probe` of an already-registered host call — drops
+    /// the live connection and returns as soon as the nudge is SENT, without
+    /// waiting for the actor to act on it. So there is always an interval in
+    /// which [`wait_real_client`] hands back a client the actor is about to
+    /// withdraw, and `manager::retire_withdrawn` then fails everything that
+    /// connection was carrying. A test that sampled a client and issued one
+    /// request on it was racing that interval with no recovery: on a loaded
+    /// machine the request lands on the wrong side and comes back
+    /// `SupervisorTransportError::SentUnanswered`, which is how this failed
+    /// on CI (the ssh leg against the CentOS container) while passing on
+    /// every developer machine. Retiring used to leave such a request parked
+    /// forever instead of failing it, so the same race was a hang nobody had
+    /// hit rather than an error.
+    ///
+    /// Only the two CONNECTION-LOSS phases are retried. A refusal from the
+    /// supervisor, a wrong reply, or any other error is the failure the test
+    /// exists to catch and is reported as one.
+    ///
+    /// The caller owes idempotence across the retry: this helper cannot know
+    /// whether a `SentUnanswered` request was performed before its answer was
+    /// lost, so a MUTATION driven through here must carry whatever key makes
+    /// a repeat harmless (the create below uses an intent key, which the
+    /// supervisor keeps in its own store and therefore honours on a fresh
+    /// connection).
+    async fn through_the_current_connection<T, F, Fut>(
+        manager: &ConnectionManager,
+        host: HostId,
+        what: &str,
+        mut call: F,
+    ) -> T
+    where
+        F: FnMut(Arc<crate::client::SupervisorClient>) -> Fut,
+        Fut: std::future::Future<Output = anyhow::Result<T>>,
+    {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let client = wait_real_client(manager, host).await;
+            let error = match call(client).await {
+                Ok(value) => return value,
+                Err(error) => error,
+            };
+            let lost = matches!(
+                error.downcast_ref::<crate::client::SupervisorTransportError>(),
+                Some(
+                    crate::client::SupervisorTransportError::NotSent
+                        | crate::client::SupervisorTransportError::SentUnanswered
+                )
+            );
+            assert!(lost, "{what}: {error:#}");
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{what}: the host never held a connection long enough to answer; last ending: \
+                 {error:#}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// Prove both halves of session survival: tmux still reports a live
@@ -3955,7 +4025,6 @@ mod tests {
             previous_run
         );
 
-        let client = wait_real_client(&manager, accepted.host_id).await;
         // The working directory has to exist ON THE TARGET. The fixture root
         // does for a self-directed run; a remote target has never heard of
         // it, so use the one directory every POSIX host is required to have.
@@ -3967,10 +4036,30 @@ mod tests {
                 .expect("temp path is UTF-8")
                 .to_string()
         };
-        let session = client
-            .create_session(&cwd, "/bin/sh", None, 80, 24)
-            .await
-            .expect("create an operable session through the provisioned host");
+        // The rerun probe immediately above ends with `retry_now`, which
+        // drops this host's live connection without waiting for the actor,
+        // so THIS is the call most likely to be issued on a connection the
+        // manager is retiring underneath it — see
+        // [`through_the_current_connection`]. The intent key is what makes
+        // the retry safe: a create whose answer was lost is replayed rather
+        // than repeated, so a second session can never appear behind this
+        // test's back.
+        let create_key = uuid::Uuid::new_v4().to_string();
+        let session = through_the_current_connection(
+            &manager,
+            accepted.host_id,
+            "create an operable session through the provisioned host",
+            |client| {
+                let cwd = cwd.clone();
+                let key = create_key.clone();
+                async move {
+                    client
+                        .create_session_with_key(&cwd, "/bin/sh", None, 80, 24, Some(key))
+                        .await
+                }
+            },
+        )
+        .await;
 
         if update {
             let newer = root.path().join("farhelm-newer");
@@ -4026,6 +4115,13 @@ mod tests {
                 );
             }
         }
+        // A bare snapshot is enough HERE, unlike at the create above: the
+        // only `retry_now` left behind is the UPDATE run's own
+        // `AttachSupervisor`, which does not complete until it has observed
+        // a NEW incarnation, so `wait_real_run` returning means the
+        // reconnect this test could race has already happened and no nudge
+        // is outstanding. Nothing after this point asks the manager to
+        // reconfigure or re-dial the row.
         let client = wait_real_client(&manager, accepted.host_id).await;
         assert_session_operable(&client, &session.id).await;
         client.delete_session(&session.id).await.unwrap();

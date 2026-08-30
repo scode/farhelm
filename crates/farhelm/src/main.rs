@@ -7,10 +7,13 @@
 //! "CLI").
 //! The two in-session commands keep stdout machine-readable, with every
 //! diagnostic on stderr: `farhelm spawn`'s only successful output is the
-//! child id, and `farhelm agent`'s is the listing it was asked for. They
-//! share the injected-environment contract (`spawn_environment`) and
-//! nothing else — a spawn is answered by the supervisor on the other end
-//! of the socket, while an agent request is relayed by it to the helm.
+//! child id, and `farhelm agent`'s is either the listing it was asked for
+//! (`hosts`/`sessions`) or, for its three lifecycle verbs
+//! (`rename`/`stop`/`archive`), the one-line confirmation of the action it
+//! just took. They share the injected-environment contract
+//! (`spawn_environment`) and nothing else — a spawn is answered by the
+//! supervisor on the other end of the socket, while an agent request is
+//! relayed by it to the helm.
 
 use clap::{Parser, Subcommand};
 use farhelm_proto::AgentReply;
@@ -54,7 +57,9 @@ enum Cmd {
         #[arg(long)]
         idempotency_key: Option<String>,
     },
-    /// Ask the helm about the fleet, from inside a Farhelm session.
+    /// Ask the helm about the fleet, or act on it, from inside a Farhelm
+    /// session — `hosts`/`sessions` are read-only questions, and
+    /// `rename`/`stop`/`archive` are fleet-wide lifecycle actions.
     Agent {
         #[command(subcommand)]
         command: AgentCmd,
@@ -80,18 +85,57 @@ enum Cmd {
 
 /// The verbs `farhelm agent` currently carries.
 ///
-/// Read-only, and that is the whole set for now rather than a starting
-/// point that happens to be small: the relay these travel over is new, and
-/// a listing that is wrong is a confused agent, while a mutation that is
-/// wrong is a session someone loses. The mutating verbs (rename, stop,
-/// archive) and the creating ones (create, clone) land on the same
-/// transport once it has carried real traffic.
+/// The two read-only listings, plus the three lifecycle verbs SPEC.md's
+/// "A session can also ASK" paragraph promises: rename, stop, archive. The
+/// CREATING verbs (create, clone) stay off this list — they land on the
+/// same transport once it has carried real lifecycle traffic, and a verb
+/// that decodes and then refuses would be indistinguishable, from here,
+/// from one that is broken.
 #[derive(Subcommand)]
 enum AgentCmd {
     /// List the hosts the helm knows, marking this session's own.
     Hosts,
     /// List the sessions the helm knows, marking this one.
     Sessions,
+    /// Rename a session — the asking one by default.
+    Rename {
+        /// The new title, forwarded to the helm verbatim.
+        ///
+        /// TWO refusals stand between it and the target, both enforced by
+        /// the supervisor rather than here: SPEC.md's control-character
+        /// rule, and the 64 KiB field cap (`CREATE_FIELD_CAP`) the relay's
+        /// own `validate_agent_verb` applies at the first hop. Anything
+        /// else — leading hyphens, punctuation, the empty string — is a
+        /// legal title.
+        ///
+        /// `allow_hyphen_values` exists because of the first of those:
+        /// since a leading hyphen is legal in a title, clap would otherwise
+        /// misparse one as an unrecognized flag before it ever reached the
+        /// wire.
+        #[arg(allow_hyphen_values = true)]
+        title: String,
+        /// Act on this session instead of the one asking — any session id
+        /// the helm knows, on any host, not only ones this session could
+        /// otherwise name.
+        #[arg(long = "session")]
+        session: Option<String>,
+    },
+    /// Stop a session's agent process tree — the asking one by default.
+    Stop {
+        /// Act on this session instead of the one asking — any session id
+        /// the helm knows, on any host, not only ones this session could
+        /// otherwise name.
+        #[arg(long = "session")]
+        session: Option<String>,
+    },
+    /// Archive a session — the asking one by default.
+    Archive {
+        /// Act on this session instead of the one asking — any session id
+        /// the helm knows, on any host, not only ones this session could
+        /// otherwise name.
+        #[arg(long = "session")]
+        session: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -254,18 +298,82 @@ fn main() -> anyhow::Result<()> {
             println!("{child}");
             Ok(())
         }
-        Cmd::Agent { command } => {
-            let verb = match command {
-                AgentCmd::Hosts => farhelm_proto::AgentVerb::Hosts {},
-                AgentCmd::Sessions => farhelm_proto::AgentVerb::Sessions {},
+        Cmd::Agent {
+            command: AgentCmd::Hosts,
+        } => print_agent_listing(farhelm_proto::AgentVerb::Hosts {}),
+        Cmd::Agent {
+            command: AgentCmd::Sessions,
+        } => print_agent_listing(farhelm_proto::AgentVerb::Sessions {}),
+        // The three lifecycle verbs print one confirmation line rather than
+        // a table — there is exactly one row to report, and a script
+        // capturing stdout wants the plain sentence SPEC.md's CLI contract
+        // promises, not a one-row table with headers. That promise has one
+        // carve-out this match cannot enforce: a bare `stop`/`archive` (no
+        // `--session`) targets the ASKING session itself, and stopping or
+        // archiving oneself ends the whole process tree the sweep reaches
+        // by environment marker — this CLI process included — which can
+        // SIGTERM it before the `println!` below ever runs. See
+        // `tests/e2e/agent_listing_real_stack.rs`'s lifecycle test for
+        // where that race was confirmed and why it is routed around there
+        // rather than fixed here.
+        Cmd::Agent {
+            command: AgentCmd::Rename { title, session },
+        } => {
+            let verb = farhelm_proto::AgentVerb::Rename {
+                session_id: session,
+                title,
             };
-            let reply = runtime()?.block_on(agent_request(verb))?;
-            print!("{}", render_agent_reply(&reply));
-            // On stderr, so a script capturing stdout still gets nothing but
-            // the table — the notice is about the ANSWER, not part of it.
-            if let Some(notice) = truncation_notice(&reply) {
-                eprintln!("{notice}");
-            }
+            let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
+            let AgentReply::Session { session } = reply else {
+                // `agent_request` already checked the reply's tag against
+                // `ReplyKind::of_verb(&Rename)` before returning it, so this
+                // arm is unreachable in practice; bailing rather than
+                // `unreachable!()` keeps a defect here a clean error instead
+                // of a panic, consistent with every other "the peer sent
+                // something this decode did not expect" case above.
+                anyhow::bail!("the helm answered rename with something other than a session");
+            };
+            println!(
+                "renamed {} to {}",
+                safe_cell(&session.id),
+                quoted(&session.title)
+            );
+            Ok(())
+        }
+        Cmd::Agent {
+            command: AgentCmd::Stop { session },
+        } => {
+            // The reply carries no id (`AgentReply::Stopped` is empty — see
+            // its own docs), so the confirmation's target comes from
+            // whatever this process itself resolved: the `--session` the
+            // caller gave, or else the ASKING session `agent_request`
+            // reports back, exactly the substitution rule the helm applies
+            // on its own side. Cloned because the original is moved into
+            // the verb below and the confirmation is printed after the
+            // round trip.
+            let target_for_reply = session.clone();
+            let verb = farhelm_proto::AgentVerb::Stop {
+                session_id: session,
+            };
+            let (asking, reply) = runtime()?.block_on(agent_request(verb))?;
+            let AgentReply::Stopped {} = reply else {
+                anyhow::bail!("the helm answered stop with something other than confirmation");
+            };
+            let target = target_for_reply.unwrap_or(asking);
+            println!("stopped {}", safe_cell(&target));
+            Ok(())
+        }
+        Cmd::Agent {
+            command: AgentCmd::Archive { session },
+        } => {
+            let verb = farhelm_proto::AgentVerb::Archive {
+                session_id: session,
+            };
+            let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
+            let AgentReply::Session { session } = reply else {
+                anyhow::bail!("the helm answered archive with something other than a session");
+            };
+            println!("archived {}", safe_cell(&session.id));
             Ok(())
         }
         Cmd::Helm {
@@ -658,7 +766,27 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
     }
 }
 
-/// Ask the helm one question, from inside a session, and return its answer.
+/// Ask `verb` (`Hosts` or `Sessions`) and print the answer exactly the way
+/// both of `farhelm agent`'s read-only listings are printed: the table on
+/// stdout, then a truncation warning on stderr if the fleet did not fit.
+///
+/// Factored out because the two call sites were identical but for the
+/// verb — the asking session's own id has no use here (`_asking` at both),
+/// unlike the lifecycle verbs, which each need it or the reply's own row
+/// for a different reason.
+fn print_agent_listing(verb: farhelm_proto::AgentVerb) -> anyhow::Result<()> {
+    let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
+    print!("{}", render_agent_reply(&reply)?);
+    // On stderr, so a script capturing stdout still gets nothing but the
+    // table — the notice is about the ANSWER, not part of it.
+    if let Some(notice) = truncation_notice(&reply) {
+        eprintln!("{notice}");
+    }
+    Ok(())
+}
+
+/// Ask the helm one question, or tell it to act, from inside a session, and
+/// return the asking session's own id alongside the answer.
 ///
 /// Mechanically `spawn_session`'s twin — same injected environment
 /// (validated by the same [`spawn_environment`], so the two commands can
@@ -672,12 +800,20 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
 /// opened and relays the answer back. See `farhelm-supervisor`'s
 /// `service::agent_relay`.
 ///
+/// The asking session's id travels back out because it is the one thing a
+/// caller cannot otherwise recover after this call: `Stop`'s reply
+/// ([`farhelm_proto::AgentReply::Stopped`]) carries no fields at all, so a
+/// confirmation naming WHICH session stopped — when the caller sent no
+/// `--session` and meant "this one" — has nowhere else to read that id
+/// from. `Rename` and `Archive` do not need it; their replies are the
+/// updated row.
+///
 /// NO TIMEOUT here, deliberately. The supervisor bounds the upcall
 /// (`AGENT_UPCALL_TIMEOUT`) and is the only party that can tell "no helm is
 /// attached" from "a helm has it and is slow"; a deadline on this side
 /// would collapse those into one unactionable failure and would fire first,
 /// hiding the specific error the relay was about to send.
-async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<AgentReply> {
+async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<(String, AgentReply)> {
     use anyhow::Context;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake_with_session_auth, parse_control};
     use farhelm_proto::{AgentOutcome, ControlMsg, SessionAuth};
@@ -685,6 +821,10 @@ async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<Agen
     // Captured before the request goes out, because the reply's own tag is
     // the only thing that can be checked against it — see [`ReplyKind`].
     let expected = ReplyKind::of_verb(&request);
+    // Also captured before `request` is moved into the frame below, for the
+    // other question this function can no longer answer afterwards: whether
+    // the thing that went out CHANGES something. See [`lost_reply`].
+    let mutating = request.is_mutating();
     let (session_id, token, socket) = spawn_environment("farhelm agent")?;
     let stream = tokio::net::UnixStream::connect(&socket)
         .await
@@ -714,18 +854,46 @@ async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<Agen
     writer
         .write_control(&ControlMsg::AgentRequest {
             req_id: REQUEST_ID,
-            session_id,
+            session_id: session_id.clone(),
             request,
         })
         .await
         .context("sending the agent request")?;
 
-    let frame = reader
-        .read_frame()
-        .await
-        .context("reading the agent reply")?
-        .ok_or_else(|| anyhow::anyhow!("the supervisor closed before answering"))?;
-    match parse_control(&frame).context("decoding the agent reply")? {
+    // Past the write, every way of not getting a reply is an ending
+    // [`lost_reply`] has to classify: the request is already on the socket,
+    // and the supervisor may have forwarded it before dying.
+    let frame = match reader.read_frame().await {
+        Ok(Some(frame)) => frame,
+        Ok(None) => {
+            return Err(lost_reply(
+                "the supervisor closed before answering",
+                mutating,
+            ));
+        }
+        Err(error) => {
+            return Err(lost_reply(
+                &format!("reading the agent reply failed: {error}"),
+                mutating,
+            ));
+        }
+    };
+    let reply = match parse_control(&frame) {
+        Ok(reply) => reply,
+        // A frame arrived and could not be read. That is not the same as no
+        // frame arriving, but it licenses exactly the same conclusion: the
+        // request went out and nothing came back that says what became of
+        // it. Classified rather than returned as a decode error for the
+        // reason [`lost_reply`] exists — `Internal`-flavoured prose about
+        // JSON tells the reader nothing about whether their stop landed.
+        Err(error) => {
+            return Err(lost_reply(
+                &format!("the agent reply could not be decoded: {error}"),
+                mutating,
+            ));
+        }
+    };
+    match reply {
         ControlMsg::AgentResponse {
             req_id: REQUEST_ID,
             outcome,
@@ -739,45 +907,133 @@ async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<Agen
                 // answering a question nobody asked.
                 let got = ReplyKind::of(&reply);
                 if got != expected {
-                    anyhow::bail!(
-                        "the helm answered the {} question with a {} listing",
-                        expected.noun(),
-                        got.noun()
-                    );
+                    // Verb- and shape-neutral wording. Two of the five
+                    // requests this can report on are not questions and
+                    // three of the four replies are not listings, so the
+                    // old "answered the X question with a Y listing" was
+                    // wrong for most of the pairs it could actually print
+                    // — a rename answered with a stop confirmation being
+                    // the plainest case.
+                    //
+                    // Routed through `lost_reply` rather than bailed
+                    // outright: a peer that answered a `stop` with a
+                    // session row is broken, but a broken peer is at least
+                    // as likely to have stopped the session and then
+                    // mis-answered as to have done nothing, and this
+                    // process cannot tell those apart. The remedy belongs
+                    // to every post-write ending of a mutation, not only
+                    // the tidy ones.
+                    return Err(lost_reply(
+                        &format!(
+                            "the helm answered with a {} where a {} was expected",
+                            got.noun(),
+                            expected.noun()
+                        ),
+                        mutating,
+                    ));
                 }
-                Ok(reply)
+                Ok((session_id, reply))
             }
-            // The message is rendered verbatim whoever wrote it — the
+            // The TEXT is rendered verbatim whoever wrote it — the
             // supervisor's relay, or the helm's own listing — because
             // SPEC.md's actionable-error rule applies to both hops and
-            // neither side's prose improves by being paraphrased here.
-            AgentOutcome::Err { message, .. } => anyhow::bail!(message),
+            // neither side's prose improves by being paraphrased here. The
+            // BYTES are not, though: with the lifecycle verbs landed, this
+            // is the first `AgentOutcome::Err` that can carry a TARGET
+            // supervisor's own free-text refusal (a rejected rename title,
+            // say) rather than only this build's own fixed sentences, and
+            // `main`'s default `Result` printer puts an uncaught `bail!`
+            // string on stderr with no escaping of its own — unlike every
+            // successful confirmation, which already runs its dynamic
+            // fields through `safe_cell`. `safe_error_message` gives this
+            // path the same floor.
+            AgentOutcome::Err { message, .. } => anyhow::bail!(safe_error_message(&message)),
         },
         // Still possible, and not a protocol violation: the supervisor
         // sends an uncorrelated `Error` when it refuses the CREDENTIAL,
         // before any request has been read (see
         // `io::handshake_with_session_auth`).
+        //
+        // Deliberately NOT routed through `lost_reply`, unlike every other
+        // arm here: this is the peer's own definitive statement that the
+        // request failed, in its own words, which is precisely the thing an
+        // outcome-unknown ending exists for the absence of. Appending "the
+        // outcome is unknown" to a refusal the supervisor authored would
+        // manufacture doubt it did not express.
         ControlMsg::Error {
             req_id: 0 | REQUEST_ID,
             message,
             ..
         } => anyhow::bail!(message),
-        unexpected => {
-            anyhow::bail!("the supervisor sent an unexpected agent reply: {unexpected:?}")
-        }
+        // Everything else is a reply this process cannot correlate or
+        // interpret — an `AgentResponse` carrying somebody else's `req_id`,
+        // an unrelated control message, an `Error` for a request that was
+        // never made. The request itself went out, so a mutation's ending
+        // here is outcome-unknown for the same reason a decode failure's is.
+        unexpected => Err(lost_reply(
+            &format!("the supervisor sent an unexpected agent reply: {unexpected:?}"),
+            mutating,
+        )),
     }
 }
 
-/// Which listing shape a verb must be answered with.
+/// The error for a reply that never usably arrived, in the two vocabularies
+/// that situation has once the request itself is known to have gone out.
+///
+/// EVERY post-write ending but one comes through here, and the breadth is
+/// the point rather than an accident of where the calls happen to sit: the
+/// socket dying, a frame that will not decode, a response correlated with
+/// somebody else's `req_id`, a control message that answers nothing, a
+/// success reply of the wrong shape. They look nothing alike and they all
+/// license exactly one conclusion — the request went out, and nothing came
+/// back that says what became of it. The single exclusion is a
+/// `ControlMsg::Error` the supervisor itself wrote, which IS a statement
+/// about the outcome and must not have doubt appended to it.
+///
+/// The local socket dying takes every `ErrorKind` with it — there is no
+/// `AgentOutcome` left to carry a classification — so this is the one place
+/// the distinction can still be made, and the CLI is the one party that can
+/// still make it: it knows the verb it sent and that its write completed.
+/// The facts are identical either way (the request reached the supervisor's
+/// socket; the supervisor may have forwarded it to a helm, which may have
+/// applied it on another host; the answer was lost), and what differs is
+/// what the reader should do next. A listing has nothing to double-apply
+/// and gets the plain transport wording, which already reads as "ask
+/// again". A rename/stop/archive may ALREADY have taken effect, so it gets
+/// the same "look before you retry" remedy the relay's own delivered-but-
+/// unanswered endings carry — one sentence across every hop, rather than a
+/// helpful answer that stops at the process boundary.
+fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
+    if !mutating {
+        return anyhow::anyhow!("{cause}");
+    }
+    anyhow::anyhow!(
+        "{cause}; the request had already been sent, so the outcome is unknown — {}",
+        farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY
+    )
+}
+
+/// Which reply shape a verb must be answered with.
 ///
 /// A retained expectation, because the protocol's `reply` tag is only
 /// useful to a client that remembers what it asked. The relay hands a
 /// response back by `req_id` across two hops and nothing on either hop
 /// re-checks the shape, so this is the only place a mismatch can be caught.
+///
+/// `Session` covers BOTH `Rename` and `Archive` — the wire's own choice
+/// (`AgentReply::Session` is one shape for two verbs; see that variant's
+/// docs) — so this check can confirm "the helm answered with a session row"
+/// but not "with THIS verb's own effect"; a helm that renamed when asked to
+/// archive would still pass it. That is an acceptable gap: it is a bug in
+/// the helm's own dispatch, not a wire-shape mismatch, and nothing this
+/// process can observe would tell the two apart without re-deriving policy
+/// that belongs to the helm alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReplyKind {
     Hosts,
     Sessions,
+    Session,
+    Stopped,
 }
 
 impl ReplyKind {
@@ -785,6 +1041,10 @@ impl ReplyKind {
         match verb {
             farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
             farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
+            farhelm_proto::AgentVerb::Rename { .. } | farhelm_proto::AgentVerb::Archive { .. } => {
+                ReplyKind::Session
+            }
+            farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
         }
     }
 
@@ -792,14 +1052,23 @@ impl ReplyKind {
         match reply {
             AgentReply::Hosts { .. } => ReplyKind::Hosts,
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
+            AgentReply::Session { .. } => ReplyKind::Session,
+            AgentReply::Stopped {} => ReplyKind::Stopped,
         }
     }
 
-    /// The word this kind is called in an error a user reads.
+    /// What this reply shape is CALLED in an error a user reads.
+    ///
+    /// A noun phrase for the reply itself, not for the verb that asked for
+    /// it: the mismatch message names two of these and has no idea which
+    /// one was the request, so anything verb-flavored reads backwards half
+    /// the time.
     fn noun(self) -> &'static str {
         match self {
-            ReplyKind::Hosts => "hosts",
-            ReplyKind::Sessions => "sessions",
+            ReplyKind::Hosts => "hosts listing",
+            ReplyKind::Sessions => "sessions listing",
+            ReplyKind::Session => "session row",
+            ReplyKind::Stopped => "stop confirmation",
         }
     }
 }
@@ -834,9 +1103,23 @@ fn truncation_notice(reply: &AgentReply) -> Option<String> {
 /// piece of information that has no other spelling — which row is the
 /// asking session, and which host it is on.
 ///
+/// Only ever called with the reply to `Hosts` or `Sessions` — the three
+/// lifecycle verbs print their own one-line confirmation instead (see
+/// `main`'s `Rename`/`Stop`/`Archive` arms) — which is why the lifecycle
+/// tags are an ERROR here rather than a table of their own.
+///
+/// A `Result` rather than a panic on those tags, deliberately. The
+/// precondition is real and holds today, but it is a fact about this
+/// program's own dispatch rather than anything the type system carries, and
+/// a `unreachable!()` turns a future routing mistake into a CLI that
+/// aborts. Every other "this is not the shape I expected" case in this file
+/// — a reply whose tag disagrees with its question, a lifecycle verb
+/// answered with the wrong variant — already ends in a `bail!`, and this
+/// belongs in the same family.
+///
 /// Returns the text rather than printing it so the shape is testable
 /// without a process.
-fn render_agent_reply(reply: &AgentReply) -> String {
+fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
     match reply {
         AgentReply::Hosts { hosts } => {
             let mut rows = vec![vec![
@@ -853,7 +1136,7 @@ fn render_agent_reply(reply: &AgentReply) -> String {
                     host.state.clone(),
                 ]
             }));
-            aligned(&rows)
+            Ok(aligned(&rows))
         }
         AgentReply::Sessions { sessions, .. } => {
             let mut rows = vec![vec![
@@ -869,16 +1152,39 @@ fn render_agent_reply(reply: &AgentReply) -> String {
                 vec![
                     marker(session.current),
                     session.id.clone(),
-                    session.host.clone(),
+                    host_cell(session),
                     session.title.clone(),
                     session.cwd.clone(),
                     session.agent.clone(),
                     session_status_cell(session),
                 ]
             }));
-            aligned(&rows)
+            Ok(aligned(&rows))
+        }
+        // Refused rather than rendered: a lifecycle reply has one row and
+        // no table to be, and printing an empty one would read as an empty
+        // fleet. `main` never routes one here — see this function's docs
+        // for why that is stated as an error and not asserted.
+        AgentReply::Session { .. } | AgentReply::Stopped {} => {
+            anyhow::bail!("only hosts and sessions listings are rendered as a table")
         }
     }
+}
+
+/// The HOST cell: the name, or an explicit stand-in when the helm had none
+/// to vouch for.
+///
+/// Unreachable from a listing today — `AgentSession::host` is only ever
+/// `None` on a lifecycle verb's own reply, which prints a confirmation line
+/// instead of a table — and spelled out anyway rather than defaulted to an
+/// empty cell. An empty cell in a column of host names reads as a rendering
+/// bug; this reads as what it is, and pairs with the `(stale)` the status
+/// cell puts on the same row.
+fn host_cell(session: &farhelm_proto::AgentSession) -> String {
+    session
+        .host
+        .clone()
+        .unwrap_or_else(|| "(unknown)".to_string())
 }
 
 /// The STATUS cell: the status word, overridden for an archived session and
@@ -996,6 +1302,32 @@ fn aligned(rows: &[Vec<String>]) -> String {
     out
 }
 
+/// One field as a quoted, unambiguously delimited token.
+///
+/// For the rename confirmation, whose title is the one place this CLI puts
+/// peer-supplied text inside literal quotes on stdout. [`safe_cell`] alone
+/// was not enough there: it neutralizes control characters but leaves a `"`
+/// as a `"`, so a title of `x" and then some` printed as
+/// `renamed s1 to "x" and then some"` — three quotes, and anything reading
+/// the line for a quoted field sees the title end where the attacker chose.
+///
+/// The two escapes happen BEFORE `safe_cell`, and the order is what makes
+/// the result decodable. Escaping first means a literal backslash in the
+/// title is already doubled by the time `safe_cell` writes its own
+/// backslash escapes, so `\n` in the output is unambiguously a newline that
+/// was escaped and never a title that literally contained a backslash and
+/// an n.
+fn quoted(field: &str) -> String {
+    let mut escaped = String::with_capacity(field.len());
+    for c in field.chars() {
+        if c == '"' || c == '\\' {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    format!("\"{}\"", safe_cell(&escaped))
+}
+
 /// One cell as a single printable line.
 ///
 /// Every control character is replaced by a visible escape rather than
@@ -1028,10 +1360,45 @@ fn safe_cell(cell: &str) -> String {
 /// to it, so a clamped cell is exactly the width the bound names — a cell
 /// that could exceed its own limit would defeat the point of having one.
 fn clamp(cell: String) -> String {
-    if cell.chars().count() <= MAX_CELL_WIDTH {
+    clamp_to(cell, MAX_CELL_WIDTH)
+}
+
+/// The longest an [`agent_request`] error message is ever printed at,
+/// before this process's own `Result`-printing takes over.
+///
+/// Sized for a SENTENCE rather than a table cell, unlike [`MAX_CELL_WIDTH`]:
+/// an error is prose meant to be read whole, not a column meant to stay
+/// aligned with its neighbors, so it gets a far more generous cap of its
+/// own rather than reusing one built for a different job.
+const MAX_ERROR_MESSAGE_CHARS: usize = 4096;
+
+/// A peer-supplied error message, made safe for the same reason
+/// [`safe_cell`] exists: escaped so an embedded control character cannot
+/// forge terminal output, and bounded so a pathologically large refusal
+/// cannot flood the screen.
+///
+/// Exists because an `AgentOutcome::Err`'s `message` — unlike every
+/// successful confirmation's fields, which already go through
+/// [`safe_cell`] — used to reach `anyhow::bail!` (and from there, this
+/// process's own unescaped `Result` printer) with neither protection. That
+/// was a latent gap even for the helm's own fixed refusal strings, and the
+/// lifecycle verbs made it a real one: a rename/stop/archive refusal can
+/// now carry a TARGET supervisor's own free-text prose (a rejected title,
+/// say), which this process never validated on the way out.
+fn safe_error_message(message: &str) -> String {
+    clamp_to(safe_cell(message), MAX_ERROR_MESSAGE_CHARS)
+}
+
+/// [`clamp`]'s general form, for a width other than [`MAX_CELL_WIDTH`].
+///
+/// `clamp` itself is left as the table-rendering path's own name for this
+/// same operation at its own fixed width, rather than folded into this one
+/// with an extra argument at every call site.
+fn clamp_to(cell: String, width: usize) -> String {
+    if cell.chars().count() <= width {
         return cell;
     }
-    let mut out: String = cell.chars().take(MAX_CELL_WIDTH - 1).collect();
+    let mut out: String = cell.chars().take(width - 1).collect();
     out.push('…');
     out
 }
@@ -1347,7 +1714,7 @@ mod tests {
     fn agent_session(id: &str, title: &str) -> farhelm_proto::AgentSession {
         farhelm_proto::AgentSession {
             id: id.to_string(),
-            host: "h".to_string(),
+            host: Some("h".to_string()),
             title: title.to_string(),
             cwd: "/w".to_string(),
             agent: "claude".to_string(),
@@ -1386,7 +1753,8 @@ mod tests {
         let rendered = render_agent_reply(&sessions(vec![
             agent_session("s1", "café"),
             agent_session("s2", "tea"),
-        ]));
+        ]))
+        .expect("a sessions listing renders as a table");
         assert_eq!(
             rendered,
             [
@@ -1414,7 +1782,8 @@ mod tests {
         let rendered = render_agent_reply(&sessions(vec![agent_session(
             "s1",
             "real\n  s2 forged\ttab\x1b[31m",
-        )]));
+        )]))
+        .expect("a sessions listing renders as a table");
         assert_eq!(
             rendered.lines().count(),
             2,
@@ -1443,7 +1812,8 @@ mod tests {
         let long = "x".repeat(MAX_CELL_WIDTH * 3);
         let mut row = agent_session("s1", &long);
         row.status = long.clone();
-        let rendered = render_agent_reply(&sessions(vec![row]));
+        let rendered = render_agent_reply(&sessions(vec![row]))
+            .expect("a sessions listing renders as a table");
         let title = rendered
             .lines()
             .nth(1)
@@ -1474,7 +1844,8 @@ mod tests {
         archived.archived = true;
         let mut stale = agent_session("s2", "t");
         stale.stale = true;
-        let rendered = render_agent_reply(&sessions(vec![archived, stale]));
+        let rendered = render_agent_reply(&sessions(vec![archived, stale]))
+            .expect("a sessions listing renders as a table");
         assert_eq!(
             rendered,
             [

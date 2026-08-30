@@ -99,7 +99,7 @@ use tracing::warn;
 mod client;
 pub use client::{
     CreateExtras, PeerHello, SessionListing, SessionPage, SupervisorClient, SupervisorError,
-    TermDetachSignal, TermEvent, TermStream,
+    SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
 };
 
 /// The merged multi-host session list and the helm-level cursor that pages
@@ -1611,34 +1611,116 @@ async fn run_with_ready(
 /// suite asserts the header by name.
 const BUILD_STAMP_HEADER: &str = "x-farhelm-build";
 
-/// Render an error as an HTTP response whose body is the error chain in
-/// full and whose status reflects what the supervisor actually classified.
+/// Classify an error chain into the coarse [`ErrorKind`] vocabulary this
+/// crate's two error-facing callers both need: [`http_error`] turns it into
+/// an HTTP status for the REST surface, and
+/// `agent_requests::HelmAgentRequests::handle` turns the SAME classification
+/// into an [`farhelm_proto::AgentOutcome::Err`] for a session-authenticated
+/// agent — one rulebook rather than two that could disagree about what a
+/// lifecycle mutation's refusal means.
 ///
-/// The status mapping is only as honest as the supervisor's own
-/// classification: `NotFound` maps to 404, `InvalidRequest` to 400, and
-/// `Conflict` (PLAN_M3.md item 6 — an intent key reused with a different
-/// fingerprint) to 409, each when a `SupervisorClient` request surfaces a
-/// [`SupervisorError`] with that kind anywhere in its chain (the walk
-/// mirrors the supervisor's own `error_kind` helper, for the same
-/// reason — a `SupervisorError` can sit under context layers this client
-/// or an intermediate caller added). Anything else — no `SupervisorError`
-/// in the chain at all, or one explicitly carrying `Internal` — is a 500:
-/// the honest default for a failure the caller could not have avoided by
+/// Three families are consulted in order of specificity, because a
+/// `SupervisorError` can sit UNDER either of the other two once
+/// `anyhow::Context` has wrapped it on the way out. Each family is looked
+/// for through [`find_cause`], which covers both ways an error can be
+/// carried — as a `source()` link and as anyhow context — so the ordering
+/// below is a statement about SPECIFICITY alone and not about how a caller
+/// happened to attach the thing:
+///
+/// - [`store::HostStoreError`] (PLAN_M6.md item 5's host-management and
+///   routing refusals): an unknown host id is `NotFound`, an unusable
+///   destination is `InvalidRequest` (the caller sent something `ssh`
+///   cannot use), and everything else the registry refuses — a duplicate
+///   destination, the immovable local row, a lost identity
+///   compare-and-swap, an identity another row claimed, a row reconfigured
+///   mid-decision, a session two hosts both claim — is `Conflict`, because
+///   each is the same shape of failure: the request was well formed and
+///   conflicts with the fleet as it stands.
+/// - [`manager::ManagerError`] carries the same split for the decisions the
+///   manager owns rather than the store.
+/// - Otherwise, whatever [`SupervisorError`] is nearest the surface is
+///   classified by ITS OWN `kind` verbatim — a non-connected host's refusal
+///   reaches this function as an ordinary `SupervisorError` carrying
+///   `Conflict` (see `sessions::refusal_text`), for the same reading.
+///
+/// Nothing classified anywhere in the chain, or a `SupervisorError` that
+/// already said `Internal` itself, both fall through to `Internal`: the
+/// honest default for a failure the caller could not have avoided by
 /// sending a different request.
 ///
-/// PLAN_M6.md item 5's host-management and routing refusals join the same
-/// table through two further downcasts. [`store::HostStoreError`]: an
-/// unknown host id is a 404, an unusable destination is a 400 (the caller
-/// sent something `ssh` cannot use), and everything else the registry
-/// refuses — a duplicate destination, the immovable local row, a lost
-/// identity compare-and-swap, an identity another row claimed, a row
-/// reconfigured mid-decision, a session two hosts both claim — is a 409,
-/// because each is the same shape of failure: the request was well formed
-/// and conflicts with the fleet as it stands. [`manager::ManagerError`]
-/// carries the same split for the decisions the manager owns rather than
-/// the store. A non-connected host's refusal reaches this function as an
-/// ordinary `SupervisorError` carrying `Conflict` (see `refusal_text`), for
-/// the same reading.
+/// One family is deliberately absent: a [`SupervisorTransportError`], the
+/// shape of a target supervisor failing to give a usable answer — its
+/// connection dying, or a correlated reply of the wrong variant.
+/// Classifying it needs a fact this function is not given — whether the
+/// verb CHANGED anything — because the same lost answer means "retry
+/// freely" for a listing and "the outcome is unknown" for a
+/// rename/stop/archive. The agent caller asks that question first
+/// (`agent_requests::transport_outcome`) and only falls back here; the
+/// REST caller keeps the `Internal` it has always produced, since a
+/// browser's retry decision is the user's own.
+fn error_kind(e: &anyhow::Error) -> ErrorKind {
+    if let Some(refusal) = find_cause::<store::HostStoreError>(e) {
+        return match refusal {
+            store::HostStoreError::HostNotFound(_) => ErrorKind::NotFound,
+            store::HostStoreError::InvalidDestination(_) => ErrorKind::InvalidRequest,
+            store::HostStoreError::DuplicateDestination(_)
+            | store::HostStoreError::LocalHostImmutable
+            | store::HostStoreError::IdentityMismatch { .. }
+            | store::HostStoreError::IdentityClaimed { .. }
+            | store::HostStoreError::StaleAttempt { .. }
+            // Two hosts claiming one session id: well-formed request,
+            // incoherent fleet. `Conflict` rather than `Internal` because
+            // the user CAN act on it (remove whichever entry does not
+            // belong) and the error names both candidates so they know
+            // which.
+            | store::HostStoreError::SessionOwnerAmbiguous { .. } => ErrorKind::Conflict,
+        };
+    }
+    if let Some(refusal) = find_cause::<manager::ManagerError>(e) {
+        return match refusal {
+            manager::ManagerError::NoSuchHost(_) => ErrorKind::NotFound,
+            // Both are "the host is not in the state this verb needs",
+            // which a client answers by re-rendering the host and offering
+            // whatever it is actually asking for now.
+            manager::ManagerError::NotAwaitingAdoption { .. }
+            | manager::ManagerError::AdoptionSuperseded { .. } => ErrorKind::Conflict,
+        };
+    }
+    find_cause::<SupervisorError>(e)
+        .map(|s| s.kind)
+        .unwrap_or(ErrorKind::Internal)
+}
+
+/// Find a `T` anywhere in `e`, whether it was attached as a SOURCE or as
+/// anyhow CONTEXT.
+///
+/// Two lookups because anyhow keeps the two in different places and neither
+/// mechanism sees the other. `chain()` walks `std::error::Error::source()`
+/// links, and a value attached with `.context(value)` is not one: the chain
+/// element is an opaque `ContextError` wrapper whose `downcast_ref::<T>()`
+/// answers `None`. `anyhow::Error::downcast_ref` is the converse — it
+/// unwraps its own context layers and the head error, but does not follow
+/// `source()` links belonging to foreign error types.
+///
+/// [`error_kind`] used to consult only the first, which made its documented
+/// order of specificity quietly conditional on HOW a caller had attached
+/// the more specific error: a `HostStoreError` wrapped as context around a
+/// `SupervisorError` was invisible, and the chain's less specific answer
+/// won. Consulting both, per family, in the family's own turn, is what
+/// makes that order hold regardless of the attachment style — which matters
+/// because nothing at a call site marks which style it used.
+fn find_cause<T: std::error::Error + Send + Sync + 'static>(e: &anyhow::Error) -> Option<&T> {
+    e.downcast_ref::<T>()
+        .or_else(|| e.chain().find_map(|c| c.downcast_ref::<T>()))
+}
+
+/// Render an error as an HTTP response whose body is the error chain in
+/// full and whose status is [`error_kind`]'s classification, mapped onto
+/// the closest HTTP status for each kind (`Unavailable`→503,
+/// `Timeout`→504 — neither reachable from a REST call today, since both
+/// belong to the agent relay's own request/reply pair, but mapped rather
+/// than lumped into `Internal` so a future path that does carry one here
+/// arrives as the gateway-shaped status it actually is).
 ///
 /// The body itself is deliberately unsanitized regardless of status:
 /// SPEC.md requires concrete, actionable errors in the client, and the
@@ -1649,69 +1731,19 @@ const BUILD_STAMP_HEADER: &str = "x-farhelm-build";
 /// body as text rather than interpreting it, which is what makes a remote
 /// supervisor's message safe to pass through verbatim.
 fn http_error(e: anyhow::Error) -> axum::response::Response {
-    // ONE status decision and ONE response construction. The three families
-    // are consulted in order of specificity — a registry refusal, then a
-    // manager refusal, then whatever the supervisor said — and each yields
-    // only a CODE, because three copies of "format the chain and return it"
-    // is three places for the body to drift apart.
-    let registry = e
-        .chain()
-        .find_map(|c| c.downcast_ref::<store::HostStoreError>())
-        .map(|refusal| match refusal {
-            store::HostStoreError::HostNotFound(_) => axum::http::StatusCode::NOT_FOUND,
-            store::HostStoreError::InvalidDestination(_) => axum::http::StatusCode::BAD_REQUEST,
-            store::HostStoreError::DuplicateDestination(_)
-            | store::HostStoreError::LocalHostImmutable
-            | store::HostStoreError::IdentityMismatch { .. }
-            | store::HostStoreError::IdentityClaimed { .. }
-            | store::HostStoreError::StaleAttempt { .. }
-            // Two hosts claiming one session id: well-formed request,
-            // incoherent fleet. 409 rather than 500 because the user CAN
-            // act on it (remove whichever entry does not belong) and the
-            // error names both candidates so they know which.
-            | store::HostStoreError::SessionOwnerAmbiguous { .. } => {
-                axum::http::StatusCode::CONFLICT
-            }
-        });
-    let managed = || {
-        e.chain()
-            .find_map(|c| c.downcast_ref::<manager::ManagerError>())
-            .map(|refusal| match refusal {
-                manager::ManagerError::NoSuchHost(_) => axum::http::StatusCode::NOT_FOUND,
-                // Both are "the host is not in the state this verb needs",
-                // which a client answers by re-rendering the host and
-                // offering whatever it is actually asking for now.
-                manager::ManagerError::NotAwaitingAdoption { .. }
-                | manager::ManagerError::AdoptionSuperseded { .. } => {
-                    axum::http::StatusCode::CONFLICT
-                }
-            })
-    };
-    let supervised = || match e
-        .chain()
-        .find_map(|c| c.downcast_ref::<SupervisorError>())
-        .map(|s| s.kind)
-    {
-        Some(ErrorKind::NotFound) => axum::http::StatusCode::NOT_FOUND,
-        Some(ErrorKind::InvalidRequest) => axum::http::StatusCode::BAD_REQUEST,
-        Some(ErrorKind::Internal) | None => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+    let status = match error_kind(&e) {
+        ErrorKind::NotFound => axum::http::StatusCode::NOT_FOUND,
+        ErrorKind::InvalidRequest => axum::http::StatusCode::BAD_REQUEST,
+        ErrorKind::Internal => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         // PLAN_M3.md item 6: an intent key reused with a different
         // fingerprint. 409 is the standard HTTP reading of "this identifier
-        // already means something else"; this function's own docstring
-        // above is where the full status-mapping table lives.
-        Some(ErrorKind::Conflict) => axum::http::StatusCode::CONFLICT,
-        Some(ErrorKind::Unauthorized) => axum::http::StatusCode::UNAUTHORIZED,
-        // Neither kind is reachable from a supervisor answering a REQUEST
-        // this helm sent — both belong to the agent relay, which travels
-        // the other way and never becomes an HTTP response. They are
-        // mapped rather than lumped into the `Internal` arm so that if
-        // some future path does carry one to a browser, it arrives as the
-        // gateway-shaped status it actually is instead of as "the helm
-        // broke".
-        Some(ErrorKind::Unavailable) => axum::http::StatusCode::SERVICE_UNAVAILABLE,
-        Some(ErrorKind::Timeout) => axum::http::StatusCode::GATEWAY_TIMEOUT,
+        // already means something else"; `error_kind`'s own docs are where
+        // the full classification table lives.
+        ErrorKind::Conflict => axum::http::StatusCode::CONFLICT,
+        ErrorKind::Unauthorized => axum::http::StatusCode::UNAUTHORIZED,
+        ErrorKind::Unavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,
     };
-    let status = registry.or_else(managed).unwrap_or_else(supervised);
     // The UI shows this body verbatim.
     (status, format!("{e:#}")).into_response()
 }
@@ -2234,6 +2266,36 @@ mod tests {
         assert_eq!(
             response.status(),
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// Pins `error_kind`'s documented order of specificity — `HostStoreError`
+    /// before `SupervisorError` — against a chain that carries BOTH, rather
+    /// than leaving that order asserted only in a doc comment.
+    ///
+    /// `error_kind` now serves two callers (`http_error` here and
+    /// `agent_requests::HelmAgentRequests::handle`, added alongside the
+    /// lifecycle verbs) instead of one, which is exactly the situation in
+    /// which an undocumented-by-test ordering rule gets silently reordered
+    /// by someone touching only one of the two call sites: nothing would
+    /// fail until a chain shaped like this one reached whichever caller
+    /// nobody re-checked. The shape itself is realistic, not contrived — a
+    /// `SupervisorError` from a low-level call wrapped in a `.context(...)`
+    /// that happens to be (or itself wrap) a `HostStoreError` is exactly
+    /// what an intermediate caller composing both layers could produce
+    /// without meaning to.
+    #[test]
+    fn error_kind_prefers_the_host_store_family_over_a_supervisor_error_in_the_same_chain() {
+        let inner = anyhow::Error::new(SupervisorError {
+            kind: farhelm_proto::ErrorKind::Internal,
+            message: "an inner, less specific classification".to_string(),
+        });
+        let chain = inner.context(crate::store::HostStoreError::HostNotFound(42));
+        let response = super::http_error(chain);
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "the HostStoreError family must win over a SupervisorError deeper in the same chain"
         );
     }
 }

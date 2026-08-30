@@ -14,7 +14,7 @@
 
 use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 use farhelm_proto::{
-    AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ControlMsg, ErrorKind,
+    AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ControlMsg, ErrorKind, Frame,
 };
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -37,6 +37,25 @@ use std::time::Duration;
 fn mock_supervisor(
     socket: &std::path::Path,
     respond: impl FnOnce(ControlMsg) -> Option<ControlMsg> + Send + 'static,
+) -> (
+    std::sync::mpsc::Receiver<Result<(), String>>,
+    std::thread::JoinHandle<()>,
+) {
+    mock_supervisor_frames(socket, |request| {
+        respond(request).map(|reply| Frame::control(&reply))
+    })
+}
+
+/// [`mock_supervisor`] one layer down, answering with a raw [`Frame`].
+///
+/// Exists for the one case a `ControlMsg` cannot express: a control frame
+/// whose body is not decodable at all. That ending is reachable in
+/// production from any peer with a version skew or a bug, and it is on the
+/// far side of the CLI's write, so it belongs to the outcome-unknown family
+/// — which nothing else here could stage.
+fn mock_supervisor_frames(
+    socket: &std::path::Path,
+    respond: impl FnOnce(ControlMsg) -> Option<Frame> + Send + 'static,
 ) -> (
     std::sync::mpsc::Receiver<Result<(), String>>,
     std::thread::JoinHandle<()>,
@@ -75,7 +94,7 @@ fn mock_supervisor(
                         .unwrap()
                         .expect("agent request");
                     if let Some(reply) = respond(parse_control(&frame).unwrap()) {
-                        writer.write_control(&reply).await.unwrap();
+                        writer.write_frame(&reply).await.unwrap();
                     }
                 });
         }))
@@ -132,17 +151,39 @@ fn output_with_timeout(mut command: Command) -> Output {
 
 /// Start with no inherited Farhelm launch contract, then let each case add
 /// exactly the values it means to exercise.
-fn agent_command(socket: &std::path::Path, verb: &str) -> Command {
+///
+/// The environment scrub is the load-bearing part: these tests run inside
+/// whatever shell invoked them, which for a session-launched run already
+/// carries a real `FARHELM_SESSION_ID`/`TOKEN`/`SOCK`, and a case that
+/// inherited them would silently talk to the developer's own supervisor
+/// instead of its mock.
+///
+/// The backtrace variables are scrubbed for a different reason, and it is
+/// a CI-only trap worth naming: `main` returns `anyhow::Result`, so a
+/// failing run's stderr is the error's `Debug` rendering, which appends a
+/// `Stack backtrace:` block whenever `RUST_BACKTRACE` is set. Nothing in
+/// this repository sets it, but `actions-rust-lang/setup-rust-toolchain`
+/// exports `RUST_BACKTRACE=short` for the whole CI job, and the child
+/// inherits it — which turned a one-line refusal into 23 lines and failed
+/// [`a_refused_lifecycle_verb_is_escaped_and_bounded_on_stderr`] on CI
+/// while it passed on every developer machine. What that test owns is how
+/// much of stderr the PEER can drive; local diagnostics the operator opted
+/// into are not part of the contract, so they are removed rather than
+/// counted around.
+fn agent_command_with_args(socket: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
     for name in [
         "FARHELM_SESSION_ID",
         "FARHELM_SESSION_TOKEN",
         "FARHELM_SUPERVISOR_SOCK",
+        "RUST_BACKTRACE",
+        "RUST_LIB_BACKTRACE",
     ] {
         command.env_remove(name);
     }
     command
-        .args(["agent", verb])
+        .arg("agent")
+        .args(args)
         .env("FARHELM_SESSION_ID", "session-1")
         .env("FARHELM_SESSION_TOKEN", "secret")
         .env("FARHELM_SUPERVISOR_SOCK", socket);
@@ -201,7 +242,7 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "hosts"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["hosts"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(0));
@@ -254,7 +295,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                     sessions: vec![
                         AgentSession {
                             id: "session-1".to_string(),
-                            host: "this machine".to_string(),
+                            host: Some("this machine".to_string()),
                             title: "auth".to_string(),
                             cwd: "/w/auth".to_string(),
                             agent: "claude".to_string(),
@@ -265,7 +306,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                         },
                         AgentSession {
                             id: "session-2".to_string(),
-                            host: "builder".to_string(),
+                            host: Some("builder".to_string()),
                             title: "docs".to_string(),
                             cwd: "/w".to_string(),
                             agent: "codex".to_string(),
@@ -276,7 +317,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                         },
                         AgentSession {
                             id: "session-3".to_string(),
-                            host: "builder".to_string(),
+                            host: Some("builder".to_string()),
                             title: "old".to_string(),
                             cwd: "/w".to_string(),
                             agent: "codex".to_string(),
@@ -292,7 +333,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "sessions"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["sessions"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(0));
@@ -335,7 +376,7 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
                 reply: AgentReply::Sessions {
                     sessions: vec![AgentSession {
                         id: "session-1".to_string(),
-                        host: "this machine".to_string(),
+                        host: Some("this machine".to_string()),
                         title: "auth".to_string(),
                         cwd: "/w".to_string(),
                         agent: "claude".to_string(),
@@ -350,7 +391,7 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "sessions"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["sessions"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(0));
@@ -396,7 +437,7 @@ fn a_refusal_is_the_supervisors_own_sentence_on_stderr() {
         })
     });
 
-    let output = output_with_timeout(agent_command(&socket, "hosts"));
+    let output = output_with_timeout(agent_command_with_args(&socket, &["hosts"]));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(1));
@@ -405,6 +446,98 @@ fn a_refusal_is_the_supervisors_own_sentence_on_stderr() {
     assert!(
         stderr.contains("no helm is attached to this session — open the session in the farhelm UI"),
         "the relay's own sentence must reach stderr verbatim, got: {stderr}"
+    );
+}
+
+/// Spec: a refusal's message is ESCAPED and BOUNDED before it reaches
+/// stderr — verbatim in wording, not in bytes.
+///
+/// The companion to the verbatim-relay test above, and the reason the two
+/// have to coexist: "render the peer's sentence unchanged" and "never let a
+/// peer drive the terminal" are both real requirements, and only the second
+/// one has an attacker in it. This is the ONE outcome path whose text can
+/// originate on a machine neither this process nor its own supervisor
+/// controls — with the lifecycle verbs landed, a refusal can carry a TARGET
+/// supervisor's free-text prose (a rejected rename title quoted back, say)
+/// — and it reaches stderr through `anyhow`'s `Result` printer, which
+/// escapes nothing on its own. Every SUCCESS path already runs its fields
+/// through the cell escaping; without `safe_error_message` the failure path
+/// was the one hole in that floor.
+///
+/// The oversized half is the availability side of the same field: a refusal
+/// is prose meant to be read, and a peer that answered with megabytes of it
+/// would scroll away whatever the user was looking at. The cap is
+/// `MAX_ERROR_MESSAGE_CHARS` (4096) plus the ellipsis that marks the cut;
+/// this asserts the bound held and the marker is present rather than
+/// re-deriving the exact number, which belongs to `main.rs` alone.
+///
+/// An `InvalidRequest` for a control-bearing `--session` is the realistic
+/// shape rather than a contrived one: it is exactly what the relay's own
+/// `validate_agent_verb` answers, which is why the sibling
+/// [`a_stop_confirmation_escapes_control_characters_in_the_target`] cannot
+/// occur end to end and this can.
+#[test]
+fn a_refused_lifecycle_verb_is_escaped_and_bounded_on_stderr() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    // Both defects in one message: a forged line break with an escape
+    // sequence behind it, then far more text than the cap allows.
+    let hostile = format!(
+        "an explicit --session target must not contain control characters\n\x1b[31mFAKE: \
+         succeeded{}",
+        "x".repeat(8192)
+    );
+    let (done, thread) = mock_supervisor(&socket, move |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Err {
+                kind: ErrorKind::InvalidRequest,
+                message: hostile,
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["stop", "--session", "hostile\nid"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "a refusal prints no confirmation");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("must not contain control characters"),
+        "the refusal's own wording must survive escaping: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains('\x1b'),
+        "no raw ESC may reach the terminal: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("\\n\\x1b[31mFAKE"),
+        "the forged line break and its escape sequence must both be visible, not acted on: \
+         {stderr:?}"
+    );
+    assert_eq!(
+        stderr.lines().count(),
+        1,
+        "a refusal must stay one line however many the peer wrote: {stderr:?}"
+    );
+    let mut tail: Vec<char> = stderr.trim_end().chars().rev().take(16).collect();
+    tail.reverse();
+    let tail: String = tail.into_iter().collect();
+    assert!(
+        tail.ends_with('…'),
+        "an oversized refusal must be cut with a visible marker, tail was {tail:?}"
+    );
+    assert!(
+        stderr.chars().count() < 5000,
+        "the cap must bound the line, got {} characters",
+        stderr.chars().count()
     );
 }
 
@@ -483,12 +616,33 @@ fn agent_run_against(
     verb: &str,
     reply: impl FnOnce(ControlMsg) -> Option<ControlMsg> + Send + 'static,
 ) -> Output {
+    agent_run_against_frame(verb, |request| {
+        reply(request).map(|reply| Frame::control(&reply))
+    })
+}
+
+/// [`agent_run_against`] answering with a raw frame; see
+/// [`mock_supervisor_frames`] for why that shape has to exist.
+fn agent_run_against_frame(
+    verb: &str,
+    reply: impl FnOnce(ControlMsg) -> Option<Frame> + Send + 'static,
+) -> Output {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, reply);
-    let output = output_with_timeout(agent_command(&socket, verb));
+    let (done, thread) = mock_supervisor_frames(&socket, reply);
+    let output = output_with_timeout(agent_command_with_args(&socket, &[verb]));
     finish_server(done, thread);
     output
+}
+
+/// A control frame whose body is not decodable, for the one ending a
+/// well-typed `ControlMsg` cannot express.
+fn undecodable_control_frame() -> Frame {
+    Frame {
+        kind: farhelm_proto::FrameKind::Control,
+        channel: 0,
+        body: b"{not json".to_vec(),
+    }
 }
 
 /// The `req_id` of whatever the CLI sent, for a mock that means to answer
@@ -576,6 +730,56 @@ fn an_untrustworthy_reply_fails_with_nothing_on_stdout() {
     assert!(stderr.contains("closed"), "{stderr}");
 }
 
+/// Spec: a supervisor that reads a MUTATING request and then dies without
+/// answering is reported as an outcome-unknown failure carrying the
+/// check-before-retrying remedy, while the same ending for a listing keeps
+/// the plain transport wording.
+///
+/// This is the one delivered-outcome-unknown ending no `ErrorKind` can
+/// describe. Every other one travels as an `AgentOutcome::Err` the relay
+/// classified; here the LOCAL socket is what died, after the request was
+/// already on it, so nothing is left to carry a classification and the CLI
+/// is the only party that still knows both facts — the verb it sent, and
+/// that its write completed. The supervisor may already have forwarded the
+/// stop to a helm that applied it on another host, so a message reading as
+/// "nothing happened, ask again" is an invitation to stop a session someone
+/// has since restarted.
+///
+/// Both classes are driven from one test because the difference is the
+/// whole content of the fix: the listing arm is what keeps the remedy from
+/// being appended to every transport failure, where it would be noise no
+/// caller can act on. `stop` is the verb because it is the one whose repeat
+/// is destructive in the plainest way.
+#[test]
+fn a_supervisor_dying_after_reading_a_mutation_says_the_outcome_is_unknown() {
+    // The mock reads the request (`mock_supervisor` always does) and then
+    // returns without writing, which closes the connection — the shape of a
+    // supervisor dying between forwarding a request and answering it.
+    let mutation = agent_run_against("stop", |_| None);
+    let listing = agent_run_against("sessions", |_| None);
+
+    assert_eq!(mutation.status.code(), Some(1));
+    assert!(mutation.stdout.is_empty());
+    let stderr = String::from_utf8(mutation.stderr).unwrap();
+    assert!(
+        stderr.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+        "a lost mutation reply must tell the caller to look before retrying: {stderr}"
+    );
+    assert!(
+        stderr.contains("outcome is unknown"),
+        "and must say why: {stderr}"
+    );
+
+    assert_eq!(listing.status.code(), Some(1));
+    let stderr = String::from_utf8(listing.stderr).unwrap();
+    assert!(
+        !stderr.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+        "a listing has nothing to double-apply and must keep the plain transport wording: \
+         {stderr}"
+    );
+    assert!(stderr.contains("closed"), "{stderr}");
+}
+
 /// Spec: a successful reply of the WRONG shape is a protocol error, in both
 /// directions.
 ///
@@ -625,4 +829,632 @@ fn a_reply_for_the_other_verb_is_refused() {
             "{case} must say what went wrong: {stderr}"
         );
     }
+}
+
+/// Spec: EVERY untrustworthy answer to a MUTATION carries the
+/// check-before-retrying remedy, not only the peer going away — and none of
+/// them carries it for a listing.
+///
+/// The sibling tests above own the shapes; this owns the vocabulary, and
+/// the gap it closes was the whole subtlety of the ending. A supervisor
+/// dying after reading the request already said "the outcome is unknown",
+/// which made the remedy look like a property of connection loss. It is not:
+/// it is a property of the WRITE having completed. A frame that will not
+/// decode, a response carrying somebody else's `req_id`, a control message
+/// that answers nothing, and an `Ok` of the wrong shape are all reached
+/// strictly after the `stop` went out, and a peer defective enough to
+/// produce any of them is exactly as likely to have stopped the session
+/// first as not. Reporting those as bare protocol errors invites the reader
+/// to retry a destructive verb on the strength of a decode complaint.
+///
+/// The listing half is what keeps the remedy meaningful. Appended to every
+/// protocol failure it would be noise no caller can act on, so `sessions`
+/// is driven through the same four peers and must come back without it.
+#[test]
+fn an_untrustworthy_answer_to_a_mutation_says_the_outcome_is_unknown() {
+    /// The four post-write endings that are not the peer's own refusal,
+    /// each run against `verb`.
+    ///
+    /// A closure per case rather than a table, because `agent_run_against`
+    /// takes a `FnOnce` the mock thread consumes; the shapes cannot be
+    /// cloned into two runs.
+    fn untrustworthy_endings(verb: &'static str) -> Vec<(&'static str, Output)> {
+        vec![
+            (
+                "an undecodable frame",
+                agent_run_against_frame(verb, |_| Some(undecodable_control_frame())),
+            ),
+            (
+                "a mis-correlated response",
+                agent_run_against(verb, |request| {
+                    Some(ControlMsg::AgentResponse {
+                        req_id: asked_req_id(&request) + 99,
+                        outcome: AgentOutcome::Ok {
+                            reply: AgentReply::Stopped {},
+                        },
+                    })
+                }),
+            ),
+            (
+                "an unrelated control message",
+                agent_run_against(verb, |_| {
+                    Some(ControlMsg::Detached {
+                        channel: 1,
+                        reason: "not an answer".to_string(),
+                    })
+                }),
+            ),
+            (
+                "a success reply of the wrong shape",
+                agent_run_against(verb, |request| {
+                    Some(ControlMsg::AgentResponse {
+                        req_id: asked_req_id(&request),
+                        outcome: AgentOutcome::Ok {
+                            reply: AgentReply::Hosts { hosts: Vec::new() },
+                        },
+                    })
+                }),
+            ),
+        ]
+    }
+
+    for (case, output) in untrustworthy_endings("stop") {
+        assert_eq!(output.status.code(), Some(1), "{case} must exit non-zero");
+        assert!(
+            output.stdout.is_empty(),
+            "{case} must print no confirmation: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("outcome is unknown"),
+            "{case} after a mutation was sent must say the outcome is unknown: {stderr}"
+        );
+        assert!(
+            stderr.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+            "{case} must tell the caller to look before retrying: {stderr}"
+        );
+    }
+
+    for (case, output) in untrustworthy_endings("sessions") {
+        assert_eq!(output.status.code(), Some(1), "{case} must exit non-zero");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            !stderr.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+            "{case} on a listing has nothing to double-apply and must stay plain: {stderr}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------
+// The three lifecycle verbs: what `farhelm agent rename/stop/archive`
+// sends, and the one confirmation line each prints on success.
+//
+// "Prints on success" holds unconditionally against a MOCK and not against
+// the real stack: a bare `stop`/`archive` targets the asking session, and
+// the marker-keyed sweep that ends it reaches this CLI process too, so a
+// real self-stop can be SIGTERMed before its own `println!` runs (see
+// `main`'s Rename/Stop/Archive comment, and the e2e lifecycle test that
+// routes around it). Every case below sends its verb to a mock that stops
+// nothing, which is what makes the confirmation observable at all.
+// ---------------------------------------------------------------
+
+/// Spec: `farhelm agent rename <title> --session <id>` sends exactly one
+/// `Rename` verb naming the given title and target, and prints the
+/// updated row's id and title as one plain confirmation line.
+///
+/// The confirmation reads from the REPLY's own fields (`AgentSession::id`/
+/// `title`), not from the CLI's own arguments — proving the helm's answer
+/// is what reaches the terminal rather than an echo of what was typed,
+/// which would still look right if the helm silently renamed something
+/// else. The mock's reply deliberately answers with an id and a title
+/// NEITHER of which equal what the CLI sent, which is what makes that
+/// distinction one this test can actually fail on: a reply that echoed the
+/// request's own `session_id`/`title` back would pass just as well whether
+/// the confirmation prints the reply or the argument.
+#[test]
+fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id,
+            session_id,
+            request,
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(session_id, "session-1", "the asking session's own id");
+        assert_eq!(
+            request,
+            AgentVerb::Rename {
+                session_id: Some("other-session".to_string()),
+                title: "new title".to_string(),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "resolved-session".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "the helm's own title".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: false,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["rename", "new title", "--session", "other-session"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "renamed resolved-session to \"the helm's own title\"\n",
+        "the confirmation must print the REPLY's fields, not an echo of the arguments sent"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: `farhelm agent stop`, with no `--session`, sends `Stop` naming no
+/// target — the substitution the helm resolves to the asking session — and
+/// the confirmation names the ASKING session, since `Stopped` itself
+/// carries no id to read one back from.
+#[test]
+fn stop_with_no_session_flag_sends_none_and_names_the_asking_session() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(request, AgentVerb::Stop { session_id: None });
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Stopped {},
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["stop"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "stopped session-1\n",
+        "with no --session, the confirmation names the injected asking session"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: `farhelm agent archive --session <id>` sends `Archive` naming that
+/// target, and prints the id from the REPLY rather than the one typed.
+///
+/// The reply's id and the argument are deliberately the same string here,
+/// which makes this the weaker half of a pair: the distinction between
+/// "printed the answer" and "echoed the argument" is what
+/// [`a_rename_confirmation_escapes_and_delimits_both_of_its_fields`] and
+/// the rename target test pin, and this exists for the WIRE half —
+/// `--session` reaching `AgentVerb::Archive::session_id` as `Some`, which
+/// is the encoding the helm's whole target-resolution rule keys off. Its
+/// twin [`bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker`]
+/// pins the `None` side; neither is meaningful without the other, since a
+/// CLI that hardcoded either one would pass exactly one of them.
+#[test]
+fn archive_sends_the_named_target_and_prints_its_id() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Archive {
+                session_id: Some("other-session".to_string()),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "other-session".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "auth".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "exited".to_string(),
+                        current: false,
+                        archived: true,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["archive", "--session", "other-session"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "archived other-session\n"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: a rename confirmation is sanitized through the SAME cell-escaping
+/// the listing tables use — SPEC_impl.md's contract for every dynamic cell
+/// this CLI ever prints, extended here to the lifecycle confirmations —
+/// and its quoted TITLE field is additionally escaped so the quotes really
+/// do delimit it.
+///
+/// A title is user-supplied fleet-wide text (the same field the `sessions`
+/// table's TITLE column escapes), so a control character in it must not
+/// reach the terminal raw: a bare `\x07` rings the bell and a raw newline
+/// would let a hostile or careless title split the confirmation into two
+/// lines, the second of which a script parsing "one line means success"
+/// would not expect.
+///
+/// THE QUOTE CASE is a separate defect from the control-character one and
+/// is why this test carries both. The title is the only value this CLI
+/// wraps in literal `"` on stdout, and cell escaping does nothing to a `"`
+/// — so a title containing one used to close the field early, and anything
+/// reading the line for a quoted value saw a title the sender chose the end
+/// of. The backslash goes with it: without doubling, `\` before the closing
+/// quote would escape it in any conventional decoder.
+///
+/// The ID is hostile here too, and not merely for symmetry. Only the title
+/// is quoted, so the id's escaping runs through a different path in the
+/// same `println!`, and a change that fixed quoting while dropping
+/// `safe_cell` from the id would still pass a title-only test.
+#[test]
+fn a_rename_confirmation_escapes_and_delimits_both_of_its_fields() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "sess\n1".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "line one\nsays \"hi\" \\ bye".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["rename", "line one\nline two"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout, "renamed sess\\n1 to \"line one\\nsays \\\"hi\\\" \\\\ bye\"\n",
+        "both fields must be escaped, and the title's own quotes must not close its field"
+    );
+    assert_eq!(
+        stdout.lines().count(),
+        1,
+        "one confirmation must stay one line even when neither field is: {stdout:?}"
+    );
+}
+
+/// Spec: a stop confirmation escapes control characters in the target id,
+/// the same way a rename confirmation escapes its own fields.
+///
+/// DEFENCE IN DEPTH, not a reachable end-to-end scenario, and the
+/// distinction is worth stating because the fixture looks like one. A
+/// control-bearing `--session` no longer survives the round trip: the
+/// relay's own `validate_agent_verb` refuses such a target before anything
+/// is forwarded, so a real supervisor would answer `InvalidRequest` rather
+/// than the `Stopped` this mock returns (that path is
+/// [`a_refused_lifecycle_verb_is_escaped_and_bounded_on_stderr`]'s
+/// subject). What this pins is the printing layer on its own: `Stop`'s
+/// reply is empty (`AgentReply::Stopped` carries no fields), so the id in
+/// the confirmation is the one THIS process resolved and never re-read
+/// from anyone, and it must stay escaped independently of whichever hop
+/// currently happens to reject hostile ids. A validation rule that moved,
+/// loosened, or gained an exemption would otherwise silently remove the
+/// only thing keeping a forged second line off stdout.
+#[test]
+fn a_stop_confirmation_escapes_control_characters_in_the_target() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Stopped {},
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["stop", "--session", "line one\nline two"],
+    ));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout, "stopped line one\\nline two\n",
+        "the embedded newline in the target id must be escaped, not printed raw"
+    );
+    assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
+}
+
+/// Spec: an archive confirmation escapes control characters in the id it
+/// reads back from the reply.
+///
+/// The other half of the pair with the stop test above, and the half that
+/// covers PEER-supplied text rather than this process's own argument:
+/// `archive`'s confirmation prints the reply's `AgentSession::id` (see
+/// `main`'s `Archive` arm), so the hostile value is planted in what the
+/// mock answers.
+///
+/// Defence in depth for the same reason its sibling is. A conforming helm
+/// answers with the id it acted on, which cannot carry a control character
+/// once the relay has refused one going the other way — so what this pins
+/// is that a MALFORMED or nonconforming reply cannot repaint the terminal
+/// on the way to being printed. Nothing in this CLI verifies that the id
+/// coming back is one it could have sent, and this is deliberately not an
+/// argument for adding such a check: escaping every printed field is the
+/// cheaper invariant and does not need to know what a legal id looks like.
+#[test]
+fn an_archive_confirmation_escapes_control_characters_in_the_id() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "line one\nline two".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "t".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "exited".to_string(),
+                        current: true,
+                        archived: true,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["archive"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout, "archived line one\\nline two\n",
+        "the embedded newline in the reply's id must be escaped, not printed raw"
+    );
+    assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
+}
+
+/// Spec: bare `farhelm agent rename <title>` (no `--session`) sends
+/// `Rename` with `session_id: None` — the asking-session substitution
+/// every other lifecycle verb already pins at this wire-encoding layer
+/// (see `stop_with_no_session_flag_sends_none_and_names_the_asking_session`
+/// for `Stop`'s own version of this contract), and here for `Rename`,
+/// which previously had no such coverage below the handler-test and e2e
+/// layers.
+#[test]
+fn bare_rename_sends_no_target_and_lets_the_helm_substitute_the_asker() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Rename {
+                session_id: None,
+                title: "new title".to_string(),
+            },
+            "omitting --session must send no target at all"
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "session-1".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "new title".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["rename", "new title"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "renamed session-1 to \"new title\"\n"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: bare `farhelm agent archive` (no `--session`) sends `Archive` with
+/// `session_id: None` — the asking-session substitution `Rename` and `Stop`
+/// already pin at this wire-encoding layer, and here for `Archive`, which
+/// previously had no such coverage below the handler-test and e2e layers
+/// (every existing `archive` test here named an explicit `--session`).
+#[test]
+fn bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Archive { session_id: None },
+            "omitting --session must send no target at all"
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "session-1".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "t".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "exited".to_string(),
+                        current: true,
+                        archived: true,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["archive"]));
+    finish_server(done, thread);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "archived session-1\n"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+/// Spec: a rename title starting with a hyphen is sent verbatim as the
+/// title, not misparsed as an unrecognized flag.
+///
+/// `title` is a positional argument, and without clap's `allow_hyphen_values`
+/// a leading-hyphen value is indistinguishable to the parser from a flag it
+/// does not recognize — even though the supervisor itself places no such
+/// restriction on a title (SPEC.md's only rename refusal is a control
+/// character). Without the attribute this test's own title would make the
+/// CLI exit before ever opening a socket, and `mock_supervisor`'s
+/// "the agent CLI did not connect" timeout would be the failure, not a
+/// clean assertion on the request actually sent.
+#[test]
+fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::Rename {
+                session_id: None,
+                title: "-not-a-flag".to_string(),
+            },
+            "a leading hyphen must reach the wire as ordinary title text"
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Session {
+                    session: AgentSession {
+                        id: "session-1".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "-not-a-flag".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "claude".to_string(),
+                        status: "running".to_string(),
+                        current: true,
+                        archived: false,
+                        stale: false,
+                    },
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["rename", "-not-a-flag"]));
+    finish_server(done, thread);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "clap must accept the leading hyphen, got stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "renamed session-1 to \"-not-a-flag\"\n"
+    );
 }

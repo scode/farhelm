@@ -246,8 +246,22 @@ where
     // findable by any attachment this connection later takes — see
     // `Supervisor::helm_link_for_session` for how one is found and why the
     // rule is attachment ownership.
+    //
+    // The link is also allowed to END this connection (see
+    // `HelmLink::retire`): a relay that has provably stopped working — a
+    // reply under a `req_id` nobody issued, a mutation's delete fence that
+    // ran out its last bound — leaves pending upcalls that nothing on a
+    // LIVE connection will resolve, and connection loss is the ending the
+    // rest of the relay already knows how to report. The sender is created
+    // here, and kept in scope for the whole function even on a restricted
+    // connection that registers no link, so the `changed()` arm below never
+    // fires merely because the last sender was dropped.
+    let (link_shutdown, mut link_shutdown_rx) = watch::channel(false);
     let link = if restricted_auth.is_none() {
-        Some(sup.register_helm_link(tx.clone()).await)
+        Some(
+            sup.register_helm_link(tx.clone(), link_shutdown.clone())
+                .await,
+        )
     } else {
         None
     };
@@ -333,6 +347,17 @@ where
                 error = &mut writer_failed_rx => {
                     let detail = error.unwrap_or_else(|_| "writer task exited".to_string());
                     return Err(anyhow::anyhow!("frame write to client failed: {detail}"));
+                }
+                // The agent relay asking for this connection to end. It has
+                // already failed its own pending upcalls and logged why
+                // (`HelmLink::retire`); what is left is the teardown of
+                // everything else this connection carries, which is exactly
+                // what returning an error from this block runs.
+                changed = link_shutdown_rx.changed() => {
+                    changed.expect("this function holds a sender for its own link shutdown");
+                    return Err(anyhow::anyhow!(
+                        "the agent relay retired this connection's upward link"
+                    ));
                 }
             };
             let Some(frame) = frame else {

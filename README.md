@@ -253,7 +253,7 @@ AGENTS.md forbids agents from running them — or from restarting the helm's uni
   installed it says so and points at `systemctl --user`. A running local supervisor is discovered and used like any
   other host.
 
-## Asking Farhelm about the fleet from inside a session
+## Asking Farhelm about the fleet, or acting on it, from inside a session
 
 An agent running in a Farhelm session can ask what else is out there:
 
@@ -283,6 +283,23 @@ $ farhelm agent sessions
 `archived` replaces the status word for a session you have archived. A very large fleet is cut — at 5,000 rows, or
 sooner if the rows themselves are large enough to make the answer unsendable — and the cut is announced on stderr rather
 than left to be mistaken for the whole answer.
+
+The same relay also carries three lifecycle verbs, on the same credential:
+
+```
+farhelm agent rename <title> [--session <id>]
+farhelm agent stop [--session <id>]
+farhelm agent archive [--session <id>]
+```
+
+Omitting `--session` acts on the asking session itself; naming one acts on ANY session the helm knows, on any host — the
+same wider-than-`spawn` authority the read-only verbs already have, since the feature's mental model is an agent talking
+to the helm itself, which already has fleet-wide authority. Success prints one plain confirmation line on stdout
+(`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), escaped the same way the listing tables are. One case
+never prints that line: a bare `stop`/`archive` (no `--session`) ends the ASKING session's own process tree, and the
+host-wide sweep that reaches every process carrying that session's marker can SIGTERM the `farhelm agent` process itself
+before it gets to print — stopping or archiving yourself is supposed to end the whole tree, calling CLI included, so a
+script relying on that confirmation should target a session other than its own.
 
 The failure worth knowing about is `no helm is attached to this session`. The relay reaches the helm that currently
 holds the session open, so a session no client is looking at has no route to ask: open the session in the Farhelm UI and
