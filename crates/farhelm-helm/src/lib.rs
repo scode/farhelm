@@ -106,6 +106,10 @@ pub use client::{
 /// it — what `GET /api/sessions` is built out of.
 mod aggregate;
 
+/// Answers to questions an agent asks from inside its own session, which
+/// reach this process as upcalls on the supervisor connections it opened.
+pub mod agent_requests;
+
 /// Browser token exchange, explicit device-secret enforcement, and live socket
 /// revocation.
 mod auth;
@@ -1553,6 +1557,15 @@ async fn run_with_ready(
         // fact about THIS BINARY, not about the argv the operator passed.
         cfg!(farhelm_release_build),
     )?);
+    // The manager was started before this state existed — it is one of the
+    // state's own fields — so the handler that answers an agent's questions
+    // can only be published now. Every connection reads the slot per
+    // request, so a host that connected during the gap answers correctly
+    // from this moment on rather than staying permanently mute; see
+    // `agent_requests::AgentRequestSlot`.
+    state
+        .manager
+        .set_agent_requests(agent_requests::HelmAgentRequests::for_state(&state));
     // First run owns token creation. Browser serving must never begin with a
     // database whose bootstrap secret exists only after somebody invokes the
     // separate `token show` command.
@@ -1688,6 +1701,15 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         // above is where the full status-mapping table lives.
         Some(ErrorKind::Conflict) => axum::http::StatusCode::CONFLICT,
         Some(ErrorKind::Unauthorized) => axum::http::StatusCode::UNAUTHORIZED,
+        // Neither kind is reachable from a supervisor answering a REQUEST
+        // this helm sent — both belong to the agent relay, which travels
+        // the other way and never becomes an HTTP response. They are
+        // mapped rather than lumped into the `Internal` arm so that if
+        // some future path does carry one to a browser, it arrives as the
+        // gateway-shaped status it actually is instead of as "the helm
+        // broke".
+        Some(ErrorKind::Unavailable) => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        Some(ErrorKind::Timeout) => axum::http::StatusCode::GATEWAY_TIMEOUT,
     };
     let status = registry.or_else(managed).unwrap_or_else(supervised);
     // The UI shows this body verbatim.

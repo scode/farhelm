@@ -1148,6 +1148,15 @@ pub struct ConnectionManager {
     /// — instrumentation, see that method's counterpart
     /// [`ConnectionManager::queued_host_writes`].
     host_write_queue: std::sync::atomic::AtomicUsize,
+    /// The handler every connection this manager opens uses to answer an
+    /// agent's questions, filled once by startup (see
+    /// [`Self::set_agent_requests`]) and shared with each
+    /// [`SupervisorClient`] as a slot rather than a value.
+    ///
+    /// Empty in a manager nobody wired one into — the REST and manager test
+    /// harnesses, which have no fleet-wide state to describe. Such a
+    /// connection still answers an upcall, with a refusal.
+    agent_requests: crate::agent_requests::AgentRequestSlot,
 }
 
 /// Decrements [`ConnectionManager::host_write_queue`] however its waiter
@@ -1375,6 +1384,27 @@ pub fn merge_cached_session(previous: &SessionInfo, incoming: &mut SessionInfo) 
 /// a client's contents would distinguish one install from another anyway.
 /// `None` on both sides is "still no connection", which is not a change
 /// either.
+/// End the connection a publish has just stopped publishing.
+///
+/// Every site that removes or replaces a row's `client` calls this with
+/// what it took out, because withdrawing a client and tearing its
+/// connection down have to be ONE event. Dropping the last `Arc` was the
+/// shape this replaces and it does not close the connection reliably: an
+/// agent answer still being assembled owns a clone of the connection's
+/// writer channel, which keeps the writer task parked and the transport
+/// (an ssh child, a socket) open — and when that listing finishes it
+/// writes a fleet answer onto a connection whose registry row may already
+/// be serving a different machine. See [`SupervisorClient::retire`].
+///
+/// Takes the value rather than a reference so a caller cannot keep using
+/// what it just retired, and does nothing for a row that had no client —
+/// the ordinary case for every publish of a non-connected state.
+fn retire_withdrawn(client: Option<Arc<SupervisorClient>>) {
+    if let Some(client) = client {
+        client.retire();
+    }
+}
+
 fn same_connection(
     before: Option<&Arc<SupervisorClient>>,
     after: Option<&Arc<SupervisorClient>>,
@@ -1428,9 +1458,30 @@ impl ConnectionManager {
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             host_write_queue: std::sync::atomic::AtomicUsize::new(0),
+            agent_requests: Arc::new(std::sync::OnceLock::new()),
         });
         manager.sync_registry().await?;
         Ok(manager)
+    }
+
+    /// Publish the handler that answers agent upcalls on every connection
+    /// this manager holds, now and later.
+    ///
+    /// Separate from construction because of an ordering the helm cannot
+    /// avoid: this manager is started BEFORE `AppState` exists (it is one
+    /// of `AppState`'s own fields), while the handler needs `AppState` to
+    /// answer anything. A slot filled afterwards is what lets both be true
+    /// without a cycle — see [`crate::agent_requests::AgentRequestSlot`]
+    /// for why the slot is read per request rather than captured per
+    /// connection.
+    ///
+    /// Idempotent by the cell's own rule: a second call is ignored rather
+    /// than swapping a live fleet's handler mid-flight.
+    pub(crate) fn set_agent_requests(
+        &self,
+        handler: Arc<dyn crate::agent_requests::AgentRequestHandler>,
+    ) {
+        let _ = self.agent_requests.set(handler);
     }
 
     /// The fleet's revision counter — what the invalidation socket
@@ -1562,19 +1613,23 @@ impl ConnectionManager {
                              configuration"
                         );
                         handle.row = row;
-                        // The published client goes with the old row.
-                        // Dropping the manager's copy is not what tears the
-                        // connection down (the actor holds one too) — the
-                        // nudge below is — but it must not remain routable
-                        // for the interval in between, since a session
-                        // operation sent onto it would reach the host the
-                        // user just stopped pointing at.
+                        // The published client goes with the old row. It
+                        // must not remain routable for even the interval
+                        // before the nudge lands, since a session operation
+                        // sent onto it would reach the host the user just
+                        // stopped pointing at — and it is retired below
+                        // rather than merely dropped, because an answer
+                        // still being assembled on it would otherwise keep
+                        // the connection alive and deliver a fleet reply
+                        // attributed to a row that now points somewhere
+                        // else.
+                        let mut withdrawn = None;
                         handle.status.send_modify(|status| {
                             status.state = HostState::Connecting {
                                 attempt: 0,
                                 last_error: None,
                             };
-                            status.client = None;
+                            withdrawn = status.client.take();
                             // Retargeting drops an identity-less host's
                             // in-memory list with its connection: those
                             // sessions belonged to the address the user
@@ -1588,6 +1643,7 @@ impl ConnectionManager {
                                 .incarnations
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         });
+                        retire_withdrawn(withdrawn);
                         handle.nudge.send_modify(|nudge| {
                             nudge.revision += 1;
                             nudge.fresh_window = true;
@@ -1665,6 +1721,7 @@ impl ConnectionManager {
             seed_epoch: Arc::clone(&seed_epoch),
             incarnations: Arc::clone(&self.incarnations),
             events: Arc::clone(&self.events),
+            agent_requests: Arc::clone(&self.agent_requests),
         };
         // One span per actor, entered for the task's whole life: SPEC.md
         // wants a reconnection trail whose every line names the host, and
@@ -1725,16 +1782,21 @@ impl ConnectionManager {
             );
             // The client goes with the state, in one publish: an entry with
             // no actor must not stay routable for even the moment it would
-            // take to clear them separately.
+            // take to clear them separately. Retired rather than merely
+            // dropped, for the reason `retire_withdrawn` gives — and it
+            // matters most here, since a panicked actor is exactly the case
+            // where nobody else is left to tear its connection down.
+            let mut withdrawn = None;
             supervised.send_modify(|status| {
                 status.state = HostState::Retired {
                     reason: reason.to_string(),
                 };
-                status.client = None;
+                withdrawn = status.client.take();
                 status.live_sessions = None;
                 status.incarnation =
                     incarnations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             });
+            retire_withdrawn(withdrawn);
             // A retirement is a state transition like any other, and one
             // the hosts panel must not have to poll for: the entry stops
             // being routable at this instant, and every open client is
@@ -2499,18 +2561,25 @@ impl ConnectionManager {
         // Settled BEFORE the bump — see this method's docs. A client woken by
         // the invalidation re-reads at once, and must not find the adopted
         // identity sitting beside the mismatch it just resolved.
+        //
+        // The withdrawn connection is retired rather than dropped: an
+        // adoption is an install-incarnation boundary, and work still in
+        // flight on the old connection must not cross it (see
+        // `retire_withdrawn`).
+        let mut withdrawn = None;
         status.send_modify(|status| {
             status.state = HostState::Connecting {
                 attempt: 0,
                 last_error: None,
             };
-            status.client = None;
+            withdrawn = status.client.take();
             status.live_sessions = None;
             status.contested = Arc::new(Vec::new());
             status.incarnation = self
                 .incarnations
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         });
+        retire_withdrawn(withdrawn);
         // Published against the COMMIT, not against whatever the reconnect
         // below manages to do: the purge is already visible in the merged
         // list, and every open client is still showing the rows it deleted.
@@ -2802,6 +2871,10 @@ struct HostActor {
     /// nothing new. [`Self::publish_refresh`] is the single place that
     /// decides whether a publication is worth waking clients for.
     events: Arc<FleetEvents>,
+    /// The manager's agent-request handler slot, shared by every actor and
+    /// handed to each connection this one opens. See
+    /// [`ConnectionManager::set_agent_requests`].
+    agent_requests: crate::agent_requests::AgentRequestSlot,
 }
 
 /// What [`HostActor::reload_row`] found, distinguishing "removed" from
@@ -3241,7 +3314,18 @@ impl HostActor {
             Ok(pair) => pair,
             Err(error) => return failure(row, error),
         };
-        let client = match SupervisorClient::start(reader, writer).await {
+        // `start_for_host`, not `start`: this connection is the ONE path an
+        // agent on this host has to the helm, and it carries the host's own
+        // id because the helm cannot otherwise tell which fleet member an
+        // upcall came from (see `crate::agent_requests`).
+        let client = match SupervisorClient::start_for_host(
+            reader,
+            writer,
+            Arc::clone(&self.agent_requests),
+            self.id,
+        )
+        .await
+        {
             Ok(client) => client,
             Err(error) => {
                 // The skew refusal reaches this side as an io::Error
@@ -3476,6 +3560,12 @@ impl HostActor {
     /// further about this connection, because by then the manager has
     /// already published the new row's state and anything published here
     /// would describe a connection to the OLD one.
+    ///
+    /// Returning CONSUMES any nudge that arrived during the connection,
+    /// whichever of the four endings actually won the race. Leaving one
+    /// pending would interrupt the reconnection this return is about to
+    /// start, which is a redundant dial and never a useful one: the return
+    /// already delivers everything a nudge asks for.
     async fn serve(
         &self,
         client: Arc<SupervisorClient>,
@@ -3555,6 +3645,20 @@ impl HostActor {
                 }
             }
         }
+        // Whatever ended this connection, the nudge that may also have
+        // arrived has now been ANSWERED, so it must not survive to
+        // interrupt the reconnection. Returning from here is precisely what
+        // a nudge asks for — [`Self::run`] reloads the row and dials with a
+        // fresh active window on the very next pass — and the two are
+        // racing on every retarget: the manager withdraws the client (which
+        // retires it, signalling `closed`) and then nudges, so both arms of
+        // the select above are ready at once and either may win. When
+        // `closed` won, a nudge left behind here would cut the new
+        // destination's dial short the instant it was made, and the actor
+        // would dial the same address a second time to no purpose — an ssh
+        // child spawned and killed for nothing on the real transport, and
+        // a connection the peer must tear down again.
+        let _ = taken_nudge(nudge);
         info!(
             connected_for_secs = connected_at.elapsed().as_secs(),
             destination = %self.destination(),
@@ -3959,6 +4063,10 @@ impl HostActor {
         // and must survive a publish that is not about it, so it is read
         // and advanced in place rather than reconstructed from nothing.
         let mut observable_change = false;
+        // The connection this publish displaces, if it displaces one —
+        // retired below, outside the `send_modify`, since teardown must not
+        // run under the watch's lock.
+        let mut withdrawn: Option<Arc<SupervisorClient>> = None;
         self.status.send_modify(|status| {
             // Captured BEFORE the match below, which `take`s on the retain
             // path: comparing against the field afterwards would see the
@@ -3986,6 +4094,11 @@ impl HostActor {
                 status.incarnation = self
                     .incarnations
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                // The same condition that mints a new incarnation is the
+                // one that ends the old connection, and deliberately so:
+                // "this row is served by something else now" and "that
+                // something is finished" are the same fact.
+                withdrawn = status.client.take();
             }
             match (&contested, client.is_some()) {
                 (Some(contested), _) => status.contested = Arc::clone(contested),
@@ -4020,6 +4133,7 @@ impl HostActor {
             status.client = client;
             status.live_sessions = live_sessions;
         });
+        retire_withdrawn(withdrawn);
         if observable_change {
             self.events.bump();
         }
@@ -5854,12 +5968,6 @@ mod tests {
         fixture.manager.sync_registry().await.unwrap();
 
         fixture.transport.wait_for_closures(host, 1).await;
-        fixture.transport.wait_for_attempts(host, 2).await;
-        assert_eq!(
-            fixture.transport.dialed_destinations(host),
-            vec!["before.example", "after.example"],
-            "the edit must be dialed, not merely recorded"
-        );
         let state = fixture
             .manager
             .wait_for_state(host, |state| {
@@ -5871,6 +5979,20 @@ mod tests {
         assert!(
             state.is_connected(),
             "the host must end up connected to the edited destination: {state:?}"
+        );
+        // Asserted only once the NEW connection is up, which is what makes
+        // the count meaningful rather than a race: at this instant every
+        // dial the retarget was going to make has been made, whereas the
+        // same assertion taken the moment the second dial was logged would
+        // pass or fail depending on whether a superfluous third dial got
+        // scheduled before the test task woke. Two entries, not merely "the
+        // last one is right": a retarget that dials the new address twice
+        // has cancelled a connection it opened, and on a real ssh transport
+        // that is a child process spawned and killed for nothing.
+        assert_eq!(
+            fixture.transport.dialed_destinations(host),
+            vec!["before.example", "after.example"],
+            "the edit must be dialed exactly once, not merely recorded"
         );
     }
 
