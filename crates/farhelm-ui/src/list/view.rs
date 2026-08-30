@@ -918,12 +918,11 @@ pub(crate) fn ListView(
                 options
                     .into_iter()
                     .find(|host| Some(host.id) == effective)
-                    // Both halves come off the OPTION: the fingerprint the
-                    // create's idempotency key is bound to, and the connection
-                    // its precondition names — one derivation each, so the
-                    // catalog the picker offers, the machine the key names and
-                    // the connection the request asserts cannot disagree.
-                    .map(|host| HostTarget::new(host.id, host.connection, host.incarnation))
+                    // The fingerprint comes off the OPTION rather than being
+                    // re-derived, so the catalog the picker offers and the
+                    // machine the create's idempotency key names cannot
+                    // disagree — one derivation, shared.
+                    .map(|host| HostTarget::new(host.id, host.incarnation))
             })
             .flatten();
         // Compared before writing so an unrelated hosts refresh — the common

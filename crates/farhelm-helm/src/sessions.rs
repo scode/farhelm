@@ -921,7 +921,10 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 /// create aimed at a profile the user picked, landing on a host that was
 /// retargeted or adopted in another tab, does not fail. It RESOLVES on the
 /// successor, launches a profile nobody chose, and records that as the
-/// remembered default. See [`crate::precondition`].
+/// remembered default. See [`crate::precondition`]. This is the one guard of
+/// its kind left: the profile routes and the remembered default itself carry
+/// none (SPEC.md, Sessions / Creation), because a wrong default or a
+/// last-write-wins edit is a smaller thing than a launch nobody asked for.
 pub(crate) async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(mut req): axum::Json<CreateReq>,
@@ -938,11 +941,9 @@ pub(crate) async fn create_session(
     // for a create: `create_target` resolves the host, takes the connection,
     // and mints the claim from the same borrow of the actor's status, so there
     // is no interval between "which install" and "which connection" for
-    // anything to land in. What carries the check forward past the forward
-    // itself is the claim: every write this create goes on to make — the cache
-    // seed, the remembered default — revalidates it under the host's own
-    // write lock, so a connection replaced while the supervisor was answering
-    // records nothing. See `crate::precondition` on how the two compose.
+    // anything to land in. The cache seed this create goes on to make
+    // revalidates the same claim under the host's write lock; the remembered
+    // default does not, by design (it is a bare id per registry row).
     if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
         return http_error(e);
     }
@@ -988,14 +989,14 @@ pub(crate) async fn create_session(
 /// [`remember_default_profile`] would silently make the two creation
 /// surfaces disagree about what this host's last-used profile is.
 ///
-/// What is deliberately NOT here is routing and preconditions. Naming the
-/// target host is where the two callers genuinely differ — the REST edge
-/// takes a registry id from a client that read `GET /api/hosts`, the agent
-/// takes a display NAME — and folding that in would mean one function with
-/// two mutually exclusive halves. The `claim` a caller passes must come
-/// from the SAME [`host_client`] read that produced `client`, which is what
-/// lets every write below revalidate against the connection the create was
-/// actually sent on.
+/// What is deliberately NOT here is routing. Naming the target host is where
+/// the two callers genuinely differ — the REST edge takes a registry id from
+/// a client that read `GET /api/hosts`, the agent takes a display NAME — and
+/// folding that in would mean one function with two mutually exclusive
+/// halves. The `claim` a caller passes must come from the SAME
+/// [`host_client`] read that produced `client`, which is what lets the cache
+/// seed below revalidate against the connection the create was actually sent
+/// on.
 ///
 /// ## Two phases, and why the seam is where it is
 ///
@@ -1082,7 +1083,7 @@ pub(crate) async fn do_create_session(
             .map(|profile| profile.id.clone()),
     };
     if let Some(profile_id) = remembered {
-        remember_default_profile(state, claim, &profile_id, &session).await;
+        remember_default_profile(state, claim.host, &profile_id, &session).await;
     }
     Ok(session)
 }
@@ -1213,15 +1214,15 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
 
 /// Record `profile_id` as this host's last-used profile, and invalidate.
 ///
-/// Routed through the MANAGER rather than straight to the store, for
-/// `record_session`'s reasons plus one that is specific to profiles: an id
-/// only means anything on the supervisor that minted it, and every fresh
-/// supervisor seeds the same STARTER profiles, so ids genuinely collide
-/// across installs. A write that landed after the host was retargeted or
-/// adopted away could therefore record an id that resolves on the new
-/// install to a profile the user never picked — and the create dialog would
-/// then offer it as their own last choice. The claim is what makes that
-/// unconstructible; see [`manager::ConnectionManager::remember_profile_default`].
+/// Written straight to the store against the registry row, unlike
+/// [`record_session`]'s claim-checked cache seed: the remembered default is a
+/// bare id per registry entry, not bound to the install the create ran on
+/// (SPEC.md, Sessions / Creation). A reply landing after a retarget records
+/// its id all the same, and the worst case is a wrong DEFAULT in a dropdown.
+/// Takes the host id alone rather than the create's `SessionClaim` for the
+/// same reason: the claim's connection facts are deliberately not consulted
+/// here, and a signature that carried them would suggest a check this write
+/// does not make.
 ///
 /// Best effort, on the same terms as [`record_session`]: the session has
 /// been created and the caller is about to be told so, and a preference that
@@ -1229,32 +1230,31 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
 /// reporting a successful create as a failure would cost a session the user
 /// then has to find and clean up by hand.
 ///
-/// Bumps the fleet's revision when the stored ROW actually CHANGED, which is
+/// Bumps the fleet's revision when the stored id actually CHANGED, which is
 /// what makes a create-dialog default arrive in a second client without
 /// polling. Creating from the same profile twice in a row changes nothing and
 /// wakes nobody.
-///
-/// "The row" rather than "the profile id", and the distinction has teeth: a
-/// create that rewrites the same id against an identity the stored row does
-/// not carry REPAIRS a binding that had made the default unreadable, so the
-/// default goes from absent back to present without the id ever moving. That
-/// is a change other clients must be told about, and the store is what decides
-/// it (`crate::store::HelmStore::remember_profile_default`).
 async fn remember_default_profile(
     state: &AppState,
-    claim: &manager::SessionClaim,
+    host: store::HostId,
     profile_id: &str,
     session: &farhelm_proto::SessionInfo,
 ) {
     match state
-        .manager
-        .remember_profile_default_from_session(claim, profile_id, session)
+        .store
+        .remember_profile_default_from_session(
+            host,
+            profile_id,
+            session.creation_seq,
+            session.created_at,
+            &session.id,
+        )
         .await
     {
         Ok(true) => state.manager.events().bump(),
         Ok(false) => {}
         Err(error) => warn!(
-            host = claim.host,
+            host,
             profile_id = manager::peer_text(profile_id).as_str(),
             error = %error,
             "the session was created but its profile could not be remembered as this host's \

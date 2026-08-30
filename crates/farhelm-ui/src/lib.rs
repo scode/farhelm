@@ -683,14 +683,18 @@ pub struct Host {
     /// token, which changes whenever the host's client does (a retarget, an
     /// adoption, a reconnection, or the connection going away).
     ///
-    /// Compared and echoed, never interpreted: it is handed back as
-    /// `expected_incarnation` on every profile mutation and profile-backed
-    /// create this UI sends, so the helm can refuse a request prepared against
-    /// an install that has since been replaced (farhelm-helm's `precondition`
-    /// module). `0` means never connected, which is nothing to assert — and
+    /// Compared, never interpreted: it is what lets a client tell one
+    /// connection to this host apart from the next. Two places in this UI
+    /// act on that distinction, and both are safety-bearing:
+    /// `provisioning::HostBinding` keeps a displayed provisioning plan bound
+    /// to the exact connection it was computed against, and the create
+    /// dialog sends it as a session create's `expected_incarnation` so the
+    /// helm can refuse a create prepared against a connection that has since
+    /// been replaced (`list::create_form::connection_claim`). `0` means
+    /// never connected, and callers must translate that sentinel into the
+    /// ABSENCE of a connection claim rather than asserting zero.
     /// `#[serde(default)]` decodes a helm that predates the field to exactly
-    /// that, so an older helm simply gets requests carrying no expectation,
-    /// which is the behavior it already has.
+    /// that, which is the honest answer for a build that has never sent one.
     ///
     /// Never persisted anywhere: the number is a counter over one helm
     /// process's connections and means nothing across a restart.

@@ -153,16 +153,16 @@ pub mod manager;
 /// scoped to the desktop webview's token-exchange and attachment routes.
 mod middleware;
 
-/// The optional preconditions a mutation may carry — which install it was
-/// prepared against, and which definition it means to replace — so a request
-/// written for one moment cannot execute in another.
-mod precondition;
-
 /// Discovery-first supervisor setup, explicit update, and host-scoped run
 /// progress (PLAN_M7.md item 6).
 mod provisioning;
 pub use provisioning::{LocalSupervisorDiscovery, discover_local_supervisor};
 
+/// The optional precondition a session create may carry — which connection
+/// it was prepared against — so a create written for one install cannot
+/// launch on another. Kept on purpose when the profile routes lost theirs;
+/// the module docs say why.
+mod precondition;
 /// `/api/hosts/{id}/profiles` — agent profile CRUD, proxied to the owning
 /// supervisor, plus the helm-owned remembered default served beside it.
 mod profiles;
@@ -563,10 +563,14 @@ impl AppState {
     /// Wait this request's turn to mutate `host`'s profile catalog, counting
     /// the wait while it lasts (see [`Self::profile_edit_queue`]).
     ///
-    /// The guard is OWNED so a caller can hand it to the task that finishes
-    /// the mutation — the lock must outlive the handler that took it, or a
-    /// cancelled request would release the queue while its edit is still in
-    /// flight (see [`profiles::committed`]).
+    /// The handler holds the guard for exactly the span of its forward, so
+    /// one host's mutations reach the supervisor in the order this helm
+    /// accepted them; a handler cancelled mid-flight releases it with
+    /// its edit possibly still landing on the supervisor, which is accepted
+    /// (see the `profiles` module docs on cancelled requests). Owned rather
+    /// than borrowed is a leftover of the detached commit task that used to
+    /// carry the guard past the handler's lifetime; nothing needs the owned
+    /// form now, and it is kept only to avoid churning every call site.
     ///
     /// Callers must have routed `host` first; see [`Self::profile_edit_lock`].
     async fn enter_profile_edit(&self, host: store::HostId) -> tokio::sync::OwnedMutexGuard<()> {

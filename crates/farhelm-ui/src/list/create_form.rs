@@ -103,6 +103,55 @@ impl IntentBinding {
     }
 }
 
+/// Whether the catalog surface's target still describes the selected row —
+/// the SAME registry row AND the same install fingerprint. The submit
+/// handler refuses to send when this is false.
+///
+/// Comparing the row id alone is not enough, and the gap is the documented
+/// one-render lag: after a retarget or an adoption the `hosts` snapshot can
+/// already describe the successor install while the catalog surface still
+/// holds the predecessor's catalog under the same row id. A profile id
+/// resolved against that catalog would then be launched on the successor,
+/// where the same id names a different profile (every fresh supervisor seeds
+/// the same starters) — and because the connection token would also be read
+/// from the successor's row, the helm's own create precondition would pass.
+/// The full-target comparison is what closes that window client-side.
+///
+/// Both sides absent is a match on purpose: the hostless refusal downstream
+/// owns that case and says something more useful than "the target changed".
+/// A selected row missing from the snapshot is a mismatch — whatever catalog
+/// is held, it cannot be shown to describe a row that no longer exists.
+fn catalog_matches_selection(
+    selected: Option<HostId>,
+    hosts: &[HostOption],
+    target: Option<&HostTarget>,
+) -> bool {
+    match (selected, target) {
+        (None, None) => true,
+        (Some(id), Some(target)) => hosts.iter().find(|host| host.id == id).is_some_and(|host| {
+            HostTarget::new(host.id, host.incarnation.clone()).same_install(target)
+        }),
+        _ => false,
+    }
+}
+
+/// The connection token a create names as its `expected_incarnation`, or
+/// `None` when there is nothing to assert: the row is gone from the
+/// snapshot, or it has never connected (`connection == 0`, the sentinel
+/// `Host::incarnation` documents).
+///
+/// The sentinel must map to NO claim rather than a claim of zero. A host
+/// making its FIRST connection between the form's snapshot and the helm's
+/// routing has a real, nonzero token by then — a create carrying `0` would
+/// be refused as stale even though this client never observed any
+/// connection and had nothing to preserve.
+fn connection_claim(hosts: &[HostOption], host: HostId) -> Option<u64> {
+    hosts
+        .iter()
+        .find(|option| option.id == host)
+        .and_then(|option| (option.connection != 0).then_some(option.connection))
+}
+
 /// Which of the two creation modes a "clone" click's snapshot TRUSTS —
 /// deliberately not carrying its own payload; see [`CreatePrefill::invocation`]
 /// for where that lives and why.
@@ -365,8 +414,7 @@ fn resolve_clone_host(
             };
             match matching_host_option(&open, hosts) {
                 Some(option) => {
-                    let target =
-                        HostTarget::new(option.id, option.connection, option.incarnation.clone());
+                    let target = HostTarget::new(option.id, option.incarnation.clone());
                     let choice = match prefill_agent {
                         PrefillAgent::Command => AgentChoice::Command,
                         PrefillAgent::Profile { id } => AgentChoice::Profile(id.clone()),
@@ -727,10 +775,14 @@ pub(super) fn CreateSessionForm(
     //
     // - A target change — the user picking another host, a chosen host
     //   leaving the registry and the default taking over, or the SAME row
-    //   being retargeted, adopted or reconnected — discards the choice and the
-    //   intent key. A profile id means nothing on another supervisor, and
-    //   because every fresh supervisor seeds the same starters, carrying one
-    //   across does not fail loudly: it resolves, to a profile nobody picked.
+    //   being retargeted or adopted — discards the choice and the intent
+    //   key. A profile id means nothing on another supervisor, and because
+    //   every fresh supervisor seeds the same starters, carrying one across
+    //   does not fail loudly: it resolves, to a profile nobody picked. A
+    //   mere RECONNECTION is deliberately not a target change (`HostTarget`
+    //   carries no connection token): a reconnect is precisely when a reply
+    //   gets lost, and rotating the key there would turn the user's retry
+    //   into a second intended create.
     // - The remembered default is CONSUMED ONCE per target, and `seeded_for`
     //   is what records that it has been. Tracking consumption by "a choice
     //   exists" is not enough and the gap is reachable: a first catalog with
@@ -925,9 +977,13 @@ pub(super) fn CreateSessionForm(
 
             if previous != target {
                 bound_target.set(target.clone());
-                // The catalog must be re-seeded for ANY change, including a
-                // mere reconnection: it was read on a connection that is
-                // gone, and the helm now refuses reads that name it.
+                // The catalog must be re-seeded whenever the TARGET moved —
+                // an install change (another row picked, or the same row
+                // retargeted or adopted), never a mere reconnection, which
+                // does not change `HostTarget` at all. What was held so far
+                // describes the previous install, and treating it as an
+                // answer about this one would offer profile ids that
+                // resolve to something else over here.
                 seeded_for.set(None);
                 // The CHOICE and the KEY, however, rotate only when the
                 // INSTALL changes. A reconnection to the same machine is
@@ -1104,12 +1160,14 @@ pub(super) fn CreateSessionForm(
                 let selected_now =
                     effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref());
                 // And the catalog the agent was just resolved against has to
-                // be the catalog OF that host. When they disagree the target
-                // effect has not caught up with the selector yet — a window of
-                // one render — and a profile id resolved against the old
-                // host's catalog would be sent to the new one, where it means
-                // something else or nothing.
-                if selected_now != target_now.as_ref().map(|target| target.host) {
+                // be the catalog OF that host — the same row AND the same
+                // install fingerprint, not merely the same id. When they
+                // disagree the target effect has not caught up yet — a window
+                // of one render, which a retarget or an adoption can also
+                // open on an UNCHANGED selection — and a profile id resolved
+                // against the old install's catalog would be sent to the new
+                // one, where it means something else or nothing.
+                if !catalog_matches_selection(selected_now, &hosts, target_now.as_ref()) {
                     error.set(Some(
                         "the target host changed while this create was being submitted, so                          nothing was sent — check the agent and press create again"
                             .to_string(),
@@ -1155,6 +1213,15 @@ pub(super) fn CreateSessionForm(
                     .iter()
                     .find(|host| host.id == binding.host)
                     .map(|host| host.identity.clone());
+                // The connection this create is prepared against, read from
+                // the same hosts snapshot the target match above just
+                // vouched for: the helm refuses the create if the host has
+                // been retargeted or adopted onto another install by the
+                // time it routes, which is what keeps a profile id chosen
+                // from THIS catalog from resolving on a successor's starter
+                // of the same id. `None` — a vanished row, or one that has
+                // never connected — means no claim (see `connection_claim`).
+                let expected_incarnation = connection_claim(&hosts, binding.host);
                 error.set(None);
                 spawn(async move {
                     // Mint until the key and the binding agree.
@@ -1250,25 +1317,16 @@ pub(super) fn CreateSessionForm(
                         LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
                         LaunchIntent::Profile(id) => CreateAgent::Profile(id),
                     };
-                    // The connection this create was prepared against. Read
-                    // from the surface's target rather than from the hosts
-                    // snapshot, because the target is what the picker's
-                    // catalog was read on — so the profile id in the body and
-                    // the connection in the precondition describe one moment.
-                    let expectation = target_now
-                        .as_ref()
-                        .map(|target| target.expectation())
-                        .unwrap_or_default();
                     match create_session(
-                            &base,
-                            &bound.cwd,
-                            agent,
-                            &bound.title,
-                            &key,
-                            Some(bound.host),
-                            expectation,
-                        )
-                        .await
+                        &base,
+                        &bound.cwd,
+                        agent,
+                        &bound.title,
+                        &key,
+                        Some(bound.host),
+                        expected_incarnation,
+                    )
+                    .await
                     {
                         Ok(session) => {
                             // Released BEFORE navigating: `on_created`
@@ -1296,8 +1354,7 @@ pub(super) fn CreateSessionForm(
                                     // create and routing it — the id now
                                     // reaches another install, where the
                                     // profile id would have resolved to
-                                    // something else. The binding is stale in
-                                    // every part, so the key goes with it (a
+                                    // something else. The key goes with it (a
                                     // retry must be a NEW intent, not a replay
                                     // aimed at a machine that never saw the
                                     // first) and the catalog is re-read, which
@@ -1307,14 +1364,13 @@ pub(super) fn CreateSessionForm(
                                     catalog.request(Trigger::Explicit);
                                 }
                                 // The key otherwise deliberately SURVIVES a
-                                // failure: this is exactly the case it exists
-                                // for. A failure whose cause was an ambiguous
-                                // transport error may have created a session
-                                // the user cannot see, and resubmitting
-                                // unchanged must reach that same session
-                                // rather than launch a second agent. A user
-                                // who instead fixes the form gets a new key,
-                                // because the binding no longer matches.
+                                // failure: a failure whose cause was an
+                                // ambiguous transport error may have created
+                                // a session the user cannot see, and
+                                // resubmitting unchanged must reach that same
+                                // session rather than launch a second agent.
+                                // A user who instead fixes the form gets a new
+                                // key, because the binding no longer matches.
                                 error.set(Some(prose));
                             }
                             ops.release();
@@ -1769,6 +1825,68 @@ mod tests {
     /// the form refuses locally instead of sending, because a hostless body
     /// would be silently defaulted by the helm to a machine the user was
     /// never shown.
+    /// Submission refuses when the catalog target and the selected row
+    /// disagree about the INSTALL, not merely about the row id.
+    ///
+    /// This is the rule-level pin of the one-render-lag regression: after a
+    /// retarget or an adoption the hosts snapshot describes the successor
+    /// while the catalog surface still holds the predecessor's catalog under
+    /// the same row id. The component-level version (staging the submit
+    /// handler mid-lag) is not stageable in this harness — the handler lives
+    /// inside the dioxus closure — so the comparison is extracted and pinned
+    /// here instead.
+    #[test]
+    fn submission_requires_the_catalog_to_match_the_selected_install() {
+        let hosts = vec![option(1, "this machine", true)];
+        let current = HostTarget::new(1, "incarnation-1".to_string());
+        assert!(catalog_matches_selection(Some(1), &hosts, Some(&current)));
+        assert!(
+            !catalog_matches_selection(
+                Some(1),
+                &hosts,
+                Some(&HostTarget::new(
+                    1,
+                    "incarnation-before-retarget".to_string()
+                )),
+            ),
+            "the same row id under a moved install fingerprint is the lag window, not a match"
+        );
+        assert!(
+            !catalog_matches_selection(Some(2), &hosts, Some(&current)),
+            "a selected row absent from the snapshot cannot vouch for any catalog"
+        );
+        assert!(
+            catalog_matches_selection(None, &hosts, None),
+            "no selection and no target fall through to the hostless refusal downstream"
+        );
+        assert!(!catalog_matches_selection(Some(1), &hosts, None));
+        assert!(!catalog_matches_selection(None, &hosts, Some(&current)));
+    }
+
+    /// A never-connected host yields NO connection claim, and a connected
+    /// one yields exactly its token.
+    ///
+    /// `Host::incarnation == 0` is the never-connected sentinel, and sending
+    /// it as `expected_incarnation: 0` would turn "I observed nothing" into
+    /// a precondition the host's very first connection then fails — a create
+    /// racing that first connect would be refused as stale with nothing
+    /// actually wrong.
+    #[test]
+    fn a_never_connected_host_makes_no_connection_claim() {
+        let mut connected = option(1, "connected", true);
+        connected.connection = 7;
+        let mut fresh = option(2, "never connected", false);
+        fresh.connection = 0;
+        let hosts = vec![connected, fresh];
+        assert_eq!(connection_claim(&hosts, 1), Some(7));
+        assert_eq!(
+            connection_claim(&hosts, 2),
+            None,
+            "the sentinel is the absence of a claim, not a claim of zero"
+        );
+        assert_eq!(connection_claim(&hosts, 3), None);
+    }
+
     #[test]
     fn no_selected_host_yields_no_binding() {
         let hosts = vec![option(1, "this machine", true)];
@@ -1990,7 +2108,7 @@ mod tests {
         assert_eq!(
             action,
             CloneHostAction::Bind {
-                target: HostTarget::new(1, 1, "incarnation-1".to_string()),
+                target: HostTarget::new(1, "incarnation-1".to_string()),
                 choice: AgentChoice::Profile("p-1".to_string()),
             }
         );

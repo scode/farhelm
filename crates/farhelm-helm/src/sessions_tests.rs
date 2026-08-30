@@ -1642,6 +1642,94 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
     peer.await.unwrap();
 }
 
+/// A stale claim fails the session-cache seed, and the remembered default
+/// still lands — with its invalidation published.
+///
+/// This is the central consistency split the bare-id default introduced,
+/// and nothing else pins it: [`record_session`]'s cache seed is
+/// CLAIM-CHECKED (a write prepared on a replaced connection must not file a
+/// session under whatever answers on the host now), while the remembered
+/// default is a registry-row preference that survives exactly that
+/// replacement. Reintroducing a claim check around the default — or letting
+/// a refused cache seed short-circuit the bookkeeping — would pass every
+/// other test in this file and fail here.
+#[tokio::test]
+async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
+    use farhelm_proto::SessionInfo;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        // Hold the connection open; nothing is forwarded in this test.
+        while let Ok(Some(_)) = reader.read_frame().await {}
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let current = harness
+        .manager
+        .status(local)
+        .expect("the local host has an actor")
+        .incarnation;
+    // A claim from the connection BEFORE this one — the shape a reply's
+    // bookkeeping sees when the host reconnected mid-create.
+    let stale = crate::manager::SessionClaim {
+        host: local,
+        incarnation: current.wrapping_sub(1),
+        identity: None,
+    };
+    let session = SessionInfo {
+        parent: None,
+        archived: false,
+        id: "sess-stale".into(),
+        title: "sess-stale".into(),
+        created_at: 1_700_000_700,
+        last_activity_at: 1_700_000_700,
+        creation_seq: Some(5),
+        cwd: "/work".into(),
+        invocation: "claude".into(),
+        status: farhelm_proto::SessionStatus::Unknown,
+        annotation: None,
+        restart_offer: farhelm_proto::RestartOffer::default(),
+        tabs: Vec::new(),
+        source_profile: None,
+    };
+
+    assert!(
+        harness
+            .manager
+            .remember_session(&stale, &session)
+            .await
+            .is_err(),
+        "a cache seed prepared against a replaced connection must be refused"
+    );
+
+    let before = harness.manager.events().revision();
+    super::remember_default_profile(&harness.state, local, "p-favorite", &session).await;
+    assert_eq!(
+        harness
+            .store
+            .remembered_profile(local)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("p-favorite"),
+        "the default is a registry-row write and must land regardless of the claim"
+    );
+    assert!(
+        harness.manager.events().revision() > before,
+        "and its change is published so open create dialogs learn of it"
+    );
+    drop(harness);
+    let _ = peer.await;
+}
+
 /// Issue one request against `app` and return its status and JSON body.
 ///
 /// The tests below make several requests each and none of them is about

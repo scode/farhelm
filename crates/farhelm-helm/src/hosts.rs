@@ -75,14 +75,15 @@ pub(crate) struct HostView {
     /// changes whenever the host's client does, including when it goes away
     /// (see `manager::ActorStatus::incarnation`).
     ///
-    /// Served so a client can hand it back as `expected_incarnation` on a
-    /// mutation and have the helm refuse one prepared against an install that
-    /// has since been replaced (`crate::precondition`). Opaque as a USAGE
-    /// convention: compare it, echo it, never interpret it — the number is a
-    /// counter over this helm's own connections and means nothing across a
-    /// restart, which is exactly why a client must not persist one.
+    /// Served so a client can tell one connection to a host from the next
+    /// without interpreting the state payload — the UI's provisioning panel
+    /// binds a displayed plan to it, so a plan prepared against one
+    /// connection is not left actionable on another. Opaque as a USAGE
+    /// convention: compare it, never interpret it — the number is a counter
+    /// over this helm's own connections and means nothing across a restart,
+    /// which is exactly why a client must not persist one.
     ///
-    /// `0` is "never connected". A client holding that has nothing to assert.
+    /// `0` is "never connected".
     pub(crate) incarnation: u64,
 }
 
@@ -461,19 +462,15 @@ pub(crate) async fn add_host(
 ///
 /// ## The retarget and this host's own writers are one queue
 ///
-/// Two things happen here that must not be split by another writer: the store
-/// forgets the remembered default profile (inside its own transaction, because
-/// an id recorded against one install can RESOLVE on the next), and the
-/// reconcile invalidates every outstanding connection claim. A
-/// remembered-default write in flight for the old connection has already
-/// passed its claim check and can land its row in between — after the delete,
-/// before the invalidation — and an identity-less host retargeted to another
-/// identity-less install has nothing left to reject it with, since its stored
-/// `NULL` identity goes on matching the row's. So both steps are taken under
-/// this host's cache-write lock (`ConnectionManager::host_write_lock`), which
-/// is the lock that write already holds. Provisioning retains the same lock
-/// for its whole confirmed run, so a retarget also cannot move the registry
-/// out from under a frozen host plan.
+/// The registry write and the reconcile that invalidates every outstanding
+/// connection claim are taken under this host's cache-write lock
+/// (`ConnectionManager::host_write_lock`), the lock the host's own cache
+/// writers hold, so a cache write in flight for the old connection cannot
+/// straddle the move. Provisioning retains the same lock for its whole
+/// confirmed run, so a retarget also cannot move the registry out from under
+/// a frozen host plan. The remembered default profile is NOT touched by a
+/// retarget — it is a bare id per registry row (SPEC.md, Sessions /
+/// Creation).
 ///
 /// Refuses the reserved local row (409 — it has no destination to change),
 /// an unknown id (404), an unusable destination (400), and a destination
@@ -803,21 +800,19 @@ mod tests {
         );
     }
 
-    /// The hosts view publishes the CONNECTION token a mutation's
-    /// precondition names, and a reconnection changes it.
+    /// The hosts view publishes the CONNECTION token, and a reconnection
+    /// changes it.
     ///
     /// Spec: every host row carries `incarnation`, equal to what the manager
     /// has published for that host, and a host that drops and comes back
     /// carries a larger one.
     ///
-    /// This is the read side of `crate::precondition`, and without it the
-    /// whole feature is unusable: a client can only assert which install it
-    /// prepared a request against if it was told. The change-on-reconnect half
-    /// is what makes the assertion mean anything — a token that stayed put
-    /// across a retarget would let every stale request through while looking
-    /// like a guard.
+    /// The UI's provisioning panel binds a displayed plan to this token so a
+    /// plan prepared against one connection is not left actionable on the
+    /// next; the change-on-reconnect half is what makes that binding mean
+    /// anything.
     #[tokio::test]
-    async fn the_hosts_view_publishes_the_connection_a_precondition_names() {
+    async fn the_hosts_view_publishes_the_connection_token() {
         let harness = lone_local_helm().await;
         let local = rest_harness::local_id(&harness.store).await;
 
@@ -1023,106 +1018,6 @@ mod tests {
         let (status, _, text) =
             call(&harness, "POST", &format!("/api/hosts/{taken}/retry"), None).await;
         assert_eq!(status, StatusCode::OK, "{text}");
-    }
-
-    /// A remembered-default write in flight across a RETARGET leaves no
-    /// residue behind it.
-    ///
-    /// Spec: `POST /api/hosts/{id}/destination` takes the host's write lock
-    /// before it touches the registry, so a write holding that lock either
-    /// commits and is erased by the retarget's own delete, or waits and finds
-    /// its claim superseded. Either way the retargeted host has no remembered
-    /// default.
-    ///
-    /// The residue is not merely stale, which is why this is worth fencing at
-    /// all: a profile id recorded against one install RESOLVES on the next —
-    /// every fresh supervisor seeds the same starter ids — so the user is
-    /// offered a profile they never chose as their own last choice. And the
-    /// binding stored beside it cannot catch this case: an identity-less host
-    /// retargeted to another identity-less install matches `NULL` against
-    /// `NULL` on every read.
-    ///
-    /// The interleaving is FORCED rather than raced. The test holds the host's
-    /// write lock exactly as an in-flight write does, waits until the retarget
-    /// has demonstrably queued behind it
-    /// (`ConnectionManager::queued_host_writes`), and only then lets the write
-    /// land. A retarget that took no lock never queues, so it fails at that
-    /// barrier rather than passing on a lucky schedule — and would then delete
-    /// nothing, because the row it was supposed to forget is written after it.
-    #[tokio::test]
-    async fn a_remembered_default_written_during_a_retarget_does_not_survive_it() {
-        let harness = lone_local_helm().await;
-        let (_, added, _) = call(
-            &harness,
-            "POST",
-            "/api/hosts",
-            Some(serde_json::json!({ "ssh": "user@before" })),
-        )
-        .await;
-        let host = added["id"].as_i64().unwrap();
-        harness.await_refreshed(host).await;
-
-        // Held for as long as an in-flight remembered-default write would
-        // hold it: from before its claim check to after its store write.
-        let writing = harness
-            .manager
-            .host_write_lock(host)
-            .await
-            .expect("the host has an actor");
-
-        let retarget = tokio::spawn({
-            let router = harness.router();
-            async move {
-                let request = axum::http::Request::builder()
-                    .method("POST")
-                    .uri(format!("/api/hosts/{host}/destination"))
-                    .header("host", "127.0.0.1:7433")
-                    .header("content-type", "application/json")
-                    .body(axum::body::Body::from(
-                        serde_json::json!({ "ssh": "user@after" }).to_string(),
-                    ))
-                    .unwrap();
-                tower::ServiceExt::oneshot(router, request)
-                    .await
-                    .unwrap()
-                    .status()
-            }
-        });
-        let queued = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            while harness.manager.queued_host_writes() == 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await;
-        assert!(
-            queued.is_ok(),
-            "the retarget must queue behind this host's writers; one that takes no lock deletes \
-             the remembered default before the write that is about to land"
-        );
-
-        // The write lands INSIDE the retarget's window — the whole point.
-        harness
-            .store
-            .remember_profile_default(host, None, "starter-claude")
-            .await
-            .expect("the write is legal: this host reports no identity, and neither does its row");
-        drop(writing);
-
-        assert_eq!(retarget.await.unwrap(), StatusCode::OK);
-        assert_eq!(
-            harness.store.remembered_profile(host).await.unwrap(),
-            None,
-            "a preference recorded for the OLD endpoint must not be offered for the new one — a \
-             starter id resolves on both"
-        );
-        let rows = harness.store.list_hosts().await.unwrap();
-        assert_eq!(
-            rows.iter()
-                .find(|row| row.id == host)
-                .and_then(|row| row.destination.clone()),
-            Some("user@after".to_string()),
-            "and the retarget itself went through"
-        );
     }
 
     /// Retargeting a host must take effect on the CONNECTION, not just in

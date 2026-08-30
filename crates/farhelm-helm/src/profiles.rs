@@ -17,23 +17,20 @@
 //! this helm, not a fact about the supervisor, and a supervisor serving two
 //! helms has no business holding either one's last choice.
 //!
-//! ## A default belongs to an INSTALL, not to a registry row
+//! ## The default is a bare profile id per registry row
 //!
-//! The single fact that shapes every rule about the remembered default:
-//! profile ids are minted per supervisor AND every fresh supervisor seeds the
-//! same starter profiles, so an id recorded against one install does not
-//! merely go stale when the row moves — it RESOLVES on the successor, to a
-//! profile the user never chose, offered back as their own last choice. That
-//! is precisely the guess SPEC.md's ask-don't-guess rule exists to prevent.
-//!
-//! So the binding is enforced at every point a default can cross an install
-//! boundary, and no single one of them is trusted alone: the write is bound
-//! to the connection claim it was made on, adoption and a genuine retarget
-//! delete the row inside their own transactions, the stored row carries the
-//! identity it was recorded against and is revalidated on every read
-//! (`crate::store::HelmStore::remembered_profile`), and [`list_profiles`]
-//! rechecks the claim after both of its reads so one install's catalog cannot
-//! be paired with another's default.
+//! The remembered default is a plain profile id stored against the registry
+//! row, and that is the whole mechanism. It is not bound to the install
+//! behind the row, no request here carries a precondition about which
+//! connection it was prepared against, and nothing revalidates the id beyond
+//! the catalog lookup the client does: a row that reaches a different install
+//! after a reinstall or a retarget, where the same id exists (every fresh
+//! supervisor seeds the same starter ids), gets that profile preselected. That
+//! is accepted because a default is a suggestion in a dropdown, never an
+//! action. SPEC.md's "asks instead of guessing" is about a profile that no
+//! longer exists, which a bare id still honours — the catalog lookup fails and
+//! the dialog asks. Machinery to detect "same id, different install" is not
+//! wanted (SPEC.md, Sessions / Creation).
 //!
 //! ## One read, both halves
 //!
@@ -50,41 +47,17 @@
 //! would turn "your last profile is gone, pick another" into a silent
 //! nothing.
 //!
-//! ## What a client may ASSERT about the moment it prepared a request in
-//!
-//! Every route here names a host by registry id, and an id outlives the
-//! install it points at: a retarget or an adoption elsewhere replaces what
-//! answers on it, silently, and colliding starter profile ids make a
-//! misdirected profile request RESOLVE on the successor rather than fail. So
-//! every route here — the catalog READ included, which files its answer under
-//! a connection the client cannot otherwise name — accepts an OPTIONAL
-//! precondition naming the connection it was written against, and an update
-//! accepts a second naming the definition it means to replace. Absent means
-//! "no claim", which is what keeps `curl`, the CLI, and older clients working
-//! exactly as before. See [`crate::precondition`] for the whole story,
-//! including how these compose with the connection-claim revalidation every
-//! request here already does, and what remains the client's own job.
-//!
-//! The other half of that story is what a client is given to guard WITH. The
-//! catalog read serves a fingerprint per definition
-//! ([`ProfilesView::definitions`]) and every successful create and update
-//! answers with the fingerprint of what was committed ([`ProfileReply`]), so a
-//! client that has just saved can guard its next edit from the reply it is
-//! already holding rather than by re-reading — which it would otherwise have
-//! to do before the row could safely be reopened.
-//!
 //! ## Every mutation that changed something invalidates
 //!
 //! Profiles are one of the surfaces the goal promises arrives without
 //! polling: an edit in one client must reach another client's open profile
 //! surface and its create dialog. Each mutation that actually changed the
 //! catalog therefore bumps the fleet's revision
-//! (`crate::manager::FleetEvents`). A plain read does not, and neither does
-//! an edit that submitted exactly what was already stored — see
-//! [`update_profile`], which recognizes that case here rather than waking the
-//! fleet for it, and which serializes each host's edits so that recognition
-//! is a decision rather than a guess about a catalog that may already have
-//! moved.
+//! (`crate::manager::FleetEvents`). A plain read does not. An edit that
+//! submits exactly what is already stored is NOT recognized here: it
+//! forwards, commits on the supervisor, and wakes the fleet like any other
+//! accepted edit — last-write-wins with no helm-side comparison (see
+//! [`update_profile`]).
 //!
 //! A FAILED mutation does not bump either, and that rule needs its boundary
 //! stated rather than assumed: a failure this side observes is not proof
@@ -97,34 +70,35 @@
 //! back. The bump this module skips is one the connection's own state change
 //! has already made redundant.
 //!
-//! A CANCELLED request is the case with no such cover, and it is the ordinary
-//! one rather than the exotic one: an axum handler's future is dropped the
-//! moment its client disconnects, so a browser tab closed a heartbeat after
-//! Save abandons a mutation whose frame is already with the supervisor. The
-//! supervisor commits, this side never sees the reply, and nothing bumps —
-//! while every other client goes on showing a catalog that no longer exists,
-//! because catalogs are read on demand and have no refresh loop to heal them.
-//! So a mutation's completion is deliberately not the handler's to lose: see
-//! [`committed`], which carries the reply, the invalidation and the per-host
-//! lock's release into a task the handler only awaits.
+//! A CANCELLED request — an axum handler's future is dropped the moment its
+//! client disconnects — can likewise abandon a mutation whose frame is
+//! already with the supervisor, so the supervisor commits and nothing bumps.
+//! That is accepted, and it is worth being exact about what it costs, because
+//! catalogs have no refresh loop of their own: a client re-reads a catalog
+//! when it opens or re-points the surface, when a feed notice arrives, after
+//! its own mutations, and on the fallback poll ONLY while the feed is down.
+//! So a connected client with the profiles section already open sees a
+//! cancelled save's effect only when something else bumps the fleet revision
+//! or the user re-opens the section — not within seconds, and not by any
+//! periodic tick. A detached task that carried the reply and the invalidation
+//! past the handler's lifetime used to close that window, and was removed as
+//! more machinery than the case (one user, one browser, a save cut off
+//! mid-request) is worth.
 
 use crate::sessions::host_client;
 use crate::store::HostId;
 use crate::{AppState, http_error};
-use anyhow::Context;
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
-use farhelm_proto::{AgentKind, ErrorKind, Profile};
+use farhelm_proto::{AgentKind, Profile};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// What `GET /api/hosts/{id}/profiles` answers with: the host's catalog, this
-/// helm's remembered default for it, and a fingerprint per definition.
+/// What `GET /api/hosts/{id}/profiles` answers with: the host's catalog and
+/// this helm's remembered default for it.
 ///
-/// See the module docs for why the first two travel in one shape. The field
-/// names are frozen by PLAN_M6_75.md item 6's consumer; `definitions` is
-/// additive, and a client that does not guard its updates can ignore it
-/// entirely.
+/// See the module docs for why the two travel in one shape. The field names
+/// are frozen by PLAN_M6_75.md item 6's consumer.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct ProfilesView {
     /// The catalog exactly as the supervisor ordered it (by profile id
@@ -146,35 +120,12 @@ pub(crate) struct ProfilesView {
     /// correct whether the profile was deleted an hour ago or between these
     /// two reads.
     pub(crate) default_profile: Option<String>,
-    /// Each profile's DEFINITION fingerprint, keyed by profile id — the value
-    /// an editor hands back as `expected_definition` when it saves
-    /// ([`crate::precondition::definition_fingerprint`]).
-    ///
-    /// Served rather than left to the client to compute, and that is the point
-    /// of it existing at all: the fingerprint is compared for exact equality,
-    /// so a client that builds its own has to reproduce this encoding
-    /// byte-for-byte in another language, and any drift shows up as guarded
-    /// updates that refuse forever with nothing wrong. Echoing an opaque value
-    /// back has nothing to get wrong.
-    ///
-    /// A separate map rather than a field on each profile because `Profile` is
-    /// the WIRE type (`farhelm_proto`), shared with the supervisor, and a
-    /// fingerprint is this API's convenience rather than a fact about the
-    /// catalog. Sorted (a `BTreeMap`) so the JSON is stable between reads.
-    pub(crate) definitions: std::collections::BTreeMap<String, String>,
 }
 
 /// The body of a profile create or update — everything but the id, which the
 /// supervisor mints on a create (a client has no way to know one in advance,
 /// and letting it propose one would invite collisions the catalog would then
 /// have to arbitrate) and the URL carries on an update.
-///
-/// The two `expected_*` fields are PRECONDITIONS rather than content: they say
-/// what the caller believed when it composed this request, and nothing about
-/// them reaches the supervisor. Both are optional, and absent means the
-/// request behaves exactly as it did before they existed — see
-/// [`crate::precondition`] for why that compatibility is permanent rather than
-/// transitional.
 #[derive(Deserialize)]
 pub(crate) struct ProfileSpec {
     name: String,
@@ -189,87 +140,6 @@ pub(crate) struct ProfileSpec {
     /// `farhelm_proto::Profile::resume_template` for what absence means per
     /// kind — it is not uniformly "no resume".
     resume_template: Option<Vec<String>>,
-    /// Which CONNECTION the caller prepared this request against — a
-    /// `HostView::incarnation` it read from `GET /api/hosts`.
-    ///
-    /// Present, and this mutation is refused unless the host is still on that
-    /// connection ([`crate::precondition::incarnation_holds`]). Absent, and no
-    /// claim is made.
-    expected_incarnation: Option<u64>,
-    /// Which DEFINITION this update means to replace — the fingerprint the
-    /// editor was seeded from ([`ProfilesView::definitions`]).
-    ///
-    /// UPDATE ONLY. A create has no prior definition to expect, so a create
-    /// carrying this is REFUSED rather than served with the field ignored: the
-    /// caller believes it sent a precondition, and silently dropping one is
-    /// how a client comes to trust a guarantee nothing is providing.
-    expected_definition: Option<String>,
-}
-
-/// The query string of the two profile routes that carry no body: the catalog
-/// READ and the DELETE.
-///
-/// A struct for one optional field, because that is what an axum `Query`
-/// extractor needs, and shared by both routes because the field means exactly
-/// one thing — see [`ProfileSpec::expected_incarnation`], which is the same
-/// precondition spelled in a body.
-///
-/// Unknown parameters are IGNORED, matching `serde`'s default everywhere else
-/// in this API. A typo therefore proceeds without the guard the caller thought
-/// it sent — the same exposure `expected_incarnation` has when it is simply
-/// omitted, which is the compatibility posture the whole feature rests on.
-#[derive(Deserialize)]
-pub(crate) struct ConnectionQuery {
-    /// See [`ProfileSpec::expected_incarnation`] — identical meaning, spelled
-    /// as a query parameter.
-    expected_incarnation: Option<u64>,
-}
-
-/// What a profile CREATE or UPDATE answers with: the definition as committed,
-/// plus its fingerprint.
-///
-/// The profile is FLATTENED, which is the whole compatibility story: every
-/// field these replies have always carried (`id`, `name`, `invocation`,
-/// `agent_kind`, `resume_template`) stays exactly where it was, and
-/// `fingerprint` is an additive sibling. A nested `{"profile": {...}}` would
-/// have been tidier and would have broken every existing reader.
-///
-/// ## Why a mutation reply carries it at all
-///
-/// Without it, a client that has just successfully edited a profile holds the
-/// new definition beside the OLD fingerprint (or, after a create, none at
-/// all) until it re-reads the catalog. Both halves of that are bugs the user
-/// sees: reopening the row and saving again sends a fingerprint the helm no
-/// longer recognizes, so an edit nobody raced is refused as stale; and a
-/// freshly created profile cannot be guarded on its first edit because there
-/// is nothing to send. Handing back the committed fingerprint lets a client
-/// fold the reply into what it holds and guard the very next edit.
-///
-/// Computed from the definition the far side actually COMMITTED — the profile
-/// carried by `ProfileCreated`/`ProfileUpdated`, not the one submitted — so a
-/// supervisor that normalized anything is described by the fingerprint rather
-/// than contradicted by it. It is the same
-/// [`crate::precondition::definition_fingerprint`] the catalog read serves and
-/// the precondition compares, which is what makes "reply, then guard" work
-/// without a re-read.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct ProfileReply {
-    #[serde(flatten)]
-    profile: Profile,
-    /// The canonical encoding of the definition as committed — byte-for-byte
-    /// what a later [`list_profiles`] serves for this profile in
-    /// [`ProfilesView::definitions`].
-    fingerprint: String,
-}
-
-impl ProfileReply {
-    /// The reply for a profile the far side just committed.
-    fn of(profile: Profile) -> ProfileReply {
-        ProfileReply {
-            fingerprint: crate::precondition::definition_fingerprint(&profile),
-            profile,
-        }
-    }
 }
 
 /// `GET /api/hosts/{id}/profiles` — one host's profile catalog plus this
@@ -282,98 +152,19 @@ impl ProfileReply {
 /// is not connected cannot answer, and this refuses with the host's state
 /// named, exactly as a session operation on it would.
 ///
-/// ## The two halves must come from ONE install
-///
-/// The catalog and the default are read in separate awaits and cannot be
-/// atomic — one comes over the wire and the other from helm.db — but they
-/// must at least describe the same connection. Between them a host can be
-/// retargeted, adopted, or simply reconnect to a different install, and the
-/// reply would then pair one install's catalog with another install's
-/// remembered id. That is not a stale number: starter profile ids collide
-/// across installs by construction, so the id would RESOLVE against the
-/// catalog beside it and be offered as the user's own last choice.
-///
-/// So the connection claim taken before the reads is checked again after
-/// both, and a claim that moved is a [`ErrorKind::Conflict`] telling the
-/// caller to ask again. Refusing rather than retrying here: a retry loop
-/// against a flapping host is unbounded work on a read a user can simply
-/// repeat, and the client already re-reads on the invalidation feed.
-///
-/// ## A READ takes a precondition too, and why one is worth taking
-///
-/// `?expected_incarnation=` says which connection the caller believes it is
-/// reading. A read is not a mutation and cannot damage anything on the far
-/// side, so the reason is entirely about what the ANSWER is filed under: a
-/// client that stores catalogs per (host, connection) has only the host id in
-/// the request, and a retarget or an adoption between its dispatch and this
-/// routing hands it the successor's catalog to record under the predecessor's
-/// key. Everything it then does with that cache — seeding an editor, guarding
-/// an update, offering a remembered default — is about the wrong install.
-///
-/// Checked where the read BINDS to a connection: once when the claim is taken
-/// (so a caller naming a connection this host has already left is refused
-/// before a round trip), and once at the same post-read revalidation the two
-/// halves are judged by — where a guarded caller gets the marked refusal
-/// (`crate::precondition`) rather than the generic one, because the two ask
-/// for different recoveries.
-///
-/// The RESIDUAL is real and belongs to the client. This can only refuse up to
-/// the moment it answers; a retarget landing while the reply is in flight
-/// produces a perfectly valid catalog for a connection that is already over,
-/// and no server-side check can close that. What closes it is the client's own
-/// activation gate — the same (host, connection) key it stores under, checked
-/// again when it uses what it stored — and the invalidation feed, which tells
-/// it to re-read as soon as the connection changes.
-///
-/// ## What an editor is seeded with
-///
-/// The reply also carries a FINGERPRINT per definition
-/// ([`ProfilesView::definitions`]). An editor holds the one it loaded and
-/// hands it back as `expected_definition` when it saves, which is how
-/// [`update_profile`] can tell "this replaces what I read" from "this
-/// silently reverts somebody else's change". Nothing requires a client to use
-/// it, and a client that ignores it gets exactly the previous behavior.
+/// The catalog and the default are read in separate awaits and are not
+/// atomic — one comes over the wire and the other from helm.db. Nothing here
+/// checks that the host stayed on one connection across the two reads: the
+/// default is a bare id per registry row (see the module docs), so pairing it
+/// with whatever catalog the row reaches now is the intended reading.
 pub(crate) async fn list_profiles(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
-    axum::extract::Query(query): axum::extract::Query<ConnectionQuery>,
 ) -> impl IntoResponse {
-    list_profiles_staged(
-        state,
-        host,
-        query.expected_incarnation,
-        std::future::ready(()),
-    )
-    .await
-}
-
-/// [`list_profiles`], with a seam between its two reads and the claim check
-/// that judges them.
-///
-/// `staged` is awaited exactly where a reconnection would have to land for the
-/// revalidation to matter: after the catalog and the remembered default are
-/// both in hand, before either is reported. Production passes a ready future.
-///
-/// The seam exists because the alternative is a test that proves nothing. This
-/// window is two awaits wide inside one handler, and the only way to put a
-/// real reconnection in it from outside is to break the connection the catalog
-/// read is waiting on — which fails the request for a different reason
-/// entirely and would pass just as well against a handler that had dropped the
-/// check. Staging the rotation here keeps the assertion on the REAL handler,
-/// its real refusal, and its real status code.
-async fn list_profiles_staged(
-    state: Arc<AppState>,
-    host: HostId,
-    expected_incarnation: Option<u64>,
-    staged: impl std::future::Future<Output = ()>,
-) -> axum::response::Response {
-    let (claim, client) = match host_client(&state, host) {
+    let (_, client) = match host_client(&state, host) {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    if let Err(e) = crate::precondition::incarnation_holds(&claim, expected_incarnation) {
-        return http_error(e);
-    }
     let profiles = match client.list_profiles().await {
         Ok(profiles) => profiles,
         Err(e) => return http_error(e),
@@ -388,134 +179,11 @@ async fn list_profiles_staged(
         Ok(default_profile) => default_profile,
         Err(e) => return http_error(e),
     };
-    staged.await;
-    // The claim these reads were taken under, judged against the world as it
-    // is now. A caller that ASSERTED a connection gets the marked refusal
-    // rather than the generic one: its recovery is "re-read under the
-    // connection you are on now", which is a different instruction from the
-    // unguarded caller's "ask again".
-    if let Err(e) = still_the_same_connection(&state, &claim) {
-        return http_error(match expected_incarnation {
-            Some(expected) => crate::precondition::connection_moved(
-                host,
-                expected,
-                state.manager.status(host).map(|status| status.incarnation),
-            ),
-            None => e,
-        });
-    }
-    let definitions = profiles
-        .iter()
-        .map(|profile| {
-            (
-                profile.id.clone(),
-                crate::precondition::definition_fingerprint(profile),
-            )
-        })
-        .collect();
     axum::Json(ProfilesView {
         profiles,
         default_profile,
-        definitions,
     })
     .into_response()
-}
-
-/// Refuse unless `claim` still names the connection this host currently has.
-///
-/// The incarnation token is minted afresh whenever a host's client changes —
-/// including when it goes away — so equality here means every read taken
-/// under `claim` describes one uninterrupted connection to one install. The
-/// identity is compared too, because a host can learn or change one without
-/// the client object changing.
-fn still_the_same_connection(
-    state: &AppState,
-    claim: &crate::manager::SessionClaim,
-) -> anyhow::Result<()> {
-    let current = state.manager.status(claim.host);
-    let matches = current.as_ref().is_some_and(|status| {
-        status.incarnation == claim.incarnation
-            && match &status.state {
-                crate::manager::HostState::Connected { identity, .. } => {
-                    *identity == claim.identity
-                }
-                _ => false,
-            }
-    });
-    if matches {
-        return Ok(());
-    }
-    Err(anyhow::Error::new(crate::SupervisorError {
-        kind: ErrorKind::Conflict,
-        message: format!(
-            "host {} changed connection while this request was being answered; its catalog and \
-             this helm's remembered default could describe different installs, so nothing is \
-             being reported — ask again",
-            claim.host
-        ),
-    }))
-}
-
-/// Carry one catalog mutation to its END, whatever happens to the request
-/// that asked for it.
-///
-/// The mutation frame is already on its way to the supervisor by the time
-/// `mutation` is awaited, so a caller that goes away here does not undo
-/// anything — it only abandons the reply, and with it the invalidation this
-/// helm owes every OTHER client. Catalogs have no periodic refresh to heal
-/// that: a create dialog somewhere else would keep offering a profile that no
-/// longer exists until something unrelated moved the revision. A browser tab
-/// closing mid-save is enough to produce it.
-///
-/// So the whole span — awaiting the reply, revalidating the claim, bumping,
-/// and releasing `serialized` — runs in a task of its own that this function
-/// merely awaits. Cancelling the handler drops the await, never the task.
-///
-/// `serialized` is moved in for the same reason: the per-host lock must be
-/// held until the mutation is genuinely finished, and a guard dropped by
-/// cancellation would let the next queued edit read a catalog the supervisor
-/// is still in the middle of changing.
-///
-/// The claim is revalidated on the way out because a connection that changed
-/// mid-flight means the mutation landed on an install that is no longer this
-/// host: reporting it as this host's current state — and waking the fleet to
-/// re-read on the strength of it — would describe a catalog nobody is looking
-/// at. No bump goes with that refusal (the connection change published its
-/// own).
-///
-/// `expected` is the caller's own assertion about that connection, and it is
-/// carried here only to decide HOW the refusal reads: a request that named a
-/// connection gets `crate::precondition`'s marked 409, an unguarded one gets
-/// [`still_the_same_connection`]'s. Same condition, same status, different
-/// recovery — and a client that went to the trouble of guarding should not have
-/// to parse prose to learn that its guard is what fired.
-async fn committed<T: Send + 'static>(
-    state: &Arc<AppState>,
-    claim: crate::manager::SessionClaim,
-    expected: Option<u64>,
-    serialized: Option<tokio::sync::OwnedMutexGuard<()>>,
-    mutation: impl std::future::Future<Output = anyhow::Result<T>> + Send + 'static,
-) -> anyhow::Result<T> {
-    let state = Arc::clone(state);
-    tokio::spawn(async move {
-        let _editing = serialized;
-        let outcome = mutation.await?;
-        if let Err(e) = still_the_same_connection(&state, &claim) {
-            let host = claim.host;
-            return Err(match expected {
-                Some(expected) => crate::precondition::connection_moved(
-                    host,
-                    expected,
-                    state.manager.status(host).map(|status| status.incarnation),
-                ),
-                None => e,
-            });
-        }
-        state.manager.events().bump();
-        Ok(outcome)
-    })
-    .await
-    .context("profile mutation task panicked")?
 }
 
 /// `POST /api/hosts/{id}/profiles` — define a new profile on that host.
@@ -528,59 +196,37 @@ async fn committed<T: Send + 'static>(
 /// only side that can check the catalog bound anyway.
 ///
 /// The one mutation that does NOT take the per-host serialization lock, and
-/// the exception is reasoned rather than an oversight: an edit's suppression
-/// decision is about ONE profile id, and a create mints an id nobody holds
-/// yet, so it cannot change the answer an in-flight [`update_profile`] is
-/// computing. Queueing creates behind edits would buy nothing and would make
-/// a slow catalog read block an unrelated create.
+/// the exception is reasoned rather than an oversight: a create mints an id
+/// nobody holds yet, so no queued edit or delete can be aimed at it and
+/// there is no order for the per-host queue to preserve. Queueing creates
+/// behind edits would buy nothing and would make a slow edit block an
+/// unrelated create.
 ///
-/// An optional `expected_incarnation` says which install the caller meant. It
-/// is checked against the claim routing produced, and the claim is revalidated
-/// before this reports success ([`committed`]), so a create that lands on a
-/// replaced install is refused rather than reported — see
-/// [`crate::precondition`] for why an id alone cannot say this, and why a
-/// profile create in particular RESOLVES rather than failing over there.
-///
-/// `expected_definition` is refused outright: there is no prior definition a
-/// create could be replacing.
+/// Answers with the profile as the supervisor committed it — the one carried
+/// by `ProfileCreated`, not the one submitted — so a supervisor that
+/// normalized anything is described rather than contradicted.
 pub(crate) async fn create_profile(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<ProfileSpec>,
 ) -> impl IntoResponse {
-    if spec.expected_definition.is_some() {
-        return http_error(anyhow::Error::new(crate::SupervisorError {
-            kind: ErrorKind::InvalidRequest,
-            message: "expected_definition is an update precondition: a create has no stored \
-                      definition to compare against, so a create carrying one is refused rather \
-                      than served as if the precondition had been checked"
-                .to_string(),
-        }));
-    }
-    let (claim, client) = match host_client(&state, host) {
+    let (_, client) = match host_client(&state, host) {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    if let Err(e) = crate::precondition::incarnation_holds(&claim, spec.expected_incarnation) {
-        return http_error(e);
-    }
-    let expected = spec.expected_incarnation;
-    let created = committed(&state, claim, expected, None, async move {
-        client
-            .create_profile(
-                &spec.name,
-                &spec.invocation,
-                spec.agent_kind,
-                spec.resume_template,
-            )
-            .await
-    })
-    .await;
-    match created {
-        // With the fingerprint of what was committed, so the caller can guard
-        // its first edit of this profile without a re-read (see
-        // [`ProfileReply`]).
-        Ok(profile) => axum::Json(ProfileReply::of(profile)).into_response(),
+    match client
+        .create_profile(
+            &spec.name,
+            &spec.invocation,
+            spec.agent_kind,
+            spec.resume_template,
+        )
+        .await
+    {
+        Ok(profile) => {
+            state.manager.events().bump();
+            axum::Json(profile).into_response()
+        }
         Err(e) => http_error(e),
     }
 }
@@ -606,60 +252,34 @@ pub(crate) async fn create_profile(
 /// through the change — it matches the snapshotted name as well as the id
 /// (see `crate::store::SessionFilter`).
 ///
-/// ## An identical edit is a no-op, decided HERE
+/// An edit applies to whichever install the row reaches when it is routed.
+/// There is no precondition naming the connection the editor was opened on:
+/// on any realistic timescale that install is where the catalog on screen
+/// came from, and an edit landing after a retarget just applies to the
+/// install that is there now.
 ///
-/// A profile editor that submits on blur, a client that re-saves a form it
-/// did not change, a retry — all of them send an edit whose fields are
-/// exactly what is already stored. Forwarded, each one is a successful
-/// mutation, and each one would wake every open client in the fleet to
-/// re-read a catalog that did not move. So this reads the catalog first and,
-/// when the submitted definition is byte-identical to the stored one, skips
-/// the supervisor call and the invalidation entirely and answers with what
-/// is already there. The reply is indistinguishable from a real edit's,
-/// which is the point: an idempotent update is a successful update.
+/// ## Last write wins, and every accepted edit is forwarded
 ///
-/// The check belongs to the HELM rather than the supervisor, and not by
-/// preference. A supervisor-side "did this change anything" answer would
-/// have to travel back over the wire, which means new reply vocabulary in a
-/// protocol version this milestone deliberately does not reopen
-/// (PLAN_M6_75.md item 3: the wire shapes for M6.75 all landed in v10, and
-/// `ProfileUpdated` carries the profile, not a changed bit). Doing it here
-/// costs one extra `ListProfiles` on the edit path — a bounded, unpaginated
-/// read of a hand-curated catalog — and needs nothing from the far side it
-/// does not already offer.
+/// Two clients editing one profile resolve by last-write-wins (SPEC.md,
+/// Concepts / Agent profile): there is no optimistic-concurrency check, no
+/// fingerprint to echo, and no helm-side comparison against what is stored.
+/// An edit that submits exactly what the catalog already holds forwards
+/// like any other — the supervisor commits it and the fleet is woken for it.
+/// A helm-side suppression used to recognize that case, and it went with the
+/// last-write-wins simplification: keeping it truthful required a catalog
+/// pre-read on every edit plus a serialization burden on the queue below,
+/// which outweighed the no-op wakes it saved.
 ///
-/// ## What the suppression actually guarantees
+/// ## One host's mutations are a queue
 ///
-/// Read-compare-forward is three steps, and it is only a decision if nothing
-/// slips between them. Two clients of THIS helm editing one host would
-/// otherwise interleave into outcomes that are wrong rather than merely
-/// racy: A reads X, B commits Y, A submits X and finds it "identical" to the
-/// catalog it read — so A reports success while the durable state is Y, and
-/// last-write-wins has been broken by a suppression rather than by a write.
-/// Two identical concurrent edits could likewise both find the old value and
-/// both forward, waking the fleet twice for one change.
+/// Edits and deletes on one host share a per-host lock
+/// (`AppState::profile_edits`), so they reach the supervisor in the order
+/// this helm accepted them. What that buys under last-write-wins is modest
+/// but real: "the later write wins" is only a meaningful sentence if there
+/// IS an order, and a delete must not overtake an edit whose success a
+/// client has already been shown (see [`delete_profile`]).
 ///
-/// So all three steps run under one per-host lock (`AppState::profile_edits`),
-/// making them a queue: among this helm's own clients, an edit either wins
-/// outright or sees the winner's result and suppresses honestly. A DELETE
-/// takes the same lock for the same reason — see [`delete_profile`], where a
-/// delete landing inside this span would make a suppression report 200 for a
-/// profile that no longer exists.
-///
-/// The guarantee STOPS at this helm. Another helm, or anything else speaking
-/// to the same supervisor, can still commit between this lock's read and its
-/// forward, and this side has no way to notice. Closing that needs the
-/// supervisor to answer "did this change anything" — a changed bit on
-/// `ProfileUpdated` — which is protocol vocabulary this milestone
-/// deliberately does not reopen. That is the eventual fix, and it is what
-/// makes the current guarantee worth stating precisely rather than implying
-/// it is total.
-///
-/// Within the lock the read is still NOT a precondition check and this is
-/// still not a compare-and-swap against the supervisor: it decides only
-/// whether there is anything to forward.
-///
-/// ## Routing is checked twice, and the claim once more on the way out
+/// ## Routing is checked twice
 ///
 /// The host is routed BEFORE the lock is taken, because the lock map is keyed
 /// by a caller-supplied path id and must only ever hold real hosts
@@ -668,85 +288,21 @@ pub(crate) async fn create_profile(
 /// host may be forgotten, retargeted, or dropped in the meantime — the client
 /// resolved before the wait would then be a connection to somewhere the id no
 /// longer names.
-///
-/// And the connection claim is revalidated before this handler reports
-/// anything at all, on BOTH exits. A suppression is a claim about what is
-/// stored on this host right now; forwarded or not, an edit whose connection
-/// moved underneath it describes an install the caller was not addressing.
-///
-/// ## The two optional preconditions
-///
-/// `expected_incarnation` names the install this edit was written for, and is
-/// checked at BOTH routing points — before the lock and again under it —
-/// because the wait for the lock is unbounded by anything this request
-/// controls, and a retarget landing during it is exactly the case the
-/// precondition exists for. `expected_definition` names the definition the
-/// editor was seeded from, and is checked under the lock against the same
-/// catalog read the suppression compares, which is what makes "unchanged since
-/// I loaded it" a decision rather than a hope.
-///
-/// The definition precondition is the helm's answer to a stale editor
-/// silently reverting somebody else's change — an update replaces the whole
-/// definition, so last-write-wins here loses a field the loser never saw. It
-/// is deliberately NOT a compare-and-swap against the supervisor: another helm
-/// can still commit between this lock's read and its forward, and closing that
-/// needs the wire vocabulary this milestone does not reopen (see above). What
-/// this closes is the case a single helm can see, which is the case a person
-/// with two tabs actually produces.
 pub(crate) async fn update_profile(
     State(state): State<Arc<AppState>>,
     AxPath((host, profile_id)): AxPath<(HostId, String)>,
     axum::Json(spec): axum::Json<ProfileSpec>,
 ) -> impl IntoResponse {
-    update_profile_staged(state, host, profile_id, spec, std::future::ready(())).await
-}
-
-/// [`update_profile`], with a seam between its pre-lock validation and the
-/// lock it then waits for.
-///
-/// `staged` is awaited exactly where a request queues: past the first routing
-/// and precondition check, before `enter_profile_edit`. That is the interval
-/// the SECOND check exists for — a retarget or an adoption landing while this
-/// request waits its turn behind another client's edit — and it is otherwise
-/// unreachable from outside, because a test cannot schedule anything into a
-/// lock acquisition. Production passes a ready future.
-///
-/// The seam is at the queue rather than deeper on purpose: a future edit that
-/// dropped the post-lock re-check would still pass every test that only ever
-/// arrives at an uncontended lock.
-async fn update_profile_staged(
-    state: Arc<AppState>,
-    host: HostId,
-    profile_id: String,
-    spec: ProfileSpec,
-    staged: impl std::future::Future<Output = ()>,
-) -> axum::response::Response {
     // Routed before the lock is allocated, and again after it is held: see
-    // this function's docs for why neither check covers the other. The
-    // precondition rides along with each, for the same reason.
-    match host_client(&state, host) {
-        Ok((claim, _)) => {
-            if let Err(e) =
-                crate::precondition::incarnation_holds(&claim, spec.expected_incarnation)
-            {
-                return http_error(e);
-            }
-        }
-        Err(e) => return http_error(e),
+    // this function's docs for why neither check covers the other.
+    if let Err(e) = host_client(&state, host) {
+        return http_error(e);
     }
-    staged.await;
-    let editing = state.enter_profile_edit(host).await;
-    let (claim, client) = match host_client(&state, host) {
+    let _editing = state.enter_profile_edit(host).await;
+    let (_, client) = match host_client(&state, host) {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    if let Err(e) = crate::precondition::incarnation_holds(&claim, spec.expected_incarnation) {
-        return http_error(e);
-    }
-    // Taken before `spec` is dismantled into the profile below, because both
-    // exits past this point still need to know whether the caller guarded.
-    let spec_expected = spec.expected_incarnation;
-    let expected_definition = spec.expected_definition;
     let profile = Profile {
         id: profile_id,
         name: spec.name,
@@ -754,75 +310,11 @@ async fn update_profile_staged(
         agent_kind: spec.agent_kind,
         resume_template: spec.resume_template,
     };
-    // An unreadable catalog is not a reason to refuse the edit ITSELF: the
-    // read is an optimization, and the honest fallback is to forward, which is
-    // what this endpoint did before the check existed.
-    let catalog = client.list_profiles().await;
-    let stored = match &catalog {
-        Ok(catalog) => catalog.iter().find(|held| held.id == profile.id).cloned(),
-        Err(error) => {
-            tracing::debug!(
-                host,
-                error = %error,
-                "could not read the catalog to check for an identical edit; forwarding it"
-            );
-            None
+    match client.update_profile(profile).await {
+        Ok(profile) => {
+            state.manager.events().bump();
+            axum::Json(profile).into_response()
         }
-    };
-    // The precondition is judged on the SAME read the suppression below
-    // compares against, under the same lock — so "unchanged since the editor
-    // loaded it" and "identical to what is stored" are two questions about one
-    // catalog rather than two.
-    //
-    // A catalog that could not be READ refuses instead of falling back. The
-    // fallback is honest for a suppression and dishonest for a precondition:
-    // forwarding would report a guarantee as checked when nothing was
-    // compared, which is the one outcome a caller asking for a precondition
-    // cannot tolerate.
-    if let Some(expected) = expected_definition.as_deref() {
-        let checked = match &catalog {
-            Err(error) => Err(crate::precondition::definition_unverifiable(
-                host,
-                &profile.id,
-                error,
-            )),
-            Ok(_) => crate::precondition::definition_holds(
-                host,
-                &profile.id,
-                stored.as_ref(),
-                Some(expected),
-            ),
-        };
-        if let Err(e) = checked {
-            return http_error(e);
-        }
-    }
-    if stored.as_ref() == Some(&profile) {
-        // Suppressing means answering "this is already what is stored", which
-        // is only true of the install the catalog was read from.
-        //
-        // The reply carries the fingerprint like any other successful update:
-        // an idempotent update is a successful update, and a client that could
-        // not tell the two apart by their bodies must not be able to tell them
-        // apart by what it can guard with afterwards either.
-        return match still_the_same_connection(&state, &claim) {
-            Ok(()) => axum::Json(ProfileReply::of(profile)).into_response(),
-            Err(e) => http_error(match spec_expected {
-                Some(expected) => crate::precondition::connection_moved(
-                    host,
-                    expected,
-                    state.manager.status(host).map(|status| status.incarnation),
-                ),
-                None => e,
-            }),
-        };
-    }
-    let updated = committed(&state, claim, spec_expected, Some(editing), async move {
-        client.update_profile(profile).await
-    })
-    .await;
-    match updated {
-        Ok(profile) => axum::Json(ProfileReply::of(profile)).into_response(),
         Err(e) => http_error(e),
     }
 }
@@ -843,61 +335,33 @@ async fn update_profile_staged(
 ///
 /// ## Why a delete queues behind edits
 ///
-/// It takes the same per-host lock [`update_profile`] does, and the reason is
-/// not symmetry. An edit's suppression is a read-compare-forward span, and a
-/// delete landing inside one turns it into a lie: the edit reads a catalog
-/// still holding P, the delete removes P, and the edit then finds its
-/// submission "identical to what is stored" and answers 200 for a profile that
-/// does not exist anywhere. The client is told its edit is durable when
-/// nothing of the sort is true, and no invalidation says otherwise because the
-/// suppression published none.
+/// It takes the same per-host lock [`update_profile`] does: one host's
+/// catalog mutations reach the supervisor in the order this helm accepted
+/// them, so a delete cannot overtake an edit whose success a client has
+/// already been shown. (The lock's original, stronger reason — keeping the
+/// identical-edit suppression's read-compare-forward span truthful — went
+/// with the suppression itself.)
 ///
-/// The routing and claim discipline is [`update_profile`]'s, for
-/// [`update_profile`]'s reasons: routed before the lock so a made-up path id
-/// cannot mint one, routed again under it, and the claim revalidated before
-/// this reports success.
-///
-/// ## The precondition rides in the QUERY STRING here
-///
-/// `?expected_incarnation=` rather than a body field, because a delete has no
-/// body at all in this API and inventing one for a precondition would make
-/// every existing caller send `{}` to keep working. Same meaning, same refusal,
-/// same marker as the body field on the other two verbs — see
-/// [`crate::precondition`]. Deleting the wrong install's profile is not
-/// recoverable by re-reading, which is why the option exists on this verb too.
+/// The routing discipline is [`update_profile`]'s, for [`update_profile`]'s
+/// reasons: routed before the lock so a made-up path id cannot mint one, and
+/// routed again under it.
 pub(crate) async fn delete_profile(
     State(state): State<Arc<AppState>>,
     AxPath((host, profile_id)): AxPath<(HostId, String)>,
-    axum::extract::Query(query): axum::extract::Query<ConnectionQuery>,
 ) -> impl IntoResponse {
-    match host_client(&state, host) {
-        Ok((claim, _)) => {
-            if let Err(e) =
-                crate::precondition::incarnation_holds(&claim, query.expected_incarnation)
-            {
-                return http_error(e);
-            }
-        }
-        Err(e) => return http_error(e),
+    if let Err(e) = host_client(&state, host) {
+        return http_error(e);
     }
-    let editing = state.enter_profile_edit(host).await;
-    let (claim, client) = match host_client(&state, host) {
+    let _editing = state.enter_profile_edit(host).await;
+    let (_, client) = match host_client(&state, host) {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    if let Err(e) = crate::precondition::incarnation_holds(&claim, query.expected_incarnation) {
-        return http_error(e);
-    }
-    let deleted = committed(
-        &state,
-        claim,
-        query.expected_incarnation,
-        Some(editing),
-        async move { client.delete_profile(&profile_id).await },
-    )
-    .await;
-    match deleted {
-        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+    match client.delete_profile(&profile_id).await {
+        Ok(()) => {
+            state.manager.events().bump();
+            axum::Json(serde_json::json!({})).into_response()
+        }
         Err(e) => http_error(e),
     }
 }
@@ -993,8 +457,8 @@ mod tests {
             })
         }
 
-        /// How many `UpdateProfile` frames arrived — the number the
-        /// suppression is about.
+        /// How many `UpdateProfile` frames arrived — the count the
+        /// serialization tests assert on.
         fn forwards(&self) -> usize {
             self.seen
                 .lock()
@@ -1370,22 +834,12 @@ mod tests {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
             let (mut reader, mut writer) = peer_up(peer_side).await;
-            // The catalog read every edit makes first, to recognize an
-            // identical submission (see `update_profile`). What is stored
-            // here differs from what the test submits, so the edit is
-            // forwarded — which is the case this test is about.
-            let ControlMsg::ListProfiles { req_id } = asked(&mut reader).await else {
-                panic!("an edit reads the catalog it is compared against first");
-            };
-            writer
-                .write_frame(&Frame::control(&ControlMsg::ProfileList {
-                    req_id,
-                    profiles: vec![profile("p-path", "Before")],
-                }))
-                .await
-                .unwrap();
+            // The FIRST thing the peer sees is the forwarded edit itself:
+            // the helm makes no catalog pre-read on this path (there is no
+            // identical-edit suppression to inform), so anything arriving
+            // ahead of the UpdateProfile is a regression.
             let ControlMsg::UpdateProfile { req_id, profile } = asked(&mut reader).await else {
-                panic!("the helm must proxy an edit as UpdateProfile");
+                panic!("the helm must proxy an edit as UpdateProfile, with no prior read");
             };
             assert_eq!(
                 profile.id, "p-path",
@@ -1632,128 +1086,6 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// A drain repairs a remembered default's identity binding as soon as
-    /// the newly identified host reports profile provenance.
-    ///
-    /// Spec: after a host learns an identity, the row recorded against no
-    /// identity becomes unreadable. The next completed drain repairs that
-    /// binding from its profile-backed session and publishes the change.
-    ///
-    /// The path is ordinary: a supervisor with no identity, upgraded or
-    /// reconfigured into one that has one. What makes it worth a test is that
-    /// the two obvious observables both LOOK right without the fix — the row
-    /// is repaired by the upsert either way, and the default reads back — so
-    /// the only thing that fails is the invalidation, and its absence is
-    /// invisible until some other client's create dialog is still offering
-    /// nothing an hour later.
-    ///
-    /// The bump is ISOLATED the same way its sibling test above isolates one:
-    /// the session this create returns is byte-identical to one the host
-    /// already listed, so recording it publishes nothing and the remembered
-    /// default is the only thing left that can move the revision.
-    #[tokio::test]
-    async fn a_drain_repairs_a_remembered_defaults_identity_binding() {
-        let existing = farhelm_proto::SessionInfo {
-            cwd: "/work".to_string(),
-            source_profile: Some(farhelm_proto::SourceProfile {
-                id: "p-favorite".to_string(),
-                name: "Claude Code".to_string(),
-                existence: farhelm_proto::ProfileExistence::Present,
-            }),
-            ..rest_harness::session("sess-new", 1_700_000_500)
-        };
-        // The host reports NO identity to begin with, so the default recorded
-        // now is bound to nothing.
-        let harness = rest_harness::FleetBuilder::new()
-            .await
-            .local(rest_harness::HostScript {
-                identity: None,
-                sessions: vec![existing.clone()],
-                ..rest_harness::HostScript::default()
-            })
-            .await
-            .start()
-            .await;
-        let local = rest_harness::local_id(&harness.store).await;
-        harness.await_refreshed(local).await;
-        let status = harness
-            .manager
-            .status(local)
-            .expect("the local host has an actor");
-        assert!(
-            harness
-                .manager
-                .remember_profile_default(
-                    &crate::manager::SessionClaim {
-                        host: local,
-                        incarnation: status.incarnation,
-                        identity: None,
-                    },
-                    "p-favorite",
-                )
-                .await
-                .expect("an identity-less host may record a default")
-        );
-
-        // The supervisor comes back reporting an identity. The stored row is
-        // bound to none, so it stops being this install's preference.
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn({
-            let existing = existing.clone();
-            async move {
-                let (mut reader, mut writer) = peer_up(peer_side).await;
-                let ControlMsg::CreateSession { req_id, .. } = asked(&mut reader).await else {
-                    panic!("expected CreateSession");
-                };
-                writer
-                    .write_frame(&Frame::control(&ControlMsg::SessionCreated {
-                        req_id,
-                        session: existing,
-                    }))
-                    .await
-                    .unwrap();
-            }
-        });
-        let harness = harness
-            .restart_with(|fleet| {
-                fleet.edit(local, |script| {
-                    script.identity = Some("identity-learned".to_string());
-                    script.peer = Some(client_side);
-                });
-            })
-            .await;
-        harness
-            .await_refreshed_as(local, "identity-learned", 1)
-            .await;
-        assert_eq!(
-            harness.store.remembered_profile(local).await.unwrap(),
-            Some("p-favorite".to_string()),
-            "the identified host's source provenance repairs the binding during its drain"
-        );
-
-        let before = harness.manager.events().revision();
-        let (status, _) = request(
-            &harness,
-            "POST",
-            "/api/sessions",
-            Some(serde_json::json!({"cwd": "/work", "profile_id": "p-favorite"})),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(
-            harness.store.remembered_profile(local).await.unwrap(),
-            Some("p-favorite".to_string()),
-            "the preceding drain already rebound the default to the host's current identity"
-        );
-        assert_eq!(
-            harness.manager.events().revision(),
-            before,
-            "the later create returns the same session provenance, so the repaired default does \
-             not publish a duplicate change"
-        );
-        peer.await.unwrap();
-    }
-
     /// The two creation modes are exclusive at the REST edge too, and a
     /// body that gets it wrong reaches no supervisor at all.
     ///
@@ -1823,50 +1155,37 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// An edit that submits exactly what is stored reaches NO supervisor and
-    /// wakes NO client.
+    /// An edit that submits exactly what is stored is FORWARDED and
+    /// invalidates, like any other accepted edit.
     ///
-    /// A profile editor that saves on blur, a form re-submitted unchanged, a
-    /// retry — each is a successful mutation that changed nothing, and each
-    /// would otherwise wake every open client in the fleet to re-read a
-    /// catalog that did not move.
-    ///
-    /// "No round trip" is proven by ORDER rather than by a timeout: the peer
-    /// answers the catalog read, and the very next request it is asked for
-    /// is the DELETE this test sends afterwards. An `UpdateProfile` slipping
-    /// through would arrive in that slot and fail the assertion by name.
+    /// This pins the removal of the helm-side identical-edit suppression:
+    /// under last-write-wins there is no helm-side comparison deciding
+    /// whether an edit "changed anything", so a no-op submission commits on
+    /// the supervisor and wakes the fleet, and the redundant wake is the
+    /// accepted cost. A reintroduced suppression — with its catalog pre-read
+    /// and its truthfulness burden on the edit queue — would fail here by
+    /// forwarding nothing.
     #[tokio::test]
-    async fn an_identical_profile_edit_is_a_no_op_with_no_round_trip() {
+    async fn an_identical_profile_edit_is_forwarded_like_any_other() {
         let stored = profile("p-1", "Claude Code");
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn({
             let stored = stored.clone();
             async move {
                 let (mut reader, mut writer) = peer_up(peer_side).await;
-                // The catalog read the helm makes to decide whether there is
-                // anything to forward.
-                let ControlMsg::ListProfiles { req_id } = asked(&mut reader).await else {
-                    panic!("an edit must first read the catalog it is compared against");
+                // The FIRST request is the forwarded edit itself: no catalog
+                // pre-read precedes it any more.
+                let ControlMsg::UpdateProfile { req_id, profile } = asked(&mut reader).await else {
+                    panic!("an edit forwards as UpdateProfile, with no prior catalog read");
                 };
+                assert_eq!(profile, stored, "the submission travels verbatim");
                 writer
-                    .write_frame(&Frame::control(&ControlMsg::ProfileList {
+                    .write_frame(&Frame::control(&ControlMsg::ProfileUpdated {
                         req_id,
-                        profiles: vec![stored],
+                        profile,
                     }))
                     .await
                     .unwrap();
-                // The NEXT request must be the delete below. Anything else —
-                // an UpdateProfile the helm should have skipped — fails here.
-                match asked(&mut reader).await {
-                    ControlMsg::DeleteProfile { req_id, profile_id } => {
-                        assert_eq!(profile_id, "p-1");
-                        writer
-                            .write_frame(&Frame::control(&ControlMsg::ProfileDeleted { req_id }))
-                            .await
-                            .unwrap();
-                    }
-                    other => panic!("an identical edit must not be forwarded; got {other:?}"),
-                }
             }
         });
 
@@ -1886,117 +1205,13 @@ mod tests {
             })),
         )
         .await;
-        assert_eq!(
-            status,
-            axum::http::StatusCode::OK,
-            "an idempotent update is a successful update"
-        );
-        assert_eq!(
-            value["id"], "p-1",
-            "and answers with the profile, indistinguishably from a real edit"
-        );
-        assert_eq!(
-            harness.manager.events().revision(),
-            before,
-            "an edit that changed nothing must wake nobody"
-        );
-
-        // The ordering probe: this is the next thing the peer is asked.
-        let (status, _) = request(
-            &harness,
-            "DELETE",
-            &format!("/api/hosts/{local}/profiles/p-1"),
-            None,
-        )
-        .await;
         assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(value["id"], "p-1");
+        assert!(
+            harness.manager.events().revision() > before,
+            "an accepted edit invalidates even when it changed nothing"
+        );
         peer.await.unwrap();
-    }
-
-    /// Two clients editing one host's catalog at the same time are a QUEUE,
-    /// not a race — and two IDENTICAL edits cost one forward and one
-    /// invalidation between them.
-    ///
-    /// Spec: with a second edit issued while the first is still inside its
-    /// read-compare-forward span, exactly one `UpdateProfile` reaches the
-    /// supervisor and the fleet revision moves by exactly one.
-    ///
-    /// Read-compare-forward is three steps and only means anything if nothing
-    /// slips between them. Unserialized, both clients read the OLD catalog,
-    /// both find their submission different from it, and both forward — so
-    /// one change wakes every client in the fleet twice. The worse
-    /// interleaving is the mirror of it, and it is why this is a correctness
-    /// test rather than a chattiness one: A reads X, B commits Y, A submits X
-    /// and finds it "identical" to the catalog it read, so A answers success
-    /// while the durable state is Y. Last-write-wins is then broken by a
-    /// suppression rather than by a write.
-    ///
-    /// The overlap is FORCED rather than hoped for, at both ends: the peer
-    /// holds the first request's catalog read open, and the test does not
-    /// release it until the second request has demonstrably QUEUED on the
-    /// host's lock (see [`await_queued`]). An unserialized helm never queues,
-    /// so it fails at the barrier rather than passing on a lucky schedule.
-    #[tokio::test]
-    async fn two_identical_concurrent_edits_forward_once_and_invalidate_once() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let shared = CatalogPeer::new(vec![profile("p-1", "Before")]);
-        let peer = tokio::spawn(catalog_peer(peer_side, std::sync::Arc::clone(&shared)));
-
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let before = harness.manager.events().revision();
-        let uri = format!("/api/hosts/{local}/profiles/p-1");
-
-        let first = tokio::spawn({
-            let router = harness.router();
-            let uri = uri.clone();
-            async move { post(router, &uri, edit_body("Renamed")).await }
-        });
-        // The first request is now inside the helm's serialized span, blocked
-        // on the peer's answer.
-        shared.arrived.notified().await;
-
-        let second = tokio::spawn({
-            let router = harness.router();
-            let uri = uri.clone();
-            async move { post(router, &uri, edit_body("Renamed")).await }
-        });
-        // The second request has reached the lock and is waiting on the first
-        // — which is the interleaving this test is about, established rather
-        // than assumed.
-        await_queued(&harness.state, 1).await;
-        assert_eq!(
-            shared.requests(),
-            Vec::<&str>::new(),
-            "and it is waiting on the LOCK: nothing of the second edit has reached the supervisor"
-        );
-
-        shared.gate.notify_one();
-        let (first_status, _) = first.await.unwrap();
-        let (second_status, second_body) = second.await.unwrap();
-        assert_eq!(first_status, axum::http::StatusCode::OK);
-        assert_eq!(
-            second_status,
-            axum::http::StatusCode::OK,
-            "an idempotent update is a successful update, whichever client got there second"
-        );
-        assert_eq!(
-            second_body["name"], "Renamed",
-            "and it answers with the definition that is actually stored"
-        );
-
-        assert_eq!(
-            shared.forwards(),
-            1,
-            "the second edit must see the first one's result and suppress itself"
-        );
-        assert_eq!(
-            harness.manager.events().revision(),
-            before + 1,
-            "one change is one invalidation, not one per client that submitted it"
-        );
-        drop(harness);
-        let _ = peer.await;
     }
 
     /// Two DIFFERING concurrent edits both land, and the one that QUEUED
@@ -2066,21 +1281,20 @@ mod tests {
         let _ = peer.await;
     }
 
-    /// A DELETE cannot land inside an identical edit's suppression window.
+    /// A DELETE queues behind an in-flight edit on the same host.
     ///
-    /// Spec: a delete issued while an edit is between its catalog read and its
-    /// decision queues on the same per-host lock, reaches the supervisor only
-    /// after that edit has answered, and leaves the catalog empty.
+    /// Spec: a delete issued while an edit is still waiting on the
+    /// supervisor queues on the per-host lock and reaches the supervisor
+    /// only after that edit has been answered.
     ///
-    /// Unserialized, the delete forwards immediately: the edit then finds its
-    /// submission "identical to what is stored" — true of the catalog it read,
-    /// false of the world — and answers 200 for a profile that no longer
-    /// exists anywhere, publishing no invalidation because it suppressed. The
-    /// client is told its edit is durable, and nothing anywhere says otherwise.
-    /// A delete is the one mutation that can do this, because it is the only
-    /// one that can make a profile the edit already compared against vanish.
+    /// The ORDER is the point. Under last-write-wins the queue is the lock's
+    /// whole remaining job: a client that was just shown its edit's success
+    /// must not have that edit overtaken by a delete this helm accepted
+    /// after it — the edit would then appear to have resurrected a profile
+    /// the user watched themselves remove. This is the test that notices if
+    /// the lock quietly stops serializing.
     #[tokio::test]
-    async fn a_delete_cannot_land_inside_an_identical_edits_suppression_window() {
+    async fn a_delete_queues_behind_an_in_flight_edit() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let shared = CatalogPeer::new(vec![profile("p-1", "Claude Code")]);
         let peer = tokio::spawn(catalog_peer(peer_side, std::sync::Arc::clone(&shared)));
@@ -2089,11 +1303,11 @@ mod tests {
         let local = rest_harness::local_id(&harness.store).await;
         let uri = format!("/api/hosts/{local}/profiles/p-1");
 
-        // An edit submitting exactly what is stored: the suppression path.
+        // An edit the peer holds open, so the delete demonstrably queues.
         let edit = tokio::spawn({
             let router = harness.router();
             let uri = uri.clone();
-            async move { post(router, &uri, edit_body("Claude Code")).await }
+            async move { post(router, &uri, edit_body("Renamed")).await }
         });
         shared.arrived.notified().await;
 
@@ -2116,103 +1330,17 @@ mod tests {
         let (edit_status, edit_body) = edit.await.unwrap();
         let delete_status = delete.await.unwrap();
         assert_eq!(edit_status, axum::http::StatusCode::OK);
-        assert_eq!(edit_body["name"], "Claude Code");
+        assert_eq!(edit_body["name"], "Renamed");
         assert_eq!(delete_status, axum::http::StatusCode::OK);
 
         assert_eq!(
             shared.requests(),
-            vec!["list", "delete"],
-            "the delete reached the supervisor only after the edit ahead of it had decided — an \
-             edit that suppressed AFTER the delete would have reported success for a profile that \
-             was already gone"
+            vec!["update", "delete"],
+            "the delete reached the supervisor only after the edit ahead of it was answered"
         );
         assert!(
             shared.catalog().is_empty(),
             "and the delete is what the catalog ends up reflecting"
-        );
-        drop(harness);
-        let _ = peer.await;
-    }
-
-    /// A mutation whose HTTP handler is cancelled still finishes: the
-    /// supervisor's reply is consumed and the fleet is invalidated.
-    ///
-    /// Spec: with the create frame already at the peer, dropping the request
-    /// task and only then letting the peer answer still moves the revision.
-    ///
-    /// This is the ordinary case, not an exotic one. An axum handler's future
-    /// is dropped the instant its client disconnects, and a browser tab closed
-    /// a heartbeat after Save does exactly that — with the mutation frame
-    /// already gone. The supervisor commits either way; if the bump lived in
-    /// the handler it would die with it, and every OTHER client would go on
-    /// showing a catalog that no longer exists, because catalogs are read on
-    /// demand and nothing re-reads them on a timer.
-    #[tokio::test]
-    async fn a_cancelled_profile_mutation_still_invalidates() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let gate = std::sync::Arc::new(tokio::sync::Notify::new());
-        let arrived = std::sync::Arc::new(tokio::sync::Notify::new());
-        let peer = tokio::spawn({
-            let gate = std::sync::Arc::clone(&gate);
-            let arrived = std::sync::Arc::clone(&arrived);
-            async move {
-                let (mut reader, mut writer) = peer_up(peer_side).await;
-                let ControlMsg::CreateProfile { req_id, name, .. } = asked(&mut reader).await
-                else {
-                    panic!("the helm must proxy a create as CreateProfile");
-                };
-                // The frame is HERE: whatever happens to the requester now,
-                // this supervisor is about to commit.
-                arrived.notify_one();
-                gate.notified().await;
-                writer
-                    .write_frame(&Frame::control(&ControlMsg::ProfileCreated {
-                        req_id,
-                        profile: profile("p-minted", &name),
-                    }))
-                    .await
-                    .unwrap();
-            }
-        });
-
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let before = harness.manager.events().revision();
-
-        let requester = tokio::spawn({
-            let router = harness.router();
-            let uri = format!("/api/hosts/{local}/profiles");
-            async move {
-                post(
-                    router,
-                    &uri,
-                    serde_json::json!({
-                        "name": "Nightly",
-                        "invocation": "claude",
-                        "agent_kind": "generic",
-                    }),
-                )
-                .await
-            }
-        });
-        arrived.notified().await;
-        // The client goes away with the mutation already on the wire.
-        requester.abort();
-        assert!(
-            requester.await.unwrap_err().is_cancelled(),
-            "the handler must actually have been dropped, or this proves nothing"
-        );
-
-        gate.notify_one();
-        let invalidated = tokio::time::timeout(Duration::from_secs(10), async {
-            while harness.manager.events().revision() == before {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await;
-        assert!(
-            invalidated.is_ok(),
-            "the supervisor committed this create; the clients that are still here must be told"
         );
         drop(harness);
         let _ = peer.await;
@@ -2285,802 +1413,6 @@ mod tests {
         .await;
         assert_eq!(status, axum::http::StatusCode::OK);
         assert_eq!(locks(), 1);
-        drop(harness);
-        let _ = peer.await;
-    }
-
-    /// A remembered-default write made against a connection that has since
-    /// been replaced is REFUSED, and nothing is stored.
-    ///
-    /// Profile ids are per-supervisor and every fresh supervisor seeds the
-    /// same STARTER profiles, so an id recorded across a retarget can
-    /// genuinely resolve on the new install — to a profile the user never
-    /// picked, offered back to them as their own last choice. The claim is
-    /// what makes that unconstructible; this stages the stale claim
-    /// directly, because the window it closes is otherwise only reachable by
-    /// timing.
-    #[tokio::test]
-    async fn a_remembered_default_from_a_superseded_connection_is_refused() {
-        let harness = rest_harness::helm_listing(Vec::new()).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let status = harness
-            .manager
-            .status(local)
-            .expect("the local host has an actor");
-        let current = crate::manager::SessionClaim {
-            host: local,
-            incarnation: status.incarnation,
-            identity: Some("local-identity".to_string()),
-        };
-        let superseded = crate::manager::SessionClaim {
-            incarnation: status.incarnation - 1,
-            ..current.clone()
-        };
-
-        harness
-            .manager
-            .remember_profile_default(&superseded, "starter-claude")
-            .await
-            .expect_err("a claim from a previous connection must not write");
-        assert_eq!(
-            harness.store.remembered_profile(local).await.unwrap(),
-            None,
-            "and nothing was stored"
-        );
-
-        // The same call on the CURRENT connection is the one that works, so
-        // this is a guard rather than a broken path.
-        assert!(
-            harness
-                .manager
-                .remember_profile_default(&current, "starter-claude")
-                .await
-                .expect("the live connection may record a default")
-        );
-        assert_eq!(
-            harness.store.remembered_profile(local).await.unwrap(),
-            Some("starter-claude".to_string())
-        );
-    }
-
-    /// The HANDLER refuses a profiles read whose connection changed under it,
-    /// with the status a client acts on.
-    ///
-    /// Spec: `GET /api/hosts/{id}/profiles` answers 409 when the host
-    /// reconnects between its two reads and the reply that was being
-    /// assembled, rather than serving the catalog and default it holds.
-    ///
-    /// The two halves cannot be atomic (one comes over the wire, the other
-    /// from helm.db) but they must at least describe one install, and this is
-    /// the case where "stale" is not the honest word: starter profile ids
-    /// collide across installs by construction, so a default recorded on one
-    /// install RESOLVES against another's catalog and would be offered as the
-    /// user's own last choice.
-    ///
-    /// Driven through the real handler, with the reconnection staged at
-    /// [`list_profiles_staged`]'s seam. The shape this replaced asserted on
-    /// [`still_the_same_connection`] alone, which is a test of the guard and
-    /// not of the endpoint: deleting the handler's call to it left that test
-    /// passing and the endpoint happily serving two installs' halves.
-    #[tokio::test]
-    async fn a_profiles_read_whose_connection_changed_underneath_is_refused() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        // Answers catalog reads for as long as this connection lasts, so the
-        // test can take one that SUCCEEDS before staging the one that must
-        // not. It ends when the staged reconnection tears the socket down.
-        let peer = tokio::spawn(async move {
-            let (mut reader, mut writer) = peer_up(peer_side).await;
-            while let Ok(Some(frame)) = reader.read_frame().await {
-                let Ok(ControlMsg::ListProfiles { req_id }) = parse_control(&frame) else {
-                    panic!("this peer serves catalog reads and nothing else");
-                };
-                writer
-                    .write_frame(&Frame::control(&ControlMsg::ProfileList {
-                        req_id,
-                        profiles: vec![profile("starter-claude", "Claude Code")],
-                    }))
-                    .await
-                    .unwrap();
-            }
-        });
-
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        // A default is on record, so the refusal is not standing in for an
-        // empty answer: this is exactly the pairing that must not be served.
-        let status = harness
-            .manager
-            .status(local)
-            .expect("the local host has an actor");
-        harness
-            .manager
-            .remember_profile_default(
-                &crate::manager::SessionClaim {
-                    host: local,
-                    incarnation: status.incarnation,
-                    identity: Some("local-identity".to_string()),
-                },
-                "starter-claude",
-            )
-            .await
-            .expect("the live connection may record a default");
-
-        // The control, taken first and through the ordinary route: nothing
-        // about this fixture makes the read fail on its own, so the refusal
-        // below is the revalidation rather than the setup.
-        let (status, value) = request(
-            &harness,
-            "GET",
-            &format!("/api/hosts/{local}/profiles"),
-            None,
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(value["default_profile"], "starter-claude");
-
-        let response = super::list_profiles_staged(
-            std::sync::Arc::clone(&harness.state),
-            local,
-            // Unguarded: this is the pre-existing claim revalidation, which
-            // must refuse on its own without a caller asserting anything.
-            None,
-            {
-                let harness = &harness;
-                async move {
-                    // A real reconnection, in the window between the reads and
-                    // the reply: the connection drops and comes back, so the
-                    // catalog in hand belongs to a connection that is over.
-                    let was = harness
-                        .manager
-                        .status(local)
-                        .expect("the local host has an actor")
-                        .incarnation;
-                    harness.fleet.kill_connection(local);
-                    await_reconnected(harness, local, was).await;
-                }
-            },
-        )
-        .await;
-        assert_eq!(
-            response.status(),
-            axum::http::StatusCode::CONFLICT,
-            "a catalog and a default that may describe different installs are not reported at all"
-        );
-        drop(harness);
-        let _ = peer.await;
-    }
-
-    /// The connection guard itself refuses every claim that no longer
-    /// describes this host — including the two an incarnation check alone
-    /// would wave through.
-    ///
-    /// Spec: [`still_the_same_connection`] accepts only a claim matching both
-    /// the current incarnation and the current identity; a superseded
-    /// incarnation, a different identity, and an identity-less claim against
-    /// an identified host are each a [`ErrorKind::Conflict`].
-    ///
-    /// Asserted directly on the guard because these are its dimensions rather
-    /// than the endpoint's: an identity changing WITHOUT the client changing
-    /// is not reachable through the harness at all, and it is the case that
-    /// matters most — a claim reused across an adoption looks perfectly
-    /// current if only the incarnation is compared.
-    #[tokio::test]
-    async fn the_connection_guard_refuses_a_claim_that_no_longer_describes_this_host() {
-        let harness = rest_harness::helm_listing(Vec::new()).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let status = harness
-            .manager
-            .status(local)
-            .expect("the local host has an actor");
-        let current = crate::manager::SessionClaim {
-            host: local,
-            incarnation: status.incarnation,
-            identity: Some("local-identity".to_string()),
-        };
-
-        super::still_the_same_connection(&harness.state, &current)
-            .expect("the live connection is the one the reads were taken on");
-
-        for stale in [
-            // A reconnection: the client changed, so the token did too.
-            crate::manager::SessionClaim {
-                incarnation: current.incarnation - 1,
-                ..current.clone()
-            },
-            // The same connection token against a different install — the
-            // shape a reused or hand-built claim would have.
-            crate::manager::SessionClaim {
-                identity: Some("some-other-install".to_string()),
-                ..current.clone()
-            },
-            // And an identity-less claim is not "do not care" either.
-            crate::manager::SessionClaim {
-                identity: None,
-                ..current.clone()
-            },
-        ] {
-            let error = super::still_the_same_connection(&harness.state, &stale)
-                .expect_err("a claim that no longer describes this host must be refused");
-            let refusal = error
-                .downcast_ref::<crate::SupervisorError>()
-                .expect("the refusal is typed, so the REST edge can map it");
-            assert_eq!(
-                refusal.kind,
-                farhelm_proto::ErrorKind::Conflict,
-                "a moved connection is a conflict the caller retries, not a 500"
-            );
-        }
-    }
-
-    /// An edit body as JSON, optionally carrying the two preconditions.
-    ///
-    /// Built as JSON and deserialized rather than constructed as a struct, in
-    /// the tests that exercise the preconditions: the FIELD NAMES are the
-    /// contract a browser is written against, and a struct literal would keep
-    /// passing after a rename that broke every client.
-    fn guarded_body(
-        name: &str,
-        expected_incarnation: Option<u64>,
-        expected_definition: Option<&str>,
-    ) -> serde_json::Value {
-        let mut body = edit_body(name);
-        if let Some(incarnation) = expected_incarnation {
-            body["expected_incarnation"] = serde_json::json!(incarnation);
-        }
-        if let Some(definition) = expected_definition {
-            body["expected_definition"] = serde_json::json!(definition);
-        }
-        body
-    }
-
-    /// The body text of a response, whatever shape it came back as.
-    fn text(value: &serde_json::Value) -> String {
-        value
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| value.to_string())
-    }
-
-    /// Drop `host`'s connection and return once it is CONNECTED AGAIN on a
-    /// different one, answering with the new connection token.
-    ///
-    /// Waiting on the incarnation rather than on the host being seen DOWN, and
-    /// the difference is a real flake rather than a style preference: the
-    /// actor's status is a `watch` channel, which coalesces, so "it went down"
-    /// is an EDGE a fast reconnect can hide entirely — a waiter that asked for
-    /// a non-connected state can find `Connected` both times it looks and wait
-    /// forever for a transition that already happened. The incarnation is a
-    /// LEVEL: once it differs it stays differing, so this cannot miss it.
-    ///
-    /// Both halves are needed by the callers. The token must have MOVED (or
-    /// there is no stale expectation to refuse) and the host must be CONNECTED
-    /// (or the refusal under test would be the ordinary host-is-down one,
-    /// which carries no marker).
-    async fn await_reconnected(
-        harness: &rest_harness::Harness,
-        host: crate::store::HostId,
-        previous: u64,
-    ) -> u64 {
-        let reconnected = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                if let Some(status) = harness.manager.status(host)
-                    && status.incarnation != previous
-                    && status.state.is_connected()
-                {
-                    return status.incarnation;
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await;
-        reconnected.expect("the host must come back on a new connection")
-    }
-
-    /// One handler response's status and body text — for the tests that call a
-    /// staged handler directly, where there is no [`request`] to unpack it.
-    async fn read_response(response: axum::response::Response) -> (axum::http::StatusCode, String) {
-        let status = response.status();
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("a handler response body");
-        (status, String::from_utf8_lossy(&bytes).into_owned())
-    }
-
-    /// An edit prepared against a connection that has been REPLACED while the
-    /// request waited its turn is refused, and reaches no supervisor.
-    ///
-    /// Spec: `expected_incarnation` is checked again under the per-host lock,
-    /// so a retarget, adoption, or reconnection landing between the first
-    /// check and the lock produces a 409 carrying
-    /// [`crate::precondition::INCARNATION_MARKER`].
-    ///
-    /// The second check is the one that is easy to talk yourself out of — the
-    /// request already validated on the way in — and it is the one that
-    /// matters: an edit can sit in that queue for as long as the edit ahead of
-    /// it takes, which is a supervisor round trip, and a host is exactly as
-    /// replaceable during it. Without it, the id resolves on the successor
-    /// install and colliding starter profile ids make the edit SUCCEED there.
-    ///
-    /// Staged at [`update_profile_staged`]'s seam, because a lock acquisition
-    /// is not something a test can schedule into. The whole call is wrapped in
-    /// a timeout: a handler that dropped the second check would carry on to
-    /// read a catalog from a reconnected host that answers no profile
-    /// requests, and the honest report for that is a failed assertion rather
-    /// than a hung suite.
-    #[tokio::test]
-    async fn an_edit_prepared_against_a_replaced_connection_is_refused_at_the_lock() {
-        let harness = rest_harness::helm_listing(Vec::new()).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let prepared = harness
-            .manager
-            .status(local)
-            .expect("the local host has an actor")
-            .incarnation;
-
-        let spec: super::ProfileSpec =
-            serde_json::from_value(guarded_body("Renamed", Some(prepared), None))
-                .expect("the body a browser sends");
-        let response = tokio::time::timeout(
-            Duration::from_secs(10),
-            super::update_profile_staged(
-                std::sync::Arc::clone(&harness.state),
-                local,
-                "p-1".to_string(),
-                spec,
-                {
-                    let harness = &harness;
-                    async move {
-                        // The host is replaced while this request is queued.
-                        harness.fleet.kill_connection(local);
-                        await_reconnected(harness, local, prepared).await;
-                    }
-                },
-            ),
-        )
-        .await
-        .expect("the edit must be refused rather than carried on to the successor install");
-
-        let (status, body) = read_response(response).await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT);
-        assert!(
-            body.contains(crate::precondition::INCARNATION_MARKER),
-            "the refusal must be branchable: {body}"
-        );
-        assert!(
-            harness
-                .manager
-                .status(local)
-                .expect("still registered")
-                .incarnation
-                > prepared,
-            "the fixture must actually have replaced the connection, or this proves nothing"
-        );
-    }
-
-    /// A stale editor's update is REFUSED rather than silently reverting the
-    /// change it never saw, and nothing is forwarded.
-    ///
-    /// Spec: `expected_definition` is compared under the per-host lock against
-    /// the same catalog read the identical-edit suppression uses; a mismatch is
-    /// a 409 carrying [`crate::precondition::DEFINITION_MARKER`] and no
-    /// `UpdateProfile` frame, while the fingerprint the catalog actually served
-    /// lets the same edit through.
-    ///
-    /// An update replaces the WHOLE definition, so two editors open on one
-    /// profile otherwise resolve by last-write-wins — and the loser's change
-    /// disappears with nothing anywhere reporting that it did. That is the
-    /// silent half of the problem: a rename and an invocation change made in
-    /// two tabs leave one of them undone, and both users are told they saved.
-    ///
-    /// The accepted value comes from `GET /api/hosts/{id}/profiles`'s own
-    /// `definitions` map rather than from a fingerprint the test computes,
-    /// because that round trip IS the contract a client uses: read a value,
-    /// hand it back unchanged.
-    #[tokio::test]
-    async fn a_stale_expected_definition_refuses_the_update_and_forwards_nothing() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let shared = CatalogPeer::new(vec![profile("p-1", "Before")]);
-        shared.gate.notify_one();
-        let peer = tokio::spawn(catalog_peer(peer_side, std::sync::Arc::clone(&shared)));
-
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let uri = format!("/api/hosts/{local}/profiles/p-1");
-
-        // What an editor is seeded with: the catalog, and the fingerprint of
-        // each definition in it.
-        let (status, view) = request(
-            &harness,
-            "GET",
-            &format!("/api/hosts/{local}/profiles"),
-            None,
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        let seeded = view["definitions"]["p-1"]
-            .as_str()
-            .expect("the catalog serves a fingerprint per profile")
-            .to_string();
-
-        // Somebody else's edit lands first. The editor above still holds the
-        // fingerprint of what it loaded.
-        let (status, _) = request(
-            &harness,
-            "POST",
-            &uri,
-            Some(guarded_body("Somebody Elses Change", None, None)),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(shared.forwards(), 1);
-
-        let (status, body) = request(
-            &harness,
-            "POST",
-            &uri,
-            Some(guarded_body("Stale Editors Change", None, Some(&seeded))),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT);
-        let body = text(&body);
-        assert!(
-            body.contains(crate::precondition::DEFINITION_MARKER),
-            "a stale definition is its own kind of conflict, distinguishable from a moved \
-             connection: {body}"
-        );
-        assert_eq!(
-            shared.forwards(),
-            1,
-            "the refused update must not have reached the supervisor"
-        );
-        assert_eq!(
-            shared.catalog()[0].name,
-            "Somebody Elses Change",
-            "and the durable definition is untouched"
-        );
-
-        // Re-read, reapply: the fingerprint the catalog serves NOW lets the
-        // same edit through, which is what makes this a precondition rather
-        // than a permanent refusal.
-        let (_, view) = request(
-            &harness,
-            "GET",
-            &format!("/api/hosts/{local}/profiles"),
-            None,
-        )
-        .await;
-        let current = view["definitions"]["p-1"]
-            .as_str()
-            .expect("a fingerprint per profile")
-            .to_string();
-        assert_ne!(
-            current, seeded,
-            "the definition moved, so its fingerprint did"
-        );
-        let (status, _) = request(
-            &harness,
-            "POST",
-            &uri,
-            Some(guarded_body("Stale Editors Change", None, Some(&current))),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(shared.forwards(), 2);
-        assert_eq!(shared.catalog()[0].name, "Stale Editors Change");
-        drop(harness);
-        let _ = peer.await;
-    }
-
-    /// A DELETE names the connection it was prepared against in the QUERY
-    /// STRING, and a stale one reaches no supervisor.
-    ///
-    /// Spec: `?expected_incarnation=` on the delete route behaves exactly as
-    /// the body field does on the other two verbs — mismatch is a 409 with
-    /// [`crate::precondition::INCARNATION_MARKER`] and nothing forwarded, a
-    /// match deletes.
-    ///
-    /// The query string is where it rides because this verb has no body at
-    /// all, and inventing one would make every existing caller send `{}` to
-    /// keep working. Worth guarding despite being a delete — or rather because
-    /// of it: deleting the wrong install's profile is the one outcome here
-    /// that re-reading cannot undo.
-    #[tokio::test]
-    async fn a_delete_prepared_against_a_replaced_connection_is_refused() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let shared = CatalogPeer::new(vec![profile("p-1", "Doomed")]);
-        shared.gate.notify_one();
-        let peer = tokio::spawn(catalog_peer(peer_side, std::sync::Arc::clone(&shared)));
-
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let current = harness
-            .manager
-            .status(local)
-            .expect("the local host has an actor")
-            .incarnation;
-
-        let (status, body) = request(
-            &harness,
-            "DELETE",
-            &format!(
-                "/api/hosts/{local}/profiles/p-1?expected_incarnation={}",
-                current - 1
-            ),
-            None,
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT);
-        assert!(
-            text(&body).contains(crate::precondition::INCARNATION_MARKER),
-            "{body:?}"
-        );
-        assert_eq!(
-            shared.requests(),
-            Vec::<&str>::new(),
-            "a delete for another install must not reach this supervisor at all"
-        );
-
-        let (status, _) = request(
-            &harness,
-            "DELETE",
-            &format!("/api/hosts/{local}/profiles/p-1?expected_incarnation={current}"),
-            None,
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(shared.requests(), vec!["delete"]);
-        assert!(shared.catalog().is_empty());
-        drop(harness);
-        let _ = peer.await;
-    }
-
-    /// A create's and an update's replies carry the fingerprint a LATER
-    /// catalog read serves for the same profile, byte for byte.
-    ///
-    /// Spec: the `fingerprint` field of a successful create, a forwarded
-    /// update, and a suppressed (identical) update each equal that profile's
-    /// entry in a subsequent `GET`'s `definitions` map.
-    ///
-    /// Without it a client is stuck between two bad states after every
-    /// successful save, and both reach the user. It holds the NEW definition
-    /// beside the OLD fingerprint, so reopening the row and saving again sends
-    /// a value the helm no longer recognizes and the edit is refused as stale
-    /// with nobody having raced it. And a freshly CREATED profile has no
-    /// fingerprint at all, so its first edit cannot be guarded — the one edit
-    /// most likely to follow immediately.
-    ///
-    /// Equality with the read is what the test is really about: two encodings
-    /// that merely both existed would let the reply be self-consistent and
-    /// useless. The suppressed update is included because an idempotent update
-    /// is a successful update, and a client cannot be expected to discover
-    /// that this one kind of success left it unable to guard the next one.
-    #[tokio::test]
-    async fn a_mutation_reply_carries_the_fingerprint_a_later_read_serves() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let shared = CatalogPeer::new(Vec::new());
-        shared.gate.notify_one();
-        let peer = tokio::spawn(catalog_peer(peer_side, std::sync::Arc::clone(&shared)));
-
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-
-        /// This profile's fingerprint as the catalog READ serves it.
-        async fn served(
-            harness: &rest_harness::Harness,
-            host: crate::store::HostId,
-            id: &str,
-        ) -> String {
-            let (status, view) =
-                request(harness, "GET", &format!("/api/hosts/{host}/profiles"), None).await;
-            assert_eq!(status, axum::http::StatusCode::OK);
-            view["definitions"][id]
-                .as_str()
-                .unwrap_or_else(|| panic!("the catalog serves a fingerprint for {id}: {view}"))
-                .to_string()
-        }
-
-        let (status, created) = request(
-            &harness,
-            "POST",
-            &format!("/api/hosts/{local}/profiles"),
-            Some(edit_body("Nightly")),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        let minted = created["id"]
-            .as_str()
-            .expect("a create answers with the minted id")
-            .to_string();
-        let from_create = created["fingerprint"]
-            .as_str()
-            .expect("a create's reply carries the committed definition's fingerprint")
-            .to_string();
-        assert_eq!(
-            from_create,
-            served(&harness, local, &minted).await,
-            "the fingerprint a create hands back must be the one the catalog will serve, or the \
-             first edit of a new profile cannot be guarded"
-        );
-
-        // A forwarded update: the definition changed, so the fingerprint must
-        // have too — and must still match what the catalog now serves.
-        let uri = format!("/api/hosts/{local}/profiles/{minted}");
-        let (status, updated) = request(&harness, "POST", &uri, Some(edit_body("Renamed"))).await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        let from_update = updated["fingerprint"]
-            .as_str()
-            .expect("an update's reply carries one too")
-            .to_string();
-        assert_ne!(
-            from_update, from_create,
-            "a definition that changed has a different fingerprint, or the guard means nothing"
-        );
-        assert_eq!(from_update, served(&harness, local, &minted).await);
-
-        // And the suppressed path — the same edit again, which reaches no
-        // supervisor at all.
-        let forwards = shared.forwards();
-        let (status, suppressed) =
-            request(&harness, "POST", &uri, Some(edit_body("Renamed"))).await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(
-            shared.forwards(),
-            forwards,
-            "the identical edit must have been suppressed, or this asserts nothing about that path"
-        );
-        assert_eq!(
-            suppressed["fingerprint"].as_str(),
-            Some(from_update.as_str()),
-            "an idempotent update is a successful update, and leaves the caller able to guard the \
-             next one"
-        );
-
-        // The reply's other fields are exactly where they always were: the
-        // fingerprint is an additive sibling, not a reshaping.
-        assert_eq!(suppressed["id"].as_str(), Some(minted.as_str()));
-        assert_eq!(suppressed["name"], "Renamed");
-        assert_eq!(suppressed["invocation"], "claude");
-        assert_eq!(suppressed["agent_kind"], "claude");
-        drop(harness);
-        let _ = peer.await;
-    }
-
-    /// A guarded catalog READ whose connection has been replaced is refused
-    /// with the same marker a guarded mutation gets.
-    ///
-    /// Spec: `GET /api/hosts/{id}/profiles?expected_incarnation=` refuses with
-    /// [`crate::precondition::INCARNATION_MARKER`] both when the named
-    /// connection is already gone at routing (no round trip) and when it is
-    /// replaced while the read is in flight; without the parameter the same
-    /// read is served.
-    ///
-    /// A read damages nothing on the far side, so the point is what the ANSWER
-    /// gets filed under. A client that stores catalogs per (host, connection)
-    /// sends only the host id, so a retarget between its dispatch and this
-    /// routing hands it the successor's catalog to record under the
-    /// predecessor's key — and every later use of that cache, including the
-    /// fingerprint it guards its next edit with, is about the wrong install.
-    ///
-    /// The in-flight half is staged at [`list_profiles_staged`]'s seam and is
-    /// where the marker matters most: the generic revalidation would refuse
-    /// this too, but unmarked, dropping a guarded client into the branch it
-    /// wrote for "the host is busy" rather than "re-read, you are on a
-    /// different connection now".
-    #[tokio::test]
-    async fn a_guarded_catalog_read_prepared_against_a_replaced_connection_is_refused() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let shared = CatalogPeer::new(vec![profile("p-1", "Claude Code")]);
-        shared.gate.notify_one();
-        let peer = tokio::spawn(catalog_peer(peer_side, std::sync::Arc::clone(&shared)));
-
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-        let current = harness
-            .manager
-            .status(local)
-            .expect("the local host has an actor")
-            .incarnation;
-
-        // The control first, while this connection is still the live one: an
-        // unguarded read is served exactly as before. Taken BEFORE the staged
-        // reconnection below, because the reconnected host is served by the
-        // standalone scripted peer, which answers session lists and nothing
-        // else — a catalog read against it would hang rather than assert.
-        let (status, view) = request(
-            &harness,
-            "GET",
-            &format!("/api/hosts/{local}/profiles"),
-            None,
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(view["profiles"][0]["id"], "p-1");
-        assert_eq!(shared.requests(), vec!["list"]);
-
-        // Already stale when it arrives: refused before a round trip.
-        let (status, body) = request(
-            &harness,
-            "GET",
-            &format!(
-                "/api/hosts/{local}/profiles?expected_incarnation={}",
-                current - 1
-            ),
-            None,
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT);
-        assert!(
-            text(&body).contains(crate::precondition::INCARNATION_MARKER),
-            "{body:?}"
-        );
-        assert_eq!(
-            shared.requests(),
-            vec!["list"],
-            "a read for a connection this host has already left need not be asked for"
-        );
-
-        // Still current when it arrives, replaced before it can answer.
-        let response = tokio::time::timeout(
-            Duration::from_secs(10),
-            super::list_profiles_staged(
-                std::sync::Arc::clone(&harness.state),
-                local,
-                Some(current),
-                {
-                    let harness = &harness;
-                    async move {
-                        harness.fleet.kill_connection(local);
-                        await_reconnected(harness, local, current).await;
-                    }
-                },
-            ),
-        )
-        .await
-        .expect("the read must be refused rather than hanging");
-        let (status, body) = read_response(response).await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT);
-        assert!(
-            body.contains(crate::precondition::INCARNATION_MARKER),
-            "a guarded reader must be told its guard is what fired, not that the host is busy: \
-             {body}"
-        );
-        drop(harness);
-        let _ = peer.await;
-    }
-
-    /// A create carrying `expected_definition` is REFUSED rather than served
-    /// with the precondition ignored.
-    ///
-    /// Spec: a 400 naming the field, and no supervisor round trip.
-    ///
-    /// There is no prior definition a create could be replacing, so the field
-    /// can only be a client mistake — and the dangerous way to treat a
-    /// precondition nobody checked is to accept it. A caller that believes it
-    /// sent a guard behaves as if it has one. Refused locally, like every
-    /// other ambiguous create body this API sees.
-    #[tokio::test]
-    async fn a_create_carrying_a_definition_precondition_is_refused_locally() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(rest_harness::silent_supervisor(peer_side));
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let local = rest_harness::local_id(&harness.store).await;
-
-        let (status, body) = request(
-            &harness,
-            "POST",
-            &format!("/api/hosts/{local}/profiles"),
-            Some(guarded_body(
-                "Nightly",
-                None,
-                Some("n1:x;i1:y;k6:claude;r-;"),
-            )),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
-        assert!(
-            text(&body).contains("expected_definition"),
-            "the refusal must name the field to remove: {body:?}"
-        );
         drop(harness);
         let _ = peer.await;
     }

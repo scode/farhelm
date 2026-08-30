@@ -59,30 +59,6 @@ Within a bucket, no order.
   localStorage/`desktop-client.json`/eval-round-trip paragraphs. Write-up:
   https://claude.ai/code/artifact/7d64a1a0-64fe-41f6-b9a3-610fd7b75434
 
-- Store the helm's remembered profile default as a bare id per registry row, and drop the install-identity binding, the
-  request preconditions, and the commit-after-cancel task around it (`crates/farhelm-helm/src/profiles.rs`, ~900 lines
-  plus ~2,200 of tests, and the `remembered_profiles.host_identity` column with its revalidation on every read). What
-  this touches is ONLY which entry the create dialog preselects; the catalog itself always comes live from whichever
-  supervisor the row currently reaches, and editing, deleting, and what a session snapshots at creation are untouched.
-  The binding exists for one moment: a row that once reached supervisor install A, where the last create used profile id
-  N, later reaches install B (wipe-and-reprovision, retarget, adopt). Every fresh supervisor seeds the same starter ids,
-  so B also has an id N under the same name; today the helm notices the identity changed and asks, whereas a bare id
-  preselects B's N — identical to A's unless the user had customised that starter on A, and even then a wrong DEFAULT in
-  a dropdown they can change before clicking create. SPEC.md's "asks instead of guessing" is about a profile that no
-  longer exists, which a bare id still honours (the catalog lookup fails, the dialog asks); the "exists but on another
-  install" extension is what goes. Also gone: the precondition on profile edits ("only if the host is still the
-  connection I prepared against" — an edit landing after a retarget just applies to the install that is there now, which
-  is where the catalog on screen came from on any realistic timescale) and the detached commit task (a save whose
-  browser disconnected mid-request relies on the next 3-second refresh to reach other clients instead of an immediate
-  push). SPEC EDITS, in the same PR: SPEC.md Sessions/Creation, after "defaults to the last-used profile on the target
-  host; if that profile no longer exists, the client asks" — add that "last-used" is a plain profile id remembered per
-  registry entry and that is the whole mechanism: not bound to the install behind the entry, no precondition, no
-  revalidation beyond the host's current catalog; a reinstalled or retargeted host with a profile under the same id gets
-  it preselected, accepted because a default is a suggestion in a dropdown, never an action; machinery to detect "same
-  id, different install" is not wanted. SPEC_impl.md: the profiles paragraph under Supervisor internals keeps its
-  per-host catalog rules; remove the "a default belongs to an INSTALL" reasoning wherever it appears. Write-up:
-  https://claude.ai/code/artifact/6476812c-681b-4d06-9b08-59911451f1e0
-
 ## Near term
 
 - Deflake the browser merge gate: three e2e tests fail on main itself, deterministically — found 2026-08-31 while gating
