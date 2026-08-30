@@ -188,6 +188,41 @@ Within a bucket, no order.
   button's bounding box lies inside the sidebar's. Candidate fixes: wrap the actions onto a second line, or fold them
   into the same `…` menu the session row got in PR #239.
 
+- Stop terminal-query replies leaking into the shell as typed garbage. Symptom: after a short-lived command that probes
+  the terminal — `sprite list` is a reliable case, and anything on lipgloss/termenv, vim's `t_RV`, or a bare `CSI 6n`
+  will do — the pane shows `^[]11;rgb:0000/0000/0000^[\^[[2;1R` on its own line and the next prompt has
+  `11;rgb:0000/0000/00001R` sitting in it as input. Cause, reproduced outside the UI with a control-mode client and
+  farhelm's tmux config: the program sends `OSC 11;?` (background colour) and `CSI 6n` (cursor position) and waits for
+  the replies; tmux answers both itself, immediately, so the program is satisfied, exits raw mode and exits. But control
+  mode's `%output` carries the pane's RAW bytes, queries included, so farhelm forwards the query sequences to xterm.js,
+  which is a real terminal and answers them too; its replies come back through `term.onData` → websocket → helm →
+  supervisor → `send-keys -H` one round trip later, by which time only the shell is listening, and the tty echoes them
+  in cooked mode and bash reads them as keystrokes. Every program under farhelm is answered twice; only the ones that
+  stop reading after the first answer show it, which is why long-running TUIs are unaffected. Stock tmux never shows
+  this because termenv refuses to query under `TERM=tmux-*`/`screen-*`; farhelm's `default-terminal
+  xterm-256color`
+  (correct for fidelity) removes that self-protection, and a rendering `tmux attach` never forwards a query it already
+  answered. FIX, on the supervisor side in Rust, deliberately not in terminal.js: in `OutputStream`, strip from the live
+  stream exactly the queries tmux answers itself — a fixed table of literal byte strings, roughly `CSI 6n`, `CSI ?6n`,
+  `CSI 5n`, `CSI c`/`CSI 0c`/`CSI >c`/`CSI >0c`, and `OSC 10/11/12;?` with either `BEL` or `ESC \` as terminator — using
+  a streaming literal matcher with a bounded hold-back (longest pattern is 8 bytes) so a query split across two
+  `%output` lines is still caught, plus a flush of the hold-back on idle so a stream that ends mid-prefix is not stuck.
+  This is NOT a VT parser and must not grow into one: no parameters are interpreted, and nothing outside the table is
+  touched. Do not put anything in the table that tmux does not answer under the pinned version (DECRQM `CSI ?…$p` is the
+  trap: xterm.js answers it, tmux does not, and stripping it would hang the program on its timeout); the guard is an
+  integration test against the pinned tmux that sends each table entry into a pane and asserts a reply comes back, so a
+  tmux bump that changes what it answers fails CI instead of hanging a user. Also a fuzz-style unit test: random split
+  points over a stream must yield output identical to the unsplit result. Replay (`capture-pane -e`) never contains
+  queries, so the matcher applies to the live stream only. The rejected alternative, for the record:
+  `registerCsiHandler`/`registerOscHandler` in terminal.js swallowing the same set is ~10 lines, but it grows the JS
+  island layer, leaves the table unguarded (no node-driven tmux test exists), and fixes only this client. DOCUMENTATION
+  IS PART OF THE DELIVERABLE: the module or type that holds the matcher must explain, in plain language a reader with no
+  tmux background can follow, what problem it solves (a pane program gets every terminal query answered twice, once by
+  tmux and once by the browser, and the late duplicate lands in the shell as typed text), why the fix lives here rather
+  than in the browser, why the table is exactly the set tmux answers and no more, what the hold-back and idle flush are
+  for, and what this code must never become. A future reader who finds a byte-matcher in the output path with a comment
+  that only names the sequences will delete it.
+
 ## Maybe later
 
 - Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
