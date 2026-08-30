@@ -156,10 +156,11 @@ pub(crate) fn retire_vanished_renames(
 /// helm's own order — as opposed to merely having its own fields updated
 /// in place.
 ///
-/// `list::SessionRow`'s actions panel is `position: fixed`, positioned
-/// from a ONE-TIME measurement of its toggle's screen coordinates taken
-/// the instant it opened (`list::menu_panel_style`); nothing re-measures
-/// it while it stays open. A row that STAYS in the listing but changes
+/// `list::SessionRow`'s actions panel — and `hosts::HostRow`'s, measured
+/// the identical way — is `position: fixed`, positioned from a ONE-TIME
+/// measurement of its toggle's screen coordinates taken the instant it
+/// opened (`menu_panel::menu_panel_style`); nothing re-measures it while it
+/// stays open. A row that STAYS in the listing but changes
 /// INDEX still invalidates that measurement — the toggle is no longer
 /// where it was measured — even though the row's own continued presence
 /// (which a separate, simpler "is this id still listed" check already

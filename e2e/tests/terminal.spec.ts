@@ -237,11 +237,41 @@ test("keyboard activation opens the session, matching a real click", async ({
     // title then never changes, which is how this test failed on two
     // loaded CI runs. Wait for the mount, then prove the focus held.
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    const openButton = sharedSessionRow(page).locator(".session-row-open");
-    await openButton.focus();
-    await expect(openButton).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    // That wait only rules out the FIRST steal, and the window between the
+    // focus and the keypress is stealable by the same mechanism: `reveal()`
+    // in terminal.js takes focus whenever a replay lands, and its
+    // `takesFocus()` deliberately declines to hold back for a focused BUTTON
+    // (only for an editable control or another terminal), so an island
+    // mounting in that window puts the Enter into the pty instead and the
+    // title never changes.
+    //
+    // This test failed with exactly that shape — button focused, title still
+    // on the bounce session — on WebKit in both full runs of the suite, and
+    // in neither of the isolated ones. The trigger itself is NOT pinned down:
+    // it does not reproduce alone, after the whole WebKit terminal family, or
+    // with the keypress repeated ten times under five spinning CPU hogs, and a
+    // probe that sat on the focused button for 40 s against this exact fixture
+    // recorded zero remounts and zero focus changes. So the steal above is the
+    // known hazard this window carries, not a diagnosis anyone has evidence
+    // for; whatever opens the window belongs to a two-hour full run and is not
+    // something the test can wait on. That is why the remedy is a
+    // retry rather than one more marker: retrying focus-then-press as a UNIT
+    // is the only thing that recovers a losing attempt, since focus that has
+    // moved into a terminal never comes back on its own and polling the title
+    // would just watch it not change. It weakens nothing — every attempt
+    // still demands that the button hold focus and that the keypress ALONE
+    // open the session, so activation that is genuinely broken fails all of
+    // them exactly as it failed the single one. Same remedy, and the same
+    // reasoning, as the toggle-focus retries in sidebar.spec.ts.
+    await expect(async () => {
+      const openButton = sharedSessionRow(page).locator(".session-row-open");
+      await openButton.focus();
+      await expect(openButton).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.locator(".titlebar .title")).toHaveText("e2e-session", {
+        timeout: 5_000,
+      });
+    }).toPass({ timeout: 30_000 });
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   } finally {
     await cleanupSession(request, bounce.id);

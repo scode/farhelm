@@ -50,6 +50,7 @@ import {
   cleanupSession,
   createSession,
   FeedStub,
+  forgetAutoSelect,
   openFilterBar,
   SESSION_LISTING,
   SessionPage,
@@ -905,12 +906,26 @@ test.describe("session list ordering", () => {
    *
    * Hands back the creation-order requests it saw, which is what both arms
    * assert on — one that the request happened and one that it did not.
+   *
+   * Also states the precondition the whole fallback rests on: NOTHING
+   * remembered. SPEC.md's fallback is what a client with no remembered
+   * selection opens, and a remembered id skips it — under a truncated walk
+   * the sidebar resolves that id with the helm and opens whatever it names,
+   * which is a real session rather than one of the rows below. The suite's
+   * shared `storageState` is supposed to hold only the device secret, but it
+   * is rewritten mid-run by auth.spec.ts and once carried a selection out of
+   * that rewrite, which failed the incomplete-walk test below on both engines
+   * in both full runs of the suite (the complete-walk one survived only
+   * because its listing is not truncated, which is the condition that arm
+   * needs). Cheap to state here, and it makes both tests say what they need
+   * rather than inherit it.
    */
   async function stubFallbackListing(
     page: Page,
     helm: string,
     complete: boolean,
   ): Promise<URL[]> {
+    await forgetAutoSelect(page);
     const { aaa, mmm, zzz } = FALLBACK_ROWS;
     const newestReads: URL[] = [];
     await page.route(SESSION_LISTING, async (route: Route) => {

@@ -748,6 +748,31 @@ export async function pinAutoSelect(page: Page, id: string): Promise<void> {
 }
 
 /**
+ * The opposite of {@link pinAutoSelect}: guarantee this page has NO
+ * remembered selection on every load it performs from here on.
+ *
+ * For the tests whose subject is the FALLBACK — what a client with nothing
+ * remembered opens (SPEC.md's newest-created non-archived session). A
+ * remembered id short-circuits that path entirely: the sidebar resolves it
+ * against the helm and opens it, and the fallback the test came to check
+ * never runs. Such a test therefore has to state the precondition rather
+ * than inherit it, because the baseline it inherits is not its own — every
+ * context starts from the shared `storageState` file the harness mints, and
+ * auth.spec.ts rewrites that file mid-run to carry a rotated credential.
+ * That rewrite has already leaked a selection once (see the comment on its
+ * write), which is exactly the kind of cross-project residue no single test
+ * can see coming.
+ *
+ * Removes rather than skips the write, so it also clears a value some
+ * earlier navigation in THIS page left behind.
+ */
+export async function forgetAutoSelect(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.removeItem("farhelm.last-selected");
+  });
+}
+
+/**
  * Open the sidebar's hosts panel if it is not already open.
  *
  * The sidebar redesign (BUGS_BURNDOWN.md issue 5) collapsed the hosts
@@ -818,8 +843,59 @@ export async function openFilterBar(page: Page): Promise<void> {
  * reason to be re-hovered, and its toggle may itself now sit under its
  * own panel depending on placement.
  */
-export async function openRowMenu(row: Locator): Promise<void> {
-  const menu = row.locator(".session-row-menu");
+/**
+ * The renderer workaround shared by `openRowMenu` and `openHostMenu`:
+ * click a row's "⋯" toggle open (idempotently) and wait for its floating
+ * panel to finish the async toggle-rect measurement `menu_panel.rs` races
+ * against the render that opened it. Both row kinds build their panel on
+ * that identical, generically shared mechanism, so this is the one place
+ * that workaround is written — the two exported functions below are thin,
+ * selector-only wrappers that keep the readable, row-specific call sites
+ * `openRowMenu(row)` / `openHostMenu(row)`.
+ *
+ * `toggleSelector`/`panelSelector` name the row's own toggle and floating
+ * panel (`.session-row-menu`/`.session-row-menu-panel` for a session row,
+ * `.host-row-menu`/`.host-row-menu-panel` for a host row); `waitMessage` is
+ * the row-specific wording surfaced if the poll below times out.
+ *
+ * The toggle is a genuine TOGGLE — the row's own `onclick` flips
+ * `menu_open` unconditionally, closed→open and open→closed alike — so
+ * clicking it blindly on an already-open menu would close it, the
+ * opposite of either exported function's contract. The `aria-expanded`
+ * check below is what makes this idempotent instead: it reads the
+ * toggle's own current truth and clicks ONLY when that truth is not
+ * already `"true"`, so calling this on an already-open menu (a defensive
+ * reopen after a background dismissal raced some earlier step, say) is a
+ * safe no-op rather than an accidental close.
+ *
+ * The toggle is also hover-revealed (`opacity: 0` at rest, `opacity: 1` on
+ * hover, keyboard focus within the row, or while its own menu is open —
+ * see app.css). `hover()` first is not strictly required for `click()` to
+ * land — Playwright's actionability checks do not treat `opacity: 0` as
+ * hidden, only `visibility`/`display` do — but every caller here is
+ * standing in for a real mouse user, and a real one has to hover the
+ * toggle before it is even visible to click. Doing it explicitly, rather
+ * than relying on `click()`'s own incidental pointer move, keeps this
+ * helper testing the same path a person takes instead of a shortcut only
+ * available to automation.
+ *
+ * Hovers the TOGGLE, not the row's center: another row's already-open menu
+ * panel is `position: fixed` (see `.session-row-menu-panel`'s own comment
+ * in app.css for why) and can float directly over this row's center point,
+ * which would make Playwright's actionability check land the hover on the
+ * covering panel instead of this row. The toggle sits at the row's
+ * trailing edge, clear of where a neighboring panel opens. Only hovered
+ * when about to open it, too — an already-open menu has no reason to be
+ * re-hovered, and its toggle may itself now sit under its own panel
+ * depending on placement.
+ */
+async function openMenuPanel(
+  row: Locator,
+  toggleSelector: string,
+  panelSelector: string,
+  waitMessage: string,
+): Promise<void> {
+  const menu = row.locator(toggleSelector);
   if ((await menu.getAttribute("aria-expanded")) !== "true") {
     await menu.hover();
     await menu.click();
@@ -829,16 +905,16 @@ export async function openRowMenu(row: Locator): Promise<void> {
   // straight into bare-DOM `querySelector(...).click()` calls (the
   // actionability-bypass tests), where a not-yet-mounted button turns
   // into a silent no-op via `?.click()` rather than a visible failure.
-  const panel = row.locator(".session-row-menu-panel");
+  const panel = row.locator(panelSelector);
   await expect(panel).toBeVisible();
   // `toBeVisible()` alone is not the MEASURED state: the panel mounts the
   // instant the toggle opens, at `opacity: 0; pointer-events: none` —
   // genuinely present and painted-nothing (`PanelPlacement::Unmeasured` in
-  // list.rs, while the toggle's own async `get_client_rect()` measurement
-  // is still in flight) — and Playwright's visibility check does not
-  // consult opacity or pointer-events at all, so a caller reading this
-  // panel's geometry immediately after this function used to return could
-  // be racing that measurement.
+  // menu_panel.rs, while the toggle's own async `get_client_rect()`
+  // measurement is still in flight) — and Playwright's visibility check
+  // does not consult opacity or pointer-events at all, so a caller reading
+  // this panel's geometry immediately after this function used to return
+  // could be racing that measurement.
   //
   // Detected by reading the panel's own inline `style` for a literal
   // `left: auto` — the one substring ONLY `PanelPlacement::Measured` ever
@@ -846,7 +922,7 @@ export async function openRowMenu(row: Locator): Promise<void> {
   // could-not-measure-at-all state, sets a literal `left: 8px` instead) —
   // rather than by comparing the panel's box to the toggle's own. Geometry
   // would be the wrong test here: a genuinely MEASURED panel can still be
-  // clamped far from its toggle on a short viewport (list.rs's
+  // clamped far from its toggle on a short viewport (`menu_panel.rs`'s
   // `menu_panel_style` — precisely what the clipping regression test in
   // sidebar.spec.ts exercises), so a box-proximity check would either
   // reject a real measured-and-clamped panel or, worse, accept `Fallback`
@@ -862,7 +938,51 @@ export async function openRowMenu(row: Locator): Promise<void> {
         }));
         return info.opacity === "1" && info.style.includes("left: auto");
       },
-      { message: "waiting for the actions panel to finish measuring against its own toggle" },
+      { message: waitMessage },
     )
     .toBe(true);
+}
+
+/**
+ * Open a session row's actions menu when it is not already open.
+ *
+ * The sidebar redesign (BUGS_BURNDOWN.md issue 5) moved every per-row
+ * action — rename, stop, archive, delete, and their confirms — off the row
+ * and into a floating panel behind the row's `⋯` toggle, so any test that
+ * clicks or asserts on those controls opens the menu first through this
+ * helper. See `openMenuPanel`'s own doc for the toggle-idempotence,
+ * hover-before-click, and measured-vs-unmeasured mechanics this drives.
+ */
+export async function openRowMenu(row: Locator): Promise<void> {
+  await openMenuPanel(
+    row,
+    ".session-row-menu",
+    ".session-row-menu-panel",
+    "waiting for the actions panel to finish measuring against its own toggle",
+  );
+}
+
+/**
+ * Open a host row's actions menu when it is not already open.
+ *
+ * The host row's own "⋯" menu folds `profiles`/`retry`/`adopt`/
+ * `edit destination`/`remove` off `.host-row-main` into a floating panel
+ * behind a `.host-row-menu` toggle — built on the identical mechanics
+ * `openRowMenu` above already drives for the session row's menu (shared
+ * generically in `menu_panel.rs`; see `openMenuPanel`'s own doc for the
+ * toggle-idempotence, hover-before-click, and measured-vs-unmeasured
+ * mechanics both wrappers drive). This is the fix for TODO.md's
+ * now-closed near-term entry: `remove` used to render clipped off the
+ * sidebar's right edge on an ssh host, invisible and unclickable, and
+ * every spec that clicks or asserts on a host row's management verbs now
+ * has to open this menu first — exactly the discipline `openRowMenu`
+ * already imposes for the session row.
+ */
+export async function openHostMenu(row: Locator): Promise<void> {
+  await openMenuPanel(
+    row,
+    ".host-row-menu",
+    ".host-row-menu-panel",
+    "waiting for the host actions panel to finish measuring against its own toggle",
+  );
 }
