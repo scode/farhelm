@@ -24,48 +24,6 @@ pub enum Script {
     Basic,
     /// Full-screen app on the alternate screen.
     Altscreen,
-    /// Like `Altscreen`, but also spawns a SIGTERM-ignoring child before
-    /// installing its own restore-and-exit handler. The acceptance
-    /// fixture for a mid-stop attach landing between the pane going dead
-    /// and `StopSession` actually publishing its snapshot: this process's
-    /// OWN pid restores the primary screen and exits within milliseconds
-    /// of SIGTERM (the pane goes dead almost immediately), while
-    /// `kill_process_tree` must still run its full SIGSTOP-quiesce-then-
-    /// SIGKILL escalation against the lingering child — several hundred
-    /// milliseconds during which the pane is dead but the stop itself has
-    /// not finished. See `Supervisor::pending_snapshots`'s docs
-    /// (farhelm-supervisor's service.rs) for the gap this fixture
-    /// exercises.
-    AltscreenStubbornChild,
-    /// Enters the alternate screen and IGNORES SIGTERM entirely
-    /// (`SIG_IGN`, no handler at all — never restores the primary
-    /// screen). The acceptance fixture for `StopSession` actually
-    /// finishing a stop against an alt-screen app that never cooperates:
-    /// `kill_process_tree` must run its full grace/SIGSTOP-quiesce/SIGKILL
-    /// escalation against THIS process itself (SIGTERM does nothing;
-    /// SIGKILL — which cannot be ignored — is what finally ends it), and
-    /// it dies still on the alternate screen, with no restore. This is
-    /// the case the alt-screen stop-snapshot feature exists for: without
-    /// it, reattaching afterward would find nothing tmux itself could
-    /// still show (see the `Attach` handler's snapshot-existence gate in
-    /// service.rs for why that is, empirically, not "the ordinary prefill
-    /// already has it").
-    AltscreenIgnoresTerm,
-    /// Like `AltscreenIgnoresTerm`, but this process itself uses the
-    /// DEFAULT SIGTERM disposition (dies within milliseconds, still on
-    /// the alternate screen, no restore — same end state as
-    /// `AltscreenIgnoresTerm`, reached the fast way instead) while a
-    /// spawned child ignores SIGTERM and lingers. Combines
-    /// `AltscreenStubbornChild`'s "pane goes dead almost immediately,
-    /// `kill_process_tree` keeps running against the child for hundreds
-    /// of milliseconds more" window with `AltscreenIgnoresTerm`'s
-    /// dies-still-on-the-alternate-screen end state — the acceptance
-    /// fixture for a mid-stop attach landing in that window while the
-    /// dead pane is STILL on the alternate screen (as opposed to
-    /// `AltscreenStubbornChild`'s already-restored-to-primary case),
-    /// pinning that the `\x1b[?1049l` alt-exit escape and the
-    /// `Supervisor::pending_snapshots` fallback compose correctly.
-    AltscreenStubbornChildStaysAlt,
     /// Raw non-UTF-8 output for byte-fidelity tests.
     Binary,
     /// Numbered records emitted as fast as the pty will take them, for
@@ -238,9 +196,6 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
     match script {
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
-        Script::AltscreenStubbornChild => altscreen_stubborn_child(),
-        Script::AltscreenIgnoresTerm => altscreen_ignores_term(),
-        Script::AltscreenStubbornChildStaysAlt => altscreen_stubborn_child_stays_alt(),
         Script::Binary => binary(),
         Script::Flood => flood(),
         Script::FloodGated => flood_gated(),
@@ -1272,14 +1227,12 @@ fn basic() -> anyhow::Result<()> {
 /// This is what makes `altscreen` a faithful stand-in for a real
 /// full-screen agent (claude, chiefly) rather than just an app that
 /// happens to draw on the alternate screen: claude's own SIGTERM handling
-/// leaves the alternate buffer before exiting, which is EXACTLY the
-/// behavior the alt-screen-stop-snapshot feature (SPEC_impl.md,
-/// e2e.rs's `stop_replays_the_alt_screen_snapshot` and friends) exists to
-/// work around — tmux never records alternate-screen content in history,
-/// so a graceful-looking exit silently destroys the app's last frame
-/// unless something captured it first. Without this handler, `altscreen`
-/// under the default SIGTERM disposition dies mid-alt-screen instead,
-/// which exercises a DIFFERENT (also real, but not this one) case.
+/// leaves the alternate buffer before exiting, so a stopped agent's pane
+/// ends up back on the primary screen — the state SPEC.md describes for
+/// a stopped full-screen program (its last frame is gone; the pane shows
+/// what the terminal itself still holds). Without this handler,
+/// `altscreen` under the default SIGTERM disposition would die
+/// mid-alt-screen instead, which is a different (also real) case.
 ///
 /// Only async-signal-safe operations happen here: a raw `write(2)`
 /// straight to the pane's stdout fd (bypassing Rust's buffered,
@@ -1308,16 +1261,14 @@ extern "C" fn restore_primary_screen_and_exit(_signal: libc::c_int) {
 /// (see `restore_primary_screen_and_exit`), exercising the graceful-
 /// alt-screen-exit case an ordinary `quit`-then-line does not need signal
 /// handling to reach. Lets tests assert alt-screen passthrough end to
-/// end, alt-screen replay on reattach, and (via the SIGTERM path) the
-/// stop-time snapshot feature's own motivating scenario.
+/// end and alt-screen replay on reattach of a LIVE pane.
 ///
 /// Draws a SECOND row (`STATUS BAR`) whose background color is painted
 /// via `\x1b[K` (erase-to-end-of-line under the current SGR) rather than
-/// printed as literal space characters — trailing cells styled this way,
-/// with no visible glyph in them, are exactly what `capture-pane`'s `-N`
-/// flag exists to preserve (see `TmuxDriver::capture_alt_screen_if_active`'s
-/// docs); without `-N` tmux trims them from the capture, which is what
-/// e2e.rs's `-N`-coverage test pins.
+/// printed as literal space characters, so the frame has the shape of a
+/// real TUI's status line. No test currently asserts on this row; it is
+/// kept so the fixture stays a faithful full-screen app rather than a
+/// single banner line.
 fn altscreen() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
@@ -1345,135 +1296,6 @@ fn altscreen() -> anyhow::Result<()> {
             restore_primary_screen_and_exit as *const () as libc::sighandler_t,
         );
     }
-
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-
-    let stdin = std::io::stdin();
-    let mut line = String::new();
-    stdin.lock().read_line(&mut line)?;
-
-    write!(out, "\x1b[?1049l")?;
-    writeln!(out, "left alt screen\r")?;
-    out.flush()?;
-    Ok(())
-}
-
-/// See `Script::AltscreenStubbornChild`'s docs for the gap this fixture
-/// exists to widen. `kill_process_tree` (service.rs) walks the PPID
-/// closure from THIS process's own pid, so the child spawned below stays
-/// reachable and still gets swept even after this process itself has
-/// long since restored the screen and exited — a real OS descendant, not
-/// merely a delayed exit of the same process, is what forces the sweep
-/// through its full escalation.
-fn altscreen_stubborn_child() -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-    write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
-    writeln!(out, "\x1b[7m ALT-SCREEN APP \x1b[0m\r")?;
-
-    // Installed BEFORE the child spawn below, not just before the ready
-    // marker: a SIGTERM landing between spawning the child and this call
-    // would hit the default disposition instead, exiting without
-    // restoring the screen — defeating the fixture's whole point (see
-    // `altscreen`'s identical ordering rationale).
-    // SAFETY: see `restore_primary_screen_and_exit`'s own docs for why
-    // the handler itself only performs async-signal-safe work.
-    unsafe {
-        libc::signal(
-            libc::SIGTERM,
-            restore_primary_screen_and_exit as *const () as libc::sighandler_t,
-        );
-    }
-
-    // A child that survives ordinary SIGTERM, exactly like
-    // `SpawnerStubborn`'s own child — reused here so `kill_process_tree`
-    // has something left to escalate against once this process itself
-    // has already restored the screen and exited.
-    std::process::Command::new("sh")
-        .arg("-c")
-        .arg("trap '' TERM; sleep 3600")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .context("spawning stubborn child")?;
-
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-
-    let stdin = std::io::stdin();
-    let mut line = String::new();
-    stdin.lock().read_line(&mut line)?;
-
-    write!(out, "\x1b[?1049l")?;
-    writeln!(out, "left alt screen\r")?;
-    out.flush()?;
-    Ok(())
-}
-
-/// See `Script::AltscreenIgnoresTerm`'s docs. `SIG_IGN` rather than a
-/// custom handler: there is nothing to run on SIGTERM at all, which is
-/// the point — this process only ever dies to SIGKILL, near the very end
-/// of `kill_process_tree`'s escalation, and SIGKILL cannot be blocked,
-/// ignored, or handled, so no signal-handler code of ours ever runs on
-/// the way out.
-fn altscreen_ignores_term() -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-    write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
-    writeln!(out, "\x1b[7m ALT-SCREEN APP \x1b[0m\r")?;
-
-    // SAFETY: `SIG_IGN` is a valid `sighandler_t` constant per POSIX
-    // `signal(2)`; no handler code of ours runs as a result of this call
-    // at all, so there is nothing here for async-signal-safety to say
-    // anything about.
-    unsafe {
-        libc::signal(libc::SIGTERM, libc::SIG_IGN);
-    }
-
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-
-    // Never reached in the fixture's OWN acceptance tests (this process
-    // is always killed via SIGKILL before anything sends it a line), but
-    // kept for symmetry with `altscreen`/`altscreen_stubborn_child`: a
-    // manual smoke test attaching and sending a line still gets a clean
-    // exit rather than hanging forever.
-    let stdin = std::io::stdin();
-    let mut line = String::new();
-    stdin.lock().read_line(&mut line)?;
-
-    write!(out, "\x1b[?1049l")?;
-    writeln!(out, "left alt screen\r")?;
-    out.flush()?;
-    Ok(())
-}
-
-/// See `Script::AltscreenStubbornChildStaysAlt`'s docs. Deliberately
-/// installs NO SIGTERM handler at all (unlike `altscreen_stubborn_child`,
-/// whose whole point is installing one) — the default disposition
-/// terminates this process within milliseconds of SIGTERM, still on the
-/// alternate screen, with nothing having run to restore it. The spawned
-/// child ignores SIGTERM exactly like `altscreen_stubborn_child`'s,
-/// forcing `kill_process_tree` through its full escalation regardless of
-/// how quickly this process itself is gone.
-fn altscreen_stubborn_child_stays_alt() -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-    write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
-    writeln!(out, "\x1b[7m ALT-SCREEN APP \x1b[0m\r")?;
-
-    // A child that survives ordinary SIGTERM, exactly like
-    // `SpawnerStubborn`'s and `altscreen_stubborn_child`'s own children —
-    // reused here so `kill_process_tree` has something left to escalate
-    // against once this process itself is already gone (to the default
-    // SIGTERM disposition, not any handler of ours).
-    std::process::Command::new("sh")
-        .arg("-c")
-        .arg("trap '' TERM; sleep 3600")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .context("spawning stubborn child")?;
 
     writeln!(out, "FAKE-AGENT READY\r")?;
     out.flush()?;

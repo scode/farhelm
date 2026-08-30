@@ -175,8 +175,17 @@ async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing(
 }
 
 /// M3 acceptance 9: relaunching into a RETAINED terminal keeps the prior
-/// run in scrollback — "the previous run's output stays in scrollback"
-/// (SPEC.md), with the new run's output below it.
+/// run's HISTORY — SPEC.md: "whatever scrollback the terminal itself
+/// retained is still there" — with the new run's output below it.
+///
+/// History, not the visible screen: the same SPEC paragraph says restart
+/// "does NOT preserve the previous run's last visible screen: the pane is
+/// blank until the new agent draws", and `respawn-pane` does exactly that
+/// (keeps tmux's scrollback, reinitializes the grid). So the marker is
+/// pushed off the 24-row screen with `spam 60` before the restart; what
+/// this test then finds is the retained scrollback and nothing else. A
+/// marker left on the visible grid would be wiped, and asserting on it
+/// would be asserting the shrink-and-restore trick SPEC.md now forbids.
 ///
 /// The marker is produced by TYPING into the first run rather than by its
 /// startup banner, because both runs print the same banner: an assertion
@@ -197,6 +206,22 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
         .await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
     wait_for(&mut rx, &mut seen, "PRIOR-RUN-MARKER", 10).await;
+    // Into history: more lines than the window has rows. The last spam
+    // line is the barrier, so the restart cannot land while the marker is
+    // still on the grid the respawn is about to wipe.
+    h.client.send_input(chan, b"spam 60\r".to_vec()).await;
+    wait_for(&mut rx, &mut seen, "spam-line-60", 10).await;
+    // And one marker that stays on the VISIBLE GRID only: typed after the
+    // spam, so nothing ever scrolls it into history before the restart.
+    // Its absence afterwards is the other half of the contract — finding
+    // it would mean something preserved the visible grid across the
+    // respawn, which is the shrink-and-restore trick SPEC.md now forbids.
+    // Waited for AFTER the last spam line so the echo provably reached
+    // the grid before the restart is issued.
+    h.client
+        .send_input(chan, b"GRID-ONLY-MARKER\r".to_vec())
+        .await;
+    wait_for_after(&mut rx, &mut seen, "spam-line-60", "GRID-ONLY-MARKER", 10).await;
 
     h.client
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
@@ -204,9 +229,10 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
         .expect("restart");
     wait_for_live_status(&h.client, &session.id, 30).await;
 
-    // Read from tmux itself, and wait for the new run's own banner to
-    // appear in the capture: the relaunched agent starts asynchronously,
-    // so a single read can land before it has printed anything.
+    // Read from tmux itself (`capture-pane -S -`, history included), and
+    // wait for the new run's own banner to appear in the capture: the
+    // relaunched agent starts asynchronously, so a single read can land
+    // before it has printed anything.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let capture = loop {
         let capture = pane_capture(&sock, &tmux_name).await;
@@ -223,11 +249,17 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     };
     assert!(
         capture.contains("PRIOR-RUN-MARKER"),
-        "the prior run's output must survive the respawn: {capture}"
+        "the prior run's retained scrollback must survive the respawn: {capture}"
+    );
+    assert!(
+        !capture.contains("GRID-ONLY-MARKER"),
+        "the prior run's visible grid must NOT survive the respawn — its presence means \
+         something preserved the grid (the forbidden shrink-and-restore): {capture}"
     );
 
     // And a client attaching after the restart sees the same thing, since
-    // its replay is that scrollback.
+    // its replay covers that scrollback (SPEC.md: at least the current
+    // screen plus 10,000 lines of it).
     h.client.detach(chan).await;
     let (_chan2, mut rx2) = h
         .client
@@ -243,6 +275,10 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
         20,
     )
     .await;
+    assert!(
+        !String::from_utf8_lossy(&replay).contains("GRID-ONLY-MARKER"),
+        "the replay must not resurrect the prior run's visible grid either"
+    );
 }
 
 /// M3 acceptance 9: leftover descendants of a prior run are reaped BEFORE

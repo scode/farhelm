@@ -98,7 +98,6 @@ mod core;
 mod handlers;
 mod launch_artifacts;
 mod listing;
-mod snapshots;
 mod status;
 mod sweep;
 mod teardown;

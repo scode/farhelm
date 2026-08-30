@@ -55,7 +55,7 @@
 //!
 //! Archive shares the process and terminal reach of delete, but not its
 //! retention story. It cancels in-flight uploads, reaps the agent and every
-//! tab, removes terminal-only launch artifacts and snapshots, and detaches
+//! tab, removes terminal-only launch artifacts, and detaches
 //! every viewer. It then KEEPS the database row and committed attachment
 //! directory, marks the row archived, and records the deliberate teardown
 //! as `Exited` with `STOP_ANNOTATION`. That separate path is intentional:
@@ -64,8 +64,7 @@
 
 use super::connection::notify_detached;
 use super::core::{ArchiveStage, SessionEntry, Supervisor, unknown_pane_owner_refusal};
-use super::launch_artifacts::{remove_fail_closed, remove_launch_artifacts_for_session};
-use super::snapshots::snapshot_path;
+use super::launch_artifacts::remove_launch_artifacts_for_session;
 use super::sweep::{SweepTarget, reap_process_tree};
 use super::terminals::{ActiveAttach, AttachmentKey};
 use super::ticker::ActivitySample;
@@ -81,8 +80,8 @@ use tracing::{debug, warn};
 /// variant per failure CLASS — not per failure site. The four probe/sweep
 /// variants each cover exactly one step of the teardown (whatever number
 /// of ways that step has of failing); [`TeardownError::FailClosed`]
-/// covers the five steps inside the fail-closed block, which is sound
-/// because those five already render their own site-specific message and
+/// covers the four steps inside the fail-closed block, which is sound
+/// because those four already render their own site-specific message and
 /// this variant carries it through verbatim.
 ///
 /// Rendering deliberately lives with the handler rather than here: these
@@ -118,11 +117,11 @@ pub(crate) enum TeardownError {
     /// The process-tree sweep itself failed — not "nothing was found to
     /// kill", but "this could not be confirmed".
     Sweep(anyhow::Error),
-    /// The fail-closed block failed — the tmux kill, one of the launch-
-    /// artifact/snapshot/attachment removals, or the row deletion and
+    /// The fail-closed block failed — the tmux kill, the launch-artifact
+    /// removal, the attachment quarantine, or the row deletion and
     /// reservation settlement.
     ///
-    /// The one variant that does NOT carry a source error: those five
+    /// The one variant that does NOT carry a source error: those four
     /// sites render their own message as they fail (each needs different
     /// context — which artifact, which step), and this carries that
     /// already-rendered string through unchanged so the reply still names
@@ -355,16 +354,9 @@ impl Supervisor {
                     .await
                     .map_err(|error| format!("removing archive artifacts: {error:#}"))?;
             }
-            // Launch specs can contain credentials and the snapshot is
-            // terminal content. Neither is metadata an archive promises to
-            // retain, and keeping either would contradict the explicit
-            // "terminal contents are gone" contract.
+            // Launch specs can contain credentials, and a spec is not
+            // metadata an archive promises to retain.
             remove_launch_artifacts_for_session(&self.state_dir, session_id).await?;
-            remove_fail_closed(
-                &snapshot_path(&self.state_dir, session_id),
-                "alt-screen snapshot",
-            )
-            .await?;
             self.store
                 .archive_session(session_id)
                 .await
@@ -737,16 +729,6 @@ impl Supervisor {
             // to LIST them: an unreadable directory is not evidence
             // there was nothing in it.
             remove_launch_artifacts_for_session(&self.state_dir, session_id).await?;
-            // Same fail-closed treatment as the launch artifacts
-            // above and for the same reason: the snapshot can hold
-            // secrets an agent echoed to an alt-screen app, and
-            // delete is the last moment anything will ever come
-            // back to remove it.
-            remove_fail_closed(
-                &snapshot_path(&self.state_dir, session_id),
-                "alt-screen snapshot",
-            )
-            .await?;
             // SPEC.md: "attachment files are removed when their
             // session is deleted". DETACHED here (an atomic
             // rename into the reserved quarantine directory) and
@@ -803,8 +785,8 @@ impl Supervisor {
         // best-effort spirit: it is a per-session diagnostic file
         // (`hook_log_path`), it names a session that no longer exists, and
         // nothing about a delete should fail over it. Deliberately NOT
-        // fail-closed like the launch specs and the alt-screen snapshot
-        // above — those can hold the user's secrets, whereas this file
+        // fail-closed like the launch specs above — those can hold the
+        // user's secrets, whereas this file
         // holds timestamps, conversation ids, and error kinds this
         // supervisor already logs itself. Most sessions have no such file
         // at all (nothing writes one unless the launch was hooked), so a

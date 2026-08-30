@@ -659,10 +659,10 @@ async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
         .await
         .expect("create a wrapper session");
 
-    // Attached once before the restart for a single reason: it is what
-    // makes the FIRST launch's argv marker exist in the pane's history,
-    // which is what the post-restart wait below anchors "a second marker"
-    // against.
+    // Attached once before the restart for a single reason: waiting for
+    // READY is what proves the first launch is actually up, so the restart
+    // below exercises a live-session relaunch rather than racing the
+    // initial spawn.
     let (_chan, mut rx) = h
         .client
         .attach(&session.id, WIDE_COLS, ROWS)
@@ -689,13 +689,17 @@ async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
         .await
         .expect("attach after the relaunch");
     let mut seen = Vec::new();
-    // The relaunched run is identified by POSITION, not by content: both
+    // The first marker this attach sees IS the relaunched run's. Both
     // generations print the identical argv line (a fresh restart reruns
-    // the same invocation), and the reattach replays the first one. A
-    // second marker after the first is therefore the only evidence that
-    // the new launch has started printing — and its line has to be
+    // the same invocation), but `respawn-pane` reinitializes the visible
+    // grid and the first run never scrolled, so its marker exists nowhere
+    // the reattach could replay from — restart does not preserve the
+    // previous run's screen (SPEC.md, Lifecycle operations/Restart). This
+    // wait once anchored on a SECOND marker, back when the relaunch pushed
+    // the old grid into history first; waiting for two markers now times
+    // out, because only one can ever arrive. The line still has to be
     // complete before the "no `--resume`" assertion below means anything.
-    wait_for_after(&mut rx, &mut seen, ARGV_MARKER, ARGV_MARKER, 30).await;
+    wait_for(&mut rx, &mut seen, ARGV_MARKER, 30).await;
     wait_for_settled_argv(&mut rx, &mut seen, 30).await;
 
     // The verified path, as on every restart; identical to the created
@@ -909,10 +913,10 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
         .await
         .expect("attach after the relaunch");
     let mut seen = Vec::new();
-    // Identified by POSITION, like the other fresh-restart test: both
-    // generations print the same marker and the reattach replays the
-    // first.
-    wait_for_after(&mut rx, &mut seen, ARGV_MARKER, ARGV_MARKER, 30).await;
+    // The first marker is the relaunched run's, for the same reason as in
+    // the fresh-restart test above: the respawn reinitialized the grid, the
+    // first run never scrolled, so no replay can carry the old marker.
+    wait_for(&mut rx, &mut seen, ARGV_MARKER, 30).await;
     wait_for_settled_argv(&mut rx, &mut seen, 30).await;
 
     assert_wrapper_got(&session.id, &verified);

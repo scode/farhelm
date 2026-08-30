@@ -28,10 +28,9 @@
 //! must survive not just a supervisor crash but a full host reboot with
 //! the same fidelity SQLite gives the rest of the session's metadata.
 //!
-//! **Best-effort atomic** ([`overwrite_private_file`]). Write a fresh 0600
+//! **Best-effort atomic** ([`overwrite_private_file_sync`]). Write a fresh 0600
 //! temp file, `fsync` it, `rename` it over the destination; no fsync of
-//! the parent directory. Today's file classes: the alt-screen stop
-//! snapshot (`service.rs`'s `snapshot_path`) and the generated tmux config
+//! the parent directory. Today's one file class: the generated tmux config
 //! (`tmux.rs`'s `TmuxDriver::ensure_server`). "Losable, never torn": the
 //! file fsync means a torn/truncated INODE can never survive a power loss
 //! (unlike a bare `rename` with no file fsync at all, which can still
@@ -39,13 +38,11 @@
 //! the missing DIRECTORY fsync means the whole update — the directory
 //! entry now pointing at the new inode — can still be lost outright,
 //! reverting the destination to whatever it pointed at before. That is an
-//! acceptable loss for both file classes: a reattach after a crash-
-//! adjacent stop shows a blank screen instead of the app's last frame, and
-//! a lost tmux-config update is rebuilt from `TmuxDriver::config_body` on
-//! the very next `ensure_server` call regardless. Paying for a directory
-//! fsync on every stop and every server start to protect state that is
-//! either cosmetic or trivially regenerable would be spending durability
-//! budget where nothing durability-sensitive is at stake.
+//! acceptable loss for this file class: a lost tmux-config update is
+//! rebuilt from `TmuxDriver::config_body` on the very next
+//! `ensure_server` call regardless. Paying for a directory fsync on every
+//! server start to protect trivially regenerable state would be spending
+//! durability budget where nothing durability-sensitive is at stake.
 //!
 //! **Atomic-publication-before-launch** ([`write_private_file`]). Per-
 //! launch spec files (`launch/<id>.json`, `crate::launch::LaunchSpec`)
@@ -149,9 +146,9 @@
 //! path skips it entirely. Every temp file this module creates shares one
 //! naming convention — `.<destination-file-name>.tmp-<uuid>` — so a
 //! single backstop-sweep pattern ([`is_staged_temp_name`]) covers every
-//! tier: `service.rs`'s narrowed launch-dir sweep, its
-//! `sweep_snapshot_temp_files`, and its tmux-config-temp sweep all key off
-//! it. `crate::attachments` deliberately does NOT: its directories hold
+//! tier: `service.rs`'s narrowed launch-dir sweep and its
+//! tmux-config-temp sweep both key off it. `crate::attachments`
+//! deliberately does NOT: its directories hold
 //! user-chosen filenames, so it separates staging from publication
 //! positionally instead (see [`StagedStream::create`]) and sweeps a
 //! reserved directory rather than a name pattern.
@@ -173,9 +170,9 @@ use std::path::{Path, PathBuf};
 /// Deliberately NOT `Send + Sync`: nothing in this crate needs a
 /// `FaultSeam` trait object to cross a thread boundary. `write_staged`
 /// is synchronous end-to-end and never holds a seam reference across an
-/// `.await`; the async wrappers ([`overwrite_private_file`],
-/// [`write_private_file`]) construct a fresh [`RealFs`] INSIDE their
-/// `spawn_blocking` closure rather than moving a `dyn FaultSeam` into it,
+/// `.await`; the async wrapper ([`write_private_file`]) constructs a
+/// fresh [`RealFs`] INSIDE its `spawn_blocking` closure rather than
+/// moving a `dyn FaultSeam` into it,
 /// so only the concrete, trivially-`Send` `RealFs` ever crosses that
 /// boundary. Test seams are therefore free to use plain interior
 /// mutability (`RefCell`) instead of a `Mutex`.
@@ -455,31 +452,14 @@ pub fn write_durable_sync(path: &Path, bytes: &[u8], seam: &dyn FaultSeam) -> io
 /// rename; no directory fsync. See the module docs for this tier's
 /// "losable, never torn" contract and why no directory fsync is owed.
 ///
-/// Exposed for tests that want to inject a failure or observe ordering
-/// through [`FaultSeam`] without a tokio runtime; production code should
-/// use [`overwrite_private_file`].
+/// Takes the seam explicitly so tests can inject a failure or observe
+/// ordering through [`FaultSeam`]; production passes [`RealFs`].
 pub fn overwrite_private_file_sync(
     path: &Path,
     bytes: &[u8],
     seam: &dyn FaultSeam,
 ) -> io::Result<()> {
     write_staged(path, bytes, seam, Tier::BestEffort)
-}
-
-/// Async wrapper around [`overwrite_private_file_sync`] for production
-/// callers (the alt-screen stop snapshot, the generated tmux config).
-/// Offloaded to `spawn_blocking` because both the file fsync and the
-/// rename are blocking syscalls that must not run on an async worker
-/// thread; a fresh [`RealFs`] is constructed INSIDE the closure so only
-/// that trivially-`Send` zero-sized type, not a `dyn FaultSeam`, crosses
-/// the thread boundary (see [`FaultSeam`]'s own docs on why it need not
-/// be `Send + Sync`).
-pub async fn overwrite_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let path = path.to_path_buf();
-    let bytes = bytes.to_vec();
-    tokio::task::spawn_blocking(move || overwrite_private_file_sync(&path, &bytes, &RealFs))
-        .await
-        .unwrap_or_else(|join_err| Err(io::Error::other(join_err)))
 }
 
 /// Atomic-publication-before-launch write: temp file (no fsync), publish
@@ -497,9 +477,14 @@ pub fn write_private_file_sync(path: &Path, bytes: &[u8], seam: &dyn FaultSeam) 
 }
 
 /// Async wrapper around [`write_private_file_sync`] for the production
-/// launch-spec write (`service.rs`'s `create_session`). See
-/// [`overwrite_private_file`]'s docs for why `spawn_blocking` and a
-/// freshly-constructed [`RealFs`] are used the same way here.
+/// launch-spec write (`service.rs`'s `create_session`). Offloaded to
+/// `spawn_blocking` because the link and unlink are blocking syscalls
+/// that must not run on an async worker thread; a fresh [`RealFs`] is
+/// constructed INSIDE the closure so only that trivially-`Send`
+/// zero-sized type, not a `dyn FaultSeam`, crosses the thread boundary
+/// (see [`FaultSeam`]'s own docs on why it need not be `Send + Sync`).
+/// The best-effort tier has no async twin: its one caller (the tmux
+/// config, `tmux.rs`) writes from a synchronous context.
 pub async fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let path = path.to_path_buf();
     let bytes = bytes.to_vec();
@@ -938,7 +923,7 @@ mod tests {
 
     /// The durability-bearing temp file must be created 0600 regardless
     /// of any pre-existing mode at the destination — the same "mode set
-    /// at CREATE time, never by chmod" property [`overwrite_private_file`]
+    /// at CREATE time, never by chmod" property [`overwrite_private_file_sync`]
     /// already relies on, pinned separately here because this tier's
     /// temp file is additionally fsync'd before it is ever renamed.
     #[test]
@@ -1158,20 +1143,11 @@ mod tests {
         assert_eq!(seam.calls(), vec!["write", "link"]);
     }
 
-    /// The async wrapper ([`overwrite_private_file`]) exists to run
-    /// fsync-bearing, blocking I/O off the async runtime's worker threads
-    /// via `spawn_blocking` — this pins that it still produces the exact
-    /// same on-disk result as its `_sync` twin, rather than merely
-    /// trusting `spawn_blocking`'s plumbing by inspection.
-    #[tokio::test]
-    async fn overwrite_private_file_matches_its_sync_counterpart() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("snapshot");
-        overwrite_private_file(&path, b"frame").await.unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"frame");
-    }
-
-    /// Same pinning for [`write_private_file`]'s async wrapper.
+    /// The async wrapper ([`write_private_file`]) exists to run blocking
+    /// I/O off the async runtime's worker threads via `spawn_blocking` —
+    /// this pins that it still produces the exact same on-disk result as
+    /// its `_sync` twin, rather than merely trusting `spawn_blocking`'s
+    /// plumbing by inspection.
     #[tokio::test]
     async fn write_private_file_matches_its_sync_counterpart() {
         let tmp = tempfile::tempdir().unwrap();

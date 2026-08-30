@@ -213,9 +213,13 @@ The client supports: create, open, rename, restart, clone, stop, archive, delete
   supported (see Durability for the exact promise). This is the only relaunch mechanism: the resume offered when opening
   an interrupted session is this same operation, not a separate feature. There is no fresh-restart variant in v1 — for a
   clean conversation, create a new session in the same directory. Restart on a session whose agent is still running
-  confirms, stops the agent, then relaunches. Restart reuses the session's terminal when it still exists — the previous
-  run's output stays in scrollback — and creates a fresh one when it does not (after a reboot, or on an archived
-  session). Restart touches the agent terminal only; terminal tabs are unaffected.
+  confirms, stops the agent, then relaunches. Restart reuses the session's terminal when it still exists — whatever
+  scrollback the terminal itself retained is still there — and creates a fresh one when it does not (after a reboot, or
+  on an archived session). Restart does NOT preserve the previous run's last visible screen: the pane is blank until the
+  new agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing
+  it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of
+  the new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real
+  program draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are unaffected.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, working directory,
   title, and agent — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
   cloning starts a brand-new, independent create through the same form and the same confirmation described under
@@ -347,7 +351,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
   a day later, and the buffer is still there. There is no separate history store — when a host reboots or a session is
   archived, terminal contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited
-  session's terminal stays viewable while its host is up, since the terminal outlives the process.
+  session's terminal stays viewable while its host is up, since the terminal outlives the process. Viewable means what
+  the terminal itself holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is
+  taken or stored.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session: with a non-empty fleet, a freshly
   loaded client selects and attaches the session the user most recently had selected there — including after a desktop
   relaunch — falling back to the newest-created non-archived one, so launching the app is itself the deliberate act the

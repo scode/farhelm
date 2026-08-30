@@ -482,10 +482,10 @@ case this preflight cannot see: a private server already running on the socket f
 
 Historical note on what the floor made moot: below 3.7 the supervisor warned once at first attach and lost bracketed
 paste restoration (`bracket_paste_flag` arrived in 3.7), and on 3.3a `capture-pane -N` dropped trailing styled padding
-from a stop snapshot's dead-pane frame (found 2026-07-29 during M2.5's 3.3a validation). The first is a fallback the
-driver still carries (a missing `bracket_paste_flag` format) that the floor makes unreachable; the second was old tmux's
-own behavior under the same `capture-pane -N` the driver issues today, not a Farhelm code path. Both are recorded here
-so nobody rediscovers them as bugs.
+from a dead pane's captured frame (found 2026-07-29 during M2.5's 3.3a validation, in a since-removed stop-time
+capture). The first is a fallback the driver still carries (a missing `bracket_paste_flag` format) that the floor makes
+unreachable; the second was old tmux's own behavior under `capture-pane -N`, not a Farhelm code path. Both are recorded
+here so nobody rediscovers them as bugs.
 
 tmux is a headless PTY holder and history store. The supervisor's only client is a non-rendering control-mode client
 (`tmux -C`, the interface iTerm2's tmux integration is built on; `pipe-pane` is the fallback shape). Sizing (audited on
@@ -556,17 +556,24 @@ boundaries (resetting it only when a `%pause` catch-up abandons the stream it be
 SPEC.md's one-attachment rule itself.
 
 Exited-session semantics: `remain-on-exit on` keeps dead panes viewable per SPEC.md, and exit codes come from the dead
-pane's status. Exec failure versus ran-and-died cannot be told apart by exit code alone (a missing command yields 127
-and a non-executable file 126 — both indistinguishable from a program exiting with that code), so classification does
-not rely on exit codes: the shell execs `farhelm internal launch`, a shim that always exists, which resolves and execs
-the profile invocation and, on exec failure, writes a sentinel with the errno detail to a per-launch status file (named
-by session and launch generation, so a sentinel left by a failed earlier launch can never describe a later relaunch)
-before exiting. The supervisor classifies **error** on that sentinel; the one sentinel-less error path is a
-cgroup-scoped launch whose `systemd-run` wrapper died before the shim ever ran, recognized only by its full evidence
-shape (dead pane, launch spec still unconsumed, no sentinel) so it can never claim an agent that actually started. NOTE:
-a sentinel written by the shell after a failed `exec` was audited and rejected — interactive bash survives a failed
-exec, but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh users; the shim works
-identically under any `$SHELL`.
+pane's status. What a dead pane shows is exactly what tmux holds for it and nothing more: the supervisor takes no screen
+capture at stop, stores none, and appends nothing to a dead pane's replay. A restart into a surviving pane goes straight
+to `respawn-pane`, which keeps history and reinitializes the visible grid; the supervisor neither shrinks the window to
+push the grid into history first nor hands the launch shim a frame to paint before `exec`. SPEC.md forbids all three
+(the restart rules under Lifecycle operations, the no-snapshot rule under Terminal experience) because a painted frame
+with no process behind it is worse than a blank pane; do not reintroduce them. The one trace left is a startup sweep
+that deletes a `<state>/snapshots/` directory an older build wrote (`sweep_legacy_snapshots_dir`), so an upgrade does
+not strand captured frames on disk. Exec failure versus ran-and-died cannot be told apart by exit code alone (a missing
+command yields 127 and a non-executable file 126 — both indistinguishable from a program exiting with that code), so
+classification does not rely on exit codes: the shell execs `farhelm internal launch`, a shim that always exists, which
+resolves and execs the profile invocation and, on exec failure, writes a sentinel with the errno detail to a per-launch
+status file (named by session and launch generation, so a sentinel left by a failed earlier launch can never describe a
+later relaunch) before exiting. The supervisor classifies **error** on that sentinel; the one sentinel-less error path
+is a cgroup-scoped launch whose `systemd-run` wrapper died before the shim ever ran, recognized only by its full
+evidence shape (dead pane, launch spec still unconsumed, no sentinel) so it can never claim an agent that actually
+started. NOTE: a sentinel written by the shell after a failed `exec` was audited and rejected — interactive bash
+survives a failed exec, but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh
+users; the shim works identically under any `$SHELL`.
 
 Motivation for never rendering through a normal attach: a rendering tmux client takes over the outer terminal on the
 alternate screen and draws everything itself, which kills native scrolling — xterm.js would accumulate no scrollback,

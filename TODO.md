@@ -83,34 +83,6 @@ Within a bucket, no order.
   per-host catalog rules; remove the "a default belongs to an INSTALL" reasoning wherever it appears. Write-up:
   https://claude.ai/code/artifact/6476812c-681b-4d06-9b08-59911451f1e0
 
-- Remove every mechanism that preserves a terminal's last visible screen across the end of the process that drew it. The
-  whole feature, in user terms: when you stop or restart an agent that is on the alternate (full-screen) screen, its
-  final frame stays on screen instead of vanishing. Three mechanisms deliver it and all three go: (1) the stop-time
-  snapshot — `capture_alt_screen_before_stop` in `handlers.rs`/`core.rs`, the SGR-sanitising parser in
-  `tmux/snapshot.rs`, the 2 MiB-capped private store in `service/snapshots.rs` with its temp-file sweep, and
-  `send_dead_pane_snapshot` in `connection.rs` that appends it to a dead pane's replay; (2) the restart carry-over — the
-  same capture taken before the kill (`live_frame` in `restart_session`), `PaneRelaunchPlan::carry_over` read off a dead
-  pane, and `LaunchSpec::preamble`, which the launch shim writes into the new terminal BEFORE it execs the agent; (3)
-  the one-row shrink-and-restore in `plan_pane_relaunch` that pushes a primary-screen pane's visible grid into history
-  before `respawn-pane` wipes it. Roughly 1,250 lines for (1) plus the plan/preamble plumbing across `tmux.rs`,
-  `launch.rs`, and `core.rs`, and the e2e coverage of each. Mechanism (2) is the one the maintainer has been hitting as
-  a bug: after a restart the old agent's final screen is painted by the shim with no process behind it, looks ready,
-  accepts typing, and is then replaced when the real agent draws — a picture of a dead process presented as live. After
-  removal: stop leaves the pane showing whatever the terminal itself still holds (for a full-screen app, the primary
-  screen from before it started), restart leaves the pane blank until the new agent draws, and scrollback is whatever
-  tmux retained on its own. Reconnect replay of a LIVE terminal is a different thing and stays. SPEC EDITS, in the same
-  PR, and this one needs the negative language most because the feature was invented from a permissive sentence: SPEC.md
-  Lifecycle operations/Restart currently says "the previous run's output stays in scrollback" — change to "whatever
-  scrollback the terminal itself retained is still there" and add that restart does NOT preserve the previous run's last
-  visible screen: the pane is blank until the new agent draws, a full-screen program's final frame (never in scrollback
-  to begin with) is gone, losing it is accepted, and Farhelm must never capture a terminal's screen and paint it back
-  into a relaunched terminal ahead of the new process — a frame with no process behind it looks live, accepts typing,
-  and is overwritten when the real program draws, which is worse than blank. Terminal experience, beside "a stopped or
-  exited session's terminal stays viewable" — add that viewable means what the terminal itself holds; a full-screen
-  program's last frame is not retained after it exits and no snapshot of it is taken or stored. SPEC_impl.md: delete the
-  `PaneRelaunchPlan`/shrink paragraph and every mention of the stop-time alt-screen snapshot and the launch preamble.
-  Write-up: https://claude.ai/code/artifact/9422fb9d-2cc2-4a1f-a8dd-5876b9dda930
-
 ## Near term
 
 - Deflake the browser merge gate: three e2e tests fail on main itself, deterministically — found 2026-08-31 while gating

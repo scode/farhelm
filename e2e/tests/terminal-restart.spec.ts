@@ -4,8 +4,8 @@
 // SPEC.md's restart is a lifecycle operation with a UI contract of its
 // own: an interrupted session's view leads with the resume offer,
 // declining it changes nothing, a live session confirms first, and a
-// reused terminal still shows the previous run above the new one. All
-// four are below.
+// reused terminal keeps whatever scrollback tmux itself retained from the
+// previous run, with the new run drawing below it. All four are below.
 // ---------------------------------------------------------------------
 
 import { expect, test } from "@playwright/test";
@@ -218,6 +218,18 @@ test("restarting a live session confirms first, and only then sends the request 
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FAKE-AGENT READY");
 
+    // The >= 2 banner count at the end needs the FIRST run's banner to
+    // survive the respawn, and only tmux history survives one — the
+    // visible grid, where a two-line run's banner still sits, is wiped
+    // (SPEC.md, Lifecycle operations/Restart). Scroll it into history
+    // before restarting: `spam 60` is more lines than any terminal this
+    // test runs in has rows, and the last line's arrival is the barrier,
+    // exactly as in the scrollback-retention test below.
+    await page.locator("#terminal").click();
+    await page.keyboard.type("spam 60");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "spam-line-60");
+
     // Wait until the view's own status-derived decision says this click
     // will confirm rather than restart outright (`data-confirms`, set from
     // the session's status): the view opens on the create reply's
@@ -265,9 +277,9 @@ test("restarting a live session confirms first, and only then sends the request 
     expect(bodies[0].mode).toBe("fresh");
 
     // And the relaunch actually comes up. Counted rather than merely
-    // matched: the reused terminal's scrollback still holds the FIRST
-    // run's banner, so `toContain` would pass without the new run having
-    // printed anything at all.
+    // matched: the spam above pushed the FIRST run's banner into the
+    // reused terminal's retained history, so `toContain` would pass
+    // without the new run having printed anything at all.
     await expect
       .poll(
         async () => (await termText(page)).split("FAKE-AGENT READY").length - 1,
@@ -286,17 +298,24 @@ test("restarting a live session confirms first, and only then sends the request 
 });
 
 // SPEC.md: "Restart reuses the session's terminal when it still exists —
-// the previous run's output stays in scrollback". Asserted from the
-// BROWSER's own buffer after the restart's remount, which is the only view
-// a user actually has of that promise: the buffer starts empty on remount,
-// so everything in it afterwards came back through replay of the reused
-// pane's scrollback.
+// whatever scrollback the terminal itself retained is still there" — and,
+// in the same paragraph, restart "does NOT preserve the previous run's
+// last visible screen: the pane is blank until the new agent draws". So
+// what survives a restart is HISTORY, not the visible grid: `respawn-pane`
+// keeps tmux's scrollback and reinitializes the screen. The marker is
+// therefore pushed off the visible screen before the restart — `spam 60`
+// exceeds the fitted browser terminal's height (about 45 rows at most in
+// this suite's 1280x720 viewports) — so that its survival is the retained
+// scrollback and nothing else. Asserted from the BROWSER's own buffer
+// after the restart's remount, which is the only view a user actually has
+// of that promise: the buffer starts empty on remount, so everything in it
+// afterwards came back through replay of the reused pane's scrollback.
 //
 // The marker is typed rather than taken from the startup banner, because
 // both runs print the same banner — text only the FIRST run could have
 // produced is what makes this about retention rather than about the new
 // run having printed something.
-test("a restarted session's terminal still shows the previous run above the new one", async ({
+test("a restarted session's terminal still shows the previous run's scrollback above the new one", async ({
   page,
   request,
 }) => {
@@ -316,6 +335,21 @@ test("a restarted session's terminal still shows the previous run above the new 
     await page.keyboard.type("PRIOR-RUN-MARKER");
     await page.keyboard.press("Enter");
     await waitForTermText(page, "echo:PRIOR-RUN-MARKER");
+    // Push the marker into tmux's history: more lines than any terminal
+    // this test runs in has rows. The last spam line's arrival is the
+    // barrier, so the restart cannot land while the marker is still on
+    // the visible grid that the respawn wipes.
+    await page.keyboard.type("spam 60");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "spam-line-60");
+    // And one marker that stays on the VISIBLE GRID only, typed after the
+    // spam so nothing ever scrolls it into history. Its absence after the
+    // restart is the other half of the contract: finding it would mean
+    // something preserved the visible grid across the respawn — the
+    // forbidden shrink-and-restore trick.
+    await page.keyboard.type("GRID-ONLY-MARKER");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:GRID-ONLY-MARKER");
 
     const restartButton = page.locator(".restart-primary");
     await expect(restartButton).toHaveAttribute("data-confirms", "true", {
@@ -324,22 +358,26 @@ test("a restarted session's terminal still shows the previous run above the new 
     await restartButton.click();
     await page.locator(".restart-confirm").click();
 
-    // Both facts at once, and in order: the prior run's typed marker is
-    // still there, and the new run's banner is BELOW it. A plain
-    // "contains both" would also pass if the restart had never happened
-    // (the pre-restart buffer contains both too), so the anchor is the
-    // marker's position relative to the LAST banner.
+    // Three facts at once, and in order: the prior run's typed marker came
+    // back out of retained scrollback, the new run's banner is BELOW it,
+    // and the grid-only marker did NOT come back. A plain "contains both"
+    // would also pass if the restart had never happened (the pre-restart
+    // buffer contains both too), so the anchor is the marker's position
+    // relative to the LAST banner — and the buffer starts empty on the
+    // restart's remount, so a grid-only marker in it could only have come
+    // from the replay, never from the pre-restart screen.
     await expect
       .poll(
         async () => {
           const text = await termText(page);
           const marker = text.indexOf("PRIOR-RUN-MARKER");
           const banner = text.lastIndexOf("FAKE-AGENT READY");
-          return marker >= 0 && banner > marker;
+          return marker >= 0 && banner > marker && !text.includes("GRID-ONLY-MARKER");
         },
         {
           timeout: 30_000,
-          message: "prior run's output above the relaunched agent's",
+          message:
+            "prior run's retained scrollback (and nothing from its visible grid) above the relaunched agent's output",
         },
       )
       .toBe(true);
@@ -387,6 +425,14 @@ test("a restart whose response is lost still recovers the terminal", async ({
     await page.keyboard.type("BEFORE-LOST-RESTART");
     await page.keyboard.press("Enter");
     await waitForTermText(page, "echo:BEFORE-LOST-RESTART");
+
+    // The marker anchors the ordering assertion below, so it has to
+    // survive the respawn — and only tmux history survives one; the
+    // visible grid, where the marker still sits, is wiped (SPEC.md,
+    // Lifecycle operations/Restart). Scroll it off-screen first.
+    await page.keyboard.type("spam 60");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "spam-line-60");
 
     const restartButton = page.locator(".restart-primary");
     await expect(restartButton).toHaveAttribute("data-confirms", "true", {
@@ -499,6 +545,17 @@ test("a restarted session's banner clears once the new attachment is live", asyn
     await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 15_000 });
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FAKE-AGENT READY");
+
+    // The count-of-two anchor at the end needs the FIRST run's banner in
+    // tmux history, because the respawn wipes the visible grid where it
+    // would otherwise still sit (SPEC.md, Lifecycle operations/Restart).
+    // Done before arming the banner observer so the observer's window
+    // stays tight around the restart itself.
+    await page.locator("#terminal").click();
+    await page.keyboard.type("spam 60");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "spam-line-60");
+
     await page.evaluate(() => (window as any).__armBannerLog());
 
     const restartButton = page.locator(".restart-primary");
