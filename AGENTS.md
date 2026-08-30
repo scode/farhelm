@@ -116,6 +116,11 @@ green does not include e2e, so skipping it at merge time means shipping unexerci
 in the same PR — the file only ever describes what is still wanted. Do not add entries on your own initiative; they are
 the maintainer's.
 
+"tldr todo", "what's in the todo", and similar requests mean the FULL list, grouped under the file's own bucket
+headings, in the file's order, one to two sentences per entry: what it is and, when the entry says so, why or the first
+step. Every entry, not a selection — the point is to see the whole board at a glance. Bold a short handle at the start
+of each line so an entry can be referred to by name afterwards.
+
 # Desktop/web UI bug triage
 
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
