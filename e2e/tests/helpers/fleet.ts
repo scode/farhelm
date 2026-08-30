@@ -11,6 +11,7 @@
 // stay local.
 import { APIRequestContext, expect, Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
 /**
  * The fake agent's `basic` script, as the create form's `invocation` string
@@ -985,4 +986,42 @@ export async function openHostMenu(row: Locator): Promise<void> {
     ".host-row-menu-panel",
     "waiting for the host actions panel to finish measuring against its own toggle",
   );
+}
+
+/**
+ * Whether passwordless `ssh localhost` works, probed DIRECTLY rather than
+ * inferred from the helm.
+ *
+ * Independence is the whole value: inferring it from "the ssh host never
+ * reached connected" conflates the one condition a fleet suite may skip for
+ * with every condition it must not — a broken transport, a supervisor that
+ * will not start, a helm that mis-registers the ensure file. Those are bugs
+ * those suites exist to catch, and a fleet probe that treats them as "no
+ * self-ssh here" reports them as a skip.
+ *
+ * The options mirror the Rust suite's own probe exactly: `BatchMode=yes` so
+ * every interactive fallback fails instead of hanging, and
+ * `StrictHostKeyChecking=yes` rather than `accept-new` because a test suite
+ * must not write to the developer's `known_hosts`.
+ *
+ * Shared rather than copied per suite because the answer must not differ
+ * between them: two probes that drifted in their ssh options would have one
+ * suite skip where the other ran, which reads as a flake rather than as the
+ * configuration difference it is. What each suite still owns is what to DO
+ * with the answer — the skip text, and whether a missing fleet is a failure
+ * in CI — because that depends on what the suite is for.
+ *
+ * Not `async`: it builds and returns one promise, and an `async` wrapper
+ * around `return await` only adds a microtask tick and an extra frame.
+ */
+export function selfSshAvailable(): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const probe = spawn(
+      "ssh",
+      ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "localhost", "true"],
+      { stdio: "ignore" },
+    );
+    probe.on("error", () => resolve(false));
+    probe.on("exit", (code) => resolve(code === 0));
+  });
 }

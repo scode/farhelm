@@ -268,8 +268,8 @@ they exit non-zero naming the environment variable that is missing.
 
 The answer comes from the HELM, not from the session's own machine: every host and every session it knows, wherever they
 are running, with the asking session and its host marked `*` in the first column. That is deliberately wider than
-`farhelm spawn`, which only ever creates on the session's own host. Output is an aligned table on stdout, one row per
-line, with anything else on stderr — so a script can capture the table alone.
+`farhelm spawn`, which is answered by the session's own supervisor and only ever creates on that host. Output is an
+aligned table on stdout, one row per line, with anything else on stderr — so a script can capture the table alone.
 
 ```
 $ farhelm agent sessions
@@ -301,14 +301,40 @@ host-wide sweep that reaches every process carrying that session's marker can SI
 before it gets to print — stopping or archiving yourself is supposed to end the whole tree, calling CLI included, so a
 script relying on that confirmation should target a session other than its own.
 
+And it carries two verbs that CREATE, which is where going through the helm buys something `farhelm spawn` cannot do at
+all:
+
+```
+farhelm agent create --cwd <dir> [--host <name>] [--profile <name> | --invocation <cmd>] [--title <t>] [--idempotency-key <key>]
+farhelm agent clone [--host <name>] [--cwd <dir>] [--title <t>] [--idempotency-key <key>]
+```
+
+`create` makes a session on any host; `clone` copies the asking session onto any host — same directory, same title, same
+agent — which is the "start another one of these over on the build box" that used to mean walking to the UI. `--host`
+takes a name straight out of `farhelm agent hosts`; leave it off and you get the host you are already on. Both print the
+new session's id on stdout and nothing else, with the confirmation on stderr, so
+`id=$(farhelm agent clone --host builder)` works. `--idempotency-key` is what makes an ambiguous retry safe: re-running
+with the same key returns the session the first attempt made instead of creating a second one, provided the retry names
+the same selector.
+
+The agent is resolved by profile NAME on the target host, and this is the part worth understanding: profile ids are
+minted per machine, so a clone onto ANOTHER host looks up a profile with the same NAME in that host's own catalog. No
+such name there is a refusal saying so, never a quiet fall back to running the source's command line on a machine that
+may not have that binary. A clone onto your OWN host is the exception and needs no lookup: it follows the source
+session's exact profile, even if that profile has since been renamed or deleted (deleted gives you a refusal rather than
+whatever now carries the old name). A session you created from a raw command line has no profile name to resolve and
+clones as that command line. A `create` naming neither `--profile` nor `--invocation` uses the target host's last-used
+profile, the same default the create dialog offers.
+
 The failure worth knowing about is `no helm is attached to this session`. The relay reaches the helm that currently
 holds the session open, so a session no client is looking at has no route to ask: open the session in the Farhelm UI and
 run the command again.
 
 ### Talking to Farhelm from inside a session
 
-You should not have to explain any of the above to your agent. Write `$farhelm <whatever you want to know>` in a message
-to it — "$farhelm what else is running?", "$farhelm which hosts are up?" — and it should reach for the CLI on its own.
+You should not have to explain any of the above to your agent. Write `$farhelm <whatever you want to do>` in a message
+to it — "$farhelm what else is running?", "$farhelm which hosts are up?", "$farhelm clone this session onto builder" —
+and it should reach for the CLI on its own.
 
 That works because the `SessionStart` hook Farhelm already injects for conversation identity prints one line the agent
 reads: that `$farhelm ...` means the `farhelm agent` CLI, and that `farhelm agent instructions` explains the rest. The

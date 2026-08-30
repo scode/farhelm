@@ -235,7 +235,8 @@ pub const AGENT_DELIVER_TIMEOUT: Duration = Duration::from_secs(5);
 /// "delivered, outcome unknown" that every pending upcall on a dead link
 /// already gets.
 ///
-/// Ten minutes: far past any plausible far-hop rename/stop/archive (the helm
+/// Ten minutes: far past any plausible far-hop mutation — a
+/// rename/stop/archive, or a create/clone (the helm
 /// routes it to another supervisor, which has its own budgets an order of
 /// magnitude shorter), and short enough that a wedged link is not a
 /// permanent one. Deliberately not tight — reaching it means killing a
@@ -3463,7 +3464,9 @@ pub struct Supervisor {
     /// lifecycle claim while holding either of the other two.
     pub(crate) lifecycle_locks: Arc<KeyedLocks>,
     /// One claim per ASKING session id, held for the whole of a MUTATING
-    /// `AgentRequest` upcall (`Rename`/`Stop`/`Archive`) — see
+    /// `AgentRequest` upcall — every verb
+    /// [`farhelm_proto::AgentVerb::is_mutating`] answers `true` for, which
+    /// is the lifecycle three plus the two creating verbs. See
     /// `handlers::handle_agent_request`'s `AgentRequest` arm.
     ///
     /// This is a lease on the CREDENTIAL that admitted the upcall, not on

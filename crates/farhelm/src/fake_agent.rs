@@ -172,6 +172,23 @@ pub enum Script {
     ///
     /// See [`hook_report`] for the markers and what each one proves.
     HookReport,
+    /// The whole agent-facing chain, acted out end to end: read the
+    /// injected `SessionStart` hook out of this launch's own `--settings`
+    /// argv, RUN it, obey the pointer line it prints by running `farhelm
+    /// agent instructions`, and then serve `$farhelm ...` requests typed
+    /// into the terminal by running the `farhelm agent` verbs.
+    ///
+    /// This is the only fixture that exercises the feature the way a real
+    /// vendor would, and every link is genuine except one. The settings
+    /// JSON is the supervisor's own; the hook is the shipped `farhelm
+    /// internal hook` binary; the pointer line is the one it prints; the
+    /// instructions are the shipped manual; the verbs are the shipped CLI,
+    /// resolved BY NAME so the launch shim's PATH is under test too. The
+    /// single stand-in is *what decides a conversation started* — a fixture
+    /// that reads its own argv, rather than a vendor that fires the hook.
+    ///
+    /// See [`agent_relay`] for the markers and the stdin grammar.
+    AgentRelay,
     /// Echoes one rc-file-sourced environment variable
     /// ([`RC_MARKER_VAR`]) at startup, then behaves like [`Script::Basic`].
     ///
@@ -257,6 +274,7 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
         Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home, false),
         Script::CodexRecord => record_agent(RecordShape::Codex, record_home, false),
         Script::HookReport => record_agent(RecordShape::Claude, record_home, true),
+        Script::AgentRelay => agent_relay(),
         Script::EnvEcho => env_echo(),
     }
 }
@@ -310,6 +328,353 @@ fn spawn_session() -> anyhow::Result<()> {
         out.flush()?;
     }
     Ok(())
+}
+
+/// The marker prefix [`agent_relay`] prints the injected hook's own stdout
+/// under.
+///
+/// Named as a constant rather than spelled at the one write site because a
+/// test asserts on it, and because the three markers below travel together
+/// as one contract — the same discipline the record markers follow.
+pub const AGENT_RELAY_POINTER_MARKER: &str = "POINTER:";
+
+/// The marker [`agent_relay`] prints once it has read the manual the
+/// pointer line told it to read.
+pub const AGENT_RELAY_INSTRUCTIONS_MARKER: &str = "INSTRUCTIONS:";
+
+/// The marker carrying a successful clone's new session id.
+pub const AGENT_RELAY_CLONED_MARKER: &str = "CLONED:";
+
+/// The marker carrying whatever went wrong instead — a refusal from any of
+/// the three hops, verbatim.
+pub const AGENT_RELAY_ERROR_MARKER: &str = "CLONE-ERROR:";
+
+/// Act out the whole chain a real agent walks: hook, pointer, manual, then
+/// `$farhelm ...` requests from the terminal.
+///
+/// ## Why this fixture reads its own argv
+///
+/// The supervisor injects the `SessionStart` hook by APPENDING
+/// `--settings <json>` to a Claude-kind launch's command line
+/// (`agent_kind::ClaudeIntegration::hook_argv`). A real vendor parses that
+/// JSON and fires the hook when a conversation starts. CI cannot have a
+/// real vendor, so this fixture does the parsing itself and fires the hook
+/// at startup — which is the ONE faked link in the chain. Everything on
+/// either side of it is the shipped product: the settings JSON is the
+/// supervisor's, the hook is `farhelm internal hook`, the pointer line is
+/// the one that hook prints, and the verbs below are the shipped CLI.
+///
+/// Reading `std::env::args()` rather than the parsed `extra` tail is
+/// deliberate: what is under test is the argv the SUPERVISOR built, so the
+/// fixture should see exactly what a vendor would, not a re-parse of it.
+///
+/// ## Markers, and what each one proves
+///
+/// - `POINTER:<line>` — the injected hook ran and wrote to stdout. A real
+///   vendor splices that stdout into the model's context; printing it here
+///   is this fixture standing in for that splice, and it is what makes
+///   "the hook fired and said something" observable to a test.
+/// - `INSTRUCTIONS:ok` (or `INSTRUCTIONS:missing-...`) — the fixture did
+///   what the pointer told it to and got a manual that actually documents
+///   the verb it is about to use. The failure spelling matters: a manual
+///   that no longer mentions `clone` would otherwise show up three steps
+///   later as an unexplained clone failure.
+/// - `CLONED:<id>` / `CLONE-ERROR:<text>` — the result of one request.
+///
+/// Every line ends `\r` because this runs on a pty, where a bare `\n`
+/// leaves the cursor in the wrong column and the next line renders
+/// staircased.
+///
+/// ## The stdin grammar
+///
+/// One request per line, in the shape a user would actually type at an
+/// agent:
+///
+/// ```text
+/// $farhelm clone this session onto <host name>
+/// $farhelm clone this session onto <host name> in <directory>
+/// ```
+///
+/// The host name may contain spaces — `user@host` names do not, but a
+/// local host is called `this machine` — so it is taken whole, up to the
+/// first ` in ` (see [`clone_request`] for which side of that separator
+/// wins and why). The `in <directory>` suffix is what a test uses to aim a
+/// clone at a directory the target does not have, which is the create
+/// refusal SPEC.md's agent section requires to arrive verbatim.
+///
+/// A request is served in two steps, and the first is not ceremony: the
+/// fixture runs `farhelm agent hosts` and refuses a name that is not in
+/// that listing. That is the behavior the feature is FOR — an agent naming
+/// a target it read out of the fleet rather than one it guessed — and
+/// doing it here is what makes the listing part of the tested chain
+/// instead of an untested sibling.
+fn agent_relay() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+
+    // Step one: the hook the supervisor injected into THIS launch.
+    match run_injected_hook() {
+        Ok(pointer) => writeln!(out, "{AGENT_RELAY_POINTER_MARKER}{pointer}\r")?,
+        Err(error) => writeln!(out, "{AGENT_RELAY_POINTER_MARKER}ERROR:{error:#}\r")?,
+    }
+    // Step two: obey it. `farhelm` by NAME, never `current_exe`, because
+    // the pointer line tells a model to run `farhelm agent instructions`
+    // and the launch shim's PATH prepend is what makes that resolvable —
+    // exactly the contract `spawn_session` above exists to prove.
+    let verdict = match &std::process::Command::new("farhelm")
+        .args(["agent", "instructions"])
+        .output()
+    {
+        Ok(result) if !result.status.success() => {
+            format!("failed:{}", String::from_utf8_lossy(&result.stderr).trim())
+        }
+        Ok(result) => {
+            let text = String::from_utf8_lossy(&result.stdout);
+            if text.contains("farhelm agent clone") {
+                "ok".to_string()
+            } else {
+                "missing-clone-verb".to_string()
+            }
+        }
+        Err(error) => format!("failed:{error}"),
+    };
+    writeln!(out, "{AGENT_RELAY_INSTRUCTIONS_MARKER}{verdict}\r")?;
+
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    for line in std::io::stdin().lock().lines() {
+        let line = line.context("reading an agent-relay fixture request")?;
+        match clone_request(line.trim()) {
+            Some((host, cwd)) => match run_clone(&host, cwd.as_deref()) {
+                Ok(id) => writeln!(out, "{AGENT_RELAY_CLONED_MARKER}{id}\r")?,
+                Err(message) => writeln!(out, "{AGENT_RELAY_ERROR_MARKER}{message}\r")?,
+            },
+            None if line.trim().is_empty() => continue,
+            None => writeln!(
+                out,
+                "{AGENT_RELAY_ERROR_MARKER}unrecognized request: {}\r",
+                line.trim()
+            )?,
+        }
+        out.flush()?;
+    }
+    Ok(())
+}
+
+/// Find this launch's injected `--settings` JSON, run the `SessionStart`
+/// hook it declares, and return the hook's stdout.
+///
+/// Both `--settings <json>` and `--settings=<json>` are accepted, because
+/// both are the same flag to the vendor — the same pair the supervisor's
+/// own injection-skip check treats as equivalent, and a fixture that
+/// understood only one spelling would silently stop testing anything if
+/// that injection ever changed shape.
+///
+/// The hook is run through `sh -c` because the command in that JSON is a
+/// SHELL command line, quoted by the supervisor's `hook_command`; running
+/// it any other way would re-parse quoting the supervisor already did.
+/// THAT IS SAFE ONLY BECAUSE OF WHERE THE STRING COMES FROM. It is this
+/// installation's own supervisor's output, arriving through a launch this
+/// same supervisor performed — trusted end to end. The shape must not be
+/// copied to any string an agent, a listing, or a peer host supplied: `sh
+/// -c` on such a value is command injection, and this file is the obvious
+/// place someone would copy the pattern from.
+///
+/// The child is waited on under [`HOOK_CHILD_DEADLINE`] rather than with
+/// `wait_with_output`, for [`wait_bounded`]'s reason: a wedged hook would
+/// otherwise hold this fixture until Playwright's outer timeout and leave
+/// its process behind.
+///
+/// The payload on stdin is a Claude-shaped `SessionStart` body, so the
+/// hook's identity half does real work rather than bailing on an empty
+/// payload — this fixture stands in for the vendor, and a vendor sends one.
+fn run_injected_hook() -> anyhow::Result<String> {
+    let argv: Vec<String> = std::env::args().collect();
+    let settings = argv
+        .iter()
+        .enumerate()
+        .find_map(|(index, element)| {
+            if let Some(inline) = element.strip_prefix("--settings=") {
+                return Some(inline.to_string());
+            }
+            if element == "--settings" {
+                return argv.get(index + 1).cloned();
+            }
+            None
+        })
+        .context(
+            "this launch carries no --settings; it was not started under a Claude-kind profile",
+        )?;
+
+    let settings: serde_json::Value =
+        serde_json::from_str(&settings).context("the injected --settings is not JSON")?;
+    // Borrowed from `settings`, which outlives the spawn below: the command
+    // is only ever handed to `Command::arg`, and copying it would be an
+    // allocation for nothing.
+    let command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        .as_str()
+        .context("the injected settings declare no SessionStart hook command")?;
+
+    let session = std::env::var("FARHELM_SESSION_ID").unwrap_or_default();
+    let cwd = std::env::current_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let payload = serde_json::json!({
+        // A conversation id shaped like the vendor's, derived from the
+        // session so two fixtures never collide and a test can predict it.
+        "session_id": format!("fake-conversation-{session}"),
+        "source": "startup",
+        "cwd": cwd,
+    })
+    .to_string();
+
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        // Inherited on purpose: the hook's contract is that it writes
+        // NOTHING to stderr, and letting it reach the pane is what would
+        // make a violation visible in a test's transcript.
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .context("running the injected SessionStart hook")?;
+    {
+        // Scoped so the pipe is CLOSED before the wait: the hook reads to
+        // EOF, and a writer that never hangs up turns every run into a
+        // timeout.
+        let mut stdin = child.stdin.take().context("the hook child has no stdin")?;
+        stdin
+            .write_all(payload.as_bytes())
+            .context("writing the hook payload")?;
+    }
+    if wait_bounded(
+        &mut child,
+        HOOK_CHILD_DEADLINE,
+        "the injected SessionStart hook",
+    )?
+    .is_none()
+    {
+        anyhow::bail!(
+            "the injected SessionStart hook did not finish within {HOOK_CHILD_DEADLINE:?} and was \
+             killed"
+        );
+    }
+    // Read after the child is gone, so the pipe is closed and this cannot
+    // block.
+    let mut stdout = Vec::new();
+    child
+        .stdout
+        .take()
+        .context("the hook child was spawned with a piped stdout")?
+        .read_to_end(&mut stdout)
+        .context("reading the hook's stdout")?;
+    Ok(String::from_utf8_lossy(&stdout).trim_end().to_string())
+}
+
+/// Parse one `$farhelm clone this session onto <host>[ in <dir>]` line.
+///
+/// Returns the host name and the optional directory, or `None` for
+/// anything else — an unrecognized line is answered rather than ignored
+/// (see [`agent_relay`]'s loop), so a test that mistypes its request gets
+/// told rather than timing out.
+///
+/// The ` in ` separator is the FIRST one, not the last, and the asymmetry
+/// is deliberate: whichever end it is searched from, one of the two fields
+/// loses the right to contain the phrase, so the question is which loss is
+/// real. A DIRECTORY containing ` in ` is an ordinary path — `/srv/project
+/// in staging` is a legal directory name and is exactly the sort of thing a
+/// refusal test aims a clone at. A HOST name containing it is not
+/// reachable in this fixture's world: a host is either an ssh destination,
+/// which has no spaces at all, or the local row, which every fleet calls
+/// `this machine`. Searching from the right (which this did until a review
+/// caught it) put the split inside such a directory, inventing a host
+/// nobody named and truncating the path to its last word.
+fn clone_request(line: &str) -> Option<(String, Option<String>)> {
+    let tail = line.strip_prefix("$farhelm clone this session onto ")?;
+    match tail.split_once(" in ") {
+        Some((host, cwd)) => Some((host.trim().to_string(), Some(cwd.trim().to_string()))),
+        None => Some((tail.trim().to_string(), None)),
+    }
+}
+
+/// Confirm `host` is a real host and clone this session onto it.
+///
+/// The `Err` string is whatever actually refused, verbatim, from whichever
+/// hop produced it: this fixture's own "not in the hosts listing", the
+/// helm's "no host named", or the TARGET supervisor's own create refusal
+/// relayed back through two hops. Paraphrasing here would defeat the point
+/// — a test asserting the refusal text is asserting that the far side's
+/// sentence survived the trip.
+fn run_clone(host: &str, cwd: Option<&str>) -> Result<String, String> {
+    let hosts = std::process::Command::new("farhelm")
+        .args(["agent", "hosts"])
+        .output()
+        .map_err(|error| format!("running farhelm agent hosts: {error}"))?;
+    if !hosts.status.success() {
+        return Err(format!(
+            "farhelm agent hosts failed: {}",
+            String::from_utf8_lossy(&hosts.stderr).trim()
+        ));
+    }
+    let listing = String::from_utf8_lossy(&hosts.stdout);
+    if !listing_names_host(&listing, host) {
+        return Err(format!(
+            "no host named {host} in the hosts listing: {}",
+            listing.replace('\n', " | ")
+        ));
+    }
+
+    let mut command = std::process::Command::new("farhelm");
+    command.args(["agent", "clone", "--host", host]);
+    if let Some(cwd) = cwd {
+        command.args(["--cwd", cwd]);
+    }
+    let cloned = command
+        .output()
+        .map_err(|error| format!("running farhelm agent clone: {error}"))?;
+    if !cloned.status.success() {
+        return Err(String::from_utf8_lossy(&cloned.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&cloned.stdout).trim().to_string())
+}
+
+/// Whether `farhelm agent hosts`' table has a row whose NAME column is
+/// exactly `host`.
+///
+/// Column-sliced rather than whitespace-split, and that is not fussiness:
+/// the very first host every fleet has is called `this machine`, so a
+/// splitter would read its name as `this` and refuse the one target that
+/// always exists. The NAME column runs from the two-character marker
+/// column to wherever the header's `KIND` label begins, which is exact —
+/// `aligned` pads every non-final cell to its column's width.
+///
+/// Offsets are taken in CHARS, not bytes, because that padding counts
+/// chars; a non-ASCII host name anywhere in the listing would otherwise
+/// put byte offsets and column boundaries out of step for every row after
+/// it.
+///
+/// Whole-cell equality rather than a prefix or substring test, so a fleet
+/// holding both `builder` and `builder-2` cannot answer for the wrong one.
+fn listing_names_host(listing: &str, host: &str) -> bool {
+    let mut rows = listing.lines();
+    let Some(header) = rows.next() else {
+        return false;
+    };
+    let Some(name_end) = header
+        .find("KIND")
+        .map(|byte| header[..byte].chars().count())
+    else {
+        return false;
+    };
+    rows.any(|row| {
+        let name: String = row
+            .chars()
+            .skip(2)
+            .take(name_end.saturating_sub(2))
+            .collect();
+        name.trim_end() == host
+    })
 }
 
 /// Report [`RC_MARKER_VAR`] as the launch's shell resolved it, then run
@@ -504,8 +869,9 @@ fn record_agent(
 /// never answers rather than as a compile error.
 const REPORT_COMMAND: &str = "report ";
 
-/// Longest [`hook_report`] waits for one hook child before declaring it
-/// hung, killing it, and carrying on.
+/// Longest this fixture waits for one hook child — [`hook_report`]'s, and
+/// the injected `SessionStart` hook [`run_injected_hook`] runs — before
+/// declaring it hung, killing it, and carrying on.
 ///
 /// Generously past the hook binary's own 2 s internal budget, and well
 /// inside the 30 s the tests give a `report` line: a fixture that blocked
@@ -513,6 +879,46 @@ const REPORT_COMMAND: &str = "report ";
 /// then fail with a transcript that says nothing about why, whereas a
 /// `HOOK-HUNG:` marker names the failure in the pane the test prints.
 const HOOK_CHILD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Wait for one child under a deadline, killing and REAPING it if the
+/// deadline passes; `None` means it was killed.
+///
+/// Shared by every place this fixture runs a subprocess, because
+/// `wait_with_output` waits forever and every one of those subprocesses is
+/// something under test. A blocking wait turns "the thing I was testing
+/// hung" into "the whole terminal stopped responding", and the test then
+/// fails on its own outer timeout with a transcript that never mentions a
+/// child process at all — twice as slow and far less informative than a
+/// fixture that says so itself.
+///
+/// Killed AND reaped: signalling alone leaves a zombie for every hung
+/// child, and a session outlives many of them.
+///
+/// Safe against a PIPED stdout only because every child here is either
+/// silent by contract or produces one short line; a child that could fill a
+/// pipe buffer would deadlock before this loop ever saw it exit, and would
+/// need its pipes drained on threads instead.
+fn wait_bounded(
+    child: &mut std::process::Child,
+    deadline: std::time::Duration,
+    what: &str,
+) -> anyhow::Result<Option<std::process::ExitStatus>> {
+    let started = std::time::Instant::now();
+    loop {
+        match child
+            .try_wait()
+            .with_context(|| format!("polling {what}"))?
+        {
+            Some(status) => return Ok(Some(status)),
+            None if started.elapsed() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(None);
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+}
 
 /// Fire the real `farhelm internal hook` for `conversation`, as the vendor
 /// would at `SessionStart`, and report what came back.
@@ -597,22 +1003,7 @@ fn hook_report(conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
     // never says a hook was involved. Polling is safe against the pipes
     // only because the child is silent by contract and its output could
     // not fill a pipe buffer even when it misbehaves.
-    let started = std::time::Instant::now();
-    let status = loop {
-        match child.try_wait().context("polling the hook binary")? {
-            Some(status) => break Some(status),
-            None if started.elapsed() >= HOOK_CHILD_DEADLINE => {
-                // Killed AND reaped: a fixture that only signalled would
-                // leave a zombie behind for every hung report, and the
-                // session outlives many of them.
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-            None => std::thread::sleep(std::time::Duration::from_millis(20)),
-        }
-    };
-    let Some(status) = status else {
+    let Some(status) = wait_bounded(&mut child, HOOK_CHILD_DEADLINE, "the hook binary")? else {
         writeln!(out, "HOOK-HUNG:{conversation}\r")?;
         return Ok(());
     };
@@ -1969,5 +2360,92 @@ mod tests {
             vec!["\x1b[?1000h\x1b[?1006h", "\x1b[?1006l\x1b[?1000h"],
             "the second cue must actively turn 1006 back off, not just re-assert 1000"
         );
+    }
+
+    /// Spec: the hosts-listing name check reads the NAME COLUMN whole, so a
+    /// name containing a space matches and a name that merely prefixes
+    /// another does not.
+    ///
+    /// Both clauses have a concrete failure behind them. `this machine` is
+    /// the name of the local host in EVERY fleet, so a whitespace-splitting
+    /// check refuses the one target that is always present — which is
+    /// exactly how the first hand-run of this fixture failed. And a fleet
+    /// holding `builder` beside `builder-2` would, under a prefix test,
+    /// have one row answer for the other and clone onto the wrong machine.
+    #[test]
+    fn the_hosts_listing_check_matches_a_whole_name_column() {
+        // Byte-for-byte what `farhelm agent hosts` prints (main.rs's
+        // `aligned`): a two-character marker column, then each non-final
+        // cell padded to its column's width plus one space.
+        //
+        // Joined rather than written as one multi-line literal, because a
+        // literal's backslash continuation eats exactly the leading
+        // whitespace this fixture is about — the same trap
+        // `agent_cli.rs`'s table assertions call out.
+        let listing = [
+            "  NAME         KIND  STATE",
+            "* this machine local connected",
+            "  builder      ssh   connected",
+            "",
+        ]
+        .join("\n");
+        let listing = listing.as_str();
+        assert!(listing_names_host(listing, "this machine"));
+        assert!(listing_names_host(listing, "builder"));
+        assert!(
+            !listing_names_host(listing, "this"),
+            "a prefix of a real name is not a host"
+        );
+        assert!(!listing_names_host(listing, "nowhere"));
+        assert!(
+            !listing_names_host("", "builder"),
+            "an empty listing names nothing, rather than panicking on a missing header"
+        );
+    }
+
+    /// Spec: the fixture's stdin grammar names the host after `onto`, with
+    /// an optional ` in <directory>` suffix split at the FIRST separator.
+    ///
+    /// The multi-word case is load-bearing on its own: every fleet's local
+    /// row is called `this machine`, so a grammar that stopped the host
+    /// name at the first space would refuse the one target that always
+    /// exists — which is exactly how the first hand-run of this fixture
+    /// failed.
+    ///
+    /// The directory case is the one a review caught. The separator has to
+    /// belong to one field or the other, and the fixture gives it to the
+    /// HOST side because a path like `/srv/project in staging` is an
+    /// ordinary directory — and is precisely the sort a refusal test aims a
+    /// clone at — while a host name containing ` in ` cannot occur here at
+    /// all (ssh destinations have no spaces; the local row is
+    /// `this machine`). Splitting from the right, as this did, put the
+    /// boundary inside such a path and reported a host nobody named.
+    #[test]
+    fn the_agent_relay_grammar_takes_the_host_after_onto_and_a_directory_after_it() {
+        assert_eq!(
+            clone_request("$farhelm clone this session onto this machine"),
+            Some(("this machine".to_string(), None))
+        );
+        assert_eq!(
+            clone_request("$farhelm clone this session onto builder in /srv/work"),
+            Some(("builder".to_string(), Some("/srv/work".to_string())))
+        );
+        assert_eq!(
+            clone_request("$farhelm clone this session onto builder in /srv/in/nested"),
+            Some(("builder".to_string(), Some("/srv/in/nested".to_string()))),
+            "a path merely containing the word `in` is untouched: the separator is spaced"
+        );
+        assert_eq!(
+            clone_request(
+                "$farhelm clone this session onto this machine in /srv/project in \
+                           staging"
+            ),
+            Some((
+                "this machine".to_string(),
+                Some("/srv/project in staging".to_string())
+            )),
+            "the FIRST separator splits, so a directory carrying the literal ` in ` survives whole"
+        );
+        assert_eq!(clone_request("hello"), None);
     }
 }

@@ -7,13 +7,27 @@
 //! "CLI").
 //! The two in-session commands keep stdout machine-readable, with every
 //! diagnostic on stderr: `farhelm spawn`'s only successful output is the
-//! child id, and `farhelm agent`'s is either the listing it was asked for
-//! (`hosts`/`sessions`) or, for its three lifecycle verbs
-//! (`rename`/`stop`/`archive`), the one-line confirmation of the action it
-//! just took. They share the injected-environment contract
+//! child id, and `farhelm agent`'s is the listing it was asked for
+//! (`hosts`/`sessions`), the one-line confirmation of a lifecycle action
+//! (`rename`/`stop`/`archive`), or — for the two creating verbs
+//! (`create`/`clone`) — the NEW SESSION'S ID and nothing else, with the
+//! human-readable confirmation on stderr beside it. That last shape is
+//! `spawn`'s contract deliberately: the created id is the one agent output
+//! meant to be captured as a SINGLE VALUE, since it is what a caller goes
+//! on to pass as `--session`. The listings are machine-readable too — a
+//! fixture and a README example both parse the hosts table — but they are
+//! parsed as a table, and a table that grew a column would still be one.
+//! An id that grew a confirmation line beside it would not. They share the
+//! injected-environment contract
 //! (`spawn_environment`) and nothing else — a spawn is answered by the
 //! supervisor on the other end of the socket, while an agent request is
 //! relayed by it to the helm.
+//!
+//! `farhelm spawn` and `farhelm agent create` overlap and both stay: a
+//! spawn creates on the host it runs on, answered by that supervisor
+//! alone, and works with no helm attached; `agent create` goes through the
+//! helm and can therefore name any host in the fleet. The first is the
+//! scripting primitive, the second is the fleet-aware one.
 //!
 //! `farhelm agent instructions` is the exception on both counts, and
 //! deliberately so: its stdout is prose for a language model rather than a
@@ -24,6 +38,7 @@
 
 use clap::{Parser, Subcommand};
 use farhelm_proto::AgentReply;
+use std::io::Write;
 use std::path::PathBuf;
 
 mod agent_instructions;
@@ -66,8 +81,9 @@ enum Cmd {
         idempotency_key: Option<String>,
     },
     /// Ask the helm about the fleet, or act on it, from inside a Farhelm
-    /// session — `hosts`/`sessions` are read-only questions, and
-    /// `rename`/`stop`/`archive` are fleet-wide lifecycle actions.
+    /// session — `hosts`/`sessions` are read-only questions,
+    /// `rename`/`stop`/`archive` are fleet-wide lifecycle actions, and
+    /// `create`/`clone` put a new session on any host in the fleet.
     ///
     /// `disable_help_subcommand` because [`AgentCmd::Help`] is farhelm's
     /// own: `farhelm agent help` prints the agent-facing instructions, not
@@ -99,15 +115,34 @@ enum Cmd {
 
 /// The verbs `farhelm agent` currently carries.
 ///
-/// Seven in total: the two read-only listings (`Hosts`, `Sessions`), the
+/// Nine in total: the two read-only listings (`Hosts`, `Sessions`), the
 /// three lifecycle verbs SPEC.md's "A session can also ASK" paragraph
-/// promises (`Rename`, `Stop`, `Archive`), and the two that print the
-/// manual itself (`Instructions`, `Help`) — see [`AgentCmd::verb`] for why
-/// the last two are answered LOCALLY while the other five are relayed to
-/// the helm. The CREATING verbs (create, clone) stay off this list — they
-/// land on the same transport once it has carried real lifecycle traffic,
-/// and a verb that decodes and then refuses would be indistinguishable,
-/// from here, from one that is broken.
+/// promises (`Rename`, `Stop`, `Archive`), the two CREATING verbs
+/// (`Create`, `Clone`), and the two that print the manual itself
+/// (`Instructions`, `Help`) — see [`AgentCmd::verb`] for why the last two
+/// are answered LOCALLY while the other seven are relayed to the helm.
+///
+/// The creating verbs print DIFFERENTLY from every other verb here, and
+/// the difference is a contract rather than a style: their stdout is the
+/// new session's id and nothing else, exactly as `farhelm spawn`'s is, so
+/// a caller can capture it. The human-readable confirmation goes to
+/// stderr. That is the opposite of the lifecycle verbs, whose confirmation
+/// IS their stdout — those act on a session the caller already named, so
+/// there is no new identifier to hand back.
+///
+/// Every value-taking option on the CREATING verbs carries
+/// `allow_hyphen_values`, and that is a rule about where the values are
+/// judged rather than a per-flag convenience. A host name, a directory, a
+/// profile name, an invocation, a title and an idempotency key are all
+/// plain strings that something DOWNSTREAM decides the legality of — the
+/// helm's registry, the target supervisor's catalog and filesystem, the
+/// relay's own byte caps. Every one of them may legally begin with `-`, and
+/// without the allowance clap refuses such a value here as an unrecognized
+/// option, which turns "the target will tell you why that name is wrong"
+/// into "this CLI would not even carry your name". The cost is the usual
+/// one and is accepted knowingly: a caller who forgets a value gets the
+/// NEXT flag consumed as that value, and a refusal from the far end rather
+/// than a usage error here.
 ///
 /// Each variant's `///` doc comment is AGENT-FACING PROSE, not only help
 /// text: [`agent_instructions`] walks this enum's clap definition and
@@ -158,6 +193,57 @@ enum AgentCmd {
         #[arg(long = "session")]
         session: Option<String>,
     },
+    /// Create a session on any host; prints its id.
+    Create {
+        /// Working directory for the new session, on the TARGET host.
+        ///
+        /// Required, and never defaulted to this session's own directory:
+        /// a create that silently inherited it would be a clone wearing
+        /// another verb's name, and `clone` is right there.
+        ///
+        /// A plain `String`, not a `PathBuf`: this path is interpreted on
+        /// whichever host the session lands on, so resolving it against
+        /// THIS process's current directory — which is what `farhelm
+        /// spawn` correctly does for its own same-host create — would
+        /// invent a path that means nothing over there.
+        #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+        cwd: String,
+        /// Host to create on, by the name `farhelm agent hosts` shows.
+        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        host: Option<String>,
+        /// Agent profile name, resolved on the target host.
+        #[arg(
+            long,
+            value_name = "NAME",
+            conflicts_with = "invocation",
+            allow_hyphen_values = true
+        )]
+        profile: Option<String>,
+        /// Command line to run instead of a profile.
+        #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+        invocation: Option<String>,
+        /// Display title; omitted derives one from the directory.
+        #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
+        title: Option<String>,
+        /// Retry key: the same key creates the session only once.
+        #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
+        idempotency_key: Option<String>,
+    },
+    /// Copy this session onto any host; prints the new id.
+    Clone {
+        /// Host to create on, by the name `farhelm agent hosts` shows.
+        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        host: Option<String>,
+        /// Working directory; omitted copies this session's.
+        #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+        cwd: Option<String>,
+        /// Display title; omitted copies this session's.
+        #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
+        title: Option<String>,
+        /// Retry key: the same key creates the session only once.
+        #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
+        idempotency_key: Option<String>,
+    },
     /// Print how to use these verbs, for an agent that was told to.
     Instructions,
     /// The same as instructions; both spellings print it.
@@ -188,6 +274,37 @@ impl AgentCmd {
             }),
             AgentCmd::Archive { session } => Some(farhelm_proto::AgentVerb::Archive {
                 session_id: session.clone(),
+            }),
+            AgentCmd::Create {
+                cwd,
+                host,
+                profile,
+                invocation,
+                title,
+                idempotency_key,
+            } => Some(farhelm_proto::AgentVerb::Create {
+                host: host.clone(),
+                cwd: cwd.clone(),
+                // `--profile` on the command line, `profile_name` on the
+                // wire: the flag is what a user types and the field says
+                // what it IS, which matters because the helm resolves it
+                // against the target host's catalog and an id would be a
+                // different (and wrong) thing to send.
+                profile_name: profile.clone(),
+                invocation: invocation.clone(),
+                title: title.clone(),
+                intent_key: idempotency_key.clone(),
+            }),
+            AgentCmd::Clone {
+                host,
+                cwd,
+                title,
+                idempotency_key,
+            } => Some(farhelm_proto::AgentVerb::Clone {
+                host: host.clone(),
+                cwd: cwd.clone(),
+                title: title.clone(),
+                intent_key: idempotency_key.clone(),
             }),
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
@@ -320,6 +437,15 @@ enum InternalCmd {
         /// ARGV:` marker, which is where a test asserts on injection
         /// without the fixture understanding the injected flags.
         ///
+        /// The `agent-relay` script is the one that reads the injected tail
+        /// rather than merely tolerating it — but it reads
+        /// `std::env::args()` directly rather than this field, on purpose:
+        /// what it is standing in for is a VENDOR parsing the argv the
+        /// supervisor built, so it should see exactly that rather than a
+        /// re-parse of it. What this field still does for it is the same
+        /// thing it does for every other script — keep clap from rejecting
+        /// the whole command line before `run` is ever reached.
+        ///
         /// The conversation-capture and restart integration fixtures
         /// (`conversation_identity_capture.rs`, `restart_with_resume.rs`)
         /// ARE this binary, symlinked as `claude` or `codex` and invoked as
@@ -382,11 +508,11 @@ fn main() -> anyhow::Result<()> {
             if matches!(command, AgentCmd::Hosts | AgentCmd::Sessions) {
                 return print_agent_listing(verb);
             }
-            // The lifecycle verbs share one `agent_request` round trip
-            // here, rather than each making its own the way the listings
-            // do, because `Stop`'s reply carries no id — the confirmation
-            // it prints needs the ASKING session, which only this shared
-            // call reports back (see `agent_request`'s docs).
+            // The lifecycle and creating verbs share one `agent_request`
+            // round trip here, rather than each making its own the way the
+            // listings do, because `Stop`'s reply carries no id — the
+            // confirmation it prints needs the ASKING session, which only
+            // this shared call reports back (see `agent_request`'s docs).
             let (asking, reply) = runtime()?.block_on(agent_request(verb))?;
             match command {
                 // The three lifecycle verbs print one confirmation line
@@ -448,6 +574,55 @@ fn main() -> anyhow::Result<()> {
                         );
                     };
                     println!("archived {}", safe_cell(&session.id));
+                }
+                // The two creating verbs invert the stream convention the
+                // three above follow, and deliberately: stdout carries the
+                // new session's id and nothing else — `farhelm spawn`'s
+                // contract, which an agent can capture and go on to use as
+                // a `--session` target — while the sentence a human reads
+                // goes to stderr beside them. A confirmation on stdout
+                // would make the two verbs whose output is meant to be
+                // captured as a single value the two it cannot be captured
+                // from.
+                AgentCmd::Create { .. } | AgentCmd::Clone { .. } => {
+                    let AgentReply::Created { session } = reply else {
+                        anyhow::bail!(
+                            "the helm answered a creating verb with something other than a new \
+                             session"
+                        );
+                    };
+                    println!("{}", session.id);
+                    // Every field is fleet-wide peer text — a title from
+                    // another host, a host name, a directory — so each one
+                    // goes through the same escaping the listings' table
+                    // cells get: `quoted` for the title, which is the one
+                    // field whose own quotes would otherwise close the
+                    // pair around it, and `safe_cell` for the rest.
+                    // `host_cell` because the helm may have no host name it
+                    // can vouch for even for a row it just created (see
+                    // `AgentSession::host`). Nothing here is the id printed
+                    // above: that line is the machine-readable one and is
+                    // left exactly as the helm sent it.
+                    //
+                    // Written through `write!` with its result DISCARDED
+                    // rather than through `eprintln!`, and that is the
+                    // whole point of the awkwardness: the macro panics on
+                    // an unwritable stderr, and the session has already
+                    // been created at this point with its id already on
+                    // stdout. Aborting here would turn a create that
+                    // succeeded into a command that failed, and a caller
+                    // that had already captured the id would be told to
+                    // retry a create it must not repeat. A confirmation
+                    // nobody can read is the acceptable loss; the id is
+                    // not.
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "created {} {} on {} in {}",
+                        safe_cell(&session.id),
+                        quoted(&session.title),
+                        safe_cell(&host_cell(&session)),
+                        safe_cell(&session.cwd)
+                    );
                 }
                 // `Hosts`/`Sessions` already returned above via
                 // `print_agent_listing`, and `verb()` returns `None` for
@@ -1125,7 +1300,9 @@ async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<(Str
 /// applied it on another host; the answer was lost), and what differs is
 /// what the reader should do next. A listing has nothing to double-apply
 /// and gets the plain transport wording, which already reads as "ask
-/// again". A rename/stop/archive may ALREADY have taken effect, so it gets
+/// again". A MUTATION — a rename/stop/archive, or a create/clone that may
+/// by now have a session running on some host — may ALREADY have taken
+/// effect, so it gets
 /// the same "look before you retry" remedy the relay's own delivered-but-
 /// unanswered endings carry — one sentence across every hop, rather than a
 /// helpful answer that stops at the process boundary.
@@ -1160,6 +1337,7 @@ enum ReplyKind {
     Sessions,
     Session,
     Stopped,
+    Created,
 }
 
 impl ReplyKind {
@@ -1171,6 +1349,15 @@ impl ReplyKind {
                 ReplyKind::Session
             }
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
+            // `Created`, not `Session`: the two payloads are identical and
+            // the tag is the only thing separating "a row that did not
+            // exist" from "the row you changed". Checking it here is what
+            // stops this CLI printing an EXISTING session's id as though
+            // it had just created one — a target an agent might then go on
+            // to stop.
+            farhelm_proto::AgentVerb::Create { .. } | farhelm_proto::AgentVerb::Clone { .. } => {
+                ReplyKind::Created
+            }
         }
     }
 
@@ -1180,6 +1367,7 @@ impl ReplyKind {
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Stopped {} => ReplyKind::Stopped,
+            AgentReply::Created { .. } => ReplyKind::Created,
         }
     }
 
@@ -1195,6 +1383,11 @@ impl ReplyKind {
             ReplyKind::Sessions => "sessions listing",
             ReplyKind::Session => "session row",
             ReplyKind::Stopped => "stop confirmation",
+            // "created", not "new": the whole point of this noun is to
+            // read differently from `Session`'s in a message that names
+            // both, and a reader who sees "session row" against "created
+            // session row" can tell which end of the mismatch is which.
+            ReplyKind::Created => "created session row",
         }
     }
 }
@@ -1231,8 +1424,10 @@ fn truncation_notice(reply: &AgentReply) -> Option<String> {
 ///
 /// Only ever called with the reply to `Hosts` or `Sessions` — the three
 /// lifecycle verbs print their own one-line confirmation instead (see
-/// `main`'s `Rename`/`Stop`/`Archive` arms) — which is why the lifecycle
-/// tags are an ERROR here rather than a table of their own.
+/// `main`'s `Rename`/`Stop`/`Archive` arms) and the two creating verbs
+/// print an id on stdout with their confirmation on stderr — which is why
+/// the lifecycle and `Created` tags are an ERROR here rather than tables of
+/// their own.
 ///
 /// A `Result` rather than a panic on those tags, deliberately. The
 /// precondition is real and holds today, but it is a fact about this
@@ -1262,7 +1457,19 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                     host.state.clone(),
                 ]
             }));
-            Ok(aligned(&rows))
+            // NAME (column 1) is printed WHOLE, exempt from the clamp every
+            // other non-final column takes, because this column is not a
+            // description of a host — it is the SELECTOR for one. `create`
+            // and `clone` take `--host <NAME>` and match it exactly, so a
+            // name the listing cut at 48 characters and marked with `…` is
+            // a host an agent can see and can never target. The clamp's
+            // amplification argument does not transfer here either: host
+            // names are operator-registered ssh destinations, one per
+            // machine in a fleet, not the per-session user text
+            // `MAX_CELL_WIDTH` was written for. The sessions table below
+            // keeps the clamp on every one of its columns for exactly that
+            // reason.
+            Ok(aligned(&rows, &[1]))
         }
         AgentReply::Sessions { sessions, .. } => {
             let mut rows = vec![vec![
@@ -1285,13 +1492,14 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                     session_status_cell(session),
                 ]
             }));
-            Ok(aligned(&rows))
+            Ok(aligned(&rows, &[]))
         }
-        // Refused rather than rendered: a lifecycle reply has one row and
-        // no table to be, and printing an empty one would read as an empty
-        // fleet. `main` never routes one here — see this function's docs
-        // for why that is stated as an error and not asserted.
-        AgentReply::Session { .. } | AgentReply::Stopped {} => {
+        // Refused rather than rendered: a lifecycle or creating reply has
+        // one row and no table to be, and printing an empty one would read
+        // as an empty fleet. `main` never routes one here — see this
+        // function's docs for why that is stated as an error and not
+        // asserted.
+        AgentReply::Session { .. } | AgentReply::Stopped {} | AgentReply::Created { .. } => {
             anyhow::bail!("only hosts and sessions listings are rendered as a table")
         }
     }
@@ -1300,12 +1508,19 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
 /// The HOST cell: the name, or an explicit stand-in when the helm had none
 /// to vouch for.
 ///
-/// Unreachable from a listing today — `AgentSession::host` is only ever
-/// `None` on a lifecycle verb's own reply, which prints a confirmation line
-/// instead of a table — and spelled out anyway rather than defaulted to an
-/// empty cell. An empty cell in a column of host names reads as a rendering
-/// bug; this reads as what it is, and pairs with the `(stale)` the status
-/// cell puts on the same row.
+/// The absent case is unreachable from a LISTING today — `AgentSession::
+/// host` is only ever `None` on a mutating verb's own reply, whose host is
+/// pinned to the connection the mutation routed through and can stop being
+/// current before the row is projected — and spelled out anyway rather than
+/// defaulted to an empty cell. An empty cell in a column of host names
+/// reads as a rendering bug; this reads as what it is, and pairs with the
+/// `(stale)` the status cell puts on the same row.
+///
+/// Shared with the creating verbs' stderr confirmation, which is not a
+/// table at all: "created … on (unknown)" is an odd sentence, and it is
+/// still the honest one — the session exists and the helm cannot name the
+/// machine it landed on, which a reader must not be told is a machine
+/// called nothing.
 fn host_cell(session: &farhelm_proto::AgentSession) -> String {
     session
         .host
@@ -1369,7 +1584,9 @@ const MAX_CELL_WIDTH: usize = 48;
 /// **Clamping.** Non-final columns are cut to [`MAX_CELL_WIDTH`] with a
 /// trailing `…`, for the amplification reason that constant documents. The
 /// final column is neither padded nor clamped: nothing follows it, so it
-/// costs its own length and no more.
+/// costs its own length and no more. Columns named in `verbatim` are
+/// exempt, which is a statement about what the column IS rather than a
+/// formatting preference — see the hosts listing's own call site.
 ///
 /// **Widths in `char`s, not bytes.** A title or directory is arbitrary user
 /// text, and byte counting would misalign every row after the first
@@ -1380,7 +1597,7 @@ const MAX_CELL_WIDTH: usize = 48;
 /// width-table dependency for a debug-shaped listing.
 ///
 /// The last column is never padded, so no line carries trailing spaces.
-fn aligned(rows: &[Vec<String>]) -> String {
+fn aligned(rows: &[Vec<String>], verbatim: &[usize]) -> String {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     // Sanitized ONCE, before anything measures: a width taken from the raw
     // text and then applied to the escaped text would misalign every row
@@ -1392,7 +1609,7 @@ fn aligned(rows: &[Vec<String>]) -> String {
                 .enumerate()
                 .map(|(column, cell)| {
                     let cell = safe_cell(cell);
-                    if column + 1 == row.len() {
+                    if column + 1 == row.len() || verbatim.contains(&column) {
                         cell
                     } else {
                         clamp(cell)
