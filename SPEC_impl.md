@@ -419,6 +419,22 @@ hands a hit to its managed supervisor through `FARHELM_TMUX`; with no hit it set
 `PATH` lookup applies. Homebrew's tmux is the recommended way to meet the floor on a Mac, not the only one the code
 accepts.
 
+The desktop app additionally owns a PREFLIGHT of its own: before it spawns its managed supervisor — never before, and
+never for a supervisor it merely discovers already answering — it probes the SAME candidate it is about to hand that
+child through `FARHELM_TMUX` and applies the version floor itself (`farhelm_ui::desktop::run_tmux_preflight_or_exit`). A
+missing or below-floor result prints one plain stderr message naming what was tried and how to fix it, then exits 1,
+before the state directory holds anything beyond the bare private directory itself (created up front so discovery's own
+probe has a valid path to operate against), before the embedded helm starts, and before the managed supervisor is ever
+spawned. Any OTHER probe failure this preflight has no tailored wording for (a permission-denied spawn, a nonzero `-V`,
+unparseable `-V` output) falls through to the desktop's ordinary bootstrap-error path instead. Discovery runs FIRST
+specifically because an answering supervisor is an ownership boundary: it may be driving a perfectly good tmux selected
+by its own `--tmux`, its own `FARHELM_TMUX`, or a login-shell `PATH` this Finder-launched process never sees, and
+refusing startup over a dependency this process does not need would reject a supported setup. The supervisor still
+performs its OWN two floor checks after being handed a tmux this way (the client-executable probe and the adopted-server
+check described above) — the desktop's preflight is a user-experience improvement specific to the one path where this
+app starts the substrate itself, not a replacement for the supervisor's own checks, which remain the authority for the
+case this preflight cannot see: a private server already running on the socket from before an upgrade.
+
 Historical note on what the floor made moot: below 3.7 the supervisor warned once at first attach and lost bracketed
 paste restoration (`bracket_paste_flag` arrived in 3.7), and on 3.3a `capture-pane -N` dropped trailing styled padding
 from a stop snapshot's dead-pane frame (found 2026-07-29 during M2.5's 3.3a validation). The first is a fallback the
