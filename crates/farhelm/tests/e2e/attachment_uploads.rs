@@ -1135,12 +1135,8 @@ async fn begin_upload_refuses_a_bad_channel_and_an_over_full_connection() {
     );
 
     // The connection is still usable for ordinary work afterwards.
-    peer.control(&ControlMsg::ListSessions {
-        req_id: 100,
-        cursor: None,
-        limit: None,
-    })
-    .await;
+    peer.control(&ControlMsg::ListSessions { req_id: 100 })
+        .await;
     assert!(matches!(
         peer.next_outcome(20).await,
         ControlMsg::SessionList { req_id: 100, .. }
@@ -2219,12 +2215,7 @@ async fn duplicate_and_unknown_upload_aborts_are_harmless() {
 
     // The connection is still perfectly usable, and nothing was
     // published or left staged.
-    peer.control(&ControlMsg::ListSessions {
-        req_id: 9,
-        cursor: None,
-        limit: None,
-    })
-    .await;
+    peer.control(&ControlMsg::ListSessions { req_id: 9 }).await;
     let mut listed = false;
     for _ in 0..4 {
         match peer.next_control(20).await {

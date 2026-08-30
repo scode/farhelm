@@ -517,7 +517,7 @@ impl Session {
     /// which is the same rule on the other side of the wire. Copied rather
     /// than shared because this crate mirrors the HTTP CONTRACT rather than
     /// depending on proto internals (see `Session`'s own docs) — but the two
-    /// must not drift: the helm ORDERS an activity-sorted page by its
+    /// must not drift: the helm ORDERS an activity-sorted list by its
     /// version of this rule, and a client that rendered ages by a different
     /// one would print a column that contradicted the order it was printed
     /// in. If the proto's fallback changes, this changes with it.

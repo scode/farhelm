@@ -3061,9 +3061,9 @@ impl TmuxDriver {
     /// an honestly observed mass exit, the reasoning went. That conflated
     /// two different things: an empty pane-states MAP is not an empty
     /// session LISTING. This method's return value plays no part in WHICH
-    /// rows `ListSessions` selects for its reply — that is the session cap
-    /// and byte budget's job (`service.rs`'s `LIST_SESSION_CAP` and
-    /// `build_list_reply`), applied independently of tmux entirely — an
+    /// rows `ListSessions` selects for its reply — that is the listing
+    /// cap's job (`farhelm_proto::LIST_SESSIONS_CAP`, applied by
+    /// `listing::list_all`), applied independently of tmux entirely — an
     /// empty map here only ever feeds `session_status`'s per-entry liveness
     /// lookup for whichever rows that selection already kept. `"no server
     /// running"` is a DEFINITIVE statement from tmux that no pane exists

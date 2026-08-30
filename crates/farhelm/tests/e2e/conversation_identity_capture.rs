@@ -1065,10 +1065,10 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
     let store = SessionStore::open(&state.path().join("supervisor.db"), false)
         .await
         .expect("open the store directly");
-    for i in 0..=LIST_SESSION_CAP {
+    for i in 0..=LIST_SESSIONS_CAP {
         // The last row is the rival: same kind, same canonical directory,
         // and a first input inside the real session's window.
-        let rival = i == LIST_SESSION_CAP;
+        let rival = i == LIST_SESSIONS_CAP;
         store
             .insert_session(
                 StoredSession {
@@ -1131,7 +1131,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
     let client = connect_client(&restarted).await;
     let listing = client.list_sessions().await.expect("list");
     assert!(
-        listing.total > LIST_SESSION_CAP as u64,
+        listing.truncated,
         "this test's premise is that there are more sessions than the reply cap"
     );
     for _ in 0..5 {

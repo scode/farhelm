@@ -427,9 +427,10 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
 /// `GET /api/sessions`'s JSON shape, which the UI decodes and which
 /// PLAN_M6.md item 5 extended without breaking.
 ///
-/// Two halves, both load-bearing for the UI PRs that follow. The M2
-/// envelope (`sessions`/`total`/`truncated`) is still there under the
-/// same names, so the list UI in this tree keeps decoding it unchanged;
+/// Two halves, both load-bearing for the UI. The M2 envelope
+/// (`sessions`/`total`/`truncated`) is still there under the same names,
+/// so the list UI keeps decoding it unchanged — and there is no
+/// `next_cursor`: the list is served whole, by contract;
 /// and each row now carries `host`/`host_identity`/`host_name`/`stale`
 /// as ADDITIVE siblings of the session's own fields, never nested under
 /// a wrapper — which is the whole reason `SessionRow` flattens
@@ -461,9 +462,12 @@ async fn list_sessions_returns_the_merged_listing_object_shape() {
     assert_eq!(value["total"], 1, "total counts the merged view");
     assert_eq!(
         value["truncated"], false,
-        "one page held everything, so there is no next page"
+        "the whole view fit under the cap"
     );
-    assert_eq!(value["next_cursor"], serde_json::Value::Null);
+    assert!(
+        value.get("next_cursor").is_none(),
+        "the reply carries no resume key: the list is one object, never a page"
+    );
 
     let row = &value["sessions"][0];
     assert_eq!(row["id"], "sess-1");
@@ -1930,56 +1934,6 @@ async fn a_down_hosts_sessions_stay_listed_and_marked_stale() {
     );
 }
 
-/// The helm-level cursor walks the MERGED order to exhaustion, page by
-/// page, crossing host boundaries mid-page without any host being asked
-/// anything.
-///
-/// The decoupling PLAN_M6.md item 5 requires is what makes this
-/// possible at all: the pages come from helm.db, so a page boundary can
-/// fall anywhere in the merged order rather than being pinned to where
-/// some host's own wire page happened to end.
-#[tokio::test]
-async fn the_helm_cursor_walks_the_merged_order_across_host_boundaries() {
-    let (harness, _alpha, _beta) = three_host_fleet().await;
-
-    let mut walked: Vec<String> = Vec::new();
-    let mut uri = "/api/sessions?limit=2".to_string();
-    for _ in 0..10 {
-        let (status, value) = get_json(&harness, &uri).await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(value["total"], 5, "every page reports the merged total");
-        walked.extend(row_ids(&value));
-        match value["next_cursor"].as_str() {
-            None => break,
-            Some(cursor) => uri = format!("/api/sessions?limit=2&cursor={cursor}"),
-        }
-    }
-    assert_eq!(
-        walked,
-        vec![
-            "beta-newest",
-            "alpha-new",
-            "local-mid",
-            "alpha-old",
-            "beta-oldest"
-        ],
-        "the walk must reproduce the whole merged order exactly once"
-    );
-
-    let (status, body) = get_json(&harness, "/api/sessions?cursor=not-a-cursor").await;
-    assert_eq!(
-        status,
-        axum::http::StatusCode::BAD_REQUEST,
-        "a tampered cursor is a clean refusal: {body}"
-    );
-    let (status, _) = get_json(&harness, "/api/sessions?limit=0").await;
-    assert_eq!(
-        status,
-        axum::http::StatusCode::BAD_REQUEST,
-        "a zero limit could never make progress through the pages"
-    );
-}
-
 /// A session operation must reach the host that OWNS the session, and
 /// only that host.
 ///
@@ -2932,195 +2886,6 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
     peer.abort();
 }
 
-/// A byte-bounded persisted scan must FENCE the merge: a live host's
-/// rows may not carry the cursor past cached rows nobody has been shown.
-///
-/// The interleaving is specific and the loss is permanent. The store's
-/// scan stops on its byte bound having returned FEWER rows than the
-/// page asked for, so the merge still has capacity — and fills it from
-/// an identity-less host's in-memory list, whose rows sort after the
-/// cached ones the scan never reached. The page's cursor then names a
-/// live row, and the next page resumes after it: every cached row
-/// between the byte cut and that position is skipped, forever, with
-/// nothing about either page looking wrong.
-///
-/// The fixture is exactly that shape — one fat cached row, an unseen
-/// cached successor, and a live row that sorts between them by time.
-#[tokio::test]
-async fn a_byte_cut_persisted_scan_fences_the_merge() {
-    let fat = farhelm_proto::SessionInfo {
-        // Alone larger than the page budget, so the scan stops right
-        // after it with a successor still unread.
-        title: "x".repeat(5 * 1024 * 1024),
-        ..rest_harness::session("cached-fat", 500)
-    };
-    let (builder, cached_host) = rest_harness::FleetBuilder::new()
-        .await
-        .ssh(
-            "user@cached",
-            rest_harness::HostScript {
-                identity: Some("identity-cached".to_string()),
-                // The successor sorts LAST, so a merge that ran past
-                // the fence would leave it behind.
-                sessions: vec![fat, rest_harness::session("cached-next", 100)],
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let (builder, live_host) = builder
-        .ssh(
-            "user@live",
-            rest_harness::HostScript {
-                // No identity: this host caches nothing and serves from
-                // the manager's memory, which is the other side of the
-                // merge.
-                identity: None,
-                sessions: vec![rest_harness::session("live-middle", 300)],
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let harness = builder.start().await;
-    harness.await_refreshed(cached_host).await;
-    harness.await_refreshed(live_host).await;
-
-    // Walk the whole list one page at a time. Every row must appear
-    // exactly once, in order — the property a fence-less merge breaks
-    // silently.
-    let mut walked: Vec<String> = Vec::new();
-    let mut uri = "/api/sessions?limit=10".to_string();
-    for _ in 0..10 {
-        let (status, value) = get_json(&harness, &uri).await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        walked.extend(row_ids(&value));
-        match value["next_cursor"].as_str() {
-            None => break,
-            Some(cursor) => uri = format!("/api/sessions?limit=10&cursor={cursor}"),
-        }
-    }
-    assert_eq!(
-        walked,
-        vec!["cached-fat", "live-middle", "cached-next"],
-        "every row exactly once, in the merged order — a fence-less merge loses the cached \
-         row after the byte cut"
-    );
-}
-
-/// The helm cursor must survive sessions coming and going between
-/// pages, and `truncated` must be true on every page but the last.
-///
-/// The stability half is the whole reason the cursor encodes a KEY: an
-/// offset would shift under both mutations and silently re-serve or skip
-/// a row, with nothing a caller could observe. The `truncated` half is
-/// what the pre-M6 UI reads to draw "showing N of M", so it has to mean
-/// something exact — "there is a next page" — rather than approximately.
-#[tokio::test]
-async fn a_page_walk_survives_creation_and_deletion_between_pages() {
-    let (harness, alpha, _beta) = three_host_fleet().await;
-
-    let (_, first) = get_json(&harness, "/api/sessions?limit=2").await;
-    assert_eq!(row_ids(&first), vec!["beta-newest", "alpha-new"]);
-    assert_eq!(
-        first["truncated"], true,
-        "entries remain, so this is not the final page"
-    );
-    let cursor = first["next_cursor"]
-        .as_str()
-        .expect("more pages")
-        .to_string();
-    let previous_incarnation = harness
-        .manager
-        .status(alpha)
-        .expect("alpha has an actor")
-        .incarnation;
-
-    // The row the cursor NAMES is deleted, and a brand-new session
-    // appears at the very front of the order — the two mutations a walk
-    // must be indifferent to.
-    harness.fleet.edit(alpha, |script| {
-        script.sessions = vec![
-            rest_harness::session("alpha-brand-new", 9_999),
-            rest_harness::session("alpha-old", 100),
-        ];
-    });
-    harness.fleet.kill_connection(alpha);
-    harness
-        .await_refreshed_after(alpha, previous_incarnation)
-        .await;
-
-    // Both scripts contain two sessions, so a count-based wait can accept
-    // the old connected state before the actor notices the killed
-    // connection. Prove that the replacement cache itself has landed
-    // before asking the old cursor to resume through it.
-    let (_, refreshed) = get_json(&harness, "/api/sessions?limit=10").await;
-    assert_eq!(
-        row_ids(&refreshed),
-        vec![
-            "alpha-brand-new",
-            "beta-newest",
-            "local-mid",
-            "alpha-old",
-            "beta-oldest",
-        ],
-        "the reconnect must publish both mutations before the cursor walk resumes"
-    );
-
-    let (_, second) = get_json(&harness, &format!("/api/sessions?limit=2&cursor={cursor}")).await;
-    assert_eq!(
-        row_ids(&second),
-        vec!["local-mid", "alpha-old"],
-        "the walk resumes strictly after the deleted row's key, and never rewinds to the \
-         newly created one"
-    );
-    let cursor = second["next_cursor"]
-        .as_str()
-        .expect("one more")
-        .to_string();
-    let (_, third) = get_json(&harness, &format!("/api/sessions?limit=2&cursor={cursor}")).await;
-    assert_eq!(row_ids(&third), vec!["beta-oldest"]);
-    assert_eq!(
-        third["truncated"], false,
-        "the final page says so, which is what stops a walking caller"
-    );
-    assert_eq!(third["next_cursor"], serde_json::Value::Null);
-}
-
-/// An over-large `?limit=` is refused rather than silently clamped.
-///
-/// Silently clamping would leave a caller that asked for fifty thousand
-/// and got five thousand with no way to tell it had not got what it
-/// asked for — the reply looks identical to a genuinely short page.
-#[tokio::test]
-async fn an_over_large_page_limit_is_refused() {
-    let (harness, _alpha, _beta) = three_host_fleet().await;
-    let (status, body) = get_json(
-        &harness,
-        &format!(
-            "/api/sessions?limit={}",
-            crate::aggregate::MAX_PAGE_LIMIT + 1
-        ),
-    )
-    .await;
-    assert_eq!(
-        status,
-        axum::http::StatusCode::BAD_REQUEST,
-        "an unbounded page is a request to do all the work at once: {body}"
-    );
-    let (status, _) = get_json(
-        &harness,
-        &format!(
-            "/api/sessions?include_archived=true&limit={}",
-            crate::aggregate::MAX_PAGE_LIMIT
-        ),
-    )
-    .await;
-    assert_eq!(
-        status,
-        axum::http::StatusCode::OK,
-        "the cap itself is legal"
-    );
-}
-
 /// A create naming a host id nothing holds must 404, and must not fall
 /// back to any other host.
 ///
@@ -3147,6 +2912,128 @@ async fn creating_on_an_unknown_host_is_refused_without_falling_back() {
         "a create naming a host nothing holds is a 404, not a create somewhere else: {body}"
     );
     peer.await.unwrap();
+}
+
+/// A supervisor may list in ANY order: a reply in reverse creation order
+/// refreshes cleanly, caches every row, and the REST list comes back in the
+/// order the CLIENT asked for.
+///
+/// Protocol 14 removed the wire-order contract and its ingress validation;
+/// this is the test that keeps them removed. Every scripted fixture in the
+/// suite happens to list newest-first, so a validator accidentally retained
+/// (or a REST path trusting peer order) would pass everything else and fail
+/// only here.
+#[tokio::test]
+async fn a_supervisors_reply_order_is_accepted_and_resorted_per_request() {
+    let harness = rest_harness::helm_listing(vec![
+        // OLDEST first — the reverse of what every real supervisor sends.
+        rest_harness::session("oldest", 100),
+        rest_harness::session("middle", 200),
+        rest_harness::session("newest", 300),
+    ])
+    .await;
+    let (status, value) = get_json(&harness, "/api/sessions?sort=created").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec!["newest", "middle", "oldest"],
+        "the helm sorts for itself; the peer's order neither fails the refresh nor leaks through"
+    );
+    assert_eq!(value["truncated"], false);
+}
+
+/// An identity-less host's cap flag reaches the REST reply through the
+/// in-memory path.
+///
+/// The persisted path's flag is pinned elsewhere; this host writes no
+/// cache, so its `truncated` word travels on the snapshot beside its rows —
+/// a different branch of the merge, and one nothing else exercises end to
+/// end.
+#[tokio::test]
+async fn an_identity_less_hosts_cap_flag_reaches_the_rest_reply() {
+    let harness = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            // No identity: this host caches nothing, and its sessions and
+            // flag are merged from the actor's own memory.
+            identity: None,
+            sessions: vec![rest_harness::session("memory-1", 100)],
+            truncated: true,
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+
+    let (status, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(row_ids(&value), vec!["memory-1"]);
+    assert_eq!(
+        value["truncated"], true,
+        "the in-memory host's cap flag must reach the reply: {value}"
+    );
+}
+
+/// A host whose supervisor cut its list at the cap makes the merged reply
+/// say `truncated: true` — while the host is connected, after it goes
+/// DOWN, and after the helm is restarted over the same helm.db.
+///
+/// SPEC.md's Session list section forbids presenting a cut list as the
+/// whole one, and the two later legs are where that used to fail: the cut
+/// rows go on being served stale in every non-connected state and across a
+/// restart, so the flag has to be a property of the cached list rather than
+/// of the connection. The whole path is exercised end to end — scripted
+/// supervisor reply, drain, registry row, merge, REST body — because each
+/// hop is a place the word can be dropped.
+#[tokio::test]
+async fn a_capped_hosts_notice_survives_the_host_going_down_and_a_helm_restart() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@capped",
+            rest_harness::HostScript {
+                identity: Some("identity-capped".to_string()),
+                sessions: vec![rest_harness::session("cut-survivor", 100)],
+                truncated: true,
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+
+    let (status, connected) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(row_ids(&connected), vec!["cut-survivor"]);
+    assert_eq!(
+        connected["truncated"], true,
+        "a supervisor's cut reaches the merged reply: {connected}"
+    );
+
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    let (_, down) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(row_ids(&down), vec!["cut-survivor"]);
+    assert_eq!(
+        down["truncated"], true,
+        "the stale rows are still the cut rows, so the notice stays: {down}"
+    );
+
+    let restarted = harness.restart_with(|fleet| fleet.take_down(host)).await;
+    restarted
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    let (_, after_restart) = get_json(&restarted, "/api/sessions").await;
+    assert_eq!(row_ids(&after_restart), vec!["cut-survivor"]);
+    assert_eq!(
+        after_restart["truncated"], true,
+        "a helm restarted over the same helm.db must not present the cut list as whole: \
+         {after_restart}"
+    );
 }
 
 /// The stale list must survive a HELM restart: a fresh helm over the
@@ -4003,217 +3890,14 @@ async fn combined_filters_narrow_rather_than_widen() {
     assert_eq!(value["total"], 4);
 }
 
-/// The two-totals contract under TRUNCATION, which is where the pair
-/// earns its keep: the page cut is over the MATCHING rows, `matching`
-/// describes every match in the fleet, and `total` goes on describing
-/// the fleet itself.
-///
-/// A client rendering "N matching of M sessions" needs all three facts
-/// to stay independent — and needs the filter to apply BEFORE the cut,
-/// or the second page would serve rows the first page's count already
-/// excluded. The walk here is asserted end to end for exactly that
-/// reason.
-#[tokio::test]
-async fn a_truncated_filtered_page_reports_both_totals_and_walks_only_matches() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&first), vec!["local-running"]);
-    assert_eq!(
-        first["matching"], 2,
-        "the matching count describes the fleet's matches, not this page's rows"
-    );
-    assert_eq!(
-        first["total"], 4,
-        "the fleet total is what the list's coherence check has always been about"
-    );
-    assert_eq!(
-        first["truncated"], true,
-        "truncation is a statement about the MATCHING walk"
-    );
-
-    let cursor = first["next_cursor"]
-        .as_str()
-        .expect("a truncated page carries a resume point")
-        .to_string();
-    let (_, second) = get_json(
-        &harness,
-        &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
-    )
-    .await;
-    assert_eq!(
-        row_ids(&second),
-        vec!["alpha-exited"],
-        "the second page must skip the non-matching rows between the two matches"
-    );
-    assert_eq!(second["matching"], 2);
-    assert_eq!(second["total"], 4);
-    assert_eq!(
-        second["truncated"], false,
-        "the matching walk is finished even though two fleet rows were never shown"
-    );
-}
-
-/// A cursor a caller EDITED cannot make the helm report numbers of the
-/// caller's choosing.
-///
-/// Spec: a real cursor is decoded, its fields are rewritten, and it is
-/// replayed. Every outcome is honest — the token is refused outright, or
-/// it is answered with counts the server recomputed — and in no case does
-/// a number the caller wrote into the token come back out.
-///
-/// The shape this pins closed is specific and was live: the cursor
-/// carried the matching count, the fleet revision, and a filter
-/// fingerprint as unauthenticated base64 JSON, and the server reported
-/// the carried count whenever the other two matched. The revision is
-/// learnable from `/api/events` and the fingerprint is a deterministic
-/// function of the query string, so a caller could name any total it
-/// liked — including one larger than the fleet, and one large enough to
-/// overflow the addition of the live-host component. Nothing in the reply
-/// would have looked wrong.
-///
-/// Every field is rewritten rather than only the count, because the test
-/// has to survive the fix rather than describe it: whatever a future
-/// cursor carries, none of it may become a claim about the fleet.
-#[tokio::test]
-async fn a_tampered_cursor_cannot_dictate_the_reported_counts() {
-    use base64::Engine;
-
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(first["matching"], 2);
-    let cursor = first["next_cursor"]
-        .as_str()
-        .expect("a truncated page carries a resume point")
-        .to_string();
-
-    let decoded: serde_json::Value = serde_json::from_slice(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&cursor)
-            .expect("a cursor is base64url"),
-    )
-    .expect("a cursor is JSON");
-    let fields: Vec<String> = decoded
-        .as_object()
-        .expect("a cursor is a JSON object")
-        .keys()
-        .cloned()
-        .collect();
-    // Absurd values, so an implementation that echoed ANY of them would
-    // be caught by the assertions below rather than by luck.
-    for field in fields {
-        let mut tampered = decoded.clone();
-        tampered[&field] = match tampered[&field] {
-            serde_json::Value::Number(_) => serde_json::json!(u64::MAX),
-            _ => serde_json::json!("forged"),
-        };
-        let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(tampered.to_string());
-        let (status, value) = get_json(
-            &harness,
-            &format!("/api/sessions?profile=p-claude&limit=1&cursor={token}"),
-        )
-        .await;
-        if status == axum::http::StatusCode::BAD_REQUEST {
-            continue;
-        }
-        assert_eq!(
-            status,
-            axum::http::StatusCode::OK,
-            "a tampered cursor is either refused or answered honestly, never a 500: {value}"
-        );
-        assert_eq!(
-            value["matching"], 2,
-            "the matching count is the server's own, whatever the token says: {value}"
-        );
-        assert_eq!(value["total"], 4, "and so is the fleet total: {value}");
-    }
-
-    // And the walk still works from the untouched token, so the refusals
-    // above are a guard rather than a broken path.
-    let (status, second) = get_json(
-        &harness,
-        &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&second), vec!["alpha-exited"]);
-    assert_eq!(second["matching"], 2);
-}
-
-/// A cursor replayed under a DIFFERENT filter is refused, rather than
-/// resuming mid-order through a result set it never described.
-///
-/// Spec: `GET /api/sessions?cursor=...` answers 400 whenever the
-/// request's filter is not the one the cursor was minted under —
-/// tightened, loosened, or cleared entirely.
-///
-/// The failure this closes is silent, which is why it is worth a refusal.
-/// The staged cases are chosen so the damage would be visible: each
-/// replacement filter matches a session that sorts BEFORE the cursor's
-/// position, so an implementation that applied the position anyway would
-/// answer 200 with that match missing and nothing anywhere to say a row
-/// had been skipped. The cleared filter is staged too, because "no
-/// filter" is the widest result set rather than the absence of one.
-#[tokio::test]
-async fn a_cursor_replayed_under_a_different_filter_is_refused() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    // A walk over the profile filter, whose first page ends after
-    // `local-running` — the newest session in the fleet, so anything the
-    // position is misapplied to loses it.
-    let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&first), vec!["local-running"]);
-    let cursor = first["next_cursor"]
-        .as_str()
-        .expect("a truncated page carries a resume point")
-        .to_string();
-
-    for changed in [
-        format!("/api/sessions?limit=1&cursor={cursor}"),
-        format!("/api/sessions?status=running&limit=1&cursor={cursor}"),
-        format!("/api/sessions?profile=p-claude&status=exited&limit=1&cursor={cursor}"),
-        format!("/api/sessions?profile=p-claude&parent=root-session&limit=1&cursor={cursor}"),
-        format!("/api/sessions?profile=p-claude&include_archived=true&limit=1&cursor={cursor}"),
-    ] {
-        let (status, body) = get_json(&harness, &changed).await;
-        assert_eq!(
-            status,
-            axum::http::StatusCode::BAD_REQUEST,
-            "{changed} resumed a walk it does not belong to: {body}"
-        );
-        assert!(
-            body.as_str().unwrap_or_default().contains("fresh walk"),
-            "the refusal must tell the caller what to do instead: {body}"
-        );
-    }
-
-    // The unchanged filter still resumes, so the binding is a guard
-    // rather than a broken walk.
-    let (status, second) = get_json(
-        &harness,
-        &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&second), vec!["alpha-exited"]);
-}
-
 /// The default list excludes archived rows, so it reports a matching
 /// count beside the fleet total even when no text dimension is present.
 ///
-/// Reporting `total` there would have been the convenient answer and is
-/// not a true one: `total` counts every cached row including any whose
-/// payload can no longer be trusted as that row, while a matching count
-/// deliberately excludes exactly those. Equating the two would make an
-/// unshowable row count as a match only in the case where nobody
-/// filtered, which is the one place the invariant was stated loudest.
-///
-/// A client that wants a number has `total` in hand and substitutes it,
-/// which is what it would have been handed anyway.
+/// Reporting no `matching` there would have been the convenient answer,
+/// and the UI does substitute `total` where a count is absent — but that
+/// substitution is meant for a helm that predates filtering, and the
+/// default view's archive exclusion IS a predicate this helm applied. A
+/// present count is what lets the client tell the two apart.
 #[tokio::test]
 async fn the_default_archive_predicate_reports_both_counts() {
     let (harness, _local, _alpha) = filterable_fleet().await;
@@ -4222,13 +3906,6 @@ async fn the_default_archive_predicate_reports_both_counts() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["total"], 4);
     assert_eq!(value["matching"], 4);
-
-    // Including when the page is cut for its LIMIT rather than a filter:
-    // truncation says nothing about matching either way.
-    let (_, value) = get_json(&harness, "/api/sessions?limit=1").await;
-    assert_eq!(value["total"], 4);
-    assert_eq!(value["matching"], 4);
-    assert_eq!(value["truncated"], true);
 }
 
 /// A status word this build does not know is a 400 naming the
@@ -4304,51 +3981,12 @@ async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
     assert_eq!(value["matching"], 2);
 }
 
-/// A filtered page is capped lower than an unfiltered one, and the
-/// refusal says which cap applied.
-///
-/// The two limits bound different work: an unfiltered page reads the
-/// rows it returns, a filtered one walks the order until it has filled
-/// itself. Refused rather than clamped, like the unfiltered cap and for
-/// the same reason — a caller that asked for 5,000 and silently received
-/// 500 cannot tell it did not get what it asked for.
-#[tokio::test]
-async fn a_filtered_page_is_capped_lower_than_an_unfiltered_one() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-    let over = crate::aggregate::MAX_FILTERED_PAGE_LIMIT + 1;
-
-    let (status, body) = get_json(
-        &harness,
-        &format!("/api/sessions?status=running&limit={over}"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
-    assert!(
-        body.as_str()
-            .unwrap_or_default()
-            .contains(&crate::aggregate::MAX_FILTERED_PAGE_LIMIT.to_string()),
-        "the refusal must name the filtered cap: {body:?}"
-    );
-
-    // Removing the default archive predicate makes the same limit an
-    // ordinary bounded scan again.
-    let (status, _) = get_json(
-        &harness,
-        &format!("/api/sessions?include_archived=true&limit={over}"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-}
-
 /// Archived sessions leave the ordinary view — its rows AND its total — and
 /// reappear in both only through the inclusion switch.
 ///
 /// The denominator half is the point: the served `total` is a count of the
 /// view the request asked for, so the ordinary list can never show ten rows
-/// above "of 12 sessions" with nothing typed into any filter. The page cut
-/// is exercised in the same test because both cuts have to apply in that
-/// order — filter first, cut second — or a limited page would report a
-/// number the rows contradict.
+/// above "of 12 sessions" with nothing typed into any filter.
 #[tokio::test]
 async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
     let mut archived = filterable(
@@ -4381,18 +4019,6 @@ async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
         "the default view's total counts the default view: one active session"
     );
 
-    let (_, limited) = get_json(&harness, "/api/sessions?limit=1").await;
-    assert_eq!(
-        row_ids(&limited),
-        vec!["active"],
-        "the newest archived row must be filtered before the page is cut"
-    );
-    assert_eq!(limited["matching"], 1);
-    assert_eq!(
-        limited["total"], 1,
-        "and the page cut does not move a count taken over the whole view"
-    );
-
     let (_, all) = get_json(&harness, "/api/sessions?include_archived=true").await;
     assert_eq!(row_ids(&all), vec!["archived", "active"]);
     assert!(all.get("matching").is_none());
@@ -4402,88 +4028,13 @@ async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
     );
 }
 
-/// A filtered walk's later pages report a count that is still TRUE: the
-/// remembered number is reused while nothing has changed, and recomputed
-/// the moment the fleet moves.
-///
-/// The reuse exists so a `limit=1` walk does not rescan the fleet per
-/// page (see `store::MatchingCount`), and its whole risk is staleness —
-/// a number taken before a create, reported after it. This asserts the
-/// OUTCOME on both paths, which is what a client sees. That a walk
-/// actually reuses rather than quietly recounting is a separate claim
-/// with a separate test, instrumented at the store
-/// (`a_filtered_walk_counts_once_and_recounts_only_after_a_change`),
-/// because an implementation that recounted every page would produce
-/// these very same numbers.
-#[tokio::test]
-async fn a_filtered_walks_count_survives_paging_and_is_recomputed_when_the_fleet_moves() {
-    let (harness, local, _alpha) = filterable_fleet().await;
-
-    let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(first["matching"], 2);
-    let cursor = first["next_cursor"]
-        .as_str()
-        .expect("a truncated page carries a resume point")
-        .to_string();
-
-    // Nothing changed: page two reports the same count.
-    let (_, second) = get_json(
-        &harness,
-        &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
-    )
-    .await;
-    assert_eq!(second["matching"], 2);
-    assert_eq!(row_ids(&second), vec!["alpha-exited"]);
-
-    // Now the fleet moves under the walk: a third matching session
-    // appears. The carried count is stale and must not be believed.
-    harness.fleet.edit(local, |script| {
-        script.sessions.push(filterable(
-            "local-latecomer",
-            50,
-            "/home/me/src/other",
-            "Late arrival",
-            farhelm_proto::SessionStatus::Running,
-            Some(source(
-                "p-claude",
-                "Claude Code",
-                farhelm_proto::ProfileExistence::Present,
-            )),
-        ));
-    });
-    harness.manager.refresh_now(local);
-    harness
-        .await_state(local, |state| {
-            matches!(
-                state,
-                crate::manager::HostState::Connected {
-                    last_refresh: crate::manager::RefreshHealth::Ok { sessions: 3 },
-                    ..
-                }
-            )
-        })
-        .await;
-
-    let (_, resumed) = get_json(
-        &harness,
-        &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
-    )
-    .await;
-    assert_eq!(
-        resumed["matching"], 3,
-        "a count taken before the change must not be reported after it"
-    );
-    assert_eq!(resumed["total"], 5);
-}
-
 /// An identity-less host's sessions live in the manager's MEMORY rather
 /// than in helm.db, so they reach the merged list by a different path —
 /// and the filter has to apply on that path too.
 ///
-/// The bug this pins is a silent one: with filtering implemented only in
-/// the SQL scan, such a host's rows would flow through unfiltered, so a
-/// search would return sessions that plainly do not match beside ones
+/// The bug this pins is a silent one: a filter applied to one source and
+/// not the other would let such a host's rows flow through unfiltered, so
+/// a search would return sessions that plainly do not match beside ones
 /// that do, with `matching` counting them.
 #[tokio::test]
 async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
@@ -4529,13 +4080,6 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
         value["total"], 2,
         "an identity-less host's rows count toward the fleet total like any other"
     );
-
-    // And the page cut is over the matches here too: a limit of one
-    // against a single match is not a truncated walk.
-    let (_, value) = get_json(&harness, "/api/sessions?directory=/opt&limit=1").await;
-    assert_eq!(row_ids(&value), vec!["memory-running"]);
-    assert_eq!(value["matching"], 2);
-    assert_eq!(value["truncated"], true);
 }
 
 /// The archive switch moves the denominator on the IN-MEMORY path too.
@@ -4731,103 +4275,17 @@ async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
     );
 }
 
-/// A cursor is bound to the ORDER it was minted under, and replaying one
-/// under a different `?sort=` is refused.
+/// An identity-less host's IN-MEMORY rows are sorted into ONE sequence with
+/// the cached rows, under every order the request can ask for.
 ///
-/// The failure this closes is silent and total: a resume point names a
-/// place in one sequence, so applied to another it lands somewhere
-/// arbitrary and every row that sorts before that point vanishes from the
-/// walk with nothing in the reply to say so. The staged replays are chosen
-/// so the damage would be visible — each names an order in which the
-/// cursor's own row is not near the front.
-#[tokio::test]
-async fn a_cursor_replayed_under_a_different_sort_is_refused() {
-    let harness = sortable_fleet().await;
-
-    let (status, first) = get_json(&harness, "/api/sessions?sort=activity&limit=1").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&first), vec!["local-busy"]);
-    let cursor = first["next_cursor"]
-        .as_str()
-        .expect("a truncated page carries a resume point")
-        .to_string();
-
-    for changed in [
-        format!("/api/sessions?sort=title&limit=1&cursor={cursor}"),
-        format!("/api/sessions?sort=created&limit=1&cursor={cursor}"),
-        // The absent parameter is the creation order, so it is a CHANGE from
-        // the activity order this token was minted in — not "no opinion".
-        format!("/api/sessions?limit=1&cursor={cursor}"),
-    ] {
-        let (status, body) = get_json(&harness, &changed).await;
-        assert_eq!(
-            status,
-            axum::http::StatusCode::BAD_REQUEST,
-            "{changed} resumed a walk taken in another order: {body}"
-        );
-        let text = body.as_str().unwrap_or_default();
-        assert!(
-            text.contains("fresh walk") && text.contains("sort"),
-            "the refusal must say what to change and what to do instead: {text:?}"
-        );
-    }
-
-    // The unchanged order still resumes, so the binding is a guard rather
-    // than a broken walk.
-    let (status, second) = get_json(
-        &harness,
-        &format!("/api/sessions?sort=activity&limit=1&cursor={cursor}"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&second), vec!["alpha-busy"]);
-}
-
-/// Walk the whole list one row per page under `sort`, through the real query
-/// string, and return the ids in the order they were served.
-///
-/// One row per page on purpose: the resume point is then exercised at every
-/// boundary in the list rather than at one of them, which is where a resume
-/// predicate that disagrees with its own `ORDER BY` shows up.
-///
-/// The loop's own bound is a BACKSTOP, not the exit: reaching it is a
-/// failure, because a walk that never issues a cursor-free page is exactly
-/// the shape a client loops on forever. Terminating on `next_cursor: null`
-/// is the property, so it is asserted rather than merely relied on.
-async fn walk_one_at_a_time(harness: &rest_harness::Harness, sort: &str) -> Vec<String> {
-    let mut walked: Vec<String> = Vec::new();
-    let mut uri = format!("/api/sessions?sort={sort}&limit=1");
-    for _ in 0..10 {
-        let (status, value) = get_json(harness, &uri).await;
-        assert_eq!(status, axum::http::StatusCode::OK, "{uri}");
-        walked.extend(row_ids(&value));
-        match value["next_cursor"].as_str() {
-            None => return walked,
-            Some(cursor) => uri = format!("/api/sessions?sort={sort}&limit=1&cursor={cursor}"),
-        }
-    }
-    panic!("the {sort} walk never reached a page without a next_cursor; walked {walked:?}");
-}
-
-/// An identity-less host's IN-MEMORY rows are re-ordered into the order the
-/// request asked for before they are merged — and are NOT re-ordered under the
-/// default one, where they already agree with it.
-///
-/// This is the one source that cannot arrive pre-sorted for every order: its
-/// host reports creation order (the wire order the drain validates and this
-/// helm never asks anyone to change), and the merge that interleaves it with
-/// the persisted page is only correct over sources that are each already
-/// ordered. Left unsorted under `activity` or `title`, its rows would be
-/// interleaved by whichever one happened to be at the front, producing a page
-/// in neither order.
-///
-/// Both paths are walked, because they are different code. Under `created` the
-/// wire order IS the requested order, so the merge skips the sort entirely and
-/// relies on the drain's validation for the binary-searched resume point to be
-/// sound; under the other two the order is established per request. A fast
-/// path that was wrong would produce a page in creation order under an order
-/// that is not creation order — which is precisely what a fixture whose three
-/// sequences coincide could not see, so this one keeps all three distinct.
+/// The two sources reach the merge by different paths — helm.db for hosts
+/// with an identity, the actor's memory for hosts without — and the order
+/// is established over the union, in memory, per request. A merge that
+/// sorted only the cached side, or trusted the host's own reported order
+/// for the in-memory side, would interleave the two by whichever happened
+/// to be at the front and serve a list in neither order. The fixture keeps
+/// all three sequences distinct precisely so that failure could not hide
+/// behind orders that happen to coincide.
 #[tokio::test]
 async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
     let (builder, alpha) = rest_harness::FleetBuilder::new()
@@ -4838,11 +4296,9 @@ async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
             // reported them.
             identity: None,
             sessions: vec![
-                // "Alpha" capitalized on the IN-MEMORY side deliberately: its
-                // key is folded by `title_sort_key` on the merge path while
-                // the cached row's was folded on the write path, and a page
-                // that interleaves the two is where a second, subtly different
-                // fold would show.
+                // "Alpha" capitalized on the IN-MEMORY side deliberately: the
+                // title order folds case, and a fold applied to one source
+                // but not the other is where the two would come apart.
                 sortable("memory-quiet", 300, 100, "Alpha"),
                 sortable("memory-busy", 200, 900, "mid"),
             ],
@@ -4872,19 +4328,15 @@ async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
         "creation order, for the contrast the other two are against"
     );
 
+    let (_, value) = get_json(&harness, "/api/sessions?sort=activity").await;
     assert_eq!(
-        walk_one_at_a_time(&harness, "created").await,
-        vec!["memory-quiet", "cached-mid", "memory-busy"],
-        "the default order's fast path leaves the in-memory list as the host reported it, and \
-         the walk must still resume correctly across every boundary"
-    );
-    assert_eq!(
-        walk_one_at_a_time(&harness, "activity").await,
+        row_ids(&value),
         vec!["memory-busy", "cached-mid", "memory-quiet"],
         "the in-memory rows must land on either side of the cached one, once each"
     );
+    let (_, value) = get_json(&harness, "/api/sessions?sort=title").await;
     assert_eq!(
-        walk_one_at_a_time(&harness, "title").await,
+        row_ids(&value),
         vec!["memory-quiet", "memory-busy", "cached-mid"],
         "and the title order is a third sequence again: the cached row's own title puts it last, \
          behind two in-memory rows that neither of the other orders puts together"

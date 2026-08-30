@@ -13,9 +13,9 @@
 //! carries; its classification core takes what it needs as plain arguments
 //! (an entry, a pane-state map), which is what keeps it out of this
 //! module's private fields and testable with no supervisor at all.
-//! `listing` owns the paged walk, and that one is NOT supervisor-free:
-//! `list_page` takes a `&Supervisor` because walking a page means locking
-//! the session map and probing tmux. What it does not do is reach into
+//! `listing` owns the whole-list reply, and that one is NOT supervisor-free:
+//! `list_all` takes a `&Supervisor` because listing means locking the
+//! session map and probing tmux. What it does not do is reach into
 //! private fields — it goes through the same API any other submodule
 //! would.
 
@@ -6652,9 +6652,9 @@ impl Supervisor {
     /// Re-derive `info`'s source-profile existence against the catalog as it
     /// stands right now (PLAN_M6_75.md item 5).
     ///
-    /// The single-snapshot counterpart to `list_page`'s batched read: one
+    /// The single-snapshot counterpart to `list_all`'s batched read: one
     /// reply describing one session costs one lookup by id, and a reply
-    /// describing a page reads the whole catalog once instead. Both feed the
+    /// describing the whole list reads the whole catalog once instead. Both feed the
     /// same rule (`status::source_profile_existence`).
     ///
     /// A raw-created session costs NOTHING — no query is issued at all,
@@ -14800,15 +14800,9 @@ pub(crate) mod tests {
 
         // Through a real reply, so the derivation is exercised rather than
         // the raw column: the profile is gone, and the reply must say so.
-        let page = crate::service::listing::list_page(
-            &reloaded,
-            crate::service::listing::ListQuery {
-                cursor: None,
-                limit: 10,
-            },
-        )
-        .await
-        .expect("list");
+        let page = crate::service::listing::list_all(&reloaded)
+            .await
+            .expect("list");
         let listed = page
             .sessions
             .iter()

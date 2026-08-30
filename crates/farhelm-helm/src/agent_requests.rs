@@ -17,7 +17,7 @@
 //! # Same answers as the UI, on purpose
 //!
 //! Every verb here is served from the exact code path its REST counterpart
-//! uses — `hosts::host_views` for hosts, `aggregate::session_page` for
+//! uses — `hosts::host_views` for hosts, `aggregate::session_list` for
 //! sessions, `sessions::do_rename_session`/`do_stop_session`/
 //! `do_archive_session` for the three lifecycle verbs, and
 //! `sessions::do_create_session` for `create` and `clone`. Not for economy:
@@ -253,37 +253,17 @@ impl HelmAgentRequests {
     }
 }
 
-/// The most sessions one `sessions` reply will ever carry.
+/// The most ENCODED session bytes one `sessions` reply will ever carry.
 ///
-/// A cut has to exist — the reply is one frame on a connection shared with
-/// every terminal on that host, and an unbounded listing would eventually
-/// be an unsendable one — and five thousand rows is already far past what
-/// an agent can do anything with. What makes the cut acceptable is that it
-/// is VISIBLE: reaching it sets `AgentReply::Sessions::truncated`, so the
-/// difference between "that session does not exist" and "you were not
-/// shown all of them" is on the wire rather than left for the reader to
-/// guess. The verbs that would make a narrower answer right (filtering,
-/// paging) do not exist yet; when they arrive the honest shape is a
-/// parameter on the verb, not a smaller silent cut here.
-///
-/// It is the SECOND of two ceilings, and the weaker one: rows say nothing
-/// about size, and [`AGENT_REPLY_BYTE_BUDGET`] is what actually keeps the
-/// reply sendable.
-const AGENT_SESSION_CAP: usize = 5_000;
-
-/// The most ENCODED session bytes one `sessions` reply will ever carry,
-/// accumulated across every page the listing walks.
-///
-/// The row cap alone was never a bound on the answer's size, and the gap
-/// was not theoretical. `aggregate::session_page` applies its own byte
-/// budget PER PAGE, so a fleet of legally fat records — session creation
-/// admits tens of kilobytes of caller-supplied title, cwd and invocation
-/// text — produces page after individually-valid page that this loop
-/// concatenated into a reply no frame could carry. The whole answer was
-/// then discarded at the writer's size backstop and the agent got
-/// `Internal` instead of the partial listing with `truncated: true` that
-/// the verb promises, after the helm had already paid to build and encode
-/// it (up to `client::AGENT_ANSWER_SLOTS` times over per host).
+/// The listing itself is bounded by rows (`farhelm_proto::LIST_SESSIONS_CAP`,
+/// applied by every supervisor and by the helm's merge), but rows say
+/// nothing about size: session creation admits tens of kilobytes of
+/// caller-supplied title, cwd and invocation text, so a fleet of legally
+/// fat records could produce a reply no frame could carry. That answer
+/// would be discarded at the writer's size backstop and the agent would
+/// get `Internal` instead of the partial listing with `truncated: true`
+/// that the verb promises, after the helm had already paid to build and
+/// encode it (up to `client::AGENT_ANSWER_SLOTS` times over per host).
 ///
 /// Six MiB of ROWS against `MAX_FRAME_LEN`'s eight leaves the reply's
 /// envelope — the `AgentResponse` wrapper, the `req_id`, the JSON
@@ -294,8 +274,8 @@ const AGENT_SESSION_CAP: usize = 5_000;
 /// catches an arithmetic mistake here, so slack costs nothing while a
 /// miscalculated ceiling would cost the whole answer.
 ///
-/// Reaching it means the same thing reaching the row cap means, and says
-/// so the same way: `truncated: true`, and no further page is fetched.
+/// Reaching it means the same thing the listing cap means, and says so the
+/// same way: `truncated: true`.
 const AGENT_REPLY_BYTE_BUDGET: usize = 6 * 1024 * 1024;
 
 #[async_trait]
@@ -1126,6 +1106,7 @@ async fn clone_for_agent(
     let source = crate::manager::drain_sessions(&source_client)
         .await
         .map_err(|error| error.context(ReadOnlyPhase("reading the session to clone")))?
+        .sessions
         .into_iter()
         .find(|session| session.id == asking_session)
         .ok_or_else(|| {
@@ -1334,26 +1315,19 @@ fn agent_row_of_mutation(
     agent_session(&row, host_name, asking_host, asking_session)
 }
 
-/// Drain the merged fleet listing into one reply, up to whichever of
-/// [`AGENT_SESSION_CAP`] and [`AGENT_REPLY_BYTE_BUDGET`] is reached first.
+/// Project the merged fleet listing into one reply, cut at
+/// [`AGENT_REPLY_BYTE_BUDGET`] if the rows will not fit a frame.
 ///
-/// Served from `aggregate::session_page` — the same function the UI's list
-/// is built from, on purpose (see the module docs) — which is PAGINATED:
-/// it stops at its own row limit, and stops earlier when the page's
-/// encoded-size budget is spent, reporting either cut through
-/// `next_cursor`. A single call was the original shape and was wrong for
-/// exactly that reason: an agent asking for the fleet got whatever fitted
-/// in one page, with no way to tell that from the whole answer. So this
-/// walks the cursor until the listing ends or a ceiling is reached, and
-/// says which of the two happened.
+/// Served from `aggregate::session_list` — the same function the UI's list
+/// is built from, on purpose (see the module docs) — which answers with the
+/// whole view up to the listing cap and says when that cap was hit. That
+/// flag carries straight through: an agent asking for the fleet must be
+/// able to tell a partial answer from the whole one, and the listing's own
+/// `truncated` is exactly that distinction.
 ///
-/// The byte allowance is CUMULATIVE across pages, which is the difference
-/// that matters: the page function's own budget resets on every page, so
-/// nothing below this function bounds the assembled reply. Each row is
-/// measured as it is projected and the walk stops BEFORE the row that
-/// would exceed the allowance — and stops fetching pages entirely, so the
-/// helm does not pay to materialize a fleet it has already decided not to
-/// send.
+/// Each row is measured as it is projected and the projection stops BEFORE
+/// the row that would exceed the allowance, so the helm never encodes a
+/// reply it has already decided not to send.
 async fn session_listing(
     state: &AppState,
     asking_host: HostId,
@@ -1366,53 +1340,34 @@ async fn session_listing(
     // history.
     let filter = crate::store::SessionFilter::default().include_archived(true);
     let sort = crate::store::ListSort::default();
+    let listing =
+        crate::aggregate::session_list(&state.manager, &state.store, &filter, sort).await?;
     let mut sessions: Vec<AgentSession> = Vec::new();
     let mut spent = 0usize;
-    let mut truncated = false;
-    let mut cursor: Option<String> = None;
-    'paging: loop {
-        let remaining = AGENT_SESSION_CAP - sessions.len();
-        let page = crate::aggregate::session_page(
-            &state.manager,
-            &state.store,
-            &state.counts,
-            cursor.as_deref(),
-            remaining.min(crate::aggregate::MAX_PAGE_LIMIT),
-            &filter,
-            sort,
-        )
-        .await?;
-        for row in &page.sessions {
-            let row = agent_session(
-                row,
-                Some(row.host_name.clone()),
-                asking_host,
-                asking_session,
-            );
-            // The ENCODED size, because that is what has to fit in a frame;
-            // a struct's in-memory footprint says nothing about it. A row
-            // that will not encode at all is charged the whole budget
-            // rather than failing the listing: it cannot be sent either
-            // way, and the reply an agent can use is the truncated one.
-            let encoded = serde_json::to_vec(&row).map_or(usize::MAX, |bytes| bytes.len());
-            if spent.saturating_add(encoded) > AGENT_REPLY_BYTE_BUDGET {
-                truncated = true;
-                break 'paging;
-            }
-            spent += encoded;
-            sessions.push(row);
+    let mut truncated = listing.truncated;
+    for row in &listing.sessions {
+        let row = agent_session(
+            row,
+            Some(row.host_name.clone()),
+            asking_host,
+            asking_session,
+        );
+        // The ENCODED size, because that is what has to fit in a frame;
+        // a struct's in-memory footprint says nothing about it. The
+        // expect is a statement, not a hope: `AgentSession` is strings,
+        // integers and booleans, which serde_json serializes infallibly,
+        // so a failure here is a serializer defect — and it must be LOUD,
+        // not laundered into a plausible-looking `truncated: true` that
+        // hides the fault behind ordinary wording.
+        let encoded = serde_json::to_vec(&row)
+            .expect("an AgentSession is plain strings and numbers; serialization cannot fail")
+            .len();
+        if spent + encoded > AGENT_REPLY_BYTE_BUDGET {
+            truncated = true;
+            break;
         }
-        match page.next_cursor {
-            // The listing ended on its own: this is the whole fleet.
-            None => break,
-            // More exists. Keep walking while there is room, and report the
-            // cut when there is not.
-            Some(next) if sessions.len() < AGENT_SESSION_CAP => cursor = Some(next),
-            Some(_) => {
-                truncated = true;
-                break;
-            }
-        }
+        spent += encoded;
+        sessions.push(row);
     }
     Ok(AgentReply::Sessions {
         sessions,
@@ -2080,7 +2035,7 @@ mod tests {
     // `HelmAgentRequests::handle` itself over a real `AppState` — a real
     // connection manager, a real helm.db, scripted supervisors — because
     // the assembly is where the interesting mistakes live: the wrong
-    // archive filter, one page instead of the fleet, the local host only,
+    // archive filter, one host instead of the fleet, the local host only,
     // a `current` marker computed from the wrong side.
     // ---------------------------------------------------------------
 
@@ -2246,8 +2201,8 @@ mod tests {
     /// This is the one test that exercises the assembly rather than the
     /// projection, and every clause is a bug that the pure unit tests above
     /// cannot see: a handler that listed only the local host, or passed the
-    /// default archive-excluding filter, or took a single page and called
-    /// it the fleet, would satisfy every one of them.
+    /// default archive-excluding filter, or listed one host and called it
+    /// the fleet, would satisfy every one of them.
     #[tokio::test]
     async fn the_production_handler_lists_the_whole_fleet_with_its_flags() {
         let (h, local, _remote) = two_host_fleet().await;
@@ -2331,26 +2286,22 @@ mod tests {
     /// something unsendable.
     ///
     /// This is the assembly's most consequential bound and no other test
-    /// reaches it. `aggregate::session_page` applies its byte budget PER
-    /// PAGE, so before the cumulative allowance existed, the row cap was
-    /// the only limit on the whole answer: page after individually-valid
-    /// page concatenated into a reply past `MAX_FRAME_LEN`, discarded whole
-    /// at the writer's size backstop, reaching the agent as `Internal`
-    /// instead of the partial listing the verb promises — after the helm
-    /// had already paid to build and encode it, on up to four connections
-    /// at once.
+    /// reaches it. The listing's row cap says nothing about bytes, so
+    /// without this allowance a fleet of fat records would assemble into a
+    /// reply past `MAX_FRAME_LEN`, discarded whole at the writer's size
+    /// backstop, reaching the agent as `Internal` instead of the partial
+    /// listing the verb promises — after the helm had already paid to build
+    /// and encode it, on up to four connections at once.
     ///
-    /// The fixture is deliberately shaped to cross a page boundary: 120
-    /// rows of 64 KiB is several times one page's own budget, so a listing
-    /// that stopped counting at the page edge (or reset its tally there)
-    /// fails here rather than passing by arithmetic accident.
+    /// The fixture is deliberately well past the allowance: 120 rows of
+    /// 64 KiB is 7.5 MiB against a 6 MiB budget, split across two hosts so
+    /// the cut lands inside a merged list rather than at one host's edge.
     #[tokio::test]
     async fn a_fat_fleet_is_cut_at_the_reply_byte_allowance() {
         const ROWS_PER_HOST: usize = 60;
         const TITLE_BYTES: usize = 64 * 1024;
-        // Newest first: a host's scripted list must arrive in the wire
-        // order the drain validates (creation time descending), so the
-        // timestamps count DOWN as the index counts up.
+        // Newest first, so the fixture reads like a real host's list; the
+        // order is not validated anywhere, the merge sorts for itself.
         let fat = |prefix: &str| -> Vec<SessionInfo> {
             (0..ROWS_PER_HOST)
                 .map(|n| {
@@ -2409,14 +2360,29 @@ mod tests {
             sessions.len() < 2 * ROWS_PER_HOST,
             "the whole fleet was carried, so nothing was actually cut"
         );
-        // More than one page's own byte budget came back, which is the
-        // clause that proves the allowance survives the page boundary
-        // rather than restarting at it.
-        let carried = sessions.len() * TITLE_BYTES;
+        // The BOUNDARY, pinned exactly: the retained rows fit the
+        // allowance and the next (uniform) row would cross it. Encoded
+        // sizes are measured the same way production measures them, so
+        // this fails on an off-by-one (`>=` for `>`), a tally that resets
+        // per host, or a budget change nobody meant.
+        let spent: usize = sessions
+            .iter()
+            .map(|row| {
+                serde_json::to_vec(row)
+                    .expect("projected rows serialize")
+                    .len()
+            })
+            .sum();
+        let one_row = serde_json::to_vec(&sessions[0])
+            .expect("projected rows serialize")
+            .len();
         assert!(
-            carried > (farhelm_proto::MAX_FRAME_LEN / 2) as usize,
-            "the reply did not even reach one page's budget ({carried} bytes), so the crossing \
-             this test is about never happened"
+            spent <= AGENT_REPLY_BYTE_BUDGET,
+            "the retained rows must fit the allowance ({spent} > {AGENT_REPLY_BYTE_BUDGET})"
+        );
+        assert!(
+            spent + one_row > AGENT_REPLY_BYTE_BUDGET,
+            "the next row must be the one that crossed ({spent} + {one_row})"
         );
         let frame = response_frame(&outcome);
         assert!(
@@ -2426,23 +2392,21 @@ mod tests {
         );
     }
 
-    /// Spec: a fleet past [`AGENT_SESSION_CAP`] rows stops at the cap and
-    /// reports `truncated`.
+    /// Spec: a merged fleet past `farhelm_proto::LIST_SESSIONS_CAP` rows
+    /// stops at the cap and reports `truncated`.
     ///
     /// The second ceiling, and the one that decides the answer when the
-    /// rows are small enough that bytes never bind. Both have to be
-    /// exercised through the production loop, because the loop is where a
-    /// cap can be applied to the wrong quantity — the page's limit rather
-    /// than the accumulated total — and still look right for every fleet
-    /// that fits in one page.
+    /// rows are small enough that bytes never bind. Exercised through the
+    /// production handler rather than `aggregate::session_list` alone,
+    /// because this is where the listing's own `truncated` has to survive
+    /// the projection into the agent reply.
     #[tokio::test]
     async fn a_fleet_past_the_row_cap_is_cut_at_the_cap() {
         // Split across two hosts because no single host may serve more than
-        // `LIST_SESSION_CAP` rows — the drain refuses past it — while the
-        // MERGED fleet has no such limit, which is exactly the shape this
-        // cap exists for. Newest first within each host, like any real
-        // list; the drain refuses a list out of wire order.
-        const PER_HOST: usize = AGENT_SESSION_CAP / 2 + 100;
+        // the cap — the drain refuses past it — while the MERGED fleet can
+        // exceed it, which is exactly the shape the merge's own cut exists
+        // for.
+        const PER_HOST: usize = farhelm_proto::LIST_SESSIONS_CAP / 2 + 100;
         let many = |prefix: &str| -> Vec<SessionInfo> {
             (0..PER_HOST)
                 .map(|n| session(&format!("{prefix}-{n}"), (PER_HOST - n) as i64))
@@ -2484,7 +2448,7 @@ mod tests {
         else {
             panic!("expected a sessions reply, got {outcome:?}");
         };
-        assert_eq!(sessions.len(), AGENT_SESSION_CAP);
+        assert_eq!(sessions.len(), farhelm_proto::LIST_SESSIONS_CAP);
         assert!(truncated, "a fleet past the cap must say it was cut");
     }
 

@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
     ListSort, SessionFilter, SessionListing, archive_session, delete_session, fetch_hosts,
-    fetch_newest_created, fetch_session, fetch_sessions, rename_session, stop_session,
+    fetch_session, fetch_sessions, rename_session, stop_session,
 };
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -263,10 +263,9 @@ const SORT_OPTIONS: [(ListSort, &str); 3] = [
 ///
 /// A function of its own because the choice is subtler than it looks and
 /// because it is the half of the fallback that can be tested without a
-/// browser. The caller decides WHETHER these rows are a sound basis for the
-/// question at all (`rows::listing_is_complete`, and the extra creation-order
-/// read the auto-select effect makes when they are not); this decides only
-/// who wins among them.
+/// browser. It answers only who wins among the rows it is given; whether a
+/// cut listing is a sound basis for the question is the auto-select
+/// effect's call (see its own comment on why it picks from them anyway).
 ///
 /// Three rules, and each exists because a plainer one is wrong:
 ///
@@ -417,7 +416,7 @@ fn clone_is_refused(
 /// the retry a read that failed against a HEALTHY feed leaves this page
 /// stale until the fleet happens to change again — the fallback poll is off,
 /// and nothing else is owed. Without the coalescing, a helm that has stopped
-/// answering accumulates one walk per notification and per fallback tick for
+/// answering accumulates one read per notification and per fallback tick for
 /// as long as the page is open.
 ///
 /// Everything is scoped to this component. Under the sidebar layout
@@ -454,13 +453,13 @@ fn clone_is_refused(
 ///
 /// The filter surface builds `api::SessionFilter` and the helm answers with
 /// the matching rows plus their count; nothing here narrows a list it was
-/// handed. That is the only arrangement coherent with pagination — a
-/// client-side filter over one page hides matches beyond the cut while the
-/// banner reports a count that includes them.
+/// handed. That is the only arrangement coherent with the helm's cap — a
+/// client-side filter over a cut list hides matches beyond the cut while
+/// the banner reports a count that includes them.
 ///
 /// The filter is applied on SUBMIT rather than per keystroke, which is a
 /// deliberate trade: a live filter over a server-side query is one whole
-/// cursor walk per character typed, and the debounce that would make that
+/// fleet read per character typed, and the debounce that would make that
 /// tolerable is a second cadence to tune in a UI whose entire point this
 /// milestone is that it has none left.
 ///
@@ -581,10 +580,10 @@ pub(crate) fn ListView(
     let mut row_ops = row_ops;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // The same generation discipline the hosts read has, for the same
-    // reason and against a slower race: a listing walk is several round
-    // trips, so a read that started before a delete can easily still be
-    // walking when the delete's own refresh has already landed — and
-    // committing it would put the deleted row back until the next one.
+    // reason and against a slower race: a listing read that started before
+    // a delete can easily still be in flight when the delete's own refresh
+    // has already landed — and committing it would put the deleted row
+    // back until the next one.
     let mut listing_reads = use_signal(ReadGate::default);
     // The host registry as this client currently knows it — four states, not
     // three, so a failed read cannot blank the panel (see `hosts::HostsRead`).
@@ -1066,8 +1065,7 @@ pub(crate) fn ListView(
             }
             // The right pane's placeholder may only claim "no active
             // sessions" on a committed result that actually proves one:
-            // the DEFAULT view's own reply, complete and coherent, with no
-            // rows. Not `rows::is_empty_fleet` — that helper answers a
+            // the DEFAULT view's own reply, uncut, with no rows. Not `rows::is_empty_fleet` — that helper answers a
             // different question (is the WHOLE fleet empty), and the
             // ordinary view withholds archived rows, so it can never
             // support that claim no matter what its own count says. An
@@ -1075,7 +1073,7 @@ pub(crate) fn ListView(
             // "no ACTIVE sessions" is exactly right for it. A user filter
             // proves nothing about the pane and leaves the verdict as it
             // was.
-            if requested == SessionFilter::default() && !listing.truncated && !listing.incoherent {
+            if requested == SessionFilter::default() && !listing.truncated {
                 fleet_empty.set(Some(listing.sessions.is_empty()));
             }
         }
@@ -2009,23 +2007,22 @@ pub(crate) fn ListView(
     // would otherwise be lost until unrelated fleet activity.
     //
     // A remembered id ABSENT from a TRUNCATED listing is not evidence it
-    // is gone (the walk stopped early); it is resolved directly instead,
-    // and only a definite not-found retires it in favor of the fallback.
-    // The fallback itself deliberately does not re-persist: overwriting
-    // the user's real choice with whichever row a bounded walk happened
-    // to return first would erase it permanently (see `stored_selection`).
+    // is gone (the helm's cap cut the view); it is resolved directly
+    // instead, and only a definite not-found retires it in favor of the
+    // fallback. The fallback itself deliberately does not re-persist:
+    // overwriting the user's real choice with whichever row a cut listing
+    // happened to hold would erase it permanently (see `stored_selection`).
     //
-    // The fallback has an incomplete-listing arm of its own, for the same
-    // reason and with a different remedy. Picking the newest-created row out
-    // of a listing that does not hold every row (a ceiling, or an
-    // underfilled walk) is only sound while the rows arrived in creation
-    // order, because only then is the newest session guaranteed to be in the
-    // prefix that was collected. Under any other order the answer has to be
-    // asked for directly — `api::fetch_newest_created`, one page of one row.
+    // The fallback picks from the rows in hand even when the listing is
+    // incomplete. Under a non-creation order the newest session may sit
+    // past the cut, so the pick can be merely the newest row the reply
+    // reached — accepted, because a listing cut at the helm's cap is a
+    // fleet of hundreds of sessions, the auto-select exists to keep the
+    // pane from sitting empty rather than to be exact, and the alternative
+    // (a second request for one row in creation order) was a whole extra
+    // API shape for that corner.
     let resolve_base = base.clone();
-    let newest_base = base.clone();
     let mut resolving_remembered = use_signal(|| false);
-    let mut resolving_newest = use_signal(|| false);
     let mut remembered_dead = use_signal(|| None::<String>);
     use_effect(move || {
         if selected.read().is_some() {
@@ -2060,7 +2057,7 @@ pub(crate) fn ListView(
             .find(|s| remembered.as_deref() == Some(s.id.as_str()));
         if in_page.is_none()
             && let Some(id) = remembered.clone()
-            && listing_ok.truncated
+            && !listing_is_complete(listing_ok)
         {
             if !*resolving_remembered.peek() {
                 resolving_remembered.set(true);
@@ -2079,46 +2076,7 @@ pub(crate) fn ListView(
         }
         // The newest-created row among the ones in hand (see
         // `newest_created_fallback` for why that is not simply the first).
-        let local_newest = newest_created_fallback(&listing_ok.sessions);
-        // The rows in hand are only a sound basis for that question while
-        // they are ALL the rows, or while they arrived newest-created first
-        // — in which case the newest is necessarily in the collected prefix
-        // however early the walk stopped. Neither holds here, so the answer
-        // is asked for rather than guessed: one page, one row, creation
-        // order, default filter. The default filter is deliberate even under
-        // an applied one, because SPEC.md's fallback is about the FLEET; the
-        // common complete-walk case never reaches this arm, so a filtered
-        // sidebar keeps picking from its own rows unless its walk fell short.
-        if in_page.is_none()
-            && !listing_is_complete(listing_ok)
-            && *sort.peek() != ListSort::Created
-        {
-            if !*resolving_newest.peek() {
-                resolving_newest.set(true);
-                let base = newest_base.clone();
-                // Cloned before the spawn so the failure arm below still has
-                // an answer without borrowing the listing across an await.
-                let local = local_newest.cloned();
-                spawn(async move {
-                    match fetch_newest_created(&base).await {
-                        Ok(Some(session)) => on_open.call(session),
-                        // The extra read is an IMPROVEMENT on a local guess,
-                        // not a precondition for one. A helm that cannot
-                        // answer it leaves the best row this walk did collect
-                        // as the honest choice, and an empty right pane is
-                        // the one outcome this whole effect exists to avoid.
-                        _ => {
-                            if let Some(session) = local {
-                                on_open.call(session);
-                            }
-                        }
-                    }
-                    resolving_newest.set(false);
-                });
-            }
-            return;
-        }
-        let candidate = in_page.or(local_newest);
+        let candidate = in_page.or_else(|| newest_created_fallback(&listing_ok.sessions));
         if let Some(session) = candidate {
             // The same synchronous handler-time guard a click gets.
             if ops.busy_now() || !pending.peek().is_empty() {
@@ -2663,27 +2621,19 @@ pub(crate) fn ListView(
                     {
                         let banner = count_banner(listing);
                         rsx! {
-                            div { class: "{banner.class}",
-                                "{banner.text}"
-                                if let Some(note) = banner.incoherence {
-                                    "{note}"
-                                }
-                            }
+                            div { class: "{banner.class}", "{banner.text}" }
                         }
                     }
                     // A filter that matched nothing says so in words, beside
                     // the banner's numbers. Without it the page is a count
                     // over an empty box, which reads as a list that failed
                     // to load rather than as a search that found nothing —
-                    // and the two call for opposite reactions. What counts
-                    // as "nothing" is the helm's own matching count rather
-                    // than the emptiness of this page's rows; see
-                    // `rows::no_matches` for the two cases that distinction
-                    // keeps the UI honest about.
-                    if rows::no_matches(listing) {
-                        div { class: "status filter-empty",
-                            "no sessions match this filter"
-                        }
+                    // and the two call for opposite reactions. The wording
+                    // is `rows::no_match_line`'s: categorical only for a
+                    // complete listing, scoped to "the sessions that could
+                    // be read" under a cut one.
+                    if let Some(line) = rows::no_match_line(listing) {
+                        div { class: "status filter-empty", "{line}" }
                     }
                     div { class: "session-list",
                         // The rows are the server's listing with this

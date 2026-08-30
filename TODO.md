@@ -11,30 +11,6 @@ Within a bucket, no order.
 
 ## Definite simplification
 
-- Serve the session list WHOLE instead of paginating it at every layer. The user experience stays exactly as it is —
-  three sort orders, the "N matching of M" count, cross-client refresh, stale rows from unreachable hosts, the "could
-  not read to the end" notice — but the fleet this product is for is tens of sessions on a few hosts, not thousands, and
-  the machinery built to scale past that is the largest source of incidental complexity in the codebase: keyset cursors
-  at the wire AND at the helm (deliberately incompatible encodings), per-order database indexes with a per-host
-  `UNION ALL` page query, Rust-side Unicode title folding cut to 128 chars with a batched backfill migration, cursors
-  bound to order and filter, byte budgets as a second page cut, a bounded matching-count cache keyed to a store
-  generation, drain-to-exhaustion refresh with three termination bounds and wire-order validation, and in the UI the
-  "underfilled listing" predicate with its three readers plus a one-row creation-order fallback request — all of it
-  existing because sorting by mutable keys under pagination lets a row cross the cursor between two pages. The
-  replacement: each supervisor returns its list in one reply up to a hard cap (a few hundred rows); the helm merges the
-  hosts in memory, sorts in Rust, and hands the browser one array; a whole reply is a snapshot, so rows cannot move
-  between pages and the drift edge cases disappear with the pages. The cap is where the spec's "could not read to the
-  end" notice lives. Wire pagination contract goes too (protocol bump). SPEC EDITS, in the same PR: SPEC.md's Session
-  list section must state the scale assumption and the prohibition in so many words — the fleet is tens of sessions, the
-  list is served and rendered WHOLE up to a fixed cap of a few hundred, "could not read to the end" means the cap was
-  hit, and no pagination, cursors, streaming or incremental listing, or per-order server-side indexing is wanted at any
-  layer; it is fine for the helm and every client to hold and sort the entire fleet in memory. Without that sentence the
-  next agent re-derives pagination from "a list the client could not read to the end". SPEC_impl.md: delete "The page is
-  a PAGE all the way down", the three-orders/cursor/collation/matching-count bullets under Helm internals, the
-  drain-then-replace and wire-order-validation bullets, and the GUI section's underfilled-listing paragraphs; replace
-  with one paragraph describing the whole-list reply and cap. Write-up:
-  https://claude.ai/code/artifact/1352315d-aab4-43e9-8cb9-2f58c06b8b4e
-
 - Move the remembered sort order and last-selected session into the HELM, as one preference every client reads and
   writes, and delete the per-client persistence. Today the browser keeps `farhelm.sort` and `farhelm.last-selected` in
   localStorage and the desktop app mirrors both into `desktop-client.json` beside its credentials through a coalesced

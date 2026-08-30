@@ -71,13 +71,11 @@ repository = "https://github.com/scode/farhelm"
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
-# Opaque encoding for both pagination cursors — the `ListSessions` wire
-# cursor (farhelm-supervisor's `service::core`, PLAN_M6.md item 2) and the
-# helm's own REST cursor over the merged multi-host order
-# (farhelm-helm's `aggregate`, PLAN_M6.md item 5). URL-safe so a cursor
-# cannot break a caller that happens to embed it in a URL — which the REST
-# layer's callers genuinely do, since the helm's cursor travels as a query
-# parameter.
+# Binary-to-text for credentials that travel inside text: the helm's web
+# token and device-cookie handling (farhelm-helm's auth) and the
+# supervisor's stored session bearer tokens (farhelm-supervisor's store).
+# (It once also encoded the session list's pagination cursors; the list is
+# served whole now and there are none.)
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 # Patch-pinned rather than "0.7": dx insists on a dioxus crate at its own

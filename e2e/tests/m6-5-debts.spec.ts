@@ -1,15 +1,16 @@
-// The four browser tests M6.5's review deferred to this milestone BY NAME
+// The browser tests M6.5's review deferred to this milestone BY NAME
 // (PLAN_M6_75.md item 7, acceptance 5): the stop-refetch-versus-poll
-// ordering, the restart-epoch staleness guard, the incoherent-banner case,
-// and the PeerLine render-shape pin.
+// ordering, the restart-epoch staleness guard, and the PeerLine render-shape
+// pin. (A fourth, the incoherent-banner case, went with the multi-page
+// listing walk it tested: a whole-list reply is one snapshot, so its counts
+// cannot contradict its rows.)
 //
 // They are together in one file because they share a reason for existing
 // rather than a subject: each one needs the CLIENT to be put in a state a
 // real server will not reliably produce — a read still in flight when a
-// mutation lands, a reply whose counts contradict each other, a build stamp
-// containing a directional override. All four are therefore route-controlled,
-// and all four were deferred precisely because that control did not exist in
-// the suite when they were first asked for.
+// mutation lands, a build stamp containing a directional override. All are
+// therefore route-controlled, and all were deferred precisely because that
+// control did not exist in the suite when they were first asked for.
 //
 // The first two are also the reason the deferral was worth honouring. They
 // pin the COMMIT CLOSURES — `list::ListView`'s `commit_listing` and
@@ -409,66 +410,6 @@ test.describe("the M6.5 test debts", () => {
     reads.releaseAll();
     await waitForRestart(request, original);
     await expect(page.locator(".titlebar .title")).toHaveText(original);
-  });
-
-  /**
-   * A reply whose rows outnumber its own total is reported as incoherent, in
-   * the browser, with the suffix as its own text run.
-   *
-   * Unreachable without route control, which is why it waited: it takes a
-   * listing that changed under the walk in a specific direction — a session
-   * deleted from an earlier page while the rows already taken stay taken —
-   * and no test can arrange that reliably against a real helm.
-   *
-   * What it pins beyond the wording is the SPLIT: the count and the
-   * incoherence note are two text runs inside one banner element, because
-   * fusing them would change the DOM without changing any string, which a
-   * text-only assertion sails straight past.
-   */
-  test("a listing whose counts contradict its rows says so in the banner", async ({ page }) => {
-    await stubFeed(page);
-    await page.route(
-      (url) => url.pathname === "/api/sessions",
-      async (route: Route) => {
-        if (route.request().method() !== "GET") {
-          await route.continue();
-          return;
-        }
-        await route.fulfill({
-          json: {
-            // Two rows against a total of one: the walk collected more than
-            // the helm says exists, which is only possible if the list moved
-            // underneath it.
-            sessions: [
-              { id: "incoherent-a", title: "incoherent-a", cwd: "/tmp", invocation: "agent" },
-              { id: "incoherent-b", title: "incoherent-b", cwd: "/tmp", invocation: "agent" },
-            ],
-            total: 1,
-            matching: 1,
-            truncated: false,
-            next_cursor: null,
-          },
-        });
-      },
-    );
-    await page.goto("/");
-
-    const banner = page.locator(".truncation-banner");
-    await expect(banner).toBeVisible({ timeout: 20_000 });
-    // The UNFILTERED shortfall wording: the request carried no filter a
-    // person applied, so the sentence has one denominator and the note
-    // beside it carries the contradiction.
-    await expect(banner).toContainText("showing 2 of 1 sessions");
-    await expect(banner).toContainText("the list changed while it was being read");
-    // Two runs, not one sentence: the count and the note are separate text
-    // nodes inside the banner.
-    const runs = await banner.evaluate((element) =>
-      [...element.childNodes]
-        .filter((node) => node.nodeType === Node.TEXT_NODE)
-        .map((node) => node.textContent ?? ""),
-    );
-    expect(runs.length, `the banner's two claims must stay separate runs: ${JSON.stringify(runs)}`)
-      .toBe(2);
   });
 
   /**

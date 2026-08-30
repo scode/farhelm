@@ -468,5 +468,14 @@ async fn the_local_row_reaches_a_real_supervisor_over_its_unix_socket() {
     // The control client proves the supervisor is still the same live
     // process the manager was talking to, rather than one that died and
     // left a cache behind.
-    assert_eq!(remote.control.list_sessions().await.expect("list").total, 1);
+    assert_eq!(
+        remote
+            .control
+            .list_sessions()
+            .await
+            .expect("list")
+            .sessions
+            .len(),
+        1
+    );
 }

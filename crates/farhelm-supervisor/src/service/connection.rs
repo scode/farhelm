@@ -50,11 +50,20 @@ const REPLAY_CHUNK: usize = 32 * 1024;
 /// a data-only backlog at 2 MiB per connection; live pane output usually
 /// arrives in far smaller notifications, so the typical backlog is a
 /// fraction of that. Control frames are capped only by `MAX_FRAME_LEN`,
-/// making the absolute worst case much larger on paper — in practice
-/// nothing generates large replies back to back, and `LIST_BYTE_BUDGET`
-/// already halves the one reply that can be big. Bounding by count keeps
-/// this one legible rule instead of a byte-accounting scheme layered over
-/// the frame layer.
+/// and large replies CAN queue back to back: `ListSessions` handlers are
+/// spawned tasks (up to `HANDLER_ADMISSION_PERMITS` of them building
+/// concurrently), and a helm's refresh drain, a live detail read, and
+/// agent verbs can each enqueue a whole-list reply on one connection. The
+/// paper worst case is therefore this bound times `MAX_FRAME_LEN` — half
+/// a gigabyte — and nothing structural here bounds it lower; what keeps
+/// the realistic case small is that the peer is the single helm, which
+/// sends one refresh drain at a time per host and a handful of agent
+/// requests, and that the session-list cap
+/// (`farhelm_proto::LIST_SESSIONS_CAP`) keeps each such reply small for
+/// any ordinary fleet. Bounding by count is kept anyway as the one
+/// legible rule, with that worst case stated rather than denied; a
+/// byte-accounting scheme layered over the frame layer is the upgrade if
+/// it ever stops being acceptable.
 ///
 /// The accepted consequence, stated plainly: when the single multiplexed
 /// consumer (the helm) is slow, control REPLIES queue behind terminal
@@ -1599,12 +1608,14 @@ mod tests {
     /// figure and the fact that it exceeds the limit) rather than being an
     /// opaque placeholder string.
     ///
-    /// `ListSessions` is the one M1 reply built entirely from unbounded
-    /// caller-controlled data (session titles), uncapped until M2's list
-    /// budget — so it is the realistic way a control reply exceeds
-    /// `MAX_FRAME_LEN`. One oversized title is enough to clear the cap
-    /// (JSON escaping plus the frame header add overhead on top of the
-    /// title itself), so a single `SessionInfo` suffices here.
+    /// `ListSessions` is the one reply built entirely from unbounded
+    /// caller-controlled data (session titles) with no byte budget of its
+    /// own anywhere in the pipeline (`LIST_SESSIONS_CAP` bounds the ROW
+    /// count, not the encoded size) — so it is the realistic way a control
+    /// reply exceeds `MAX_FRAME_LEN`, and this check is its only backstop.
+    /// One oversized title is enough to clear the limit (JSON escaping
+    /// plus the frame header add overhead on top of the title itself), so
+    /// a single `SessionInfo` suffices here.
     #[test]
     fn reply_frame_substitutes_error_for_oversized_reply() {
         let req_id = 42;
@@ -1626,8 +1637,7 @@ mod tests {
                 tabs: Vec::new(),
                 source_profile: None,
             }],
-            total: 1,
-            next_cursor: None,
+            truncated: false,
         };
         assert!(
             Frame::control(&oversized).exceeds_max_len(),
@@ -1961,11 +1971,7 @@ mod tests {
         ));
 
         writer
-            .write_control(&ControlMsg::ListSessions {
-                req_id: 60,
-                cursor: None,
-                limit: None,
-            })
+            .write_control(&ControlMsg::ListSessions { req_id: 60 })
             .await
             .expect("send a full-authority request");
         let reply = reader.read_frame().await.unwrap().expect("list reply");
@@ -2037,11 +2043,7 @@ mod tests {
             Ok(ControlMsg::Hello { .. })
         ));
         writer
-            .write_control(&ControlMsg::ListSessions {
-                req_id: 61,
-                cursor: None,
-                limit: None,
-            })
+            .write_control(&ControlMsg::ListSessions { req_id: 61 })
             .await
             .unwrap();
         let refusal = reader
@@ -2295,11 +2297,7 @@ mod tests {
         for req_id in 0..REQUESTS {
             handle_control(
                 &sup,
-                ControlMsg::ListSessions {
-                    req_id,
-                    cursor: None,
-                    limit: None,
-                },
+                ControlMsg::ListSessions { req_id },
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,

@@ -108,8 +108,13 @@ pub(crate) struct HostScript {
     /// The identity the hello reports. `None` models a supervisor with
     /// none, which connects but caches nothing.
     pub(crate) identity: Option<String>,
-    /// The session list this host serves, in one page.
+    /// The session list this host serves, whole, in one reply.
     pub(crate) sessions: Vec<SessionInfo>,
+    /// The `truncated` flag that reply carries: the supervisor saying its
+    /// list was cut at the wire's cap. A knob rather than a function of the
+    /// list's length, because what the REST tests pin is the flag's journey
+    /// to the reply body, not the supervisor's arithmetic.
+    pub(crate) truncated: bool,
     /// A test-owned peer to splice this host's connection to (module
     /// docs). Taken on the first dial; a reconnect after that falls back to
     /// standalone behavior, which is the honest thing to do — the test's
@@ -130,6 +135,7 @@ impl Default for HostScript {
             build: "peer-build".to_string(),
             identity: None,
             sessions: Vec::new(),
+            truncated: false,
             peer: None,
             panic_on_dial: false,
         }
@@ -193,7 +199,24 @@ struct ListGate {
     /// to say so. Each reply is built when its REQUEST arrives, which is
     /// what lets a held reply be genuinely stale relative to whatever
     /// happened while it was held.
-    lists: Mutex<HashMap<HostId, Arc<Vec<SessionInfo>>>>,
+    lists: Mutex<HashMap<HostId, Arc<ScriptedList>>>,
+}
+
+/// What one host's `SessionList` reply is built from: the rows and the
+/// cap flag, mirrored out of its [`HostScript`] together so an edit to
+/// either lands on the running peer at the same moment.
+struct ScriptedList {
+    sessions: Vec<SessionInfo>,
+    truncated: bool,
+}
+
+impl ScriptedList {
+    fn of(script: &HostScript) -> Arc<ScriptedList> {
+        Arc::new(ScriptedList {
+            sessions: script.sessions.clone(),
+            truncated: script.truncated,
+        })
+    }
 }
 
 impl ScriptedFleet {
@@ -299,7 +322,7 @@ impl ScriptedFleet {
             .lists
             .lock()
             .expect("list mutex")
-            .insert(host, Arc::new(script.sessions.clone()));
+            .insert(host, ScriptedList::of(script));
     }
 
     /// Drop this host's live connection — the helm sees EOF, exactly as
@@ -369,7 +392,7 @@ impl HostTransport for ScriptedFleet {
                     .lock()
                     .expect("list mutex")
                     .entry(id)
-                    .or_insert_with(|| Arc::new(script.sessions.clone()));
+                    .or_insert_with(|| ScriptedList::of(script));
                 (
                     PeerBehavior {
                         protocol: script.protocol,
@@ -420,24 +443,20 @@ impl PeerBehavior {
         }
     }
 
-    /// This host's whole session list as one page. Pagination of the WIRE
-    /// list is pinned in `manager.rs` against a peer that really does
-    /// chunk; nothing at the REST layer depends on how many pages a host's
-    /// drain took, so serving one page here keeps these tests about the
+    /// This host's whole session list, exactly as a real supervisor
+    /// answers: one reply, never cut. The cap and its `truncated` flag are
+    /// pinned in `manager.rs` against a scripted peer; nothing at the REST
+    /// layer depends on them, so an uncut reply keeps these tests about the
     /// merge rather than about the drain.
     fn list_reply(&self, gate: &ListGate, host: HostId, req_id: u64) -> ControlMsg {
-        let sessions = gate
-            .lists
-            .lock()
-            .expect("list mutex")
-            .get(&host)
-            .map(|list| list.as_ref().clone())
-            .unwrap_or_default();
+        let list = gate.lists.lock().expect("list mutex").get(&host).cloned();
         ControlMsg::SessionList {
             req_id,
-            total: sessions.len() as u64,
-            sessions,
-            next_cursor: None,
+            sessions: list
+                .as_ref()
+                .map(|l| l.sessions.clone())
+                .unwrap_or_default(),
+            truncated: list.is_some_and(|l| l.truncated),
         }
     }
 }
@@ -1060,7 +1079,7 @@ impl FleetBuilder {
             .lists
             .lock()
             .expect("list mutex")
-            .insert(host, Arc::new(script.sessions.clone()));
+            .insert(host, ScriptedList::of(&script));
         self.fleet
             .scripts
             .lock()

@@ -76,7 +76,7 @@
 //! on the same functional-no-op terms, once each had grown into a contract
 //! of its own: `status` (how a session's liveness, restart offer, and
 //! reply-shaped `SessionInfo` are derived), `listing` (the `ListSessions`
-//! order, cursor, page cuts, and the walk itself), `teardown` (the whole of
+//! order, cap, and the whole-list reply itself), `teardown` (the whole of
 //! what `DeleteSession` does, minus the reply), `capture` (the
 //! first-input anchor, claim ladder, scheduling, and durable correlation
 //! pass), and `terminals` (terminal identity plus the sink and output-reap
@@ -116,4 +116,3 @@ pub use core::{
     TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT,
     WRITER_STALL_TIMEOUT, connect, run,
 };
-pub use listing::LIST_SESSION_CAP;

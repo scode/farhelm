@@ -11,7 +11,7 @@ details, this is the map:
   the real helm for its stamp — a missing stamp latches skew and the page stops reading), COMPLETE serde enum variants
   (`HostPhase` is `tag="phase"` with required per-variant fields; a bare `{phase: "connected"}` fails decode and renders
   the compact strip's error line instead of chips), and a `matching` count (a missing `matching` reads as an old helm
-  and takes the count banner's incoherence wording).
+  and takes the count banner's "filter was ignored" wording).
 - **Auto-select changes every test's page load**: a session attaches at `goto` before any click. Tests that stage route
   holds or stubs around a specific session's first reads must `pinAutoSelect(page, otherId)` BEFORE `goto` (the helper
   fetches the helm identity and writes the keyed record — a bare id is silently ignored). `__farhelmTermReady` is true

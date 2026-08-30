@@ -87,30 +87,34 @@ Keeping the order out of `SessionFilter` mirrors the helm's own split, and on th
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
 list is filtered, whether a session's absence means it left the fleet, whether an optimistic rename may be retired — and
 not one of those answers can change because the same rows arrived in a different sequence. Reply ADMISSION is the one
-question that does depend on both: a listing walked under the previous order is a correct list of the wrong sequence
+question that does depend on both: a listing answered under the previous order is a correct list of the wrong sequence
 arriving under a control that names another one, so it is refused exactly as a listing answering a stale filter is. The
 UI names the order on every read instead of leaning on the helm's `created` default, which is what keeps the control on
-screen and the rows beneath it from disagreeing. Changing it restarts the walk, since a cursor names a position in one
-order and the helm refuses one replayed under another.
+screen and the rows beneath it from disagreeing. Changing it is one more read, since every read is one request for the
+whole list.
 
-Two consequences are worth recording because nothing on screen shows either. The first is the auto-select fallback
-(SPEC.md's "newest-created non-archived session", for a client with no remembered selection): it can no longer be
-assumed to be the first row of the listing, because the first row is now whatever the chosen order put there. It picks
-by the session's `created_at` instead, which is why that field is decoded by the UI at all, and treats a missing stamp
-(an older helm) as unknown rather than as 1970 — a fleet with no stamps degrades to the listing's own first non-archived
-row. When the listing is INCOMPLETE and the applied order is not `created`, even that is not enough, since the newest
-session may lie past the cut; the fallback then asks the helm directly, with a one-row creation-order request under the
-default filter.
+The listing is ONE request and one reply (SPEC.md's Session list section): `GET /api/sessions` answers with the entire
+view — merged, filtered, sorted — up to the helm's cap, plus both counts and a `truncated` flag that is set exactly when
+the cap cut it. The UI follows no cursor, keeps no ceilings of its own, and never asks a second time to reconcile what
+it got. Because the rows and both counts come from one snapshot on the helm's side — with a cached row nothing can
+render dropped from all three at the source — there is nothing for the list to change under and no count contradiction
+to detect: the flag is the whole of what the UI reads off a reply about completeness, and the rows are never compared
+against the counts (that comparison was the paged design's "underfilled listing" detector, and it went with the pages).
+"Short" is one predicate with three readers rather than a rule each place restates: it is exactly the condition the
+count banner prints "showing N of M" for, the same answer decides whether an absence may be read as a departure
+(otherwise the missing row's rename is retired, its editor closed, and — if it is the selected one — its pane torn down
+and replaced), and the same answer decides whether a remembered selection missing from the list is resolved directly
+rather than treated as gone. A UI that tells the user its list is incomplete and then reasons as though it were complete
+would be disagreeing with the one line whose job is to be believed.
 
-The second is that a listing can now come back underfilled without any flag saying so. Sort keys are mutable — activity
-advances when a session prints, a title changes when someone renames it — so a live row can cross the cursor's position
-between two pages of one walk and be served by neither, while the walk ends normally with no ceiling hit and no
-`next_cursor`. Only the counts show it. "Short" is therefore one predicate with three readers rather than a rule each
-place restates: it is exactly the condition the count banner already prints "showing N of M" for, and the same answer
-now decides whether an absence may be read as a departure (otherwise the missing row's rename is retired, its editor
-closed, and — if it is the selected one — its pane torn down and replaced) and whether the auto-select fallback may
-trust its prefix. A UI that tells the user its list is incomplete and then reasons as though it were complete would be
-disagreeing with the one line whose job is to be believed.
+One consequence is worth recording because nothing on screen shows it: the auto-select fallback (SPEC.md's
+"newest-created non-archived session", for a client with no remembered selection) cannot be assumed to be the first row
+of the listing, because the first row is whatever the chosen order put there. It picks by the session's `created_at`
+instead, which is why that field is decoded by the UI at all, and treats a missing stamp (an older helm) as unknown
+rather than as 1970 — a fleet with no stamps degrades to the listing's own first non-archived row. It picks from the
+rows in hand even when the cap cut the listing, where under a non-creation order the newest session may sit past the
+cut: a cut listing is a fleet of hundreds, the fallback exists to keep the pane from sitting empty rather than to be
+exact, and the alternative was a second request shape for that corner.
 
 What a sidebar row SHOWS was narrowed on 2026-08-23, reversing part of BUGS_BURNDOWN.md's "Decisions (interviewed
 2026-08-13)" list, which called for title, status badge, host, working directory and invocation on every row. Two of
@@ -150,7 +154,7 @@ a precision they do not have, so the code instead refuses to print nonsense (a s
 than a negative age) and keeps the raw stamp one hover away. The `Session` mirror decodes `last_activity_at` for this
 and applies the proto's own fallback rule, `last_activity_at` when positive and `created_at` otherwise, copied into
 `Session::effective_activity` rather than shared: this crate mirrors the HTTP contract rather than depending on proto
-internals, but the helm ORDERS an activity-sorted page by its copy of that rule, so a client rendering ages by a
+internals, but the helm ORDERS an activity-sorted list by its copy of that rule, so a client rendering ages by a
 different one would print a column contradicting the order it was printed in. A zero means "this helm predates the
 field" and renders no age at all rather than an age counted from 1970. The viewer's end of the subtraction can go
 missing too — a platform clock that will not answer, or one sitting at or before the epoch — and that is carried as an
@@ -834,35 +838,30 @@ the wire, populating them everywhere a supervisor builds a session row, and pers
 Refusing the raw clone instead is not available: SPEC.md promises a raw session "clones as that invocation".
 
 The two read verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
-narrowings are contractual rather than incidental. The session listing is drained by cursor under two ceilings — a fixed
-row cap (5,000) and a cumulative encoded-byte allowance across every page it walks (6 MiB, leaving the reply's envelope
-room under the 8 MiB frame limit) — and carries a `truncated` flag when either cuts it, because a partial fleet listing
-is otherwise shaped exactly like a complete one and "that session does not exist" would be indistinguishable from "that
-session is past the cut". The byte allowance is the load-bearing one: the pagination it drains from applies its own
-budget per page, so rows alone bound nothing about the assembled reply, and a fleet of legally fat records would
-otherwise produce an answer no frame could carry — discarded whole, reaching the agent as `Internal` rather than as the
-partial listing the verb promises. It includes archived sessions, flagged, since an agent has no archive switch to flip.
-And the per-session `agent` field is a non-secret label — the source profile's snapshotted name, or the invocation's
-program basename — never the raw command line. Users put credentials in command lines, this listing is readable with any
-one attached session's credential, and its reader is a model that will quote what it read, so arguments must not cross
-this wire at all.
+narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
+at the same cap (`LIST_SESSIONS_CAP`, a few hundred rows) and additionally at an encoded-byte allowance of 6 MiB —
+leaving the reply's envelope room under the 8 MiB frame limit — and carries a `truncated` flag when either cuts it,
+because a partial fleet listing is otherwise shaped exactly like a complete one and "that session does not exist" would
+be indistinguishable from "that session is past the cut". The byte allowance exists because rows bound nothing about
+size: session creation admits tens of kilobytes of caller-supplied text per row, and a fleet of legally fat records
+would otherwise produce an answer no frame could carry — discarded whole, reaching the agent as `Internal` rather than
+as the partial listing the verb promises. It includes archived sessions, flagged, since an agent has no archive switch
+to flip. And the per-session `agent` field is a non-secret label — the source profile's snapshotted name, or the
+invocation's program basename — never the raw command line. Users put credentials in command lines, this listing is
+readable with any one attached session's credential, and its reader is a model that will quote what it read, so
+arguments must not cross this wire at all.
 
-The session list is cursor-paginated on this wire (protocol 8, M6). The contract, recorded here because the milestone
-plan that settled it is history the moment M6 closes: pages walk a total order — creation time descending, session id
-ascending as the tiebreak — over columns that never change for a live session, so an issued cursor stays a valid resume
-point for as long as its holder cares to use it. The cursor is opaque: it encodes the last-returned entry's ordering
-key, callers store and replay it verbatim, and an undecodable cursor is refused as an invalid request. A decodable
-cursor is simply an ordering key, and deliberately so — cursors carry no authority in a single-user supervisor, any
-well-formed key is a valid resume position (which is also what lets a deleted session's cursor resume cleanly), so there
-is nothing a forged cursor obtains that honest paging does not. Resumption is strictly-after, which is also what makes a
-cursor whose own session was deleted resume cleanly. Under concurrent mutation the walk promises no duplicates and no
-tearing, and deliberately NOT completeness: a session created mid-walk can land behind the cursor (same-second creations
-tie-break by id; a clock rollback places new sessions mid-order) and is only guaranteed by the next walk from the start.
-Both page cuts — the count limit and the frame-size budget — carry the same continuation cursor, so truncation is a
-resumable state rather than M2's terminal flag, and the reply's total keeps reporting the full count before any cut. One
-case is neither cut: a record too large to ship even alone (nothing bounds a title below the byte budget) is an explicit
-error, never a fake exhaustion — an empty page with no cursor would otherwise claim the walk was done when a session
-remains that can never be represented on any page.
+The session list is served WHOLE on this wire (protocol 14). `ListSessions` carries nothing but its request id, and
+`SessionList` answers with every session the supervisor has, cut at `LIST_SESSIONS_CAP` (a few hundred rows, one
+constant in farhelm-proto that every layer reads) with `truncated` set when the cut applied. There is no cursor, no page
+size, and no order contract: the helm sorts every host's rows itself, in memory, for whichever order a client asks, so
+the sequence a supervisor chooses is not part of the protocol. Protocol 8 through 13 paginated this list by keyset
+cursor with a per-page byte budget; that contract and everything built on it (cursors bound to order and filter,
+drain-to-exhaustion with termination bounds, wire-order validation) is gone by decision, recorded in SPEC.md's Session
+list section — the fleet this product serves fits in one reply, and the paging machinery was the largest source of
+incidental complexity in the codebase. One case is still an explicit error rather than a cut: a reply whose encoding
+exceeds the frame limit is refused at the writer's size backstop, so a host with a single record too large to ship
+reports a failed listing rather than a silently shortened one.
 
 ## Supervisor internals
 
@@ -1113,9 +1112,10 @@ remains that can never be represented on any page.
   another. A cache write also carries the identity it was produced under, checked against the stored value in the same
   transaction: this closes the window where a refresh already in flight when a user adopts a new identity could land
   after the adoption's purge and repopulate the cache with the dead install's sessions by a side door. Reads of the two
-  tables disagree on purpose: a cache row that no longer decodes is skipped and logged rather than failing the read (it
-  is last-known display data, not authority), while a corrupt registry row still fails `list_hosts` loudly (the registry
-  is authority for which hosts exist at all).
+  tables disagree on purpose: a cache row that no longer decodes is dropped from the read with a warning naming the host
+  and session rather than failing the read (it is last-known display data, not authority) — dropped from the counts too,
+  so the served list never describes a row nobody can render — while a corrupt registry row still fails `list_hosts`
+  loudly (the registry is authority for which hosts exist at all).
 - One connection actor per registry row, the local row included (PLAN_M6.md item 4), each owning its transport
   connection, its reconnect state machine, and its slice of the session cache. A row's connection is always in exactly
   one of six states, and the last three exist because folding them into "unreachable" would throw away the only
@@ -1169,102 +1169,67 @@ remains that can never be represented on any page.
 - A cache write refused because this connection's identity is no longer the row's also ends the connection. Every later
   refresh on it would be refused identically, so keeping it up would show a host as healthily connected while its stale
   list silently stopped advancing; dropping it re-asks the identity question against the row as it now stands.
-- A connected host's cache refresh is drain-then-replace: follow the supervisor's `next_cursor` to exhaustion, then
-  replace that host's whole cache slice in one identity-bound write. The page limit is left unset so the supervisor
-  applies its own default cap, which is sized so an ordinary host's entire list arrives in one page — that matters
-  beyond round-trip count, because the supervisor's conversation-capture sweep rides the `ListSessions` handler and
-  therefore runs once per page, so a smaller limit would multiply whole-host scans for every host on every refresh. A
-  failed refresh records the failure and keeps the previous cache, never wiping it: the cache's whole job is to answer
-  "what did this host have, last we knew" while the host is unavailable, so clearing it on failure would destroy the
-  answer exactly when it becomes the only one available, and would make a transient failure look identical to "this host
-  genuinely has no sessions". A host whose supervisor reports no identity at all connects and serves live but writes no
-  cache, since the identity binding has nothing to bind to. The walk's termination is never the peer's to decide: it is
-  bounded by pages followed, by sessions accumulated (ten of the supervisor's own default pages), and by a refusal to
-  follow a cursor identical to the one that produced it — each catching a shape the others cannot, and all three landing
-  as an ordinary failed refresh that keeps the previous cache.
+- A connected host's cache refresh is one request and one replacement: a single `ListSessions`, whose reply carries the
+  host's whole list, then that host's whole cache slice replaced in one identity-bound write. One request per refresh
+  matters beyond round-trip count, because the supervisor's conversation-capture sweep rides the `ListSessions` handler,
+  so every request is a whole-host scan on the far side. A failed refresh records the failure and keeps the previous
+  cache, never wiping it: the cache's whole job is to answer "what did this host have, last we knew" while the host is
+  unavailable, so clearing it on failure would destroy the answer exactly when it becomes the only one available, and
+  would make a transient failure look identical to "this host genuinely has no sessions". A host whose supervisor
+  reports no identity at all connects and serves live but writes no cache, since the identity binding has nothing to
+  bind to. The reply is checked at ingress and refused whole — an ordinary failed refresh that keeps the previous cache
+  — when it is longer than `LIST_SESSIONS_CAP` (a peer ignoring the one bound on what this side retains), when a session
+  id exceeds the id length cap, or when an id appears twice; a reply cut AT the cap is accepted and remembered as
+  truncated, which is what the served list's own `truncated` flag carries forward.
 - The served session list is a MERGE, and it is served from what the helm has already recorded rather than from the
-  hosts. Every connected host's actor drains its supervisor's paginated list to exhaustion into helm.db; the list
-  endpoint then merges what is there — live hosts' latest refresh and down hosts' last-known entries alike — into one
-  order, tagging each row with its host and marking it stale unless that host is connected right now. A host being
-  connected changes only that flag, never where its rows are read from.
+  hosts. Every connected host's actor records its supervisor's whole list into helm.db; the list endpoint then merges
+  what is there — live hosts' latest refresh and down hosts' last-known entries alike — into one order, tagging each row
+  with its host and marking it stale unless that host is connected right now. A host being connected changes only that
+  flag, never where its rows are read from.
 - The list is served in one of THREE orders, chosen by the request (`?sort=`, defaulting to `created` when absent so
   every client written before there was a choice keeps its behavior; an unrecognized word is a 400, like an unknown
   status). `created` is `created_at` DESCENDING, then session id ascending, then HOST ID ascending — the first two are
-  the wire's own total order and the third is what keeps the merged order total even in a database whose one-owner index
-  is absent. `activity` leads with the session's effective activity stamp descending, and `title` with its collated
-  title ascending; both then fall into that same creation-order tail. Every order therefore ends in the same total
-  order, which is not decoration: a cursor over an order that left equal ranks unordered can skip one row and repeat
-  another when two of them swap between page fetches. The effective activity stamp is `last_activity_at` when the sender
-  supplied one and `created_at` when it did not, so a session that has produced no observed output — or whose supervisor
-  predates the field — sorts by its creation time rather than piling up at the epoch. The title collation is Rust's
+  the order supervisors have always listed in and the third is what keeps the merged order total across hosts.
+  `activity` leads with the session's effective activity stamp descending, and `title` with its collated title
+  ascending; both then fall into that same creation-order tail, so every order is total and a stable sort of the same
+  rows always yields the same sequence. The effective activity stamp is `last_activity_at` when the sender supplied one
+  and `created_at` when it did not, so a session that has produced no observed output — or whose supervisor predates the
+  field — sorts by its creation time rather than piling up at the epoch. The title collation is Rust's
   `str::to_lowercase` compared as code points: Unicode's locale-independent FULL lowercase mapping (it can lengthen a
   string, as `İ` does), which is neither SIMPLE lowercasing nor case FOLDING — so `ß` and `SS` stay distinct keys. The
   result is case-insensitive and otherwise ordinal, deliberately not locale-aware (that is an ICU dependency and a
-  per-user setting this milestone does not have), and deliberately not SQLite's `NOCASE`, which folds ASCII only and
-  would case-fold half of a non-English user's alphabet. The folded key is CUT to 128 characters, because it is also an
-  index key on every cached row and the leading component of a cursor the browser replays in a query string, and the
-  only bound on a title anywhere is the supervisor's 64 KiB create-field cap. Cutting is sound only because it happens
-  where the key is minted rather than where the cursor is written: the cut value IS the row's position, so two titles
-  sharing a 128-character prefix tie and fall through to the shared tail, exactly as two identical titles do.
-- Keyset cursors are stable under insert and delete because the key they name does not move — and under `activity` and
-  `title` that is no longer unconditionally true. `created_at` is immutable, so the old order was immune; an activity
-  stamp advances and a rename rewrites a folded title, so a row can cross the cursor between two page fetches of one
-  walk and be shown twice or not at all. There is deliberately no snapshot or generation machinery against that: it
-  would mean per-walk server state and an expiry policy, for a list the user re-reads constantly anyway. Two things
-  already in place bound the damage instead. The supervisor advances an activity stamp at most once a minute
-  (`ACTIVITY_STAMP_QUANTUM`) rather than per byte of output, so a row can only cross that rarely; and the UI's own
-  coherence checks re-read the whole list when the numbers stop agreeing, saying so on screen ("the list changed while
-  it was being read; refreshing"). A duplicated or missed row is a stale read of a visibly moving list, not a lost
-  session.
-- Both new ordering keys are denormalized into `session_cache` columns extracted at write time (schema version 11,
-  backfilled from the existing payloads, with one HOST-LEADING index per new order — version 11 adds two ordering
-  indexes, bringing the total to four for the three logical orders). `created` alone keeps a global/host-leading pair,
-  inherited from before the page query became per-host; `activity` and `title` get only the host-leading index, because
-  by the time they were added nothing would ever read a global one. The host-leading index is what a page actually
-  walks, at every fleet size and under every order: an `IN`-list of more than one host makes SQLite abandon a global
-  ordering index and sort the whole cache into a temp b-tree, so the page query is written as one single-host SELECT per
-  host merged by `UNION ALL`, and each branch is a range scan over that host's slice. That was true of `created` before
-  the other two orders existed; it is fixed for all three together. Same reason `created_at` and the archive flag are
-  columns: an ORDER BY must not mean decoding every payload in the fleet. The activity column stores the EFFECTIVE value
-  so the fallback rule is applied in exactly one place, while the payload keeps the raw field untouched — a synthesized
-  value written back would be indistinguishable from an observation at the next merge. The title is folded in Rust
-  rather than by a SQL collation so that the one definition of the collation also serves the in-memory rows an ordered
-  page is merged with. Nothing new is needed for change detection: both columns are derived from the payload on the way
-  in, so a session that produced output or was renamed already flips the cache's changed flag and reaches open clients
-  on the invalidation feed.
-- A cursor is bound to its ORDER exactly as it is bound to its filter, and replaying one under a different `sort` is a
-  400 telling the caller to start a fresh walk. A resume point names a place in one sequence; applied to another it
-  resumes mid-list and silently drops everything that sorts before it. The token carries the order it was taken in and
-  only the key components that order compares, so a creation-ordered cursor omits both new components and stays
-  fixed-size (version 3 grew it by the order word and the longer domain tag, not by anything that scales with a peer's
-  text) while a title-ordered one pays for the title only where the title is what it is ordered by; a token naming an
-  order without its leading component is refused rather than defaulted, since every default is itself a real position in
-  the order — where that position falls differs per order, so the damage is a silent skip or a silent repeat depending
-  on which. The cursor's domain tag is versioned for exactly this, so tokens minted before the order was named fail
-  cleanly.
+  per-user setting this product does not have). The sort happens in Rust, in memory, over the whole merged fleet, on
+  every request; nothing about the order is stored, indexed, or cut.
 - Ordering is not filtering, and the two are kept apart: a sort changes the sequence, never the membership, so neither
-  `total` nor `matching` moves with it and the helm's per-filter matching-count cache stays valid across a sort change.
+  `total` nor `matching` moves with it.
 - One host does not fit the cache rule and cannot be made to: a supervisor reporting NO identity, against a registry row
   that has none on record either, has nothing for the identity-bound cache write to bind to. Its refreshes are kept in
   the connection manager's memory and merged into the list and the owner lookup from there; they serve while it is
   connected and vanish when it is not, because with no durable copy there is nothing to stand behind. A row that HAS a
   recorded identity meeting an identity-less hello is a different situation entirely and fails closed — see below.
-- The REST list is paginated with a helm-level cursor that is deliberately DECOUPLED from the wire cursor underneath it.
-  Composing per-host wire cursors into the REST cursor would tie one browser page fetch to N live host round trips, so a
-  single flapping host would break a page walk that has nothing to do with it and a slow host would set every page's
-  latency. Draining into the cache first makes the REST cursor a plain resume point over local data — an opaque
-  base64url-JSON ordering key, resuming strictly after the last row a page returned, so pages are stable under
-  concurrent creation and deletion for the same reason the wire cursor is. The decoupling is enforced rather than
-  intended: the helm's cursor carries a domain-and-version tag and spells its key's components differently, so neither
-  decoder can read the other's tokens — without that they were byte-compatible and each silently resumed at a position
-  the other had named.
-- The page is a PAGE all the way down. The resume predicate and the limit go into one indexed query against helm.db's
-  merged-order index, so a poll reads and JSON-decodes only the rows it returns; the alternative, loading the whole
-  fleet's cache per request, made a full walk quadratic in the fleet's size. Two independent cuts apply, mirroring the
-  supervisor's own list discipline: the caller's limit (capped, with an over-large request refused rather than silently
-  clamped) and an encoded-byte budget that shrinks a page of fat records rather than oversizing the reply. The ordering
-  key carries the host id as its final component so the order is total even where the one-owner index below is absent —
-  a cursor over a non-total order can skip or repeat rows.
+- The REST list is served WHOLE, and this is a decision rather than a default (SPEC.md's Session list section states the
+  scale assumption and the prohibition). `GET /api/sessions` reads every cached row for every host plus the in-memory
+  rows of identity-less hosts, decodes them, filters, sorts, and counts in Rust, and answers with one array cut at
+  `LIST_SESSIONS_CAP` with `truncated` set when the cut applied or when any host's own list was cut at the wire's cap.
+  The reply is a snapshot: rows and both counts come from the same in-memory view, so nothing can move between them. A
+  host's cap flag is kept WITH its cache (`hosts.cache_truncated`, written in the same transaction as the rows it
+  describes) rather than with its connection, because the cut rows go on being served stale in every non-connected state
+  and across a helm restart, and SPEC.md forbids presenting a cut list as the whole one in any of them; the one host
+  with no cache (an identity-less supervisor, serving from the actor's memory) carries its flag on the snapshot beside
+  its rows, and both vanish with the connection. Versions 8 through 13 of this list were cursor-paginated at the REST
+  layer on top of a cursor-paginated wire, with per-order ordering columns and host-leading indexes in helm.db (schema
+  versions 11 and earlier), a Rust-side title fold cut to 128 characters with a batched backfill, a byte budget as a
+  second page cut, a matching-count cache keyed to a store generation, and a client-side "underfilled listing" predicate
+  — all of it existing because sorting by mutable keys under pagination lets a row cross the cursor between two pages.
+  Schema version 13 drops the ordering columns and their indexes and adds the per-host cap flag; `session_cache` keeps
+  `created_at` (the identity cross-check a read applies to a decoded payload) and `archived` (so the default view can
+  skip a row before decoding it) as columns, not because anything orders by them. What the whole-list reply gives up is
+  a per-request cost that grows with the fleet — decoding every cached payload on every poll — and that is accepted
+  outright: the decode work is bounded per HOST (up to `LIST_SESSIONS_CAP` rows from every cache-serving host, before
+  the merged output is cut back to one cap), which at the spec's scale of a few hosts is a few hundred JSON decodes per
+  request. The one deliberate second cut anywhere in the listing paths is the agent verb's encoded-byte allowance (6
+  MiB, `agent_requests`): that reply must fit a single frame and its rows carry unbounded caller text, so the helm stops
+  projecting rows before the reply could exceed a frame and reports it through the same `truncated` flag.
 - A listing reply carries two counts, and they answer different questions. `matching` is how many rows satisfy the
   caller's filter across the whole merged view, and it is present exactly when a predicate is active. `total` is how big
   the VIEW is — the denominator the UI's "N matching of M sessions" prints — and it deliberately does not move when the
@@ -1272,12 +1237,9 @@ remains that can never be represented on any page.
   does move it is the archive-inclusion switch: that switch selects which list is being served rather than narrowing
   one, so the default view's rows and its total are both about the non-archived fleet and `include_archived=true` widens
   both. The flag is denormalized into a `session_cache.archived` column (schema version 10, backfilled from each
-  payload) for the same reason `created_at` is: counting must not mean decoding every blob. A row whose payload no
-  longer decodes stays inside the `total` of whichever view its stored flag names, and outside `matching` in both, which
-  is what keeps "showing 4 of 5" reading as one unshowable entry rather than as data loss. The flag is what it was when
-  the row was written, so such a row keeps the classification it was filed under rather than reverting to active; the
-  one place an unreadable payload does land active is the version-10 backfill, which has no stored flag to keep and
-  reads the archive member out of the JSON text — a payload SQLite cannot parse at all is counted rather than hidden.
+  payload) so the default view can leave an archived row unread rather than decoding it to find out. A row whose payload
+  no longer decodes is in NEITHER count: it is dropped at the read with a warning, so `total` and `matching` describe
+  rows a client can see and "showing 4 of 5" never appears over a row nobody can render (the corruption is for the log).
   Changed 2026-08-22: `total` used to count archived rows in every view, so out of the box the default list showed ten
   rows above a count of twelve, with no filter typed and nothing on screen able to explain the gap. The accepted
   consequence is that the ordinary list now reads as unfiltered — "M sessions" — and the filtered wording belongs to
@@ -1294,16 +1256,11 @@ remains that can never be represented on any page.
   which costs one refresh interval in which a genuine collision routes to the cached owner. A host that lists one
   session id twice in a single reply is a different failure: a list that contradicts itself is refused whole, and the
   previous cache is kept.
-- The wire order is VALIDATED, not assumed. A drain rejects a list that is not creation-time descending with the session
-  id ascending — within a page and across page boundaries — because this side does not merely display that order: an
-  identity-less host's list is binary-searched for a resume point and merged in lockstep with the persisted page, and
-  both are meaningless over an unsorted sequence. The failure would otherwise be silent pages that skip or repeat
-  entries. Session ids are bounded at every peer ingress for a related reason: an id near the frame limit produces a
-  cursor no client could replay, which would strand a walk at that row forever. The served `sort` does not reach this:
-  it is a property of the helm's own merged cache, so hosts go on listing in creation order and the drain goes on
-  validating exactly that. The consequence for the one host that serves from memory rather than from the cache is that
-  its list arrives in creation order whatever was asked for, and the merge re-orders it per request — a k-way merge is
-  only correct over sources that are each already ordered.
+- The order a supervisor lists in is neither validated nor relied on. The helm sorts the union of every host's rows —
+  cached and in-memory alike — per request, so an unsorted or differently sorted reply costs nothing and the one host
+  that serves from memory rather than from the cache needs no special handling. Session ids are still bounded at every
+  peer ingress, for a reason that survived the cursors: every later request naming the session embeds its id in a frame
+  head, and an id near the frame limit is one no such request could carry.
 - Every mutation whose result changes what the helm has RECORDED records it before answering: a create seeds its new
   session, a restart and a rename store the reply's fresh `SessionInfo`, and a delete forgets the row. The merged list
   and the owner lookup are both served from those records, so a mutation that recorded nothing leaves the list
@@ -1346,9 +1303,8 @@ remains that can never be represented on any page.
   own creation default) and refuses a non-connected one as a precondition failure. Reading a session's DETAIL is the one
   route a non-connected host does not refuse: SPEC.md requires a stale session's metadata to be viewable behind the
   host-unreachable notice, so that read is served from the cache and marked stale, while a reachable host's detail is
-  always fetched live — the cache exists for the stale list, not as a general serving layer. The live path drains the
-  owner's list to exhaustion rather than reading one page, since a session sitting past the supervisor's default page is
-  exactly the case a busy host has most of.
+  always fetched live — the cache exists for the stale list, not as a general serving layer. The live path reads the
+  owner's whole list, which is the only list the wire serves.
 - Host management commits durably first and converges the live actors after, so each verb states how it fails closed:
   add rolls its row back if no actor could be started (a registered host with no actor is invisible and un-dialed, while
   its destination is taken); retarget converges instead of rolling back, because the durable write is what the user

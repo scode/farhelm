@@ -35,8 +35,7 @@
 //! recording, because both shaped the design that replaced it. Skipping on
 //! a busy lock only ever collapses passes that OVERLAP — a 2-second ticker
 //! beside a 3-second drain mostly does not overlap, so the steady cost was
-//! additive, and multiplied again by pagination, since the list path
-//! sweeps per PAGE. And the skip was actively wrong for the list path: a
+//! additive. And the skip was actively wrong for the list path: a
 //! caller that gave up because somebody else's pass was in flight could
 //! reply from a pre-commit `restart_offer`.
 //!
@@ -1736,7 +1735,7 @@ mod tests {
     /// advances because the SUPERVISOR decided to, not because somebody
     /// polled it.
     ///
-    /// This test never calls `ListSessions`, `list_page`, or `capture_now`
+    /// This test never calls `ListSessions`, `list_all`, or `capture_now`
     /// — the three carriers capture used to ride — so a passing run is
     /// positive evidence that the ticker is what claimed the identity. It
     /// runs against a real planted record rather than a stubbed pass
@@ -3232,11 +3231,7 @@ mod tests {
             Duration::from_secs(10),
             handle_control(
                 &sup,
-                ControlMsg::ListSessions {
-                    req_id: 1,
-                    cursor: None,
-                    limit: None,
-                },
+                ControlMsg::ListSessions { req_id: 1 },
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,

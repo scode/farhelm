@@ -68,7 +68,7 @@ pub use crate::transport::{
     HostTransport, LocalSupervisorNotRunning, SystemTransport, TransportPair,
 };
 
-use crate::client::{SupervisorClient, SupervisorError};
+use crate::client::{SessionListing, SupervisorClient, SupervisorError};
 use crate::store::{
     CacheReplacement, DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow,
     HostStoreError,
@@ -150,35 +150,6 @@ pub const REPROBE_INTERVAL: Duration = Duration::from_secs(45);
 /// retires polling on both sides.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
-/// Hard ceiling on pages one [`drain_sessions`] walk will follow.
-///
-/// Not a tuning knob — a termination guarantee. The walk's loop condition
-/// is a value the PEER supplies (`next_cursor`), so a supervisor that is
-/// buggy, or malicious, or merely racing its own session churn in a way
-/// nobody anticipated, could hand back a cursor forever and park this
-/// actor in an unbounded loop. This bound is what catches the pathological
-/// shape [`REFRESH_SESSION_CAP`] cannot: a peer that answers every page
-/// with zero sessions and a fresh cursor never accumulates anything to
-/// count, so only a page ceiling ends it.
-pub const REFRESH_PAGE_LIMIT: usize = 1_000;
-
-/// Hard ceiling on sessions one [`drain_sessions`] walk will accumulate.
-///
-/// The memory half of the same termination guarantee: pages are bounded
-/// above, but a peer serving full pages could still hand this actor
-/// half a million `SessionInfo`s before [`REFRESH_PAGE_LIMIT`] fired, and
-/// they are all held at once because the cache is replaced wholesale.
-///
-/// Ten times the supervisor's own default page cap
-/// (`LIST_SESSION_CAP`, 500), i.e. ten full pages: honest headroom rather
-/// than a snug fit, since an ordinary host's whole list arrives in ONE page
-/// and even an implausibly busy fleet is nowhere near this. A host that
-/// exceeds it gets a failed refresh with its previous cache preserved (see
-/// [`HostActor::refresh_once`]) — the same treatment as any other refusal,
-/// which is the point: a walk that will not terminate is a broken refresh,
-/// not a reason to lose what the host last told us.
-pub const REFRESH_SESSION_CAP: usize = 5_000;
-
 /// How long ONE connection attempt — the dial AND the hello it must
 /// complete — may take before it counts as failed.
 ///
@@ -198,36 +169,18 @@ pub const REFRESH_SESSION_CAP: usize = 5_000;
 /// refused connection.
 pub const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// How many encoded bytes of session metadata one refresh may accumulate
-/// before the walk is abandoned.
-///
-/// The third independent bound on a drain, and the one the other two cannot
-/// stand in for: pages and rows are both satisfied by a peer that sends few,
-/// enormous pages, and `REFRESH_PAGE_LIMIT` frames of `REFRESH_SESSION_CAP`
-/// fat records is gigabytes of retained `SessionInfo` — chosen entirely by
-/// the far end, which for a registered host is a machine the helm does not
-/// control.
-///
-/// Sixty-four mebibytes is far above any honest fleet's whole list (a
-/// session's metadata is a few hundred bytes) and far below what would
-/// threaten this process. Tripping it is an ordinary failed refresh: the
-/// previous cache is kept, exactly as for every other way a walk can fail.
-pub const REFRESH_BYTE_CAP: usize = 64 * 1024 * 1024;
-
 /// Longest session id this helm will accept from a peer.
 ///
 /// Not a guess at what a supervisor mints (a UUID, 36 bytes) but a bound on
 /// what this side can still WORK with. A session id is embedded verbatim in
-/// the helm's own list cursors, and those travel as a query parameter — so
-/// an id anywhere near the frame limit yields a cursor no client could
-/// replay, because the request head is refused before any handler sees it.
-/// A page whose continuation cannot be replayed is a walk that stops
-/// forever at that row.
+/// REST paths and query strings (`/api/sessions/{id}`, the `parent` filter),
+/// so an id anywhere near the frame limit names a session no client could
+/// ever address, because the request head is refused before any handler
+/// sees it.
 ///
 /// A kibibyte is two orders of magnitude above every id any farhelm
-/// supervisor has ever minted and still leaves a cursor comfortably inside
-/// any HTTP head limit. Over-cap rows are poison-tier: skipped and warned
-/// about, never silently kept. The value comes from `farhelm-proto` so this
+/// supervisor has ever minted and still leaves a URL comfortably inside
+/// any HTTP head limit. The value comes from `farhelm-proto` so this
 /// ingestion check cannot drift from the handshake's auth-session check.
 pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
 
@@ -241,10 +194,10 @@ pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
 /// genuinely wedged peer at least surfaces as unreachable.
 ///
 /// Deliberately much larger than [`REFRESH_INTERVAL`] and larger than
-/// [`CONNECT_ATTEMPT_TIMEOUT`]: a refresh may legitimately walk several
-/// pages, and each page costs the supervisor a whole-host capture sweep
-/// (see [`drain_sessions`]). Thirty seconds is well past any plausible
-/// honest walk while still bounded by something a user would notice.
+/// [`CONNECT_ATTEMPT_TIMEOUT`]: a refresh's one request costs the
+/// supervisor a whole-host capture sweep before it can answer (see
+/// [`drain_sessions`]). Thirty seconds is well past any plausible honest
+/// reply while still bounded by something a user would notice.
 pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The cadences an actor runs on and the deadlines it holds a peer to,
@@ -353,6 +306,9 @@ struct RefreshStep {
     /// or `None` for a refresh that produced no evidence either way (a
     /// failed one). See [`ActorStatus::contested`].
     contested: Option<Arc<Vec<String>>>,
+    /// Whether the supervisor's reply hit its cap, or `None` for a refresh
+    /// that produced no reply to say. See [`ActorStatus::list_truncated`].
+    truncated: Option<bool>,
     /// Whether this refresh's committed cache write actually CHANGED a row
     /// — the invalidation feed's changed-only rule, carried out of the
     /// store's own transaction rather than guessed at here.
@@ -676,6 +632,9 @@ pub struct HostSnapshot {
     /// host, and read from the same borrow as everything else here so a
     /// routing decision cannot pair one host's claims with another's state.
     pub contested: Arc<Vec<String>>,
+    /// Whether this host's last successful drain hit the wire's cap — see
+    /// [`ActorStatus::list_truncated`].
+    pub list_truncated: bool,
     /// Which CONNECTION this snapshot describes — see
     /// [`ActorStatus::incarnation`], and read from the same borrow as the
     /// state beside it.
@@ -763,170 +722,67 @@ struct RepeatedFailure {
 
 // ---- Session refresh -------------------------------------------------
 
-/// Walk a supervisor's paginated session list to exhaustion, following
-/// `next_cursor` until it is absent, and return every entry in order.
+/// One host's list as a refresh drained it: the rows, and whether the
+/// Read a supervisor's whole session list in one reply and check it at
+/// ingress, returning the validated [`SessionListing`] — rows plus the
+/// supervisor's own `truncated` flag, which every consumer carries through
+/// so a capped host's list is never presented as the whole one.
 ///
-/// The helm's aggregation is deliberately two decoupled cursor layers
-/// (PLAN_M6.md item 5): this walk drains a host into local storage, and
-/// the REST edge paginates over that local data. Composing the two instead
-/// — turning one browser page fetch into N live host round trips — would
-/// break the moment any host flapped mid-walk. So this runs on a cadence,
-/// off the request path, and its cost is paid once per host per refresh
-/// rather than once per viewer.
+/// One request, one reply: the wire has no pages (`PROTOCOL_VERSION` 14),
+/// so a drain is a single `ListSessions` whose reply carries every
+/// session the host has up to `farhelm_proto::LIST_SESSIONS_CAP`. The
+/// supervisor's conversation-capture sweep rides that handler, so each
+/// refresh costs one whole-host sweep — the cost this cadence was sized
+/// against.
 ///
-/// **The page count is not free, and not just in round trips.** The
-/// supervisor's conversation-capture sweep (`capture::capture_pass`) rides
-/// the `ListSessions` handler, so it runs once PER PAGE — a walk that takes
-/// four pages performs four whole-host scans, not one. That is why every
-/// caller passes `limit: None` and lets the supervisor apply its own
-/// default cap (`LIST_SESSION_CAP`, 500): at that size an ordinary host's
-/// entire list arrives in a single page, so the multiplication is
-/// hypothetical for everyone except the pathological fleet that pagination
-/// exists for in the first place. Shrinking the limit to make pages
-/// "nicer" would multiply that scan for every host, every refresh.
-///
-/// **Everything about this walk's termination is the peer's to decide, so
-/// none of it is trusted.** Three independent bounds, because the ways a
-/// walk can fail to end are independent: [`REFRESH_PAGE_LIMIT`] on pages
-/// followed, [`REFRESH_SESSION_CAP`] on entries accumulated, and a refusal
-/// to follow a `next_cursor` identical to the one that produced it (the
-/// cheapest non-termination there is to write by accident — a supervisor
-/// that echoes back the cursor it was handed, which alone would spin
-/// forever inside both other bounds while collecting duplicates). Any of
-/// them tripping is an ordinary failed refresh: the caller keeps the
-/// previous cache (see [`HostActor::refresh_once`]) rather than trusting a
-/// walk that did not finish.
-pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Vec<SessionInfo>> {
-    let mut collected: Vec<SessionInfo> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut bytes = 0usize;
-    let mut cursor: Option<String> = None;
-    // The ordering key of the previous entry, carried ACROSS page
-    // boundaries — a peer that orders each page correctly but restarts the
-    // order at every page would otherwise pass an inside-a-page check.
-    let mut previous: Option<(std::cmp::Reverse<i64>, String)> = None;
-    for _ in 0..REFRESH_PAGE_LIMIT {
-        // Kept so the reply's own `next_cursor` can be compared against
-        // the cursor that produced it.
-        let used = cursor.clone();
-        let page = client
-            .list_sessions_page(cursor.take(), None)
-            .await
-            .context("listing a page of the host's sessions")?;
-        for entry in page.sessions {
-            // A session id is peer-supplied text that ends up inside the
-            // helm's own cursors, which travel as a query parameter. An id
-            // near the frame limit therefore produces a cursor no client
-            // could replay — the request head would be refused long before
-            // the handler saw it — so the walk would advance to a position
-            // nothing could ever resume from. Bounded at ingress, where the
-            // value first enters this process, rather than at each of the
-            // places it is later embedded.
-            if entry.id.len() > MAX_SESSION_ID_BYTES {
-                anyhow::bail!(
-                    "the host reported a session id of {} bytes (cap {MAX_SESSION_ID_BYTES}); \
-                     refusing a list this side could not build resumable cursors over",
-                    entry.id.len()
-                );
-            }
-            // Uniqueness is checked HERE, before either publication branch,
-            // rather than at the cache write. A list that names one session
-            // twice is a list that contradicts itself, and the durable path
-            // has always refused it — but the in-memory path an
-            // identity-less host publishes through never touched the store,
-            // so the same malformed reply used to be accepted there. One
-            // check on the drain covers both, and the refusal keeps the
-            // previous list either way (see `HostActor::refresh_once`).
-            if !seen.insert(entry.id.clone()) {
-                anyhow::bail!(
-                    "the host listed session id {:?} more than once; refusing a list that \
-                     contradicts itself",
-                    entry.id
-                );
-            }
-            // THE ORDER IS A CONTRACT, and until now it was an assumption.
-            // PLAN_M6.md fixes the wire order as creation-time descending
-            // with the session id as tiebreak, and this side does not
-            // merely display that order — it BUILDS ON it. An
-            // identity-less host's list is binary-searched for a resume
-            // point (`aggregate`'s `partition_point`) and merged in
-            // lockstep with the persisted page, both of which are simply
-            // wrong over an unsorted sequence: the search lands anywhere,
-            // and the merge interleaves two sequences that were never
-            // ordered. The failure is silent — pages that quietly skip or
-            // repeat entries — which is exactly the kind a peer should not
-            // be able to cause by accident or otherwise.
-            let key = (std::cmp::Reverse(entry.created_at), entry.id.clone());
-            if let Some(previous) = &previous
-                && *previous >= key
-            {
-                anyhow::bail!(
-                    "the host's session list is not in the wire order (creation time descending, \
-                     id ascending): {:?} followed {:?}",
-                    entry.id,
-                    previous.1
-                );
-            }
-            previous = Some(key);
-            // Cumulative BYTES, not just pages and rows. The other two
-            // bounds are satisfied by a peer that sends few, enormous
-            // pages: `REFRESH_PAGE_LIMIT` near-frame-sized pages of
-            // `REFRESH_SESSION_CAP` sessions is gigabytes of retained
-            // `SessionInfo`, all of it the far end's choice. Measured on the
-            // encoded form because that is what a session's cost actually
-            // is — its fields are user-supplied text with no individual cap
-            // worth trusting.
-            bytes = bytes.saturating_add(
-                serde_json::to_vec(&entry)
-                    .map(|encoded| encoded.len())
-                    .unwrap_or(0),
-            );
-            if bytes > REFRESH_BYTE_CAP {
-                anyhow::bail!(
-                    "the host's session list exceeded {REFRESH_BYTE_CAP} bytes; refusing to keep \
-                     draining it"
-                );
-            }
-            collected.push(entry);
-        }
-        if collected.len() > REFRESH_SESSION_CAP {
+/// What is checked is what this side goes on to BUILD ON, and every
+/// refusal is an ordinary failed refresh that keeps the previous cache
+/// (see [`HostActor::refresh_once`]): a session id past
+/// [`MAX_SESSION_ID_BYTES`] (nothing could ever address it), an id listed
+/// twice (a list that contradicts itself has no single truth to cache),
+/// and a reply longer than the cap the protocol fixes (a peer ignoring
+/// the one bound on what this side retains). Order is NOT checked: the
+/// helm sorts every host's rows itself, in memory, for whichever order a
+/// client asks, so nothing here depends on the sequence the host chose.
+pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<SessionListing> {
+    let listing = client
+        .list_sessions()
+        .await
+        .context("listing the host's sessions")?;
+    if listing.sessions.len() > farhelm_proto::LIST_SESSIONS_CAP {
+        anyhow::bail!(
+            "the host listed {} sessions, past the protocol's cap of {}; refusing a list this \
+             side would not retain whole",
+            listing.sessions.len(),
+            farhelm_proto::LIST_SESSIONS_CAP
+        );
+    }
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for entry in &listing.sessions {
+        // Bounded at ingress, where the value first enters this process,
+        // rather than at each of the places it is later embedded.
+        if entry.id.len() > MAX_SESSION_ID_BYTES {
             anyhow::bail!(
-                "the host's session list exceeded {REFRESH_SESSION_CAP} entries; refusing to keep \
-                 draining it"
+                "the host reported a session id of {} bytes (cap {MAX_SESSION_ID_BYTES}); \
+                 refusing a list this side could not address",
+                entry.id.len()
             );
         }
-        match page.next_cursor {
-            None => {
-                // `total` is the supervisor's own count before any page
-                // cut, so a completed walk should have collected exactly
-                // that many. A mismatch is not fatal — sessions really do
-                // come and go between pages, and the cache is last-known
-                // data either way — but it is the only signal that would
-                // distinguish a benign race from a pagination bug quietly
-                // dropping entries, so it is said out loud.
-                if collected.len() as u64 != page.total {
-                    warn!(
-                        drained = collected.len(),
-                        reported_total = page.total,
-                        "the host's session walk finished with a different count than the host \
-                         reported; caching what was drained"
-                    );
-                }
-                return Ok(collected);
-            }
-            Some(next) if used.as_deref() == Some(next.as_str()) => {
-                anyhow::bail!(
-                    "the host's session list handed back the same cursor it was given \
-                     ({next:?}); refusing to follow it in a circle"
-                );
-            }
-            Some(next) => cursor = Some(next),
+        // Uniqueness is checked HERE, before either publication branch,
+        // rather than at the cache write. The durable path has always
+        // refused a duplicate, but the in-memory path an identity-less
+        // host publishes through never touched the store, so the same
+        // malformed reply used to be accepted there. One check on the
+        // drain covers both.
+        if !seen.insert(entry.id.as_str()) {
+            anyhow::bail!(
+                "the host listed session id {:?} more than once; refusing a list that \
+                 contradicts itself",
+                entry.id
+            );
         }
     }
-    anyhow::bail!(
-        "the host's session list did not terminate within {REFRESH_PAGE_LIMIT} pages; refusing to \
-         keep following its cursor"
-    )
+    Ok(listing)
 }
 
 // ---- The manager -----------------------------------------------------
@@ -987,6 +843,21 @@ struct ActorStatus {
     /// Empty for essentially every host that ever runs. `Arc` for the same
     /// reason `live_sessions` is: every status read clones it.
     contested: Arc<Vec<String>>,
+    /// Whether this host's most recent successful drain was cut at the
+    /// wire's cap (`farhelm_proto::LIST_SESSIONS_CAP`) — the per-host half
+    /// of SPEC.md's "could not read to the end" notice, which the merged
+    /// list raises when any contributing host says so.
+    ///
+    /// Refresh state, like `contested`: the last successful drain's own
+    /// word, kept across a failed refresh (which produced no word). For a
+    /// host that serves from its CACHE this is a copy of what the drain
+    /// also wrote to helm.db (`HostRow::cache_truncated`), and the merged
+    /// list reads that persisted copy — it is what makes the notice
+    /// outlive the connection and a helm restart. This in-memory word is
+    /// what the merge reads for the one host that has no cache: an
+    /// identity-less supervisor, whose whole list lives here and vanishes
+    /// with the connection, flag included.
+    list_truncated: bool,
     /// Which CONNECTION this status describes, as a token drawn from a
     /// MANAGER-WIDE counter that is never reused.
     ///
@@ -1221,6 +1092,9 @@ pub struct HostStatus {
     /// Session ids this host reports that another host's cache already
     /// claims — see [`ActorStatus::contested`].
     pub contested: Arc<Vec<String>>,
+    /// Whether this host's last successful drain hit the wire's cap — see
+    /// [`ActorStatus::list_truncated`].
+    pub list_truncated: bool,
     /// Which CONNECTION this status describes — see
     /// [`ActorStatus::incarnation`]. Read from the same borrow as everything
     /// above, so a mutation can capture it alongside the client it is about
@@ -1669,6 +1543,7 @@ impl ConnectionManager {
             // because a claim is only made against a published client.
             incarnation: 0,
             contested: Arc::new(Vec::new()),
+            list_truncated: false,
         }));
         let (nudge_tx, nudge_rx) = watch::channel(Nudge::default());
         let (refresh_tx, refresh_rx) = watch::channel(0u64);
@@ -1814,6 +1689,7 @@ impl ConnectionManager {
                     state: published.state.clone(),
                     live_sessions: published.live_sessions.clone(),
                     contested: Arc::clone(&published.contested),
+                    list_truncated: published.list_truncated,
                     incarnation: published.incarnation,
                 }
             })
@@ -1842,6 +1718,7 @@ impl ConnectionManager {
             client: published.client.clone(),
             live_sessions: published.live_sessions.clone(),
             contested: Arc::clone(&published.contested),
+            list_truncated: published.list_truncated,
             incarnation: published.incarnation,
         })
     }
@@ -2002,32 +1879,47 @@ impl ConnectionManager {
                     }
                     let session = &session;
                     entries.retain(|existing| existing.id != session.id);
-                    // The same bounds a drain obeys, for the same reason:
-                    // this list is retained memory whose size is decided by
-                    // how many creates a caller makes, and an unbounded one
-                    // is an unbounded one however it grew.
-                    let bytes: usize = entries
-                        .iter()
-                        .chain(std::iter::once(session))
-                        .map(|info| {
-                            serde_json::to_vec(info)
-                                .map(|encoded| encoded.len())
-                                .unwrap_or(0)
-                        })
-                        .sum();
-                    if entries.len() >= REFRESH_SESSION_CAP || bytes > REFRESH_BYTE_CAP {
-                        refused = Some("the host's in-memory session list is at its cap");
-                        return;
-                    }
-                    // Inserted in the merged order rather than pushed: a
-                    // created session is usually newest, but "usually" is
-                    // not an ordering guarantee, and the page merge
-                    // binary-searches this list.
+                    // Inserted at the position creation order would give
+                    // rather than pushed, so a re-record of an unchanged
+                    // session lands where it was on a host that lists in
+                    // creation order (the common case) and `changed` below
+                    // stays a value comparison. Nothing downstream depends
+                    // on the order — the merged list re-sorts every host's
+                    // rows, and a drain publishes the peer's own sequence
+                    // verbatim — so this is a determinism nicety, not a
+                    // sorted-list invariant anything may lean on.
                     let at = entries.partition_point(|existing| {
                         (std::cmp::Reverse(existing.created_at), existing.id.as_str())
                             < (std::cmp::Reverse(session.created_at), session.id.as_str())
                     });
                     entries.insert(at, session.clone());
+                    // The same bound a drain obeys — but held by EVICTION,
+                    // never by refusing the new row: the create already
+                    // succeeded on the supervisor, and a list without its
+                    // row would leave a session the caller was just told
+                    // exists unroutable until the next refresh. The victim
+                    // is FOUND, not taken from the tail: the list carries
+                    // the peer's own order (nothing sorts it since the wire
+                    // dropped its order contract), so "oldest" has to be
+                    // selected explicitly — smallest creation time, ties to
+                    // the later id, the same choice the durable path's SQL
+                    // makes. The published flag records that this list no
+                    // longer holds everything known — the same statement a
+                    // capped drain makes.
+                    if entries.len() > farhelm_proto::LIST_SESSIONS_CAP {
+                        if let Some(oldest) = entries
+                            .iter()
+                            .enumerate()
+                            .max_by(|(_, a), (_, b)| {
+                                (std::cmp::Reverse(a.created_at), a.id.as_str())
+                                    .cmp(&(std::cmp::Reverse(b.created_at), b.id.as_str()))
+                            })
+                            .map(|(index, _)| index)
+                        {
+                            entries.remove(oldest);
+                        }
+                        status.list_truncated = true;
+                    }
                     changed = status.live_sessions.as_deref() != Some(&entries);
                     status.live_sessions = Some(Arc::new(entries));
                 });
@@ -2262,6 +2154,7 @@ impl ConnectionManager {
                             client: published.client.clone(),
                             live_sessions: published.live_sessions.clone(),
                             contested: Arc::clone(&published.contested),
+                            list_truncated: published.list_truncated,
                             incarnation: published.incarnation,
                         },
                     ))
@@ -3472,6 +3365,7 @@ impl HostActor {
                 Some(Arc::clone(&client)),
                 step.live,
                 step.contested,
+                step.truncated,
             );
             // AFTER the publish, so a client that re-reads on this
             // revision sees a hosts list and a session list that already
@@ -3545,8 +3439,8 @@ impl HostActor {
     /// to answer "what did this host have, last we knew" while the host is
     /// unavailable, so wiping it on a failed refresh would destroy the
     /// answer at precisely the moment it becomes the only one available —
-    /// and would make a transient failure (the pagination `Internal` error
-    /// a single over-large record produces, a connection dying mid-walk)
+    /// and would make a transient failure (the `Internal` error a single
+    /// over-large record produces, a connection dying mid-refresh)
     /// indistinguishable from "this host genuinely has no sessions". The
     /// failure is recorded in [`RefreshHealth::Failed`] instead, where it
     /// is visible without being destructive.
@@ -3578,7 +3472,10 @@ impl HostActor {
         // snapshot recognizes that it lost.
         let epoch_before = self.seed_epoch.load(std::sync::atomic::Ordering::Acquire);
         let drained = tokio::time::timeout(self.cadence.refresh_timeout, drain_sessions(client));
-        let entries = match drained.await {
+        let SessionListing {
+            sessions: entries,
+            truncated,
+        } = match drained.await {
             Err(_) => {
                 warn!(
                     timeout_secs = self.cadence.refresh_timeout.as_secs(),
@@ -3602,10 +3499,11 @@ impl HostActor {
                     end_connection: Some("the host stopped answering its session list"),
                     live: LiveSessions::Retain,
                     contested: None,
+                    truncated: None,
                     cache_changed: false,
                 };
             }
-            Ok(Ok(entries)) => entries,
+            Ok(Ok(drained)) => drained,
             Ok(Err(error)) => {
                 let internal = error
                     .downcast_ref::<SupervisorError>()
@@ -3632,6 +3530,7 @@ impl HostActor {
                     end_connection: None,
                     live: LiveSessions::Retain,
                     contested: None,
+                    truncated: None,
                     cache_changed: false,
                 };
             }
@@ -3655,6 +3554,7 @@ impl HostActor {
                     end_connection: None,
                     live: LiveSessions::Retain,
                     contested: None,
+                    truncated: None,
                     cache_changed: false,
                 };
             }
@@ -3663,6 +3563,7 @@ impl HostActor {
                 end_connection: None,
                 live: LiveSessions::Set(Arc::new(entries)),
                 contested: Some(Arc::new(Vec::new())),
+                truncated: Some(truncated),
                 cache_changed: false,
             };
         };
@@ -3688,12 +3589,13 @@ impl HostActor {
                 end_connection: None,
                 live: LiveSessions::Clear,
                 contested: None,
+                truncated: None,
                 cache_changed: false,
             };
         }
         match self
             .store
-            .replace_host_sessions(self.id, identity, entries)
+            .replace_host_sessions(self.id, identity, entries, truncated)
             .await
         {
             Ok(replacement) => {
@@ -3735,6 +3637,7 @@ impl HostActor {
                     end_connection: None,
                     live: LiveSessions::Clear,
                     contested: Some(Arc::new(contested)),
+                    truncated: Some(truncated),
                     cache_changed: changed || default_changed,
                 }
             }
@@ -3762,6 +3665,7 @@ impl HostActor {
                         .then_some("this connection's identity is no longer the row's"),
                     live: LiveSessions::Clear,
                     contested: None,
+                    truncated: None,
                     cache_changed: false,
                 }
             }
@@ -3853,7 +3757,7 @@ impl HostActor {
         client: Option<Arc<SupervisorClient>>,
         live: LiveSessions,
     ) {
-        self.publish_refresh(state, client, live, None);
+        self.publish_refresh(state, client, live, None, None);
     }
 
     /// [`Self::publish_with_live`] plus this refresh's contested set.
@@ -3897,6 +3801,7 @@ impl HostActor {
         client: Option<Arc<SupervisorClient>>,
         live: LiveSessions,
         contested: Option<Arc<Vec<String>>>,
+        truncated: Option<bool>,
     ) {
         let previous = self.status.borrow().state.phase();
         if previous != state.phase() {
@@ -3985,9 +3890,18 @@ impl HostActor {
             // emptiness check would miss, and it is the case where a client
             // holding the old answer sends an operation somewhere it must
             // not go.
+            // A drain's cap flag is refresh state exactly like `contested`
+            // (a failed refresh says nothing and keeps the previous word),
+            // and it is observable: it decides whether every client shows
+            // the "could not read to the end" notice.
+            let published_truncated = status.list_truncated;
+            if let Some(truncated) = truncated {
+                status.list_truncated = truncated;
+            }
             observable_change = status.state != state
                 || published_live.as_deref() != live_sessions.as_deref()
-                || *published_contested != *status.contested;
+                || *published_contested != *status.contested
+                || published_truncated != status.list_truncated;
             status.state = state;
             status.client = client;
             status.live_sessions = live_sessions;
@@ -4248,133 +4162,14 @@ mod tests {
         drop(kill);
     }
 
-    /// A drain must be bounded by BYTES, not only by pages and rows.
+    /// A session id past [`MAX_SESSION_ID_BYTES`] must be refused at
+    /// ingress.
     ///
-    /// The other two bounds are both satisfied by a peer that sends few,
-    /// enormous pages — which is the shape that actually costs memory. A
-    /// host answering with near-frame-sized pages of fat records would
-    /// otherwise have this side retain gigabytes on the far end's say-so,
-    /// and a registered host is a machine the helm does not control.
-    ///
-    /// The refusal is an ordinary failed refresh: the previous cache stands,
-    /// as it does for every other way a walk can fail.
-    #[tokio::test]
-    async fn a_drain_refuses_a_list_that_exceeds_its_byte_cap() {
-        // Each session's title alone is a megabyte, so seventy of them pass
-        // both the page and the row bound and blow the byte one — which is
-        // the shape those two cannot catch. Pages stay well under
-        // `MAX_FRAME_LEN` so the walk fails at the bound under test rather
-        // than at the transport.
-        let fat: Vec<SessionInfo> = (0..70)
-            .map(|index| {
-                let mut info = session(&format!("fat-{index}"), 1_000 - index);
-                info.title = "x".repeat(1024 * 1024);
-                info
-            })
-            .collect();
-        let script = Script {
-            sessions: fat,
-            page_size: 4,
-            ..Script::default()
-        };
-        let scripts = Arc::new(Mutex::new(HashMap::from([(1, script.clone())])));
-        let (kill, kill_rx) = broadcast::channel(1);
-        let (ours, theirs) = tokio::io::duplex(16 * 1024 * 1024);
-        let peer = tokio::spawn(run_peer(
-            theirs,
-            script,
-            PeerContext {
-                scripts,
-                requests: Arc::new(Mutex::new(Vec::new())),
-                closures: watch::Sender::new(Vec::new()),
-                id: 1,
-            },
-            kill_rx,
-        ));
-        let (r, w) = tokio::io::split(ours);
-        let client = SupervisorClient::start(r, w).await.expect("connect");
-
-        let error = drain_sessions(&client)
-            .await
-            .expect_err("a list this large must be refused rather than retained");
-        assert!(
-            format!("{error:#}").contains("bytes"),
-            "the refusal must say which bound it was: {error:#}"
-        );
-        peer.abort();
-        drop(kill);
-    }
-
-    /// A drain must REFUSE a list that is not in the wire order — within a
-    /// page and across page boundaries alike.
-    ///
-    /// PLAN_M6.md fixes that order, and this side does not merely display
-    /// it: an identity-less host's list is binary-searched for a resume
-    /// point and merged in lockstep with the persisted page, and both are
-    /// simply wrong over an unsorted sequence. The failure would be silent —
-    /// pages that skip or repeat entries — which is exactly what a peer
-    /// should not be able to cause. The across-pages case is separate
-    /// because a per-page check passes a peer that restarts the order at
-    /// every page.
-    #[tokio::test]
-    async fn a_drain_refuses_a_list_that_is_not_in_the_wire_order() {
-        // Ascending time: the reverse of the contract, inside one page.
-        let within_a_page = vec![session("a", 100), session("b", 200)];
-        // Each page is internally ordered; the SECOND starts newer than the
-        // first ended.
-        let across_pages = vec![
-            session("a", 300),
-            session("b", 200),
-            session("c", 900),
-            session("d", 800),
-        ];
-        for (label, sessions, page_size) in [
-            ("within one page", within_a_page, 50),
-            ("across a page boundary", across_pages, 2),
-        ] {
-            let script = Script {
-                sessions,
-                page_size,
-                ..Script::default()
-            };
-            let scripts = Arc::new(Mutex::new(HashMap::from([(1, script.clone())])));
-            let (kill, kill_rx) = broadcast::channel(1);
-            let (ours, theirs) = tokio::io::duplex(256 * 1024);
-            let peer = tokio::spawn(run_peer(
-                theirs,
-                script,
-                PeerContext {
-                    scripts,
-                    requests: Arc::new(Mutex::new(Vec::new())),
-                    closures: watch::Sender::new(Vec::new()),
-                    id: 1,
-                },
-                kill_rx,
-            ));
-            let (r, w) = tokio::io::split(ours);
-            let client = SupervisorClient::start(r, w).await.expect("connect");
-
-            let error = drain_sessions(&client)
-                .await
-                .err()
-                .unwrap_or_else(|| panic!("{label}: an out-of-order list must be refused"));
-            assert!(
-                format!("{error:#}").contains("wire order"),
-                "the refusal must name the contract it enforces ({label}): {error:#}"
-            );
-            peer.abort();
-            drop(kill);
-        }
-    }
-
-    /// A session id too large to build a replayable cursor over must be
-    /// refused at ingress.
-    ///
-    /// An id near the frame limit produces a cursor no client could send
-    /// back — the request head would be refused before any handler saw it —
-    /// so the walk would advance to a position nothing could ever resume
-    /// from. Bounded where the value first enters this process rather than
-    /// at each of the places it is later embedded.
+    /// Every later request naming the session — attach, rename, delete —
+    /// embeds its id in a frame head, and an id near the frame limit is
+    /// one no such request could carry. Bounded where the value first
+    /// enters this process rather than at each of the places it is later
+    /// embedded.
     #[tokio::test]
     async fn a_drain_refuses_an_unusably_long_session_id() {
         let script = Script {
@@ -4402,7 +4197,7 @@ mod tests {
             .await
             .expect_err("an unusable session id must be refused");
         assert!(
-            format!("{error:#}").contains("cursors"),
+            format!("{error:#}").contains("could not address"),
             "the refusal must say what this side could not do with it: {error:#}"
         );
         peer.abort();
@@ -4439,11 +4234,17 @@ mod tests {
         /// The identity the peer's hello reports. `None` models a
         /// supervisor with none to report.
         identity: Option<String>,
-        /// What the peer's session list contains, served in
-        /// `page_size` chunks so a walk really does have to follow
-        /// cursors.
+        /// What the peer's session list contains, served whole in one
+        /// reply — exactly as a real supervisor answers, however long the
+        /// list. A script longer than `farhelm_proto::LIST_SESSIONS_CAP`
+        /// is therefore how a test models a peer ignoring the cap.
         sessions: Vec<SessionInfo>,
-        page_size: usize,
+        /// The `truncated` flag the peer's reply carries — a supervisor
+        /// saying its own list was cut at the cap. Independent of the
+        /// script's length on purpose: what is under test is the flag's
+        /// journey through this side, not the supervisor's arithmetic
+        /// (pinned in farhelm-supervisor).
+        truncated: bool,
         /// When set, every `ListSessions` is refused with this message as
         /// an `Internal` error — the shape a record too large to ship
         /// produces on a real supervisor (`build_list_reply`'s refusal,
@@ -4460,10 +4261,10 @@ mod tests {
         /// `ListSessions`. The connected counterpart of `silent_hello`, and
         /// the failure the refresh deadline exists for.
         silent_list: bool,
-        /// The peer drops the connection after serving this many pages,
-        /// mid-walk — a supervisor killed, or an ssh channel dying, while
-        /// the helm was halfway through draining it.
-        close_after_pages: Option<usize>,
+        /// The peer drops the connection instead of answering a
+        /// `ListSessions` — a supervisor killed, or an ssh channel dying,
+        /// while the helm was refreshing from it.
+        close_on_list: bool,
         /// The TRANSPORT panics when this host is dialed, standing in for
         /// any bug that takes an actor's task down — there is no honest
         /// smaller stand-in, since a panic is exactly what an unexpected
@@ -4479,30 +4280,14 @@ mod tests {
                 build: "peer-build".to_string(),
                 identity: Some("identity-a".to_string()),
                 sessions: Vec::new(),
-                page_size: 500,
+                truncated: false,
                 list_error: None,
                 silent_hello: false,
                 silent_list: false,
-                close_after_pages: None,
+                close_on_list: false,
                 panic_on_dial: false,
             }
         }
-    }
-
-    /// One `ListSessions` exactly as it arrived — the request side of the
-    /// wire, which the state assertions elsewhere cannot see.
-    ///
-    /// Recorded because two of the drain's contracts are entirely about
-    /// what is SENT: that every page is requested with `limit: None` (so
-    /// the supervisor applies its own cap, which is what keeps its
-    /// per-page capture sweep from being multiplied — see
-    /// [`drain_sessions`]), and that a walk really advances its cursor
-    /// rather than re-asking for the same page.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    struct ListRequest {
-        host: HostId,
-        cursor: Option<String>,
-        limit: Option<u32>,
     }
 
     /// One recorded dial: which host, WHERE it was pointed, and when.
@@ -4540,8 +4325,14 @@ mod tests {
         /// deterministic and hung.
         attempts: watch::Sender<Vec<Dial>>,
         /// Every `ListSessions` any peer has received, in arrival order.
-        /// See [`ListRequest`].
-        requests: Arc<Mutex<Vec<ListRequest>>>,
+        /// Which host each `ListSessions` arrived for, in arrival order.
+        /// Recorded because one of the drain's contracts is entirely about
+        /// what is SENT: a refresh is exactly one request (the supervisor's
+        /// conversation-capture sweep rides its `ListSessions` handler, so
+        /// every extra request is another whole-host scan — see
+        /// [`drain_sessions`]). The message carries nothing but its
+        /// `req_id`, so the host is all there is to record.
+        requests: Arc<Mutex<Vec<HostId>>>,
         origin: tokio::time::Instant,
         /// Broadcast to every live peer, which then drops its half of the
         /// duplex — the client sees EOF, exactly as it would when an ssh
@@ -4581,12 +4372,12 @@ mod tests {
         }
 
         /// Every `ListSessions` one host's peers have received so far.
-        fn requests(&self, host: HostId) -> Vec<ListRequest> {
+        fn requests(&self, host: HostId) -> Vec<HostId> {
             self.requests
                 .lock()
                 .expect("request log mutex")
                 .iter()
-                .filter(|request| request.host == host)
+                .filter(|id| **id == host)
                 .cloned()
                 .collect()
         }
@@ -4717,7 +4508,7 @@ mod tests {
     #[derive(Clone)]
     struct PeerContext {
         scripts: Arc<Mutex<HashMap<HostId, Script>>>,
-        requests: Arc<Mutex<Vec<ListRequest>>>,
+        requests: Arc<Mutex<Vec<HostId>>>,
         closures: watch::Sender<Vec<HostId>>,
         id: HostId,
     }
@@ -4774,7 +4565,6 @@ mod tests {
         if !matches!(reader.read_frame().await, Ok(Some(_))) {
             return;
         }
-        let mut pages_served = 0usize;
         loop {
             let frame = tokio::select! {
                 _ = kill.recv() => return,
@@ -4784,20 +4574,8 @@ mod tests {
             let Ok(msg) = parse_control(&frame) else {
                 return;
             };
-            if let ControlMsg::ListSessions {
-                req_id,
-                cursor,
-                limit,
-            } = msg
-            {
-                requests
-                    .lock()
-                    .expect("request log mutex")
-                    .push(ListRequest {
-                        host: id,
-                        cursor: cursor.clone(),
-                        limit,
-                    });
+            if let ControlMsg::ListSessions { req_id } = msg {
+                requests.lock().expect("request log mutex").push(id);
                 let current = scripts
                     .lock()
                     .expect("script mutex")
@@ -4810,31 +4588,30 @@ mod tests {
                     // makes this invisible without a deadline.
                     continue;
                 }
-                if current.close_after_pages.is_some_and(|n| pages_served >= n) {
+                if current.close_on_list {
                     // Returning drops this peer's half of the duplex: the
-                    // helm sees EOF mid-walk, as it would if the supervisor
-                    // had been killed between two pages.
+                    // helm sees EOF where it expected a reply, as it would
+                    // if the supervisor had been killed mid-refresh.
                     return;
                 }
                 if writer
-                    .write_control(&list_reply(&current, req_id, cursor))
+                    .write_control(&list_reply(&current, req_id))
                     .await
                     .is_err()
                 {
                     return;
                 }
-                pages_served += 1;
             }
         }
     }
 
-    /// One page of a scripted peer's session list.
+    /// A scripted peer's whole session list, as one reply.
     ///
-    /// The cursor is the index of the next entry, rendered as a string.
-    /// Opaque to the helm by contract, so any encoding will do — and a
-    /// transparent one keeps the test's own arithmetic checkable at a
-    /// glance.
-    fn list_reply(script: &Script, req_id: u64, cursor: Option<String>) -> ControlMsg {
+    /// Never cut, whatever the script's length: the helm's own ingress
+    /// check is what a too-long list is meant to trip, and a peer that cut
+    /// its list for the helm would hide exactly that. `truncated` is the
+    /// script's own word, not derived from the length.
+    fn list_reply(script: &Script, req_id: u64) -> ControlMsg {
         if let Some(message) = &script.list_error {
             return ControlMsg::Error {
                 req_id,
@@ -4842,16 +4619,10 @@ mod tests {
                 kind: ErrorKind::Internal,
             };
         }
-        let start: usize = cursor
-            .as_deref()
-            .map(|c| c.parse().expect("the test's own cursor round-trips"))
-            .unwrap_or(0);
-        let end = (start + script.page_size).min(script.sessions.len());
         ControlMsg::SessionList {
             req_id,
-            sessions: script.sessions[start..end].to_vec(),
-            total: script.sessions.len() as u64,
-            next_cursor: (end < script.sessions.len()).then(|| end.to_string()),
+            sessions: script.sessions.clone(),
+            truncated: script.truncated,
         }
     }
 
@@ -5104,6 +4875,91 @@ mod tests {
         }
     }
 
+    /// The in-memory twin of the store's seed eviction: an identity-less
+    /// host's actor cache at the cap takes a create seed by EVICTING its
+    /// oldest row, keeps the new session listed, and publishes
+    /// `list_truncated`.
+    ///
+    /// This is the F5 path's own storage: a host with no identity writes no
+    /// `session_cache` row, so the durable eviction test cannot cover it —
+    /// a refusal here (the old behavior) would leave a session the caller
+    /// was just told exists unroutable until the next refresh, on exactly
+    /// the host whose list vanishes with its connection.
+    #[tokio::test(start_paused = true)]
+    async fn an_in_memory_seed_past_the_cap_evicts_the_oldest_row_and_flags_the_cut() {
+        let full: Vec<SessionInfo> = (0..farhelm_proto::LIST_SESSIONS_CAP)
+            .map(|n| session(&format!("s-{n:04}"), 1_000 + n as i64))
+            .collect();
+        let fixture = fixture(Cadence::default(), {
+            let full = full.clone();
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host("memoryfull.example", None, None)
+                    .await
+                    .unwrap();
+                // No identity anywhere: this host serves from the actor's
+                // memory, which is the slice under test.
+                transport.set_script(
+                    host,
+                    Script {
+                        identity: None,
+                        sessions: full,
+                        ..Script::default()
+                    },
+                );
+            }
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        identity: None,
+                        last_refresh: RefreshHealth::Ok {
+                            sessions: farhelm_proto::LIST_SESSIONS_CAP
+                        },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("actor is running");
+        let status = fixture.manager.status(host).expect("connected");
+        assert!(!status.list_truncated, "a full-cap drain is not a cut");
+        let claim = SessionClaim {
+            host,
+            incarnation: status.incarnation,
+            identity: None,
+        };
+
+        fixture
+            .manager
+            .remember_session(&claim, &session("fresh", 10_000))
+            .await
+            .expect("the seed must land, not be refused at the cap");
+
+        let after = fixture.manager.status(host).expect("connected");
+        let live = after
+            .live_sessions
+            .expect("an identity-less host serves its list from memory");
+        assert_eq!(live.len(), farhelm_proto::LIST_SESSIONS_CAP);
+        assert!(
+            live.iter().any(|s| s.id == "fresh"),
+            "the new session must be listed and routable"
+        );
+        assert!(
+            !live.iter().any(|s| s.id == "s-0000"),
+            "the oldest row is the one evicted"
+        );
+        assert!(
+            after.list_truncated,
+            "the eviction is published as a cut: the list no longer holds everything known"
+        );
+    }
+
     /// A refresh whose session cache is byte-identical still publishes when
     /// the remembered default alone changes.
     ///
@@ -5132,7 +4988,7 @@ mod tests {
                     .unwrap();
                 record_contact(&store, host, "defaults-identity").await;
                 store
-                    .replace_host_sessions(host, "defaults-identity", vec![profiled.clone()])
+                    .replace_host_sessions(host, "defaults-identity", vec![profiled.clone()], false)
                     .await
                     .unwrap();
                 transport.set_script(
@@ -5619,6 +5475,7 @@ mod tests {
                     host,
                     "identity-original",
                     vec![session("ghost", 100), session("phantom", 90)],
+                    false,
                 )
                 .await
                 .unwrap();
@@ -6330,12 +6187,11 @@ mod tests {
 
     // ---- Session refresh ----------------------------------------------
 
-    /// A refresh drains the supervisor's pagination to exhaustion and
-    /// replaces the whole cache slice — PLAN_M6.md item 5's
-    /// drain-then-replace, with the walk really crossing page boundaries
-    /// rather than fitting in one.
+    /// A refresh takes the supervisor's whole list in one reply and
+    /// replaces the whole cache slice with it — PLAN_M6.md item 5's
+    /// drain-then-replace, minus the drain.
     #[tokio::test(start_paused = true)]
-    async fn a_refresh_drains_every_page_into_the_cache() {
+    async fn a_refresh_replaces_the_cache_with_the_whole_list() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
                 .add_ssh_host("busy.example", None, None)
@@ -6344,11 +6200,7 @@ mod tests {
             transport.set_script(
                 host,
                 Script {
-                    // Five sessions in pages of two: three pages, the last
-                    // one short, so both the "follow the cursor" and the
-                    // "stop when it is absent" halves are exercised.
                     sessions: (0..5).map(|n| session(&format!("s{n}"), 100 - n)).collect(),
-                    page_size: 2,
                     ..Script::default()
                 },
             );
@@ -6390,8 +6242,117 @@ mod tests {
         assert_eq!(
             ids,
             vec!["s0", "s1", "s2", "s3", "s4"],
-            "every page must land in the cache, in the wire order"
+            "every listed session must land in the cache"
         );
+    }
+
+    /// A supervisor's `truncated: true` reaches the published snapshot AND
+    /// the host's registry row, and both keep saying so across a failed
+    /// refresh.
+    ///
+    /// The flag's journey is the one piece of state machinery the whole-
+    /// list change added, and it is what every client's "could not read to
+    /// the end" notice hangs on. Pinned through the actor rather than at
+    /// `drain_sessions` alone because the actor is where the word could be
+    /// dropped (a `RefreshStep` built without it) or wrongly cleared (a
+    /// failed refresh that reset it), and neither shows at the drain.
+    #[tokio::test(start_paused = true)]
+    async fn a_supervisors_cap_flag_is_published_and_persisted_and_kept_across_a_failed_refresh() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("capped.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    sessions: vec![session("only", 100)],
+                    truncated: true,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("actor is running");
+        let published = || fixture.manager.status(host).expect("actor").list_truncated;
+        let persisted = async || {
+            fixture
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .cache_truncated
+        };
+        assert!(published(), "the snapshot carries the supervisor's word");
+        assert!(persisted().await, "and so does the host's registry row");
+
+        // A refresh that fails produces no word at all, and must not be
+        // read as "not cut": the rows being served are still the cut ones.
+        fixture.transport.edit(host, |script| {
+            script.list_error = Some("a session record is too large to send".to_string());
+        });
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Failed { .. },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("actor is running");
+        assert!(published(), "a failed refresh keeps the previous word");
+        assert!(
+            persisted().await,
+            "in the registry row as well as the snapshot"
+        );
+
+        // And a later UNCUT reply clears it everywhere — the guard against
+        // a sticky `|=` implementation, which every assertion above would
+        // wave through. The script gains a second session so the Ok state
+        // this leg waits for is unambiguously the new refresh's.
+        fixture.transport.edit(host, |script| {
+            script.list_error = None;
+            script.truncated = false;
+            script.sessions = vec![session("only", 100), session("second", 90)];
+        });
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { sessions: 2 },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("actor is running");
+        assert!(
+            !published(),
+            "an uncut reply clears the published word; the flag is the last drain's, not sticky"
+        );
+        assert!(!persisted().await, "and the registry row clears with it");
     }
 
     /// A failed refresh must NOT wipe the cache.
@@ -6401,8 +6362,8 @@ mod tests {
     /// is exactly what a user falls back to when a host is having trouble
     /// — so wiping on failure would destroy the data at the moment it
     /// becomes the only data there is. The failure modelled here is the
-    /// real one PLAN_M6.md names: the supervisor's pagination `Internal`
-    /// refusal for a record too large to ship.
+    /// real one PLAN_M6.md names: the supervisor's `Internal` refusal for a
+    /// record too large to ship.
     #[tokio::test(start_paused = true)]
     async fn a_failed_refresh_keeps_the_previous_cache() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
@@ -6716,14 +6677,13 @@ mod tests {
     /// replace a complete list with a partial one, and the resulting stale
     /// view would be missing exactly the sessions that were listed last.
     #[tokio::test(start_paused = true)]
-    async fn a_connection_lost_mid_walk_keeps_the_whole_previous_cache() {
+    async fn a_connection_lost_during_a_refresh_keeps_the_previous_cache() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store.add_ssh_host("cut.example", None, None).await.unwrap();
             transport.set_script(
                 host,
                 Script {
                     sessions: vec![session("a", 300), session("b", 200), session("c", 100)],
-                    page_size: 1,
                     ..Script::default()
                 },
             );
@@ -6744,12 +6704,11 @@ mod tests {
             .await
             .expect("actor is running");
 
-        // From here on the peer serves ONE page and then dies, so every
-        // later walk is cut after its first page — with two more pages
-        // still owed.
+        // From here on the peer dies instead of answering, so every later
+        // refresh ends with no reply at all.
         fixture
             .transport
-            .edit(host, |script| script.close_after_pages = Some(1));
+            .edit(host, |script| script.close_on_list = true);
 
         fixture.transport.wait_for_attempts(host, 2).await;
         fixture
@@ -6768,13 +6727,13 @@ mod tests {
         assert_eq!(
             ids,
             vec!["a", "b", "c"],
-            "a walk cut between pages must leave the previous cache whole, not truncated to \
-             what arrived"
+            "a refresh that never got its reply must leave the previous cache whole"
         );
     }
 
-    /// A list that grows past [`REFRESH_SESSION_CAP`] is a refused refresh
-    /// like any other: the cache the host last gave us survives.
+    /// A list that grows past `farhelm_proto::LIST_SESSIONS_CAP` is a
+    /// refused refresh like any other: the cache the host last gave us
+    /// survives.
     ///
     /// Pinned through the actor rather than only at [`drain_sessions`]
     /// because the bound's WHOLE value is what it does to the connection —
@@ -6812,18 +6771,13 @@ mod tests {
             .await
             .expect("actor is running");
 
-        // One session past the ceiling, served in the supervisor's own
-        // default page size — i.e. eleven near-budget pages, the realistic
-        // shape rather than one implausible mega-page.
+        // One session past the cap, which a conforming supervisor would
+        // never send: the scripted peer serves its list uncut precisely so
+        // this side's ingress check is what gets exercised.
         fixture.transport.edit(host, |script| {
-            script.sessions = (0..=REFRESH_SESSION_CAP)
-                // Descending creation times, so the fixture itself obeys
-                // the wire order the drain now validates — an unordered
-                // fixture would trip that check instead of the ceiling this
-                // test is about.
+            script.sessions = (0..=farhelm_proto::LIST_SESSIONS_CAP)
                 .map(|n| session(&format!("many-{n}"), 1_000_000 - n as i64))
                 .collect();
-            script.page_size = 500;
         });
 
         let state = fixture
@@ -6841,7 +6795,7 @@ mod tests {
             .expect("actor is running");
         assert!(
             matches!(&state, HostState::Connected { last_refresh: RefreshHealth::Failed { error }, .. }
-                if error.contains(&REFRESH_SESSION_CAP.to_string())),
+                if error.contains(&farhelm_proto::LIST_SESSIONS_CAP.to_string())),
             "the refusal must name the ceiling: {state:?}"
         );
         assert!(
@@ -6926,17 +6880,16 @@ mod tests {
         }
     }
 
-    /// Every page of a walk must be requested with NO limit, and with a
-    /// cursor that actually advances.
+    /// A refresh is exactly ONE `ListSessions`, however long the list.
     ///
-    /// Both are contracts about what goes OUT, which no state assertion can
-    /// see. The limit matters beyond tidiness: the supervisor's
-    /// conversation-capture sweep rides its `ListSessions` handler, so it
-    /// runs once per page — a helm that asked for small pages would
-    /// multiply whole-host scans on every host on every refresh (see
-    /// [`drain_sessions`]).
+    /// A contract about what goes OUT, which no state assertion can see,
+    /// and one that matters beyond tidiness: the supervisor's
+    /// conversation-capture sweep rides its `ListSessions` handler, so
+    /// every request is a whole-host scan on the far side (see
+    /// [`drain_sessions`]). A drain that asked twice — to confirm a count,
+    /// say — would double that cost on every host on every refresh.
     #[tokio::test(start_paused = true)]
-    async fn the_drain_asks_for_unlimited_pages_and_advances_its_cursor() {
+    async fn a_refresh_is_one_list_request() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
                 .add_ssh_host("paged.example", None, None)
@@ -6946,7 +6899,6 @@ mod tests {
                 host,
                 Script {
                     sessions: (0..5).map(|n| session(&format!("s{n}"), 100 - n)).collect(),
-                    page_size: 2,
                     ..Script::default()
                 },
             );
@@ -6967,18 +6919,14 @@ mod tests {
             .await
             .expect("actor is running");
 
+        // The first successful refresh has just been observed and the next
+        // tick is paused-clock time away, so the log holds exactly that
+        // refresh's traffic.
         let requests = fixture.transport.requests(host);
         assert_eq!(
-            requests[..3]
-                .iter()
-                .map(|r| r.cursor.as_deref())
-                .collect::<Vec<_>>(),
-            vec![None, Some("2"), Some("4")],
-            "one walk must follow the peer's cursors forward: {requests:?}"
-        );
-        assert!(
-            requests.iter().all(|request| request.limit.is_none()),
-            "every page must be requested without a limit: {requests:?}"
+            requests,
+            vec![host],
+            "one refresh must be one request: {requests:?}"
         );
     }
 
@@ -7645,6 +7593,7 @@ mod tests {
             remote_farhelm: None,
             remote_state_dir: None,
             host_identity: None,
+            cache_truncated: false,
         };
         let cases = [
             (
@@ -7695,6 +7644,7 @@ mod tests {
             remote_farhelm: None,
             remote_state_dir: None,
             host_identity: None,
+            cache_truncated: false,
         };
         let error = classify_local_dial(anyhow::Error::new(std::io::Error::new(
             std::io::ErrorKind::ConnectionRefused,
@@ -7747,124 +7697,99 @@ mod tests {
 
     // ---- The drain primitive on its own --------------------------------
 
-    /// A peer whose session list never ends, written inline rather than via
-    /// [`ScriptedTransport`] because an endless list is the one thing that
-    /// transport cannot express.
+    /// [`drain_sessions`] must refuse a reply longer than
+    /// `farhelm_proto::LIST_SESSIONS_CAP` rather than retain it.
     ///
-    /// `sessions_per_page` and the cursor's shape are the two knobs the
-    /// bounds below are separated by: a peer that advances its cursor
-    /// forever is caught by a different guard than one that hands back the
-    /// cursor it was given, and a peer serving full pages is caught by a
-    /// different guard than one serving thin ones.
-    async fn endless_list_client(
-        sessions_per_page: usize,
-        repeat_the_cursor: bool,
-    ) -> Arc<SupervisorClient> {
+    /// The cap is the ONE bound on what this side keeps per host, and a
+    /// registered host is a machine the helm does not control: a peer that
+    /// ignores the cap must not be able to make the helm hold an unbounded
+    /// list on its say-so. Pinned directly rather than only through an
+    /// actor because the bound is a safety property, not a behavior: it
+    /// should hold for every caller this function ever gains.
+    #[tokio::test]
+    async fn draining_a_peer_that_ignores_the_cap_is_refused() {
+        let script = Script {
+            sessions: (0..=farhelm_proto::LIST_SESSIONS_CAP)
+                .map(|n| session(&format!("s{n}"), 1_000_000 - n as i64))
+                .collect(),
+            ..Script::default()
+        };
+        let scripts = Arc::new(Mutex::new(HashMap::from([(1, script.clone())])));
+        let (kill, kill_rx) = broadcast::channel(1);
         let (ours, theirs) = tokio::io::duplex(1 << 20);
-        tokio::spawn(async move {
-            let (r, w) = tokio::io::split(theirs);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            let _ = writer.write_control(&ControlMsg::hello("supervisor")).await;
-            let _ = reader.read_frame().await;
-            let mut issued: u64 = 0;
-            while let Ok(Some(frame)) = reader.read_frame().await {
-                let Ok(ControlMsg::ListSessions { req_id, cursor, .. }) = parse_control(&frame)
-                else {
-                    continue;
-                };
-                issued += 1;
-                let next = if repeat_the_cursor {
-                    // Echoing the cursor back is the accidental
-                    // non-termination this models: a supervisor that
-                    // forgets to advance its own resume point.
-                    cursor.unwrap_or_else(|| "0".to_string())
-                } else {
-                    issued.to_string()
-                };
-                let reply = ControlMsg::SessionList {
-                    req_id,
-                    sessions: (0..sessions_per_page)
-                        // Strictly descending across the whole walk, not
-                        // just within a page: the drain validates the wire
-                        // order, and a fixture that restarted its order at
-                        // every page would fail that check rather than the
-                        // bound under test.
-                        .map(|n| {
-                            session(
-                                &format!("s{issued}-{n}"),
-                                i64::MAX - (issued as i64 * 10_000 + n as i64),
-                            )
-                        })
-                        .collect(),
-                    total: u64::MAX,
-                    // Never absent: the peer claims there is always more.
-                    next_cursor: Some(next),
-                };
-                if writer.write_control(&reply).await.is_err() {
-                    return;
-                }
-            }
-        });
+        let peer = tokio::spawn(run_peer(
+            theirs,
+            script,
+            PeerContext {
+                scripts,
+                requests: Arc::new(Mutex::new(Vec::new())),
+                closures: watch::Sender::new(Vec::new()),
+                id: 1,
+            },
+            kill_rx,
+        ));
         let (r, w) = tokio::io::split(ours);
-        SupervisorClient::start(r, w).await.expect("client")
-    }
+        let client = SupervisorClient::start(r, w).await.expect("connect");
 
-    /// [`drain_sessions`] must terminate against a peer that keeps issuing
-    /// FRESH cursors, rather than following them forever.
-    ///
-    /// One session per page, so the walk is stopped by the page ceiling
-    /// long before it has accumulated enough entries for the session cap to
-    /// have anything to say — which is exactly the shape that bound exists
-    /// for, and the shape a count-based bound alone would never catch.
-    ///
-    /// Pinned directly rather than through an actor because the bound is a
-    /// safety property, not a behavior: it should hold for every caller
-    /// this function ever gains, including ones that do not exist yet.
-    #[tokio::test]
-    async fn draining_a_peer_that_never_exhausts_its_cursor_gives_up() {
-        let client = endless_list_client(1, false).await;
         let error = drain_sessions(&client)
             .await
-            .expect_err("an unterminating cursor must be given up on, not followed forever");
-        assert!(error.to_string().contains("did not terminate"), "{error:#}");
-    }
-
-    /// The cheapest non-termination there is: a peer that hands back the
-    /// cursor it was given. Both other bounds would eventually stop it, but
-    /// only after following the same page hundreds of times and
-    /// accumulating hundreds of copies of the same sessions — so the walk
-    /// refuses the second use of one cursor outright, which is also the
-    /// only one of the three bounds that can name the actual bug.
-    #[tokio::test]
-    async fn draining_a_peer_that_repeats_one_cursor_aborts_at_once() {
-        let client = endless_list_client(1, true).await;
-        let error = drain_sessions(&client)
-            .await
-            .expect_err("a repeated cursor must abort the walk");
+            .expect_err("a list past the cap must be refused, not retained");
         assert!(
-            error.to_string().contains("same cursor"),
-            "the error must name what the peer did: {error:#}"
+            error
+                .to_string()
+                .contains(&farhelm_proto::LIST_SESSIONS_CAP.to_string()),
+            "the error must name the cap it enforces: {error:#}"
         );
+        peer.abort();
+        drop(kill);
     }
 
-    /// The memory half of the bound: full pages with advancing cursors stay
-    /// under the page ceiling indefinitely while the collected `Vec` grows
-    /// without limit, so only the session cap ends it.
+    /// A reply of EXACTLY the cap is accepted whole, with the peer's own
+    /// `truncated` word carried through in both values.
     ///
-    /// Pages of 500 are the supervisor's own default cap
-    /// (`LIST_SESSION_CAP`), i.e. the largest page a real host ever sends —
-    /// the walk must give up a little past ten of them, not after some
-    /// number of round trips that happens to be small.
+    /// The boundary the refusal test above cannot see: a `>` regressed to
+    /// `>=` would refuse every legal full-cap reply and park the host in
+    /// failed-refresh health while satisfying that test perfectly. Both
+    /// flag values are exercised because a full-cap list is legal either
+    /// way — cut (more existed) or complete (the count landed on the
+    /// ceiling) — and the drain must not infer one from the length.
     #[tokio::test]
-    async fn draining_a_peer_serving_full_pages_forever_stops_at_the_session_cap() {
-        let client = endless_list_client(500, false).await;
-        let error = drain_sessions(&client)
-            .await
-            .expect_err("an endless list must be given up on before it exhausts memory");
-        assert!(
-            error.to_string().contains(&REFRESH_SESSION_CAP.to_string()),
-            "the error must name the ceiling it hit: {error:#}"
-        );
+    async fn draining_exactly_the_cap_is_accepted_with_the_peers_flag() {
+        for peer_truncated in [false, true] {
+            let script = Script {
+                sessions: (0..farhelm_proto::LIST_SESSIONS_CAP)
+                    .map(|n| session(&format!("s{n}"), 1_000_000 - n as i64))
+                    .collect(),
+                truncated: peer_truncated,
+                ..Script::default()
+            };
+            let scripts = Arc::new(Mutex::new(HashMap::from([(1, script.clone())])));
+            let (kill, kill_rx) = broadcast::channel(1);
+            let (ours, theirs) = tokio::io::duplex(1 << 20);
+            let peer = tokio::spawn(run_peer(
+                theirs,
+                script,
+                PeerContext {
+                    scripts,
+                    requests: Arc::new(Mutex::new(Vec::new())),
+                    closures: watch::Sender::new(Vec::new()),
+                    id: 1,
+                },
+                kill_rx,
+            ));
+            let (r, w) = tokio::io::split(ours);
+            let client = SupervisorClient::start(r, w).await.expect("connect");
+
+            let listing = drain_sessions(&client)
+                .await
+                .expect("a full-cap reply is legal and must be retained whole");
+            assert_eq!(listing.sessions.len(), farhelm_proto::LIST_SESSIONS_CAP);
+            assert_eq!(
+                listing.truncated, peer_truncated,
+                "the flag is the peer's word, never derived from the length"
+            );
+            peer.abort();
+            drop(kill);
+        }
     }
 }
