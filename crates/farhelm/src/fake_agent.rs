@@ -547,7 +547,10 @@ const HOOK_CHILD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(
 ///   stderr to the user on a non-zero exit, so a single stray byte here is
 ///   a user-visible defect. Asserted from inside a REAL supervised session,
 ///   which is the only place the credential path, the socket dial and the
-///   reply are all genuine at once.
+///   reply are all genuine at once. The child is invoked WITHOUT
+///   `--announce`, which is what keeps that assertion about silence rather
+///   than about the announce flag being off; the pointer line has its own
+///   tests in `e2e/hook_identity.rs`.
 /// - `HOOK-STDOUT-DIRTY:<bytes>` / `HOOK-EXIT:<code>` — the two ways that
 ///   contract breaks, reported separately (and never instead of each other)
 ///   so a failing test names which one happened rather than just "not

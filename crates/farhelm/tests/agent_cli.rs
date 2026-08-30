@@ -1458,3 +1458,119 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
         "renamed session-1 to \"-not-a-flag\"\n"
     );
 }
+
+/// Spec: `farhelm agent instructions` prints every verb the binary carries
+/// and exits 0, with no supervisor socket, no session credential, and no
+/// helm anywhere.
+///
+/// This is the reachability claim the whole feature rests on. An agent
+/// meets farhelm through one line the `SessionStart` hook prints, and that
+/// line's only instruction is to run this command. If the command needed
+/// the session environment, the agent's first act on being told about
+/// farhelm would be an error message — and the sessions least likely to
+/// have a working relay (a host nobody has open in a client) are exactly
+/// the ones whose agent most needs to be told what to do about it.
+///
+/// The unit tests in `agent_instructions.rs` check the text's content
+/// against clap. What only a PROCESS can check is the pair this test
+/// exists for: that the command runs at all outside a session, and that it
+/// exits 0 while doing it.
+///
+/// `help` is asserted to be byte-identical rather than merely similar
+/// because it is documented as the same output. Two texts that drifted
+/// apart would mean an agent's answer depended on which spelling it
+/// happened to try.
+#[test]
+fn instructions_print_every_verb_without_a_session() {
+    let run = |verb: &str| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
+        // Stripped rather than merely unset: this test process may itself
+        // be running inside a farhelm session, and inheriting a live
+        // credential would let the command reach a real supervisor — which
+        // is the one thing this test is claiming it never needs.
+        for name in [
+            "FARHELM_SESSION_ID",
+            "FARHELM_SESSION_TOKEN",
+            "FARHELM_SUPERVISOR_SOCK",
+        ] {
+            command.env_remove(name);
+        }
+        command.args(["agent", verb]);
+        output_with_timeout(command)
+    };
+
+    let output = run("instructions");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "instructions must succeed outside a session: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "instructions are the whole output: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).expect("the instructions are UTF-8");
+    for verb in [
+        "hosts",
+        "sessions",
+        "rename",
+        "stop",
+        "archive",
+        "instructions",
+        "help",
+    ] {
+        assert!(
+            text.contains(&format!("farhelm agent {verb}")),
+            "the printed instructions never mention `farhelm agent {verb}`:\n{text}"
+        );
+    }
+    // The three conventions an agent cannot infer: the trigger, the marker
+    // column, and the failure that has a remedy rather than a cause.
+    assert!(text.contains("$farhelm"), "{text}");
+    assert!(text.contains("\"*\""), "{text}");
+    assert!(
+        text.contains("no helm is attached to this session"),
+        "{text}"
+    );
+
+    let alias = run("help");
+    assert_eq!(alias.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(alias.stdout).expect("UTF-8"),
+        text,
+        "`help` and `instructions` must print the same bytes"
+    );
+}
+
+/// Spec: `farhelm agent --help` still prints clap's usage screen, not the
+/// agent-facing instructions.
+///
+/// `farhelm agent help` was taken over by farhelm's own verb, which means
+/// clap's built-in `help` SUBCOMMAND had to be disabled to stop it
+/// shadowing that. The `--help` FLAG is a different mechanism and must
+/// survive: it is the surface a human at a terminal reaches for, and it is
+/// the only place the full option syntax is spelled out. A regression here
+/// would be invisible to every other test in this file, since they all
+/// drive real verbs.
+#[test]
+fn the_help_flag_still_prints_clap_usage() {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
+    command.args(["agent", "--help"]);
+    let output = output_with_timeout(command);
+    assert_eq!(output.status.code(), Some(0));
+    let text = String::from_utf8(output.stdout).expect("UTF-8");
+    assert!(
+        // Specifically THIS subcommand's usage line, not merely "some
+        // clap usage screen" — a regression that printed the top-level
+        // `farhelm --help` or a sibling subcommand's screen would satisfy
+        // a bare `"Usage:"` check while answering the wrong question.
+        text.contains("Usage: farhelm agent"),
+        "--help must be clap's usage screen for `farhelm agent` specifically: {text}"
+    );
+    assert!(
+        !text.contains("$farhelm"),
+        "--help must not be the agent instructions: {text}"
+    );
+}
