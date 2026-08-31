@@ -113,6 +113,22 @@ Within a bucket, no order.
 
 ## Near term
 
+- Deflake the browser merge gate: three e2e tests fail on main itself, deterministically — found 2026-08-31 while gating
+  a PR stack, and every failure reproduces on main's own tree, idle box, both engines. Two independent causes. First,
+  `provisioning.spec.ts` hardcodes `BUILD = "0.0.3"` into every stubbed reply's `x-farhelm-build` header; the workspace
+  version has been past that since the 0.1.0/0.1.1 release bumps (2026-08-26/27), so the stale stamp latches the UI's
+  build-skew gate, and a latched page deliberately never opens its feed socket — the two feed-driven provisioning tests
+  ("a failed local ADD keeps its rerun action...", "a progress read failure recovers...") then time out on
+  `feed.openSockets() > 0` while everything else on the page works. Fix: read the stamp off the running helm the way
+  `terminal-suite.ts`'s `HELM_BUILD` already does, so a release bump cannot silently break the gate again. Second,
+  terminal-flood's "a multi-megabyte message does not drop the terminal socket" times out waiting for
+  `echo:after-big-message`: the 2 MiB payload becomes ~8192 synchronous 256-byte `send-keys` round trips (deliberate —
+  see the test's own comment on `InputClient::send`), and the 60s budget does not cover that on an 11 GB / 6-core
+  machine even with nothing else running. Measure the per-chunk round-trip cost before choosing between a bigger budget
+  and a smaller payload; whatever the choice, the payload must stay above the 1 MiB cap the test exists to guard
+  against. Until both are fixed, a red merge-gate run needs manual triage against this entry to tell a real regression
+  from the known set.
+
 - Show the missing-or-too-old-tmux refusal in a native window, not just on stderr. `farhelm-desktop`'s tmux preflight
   now prints one plain message and exits (see `desktop.rs`'s `run_tmux_preflight_or_exit`), but a Finder launch has no
   terminal for stderr to land in, so that message currently reaches nobody there. Unverifiable without a Mac to try it
