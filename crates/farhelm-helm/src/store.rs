@@ -129,7 +129,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 /// How many cached titles version 11's collation backfill folds at a time.
 ///
@@ -268,31 +268,22 @@ pub struct CacheReplacement {
     pub default_changed: bool,
 }
 
-/// Remembered-default columns needed to compare one source observation.
+/// Remembered-default columns needed to compare one source observation:
+/// `(profile_id, source_creation_seq, source_created_at, source_session_id)`.
 ///
 /// The alias keeps the SQL projection's positional contract visible without
-/// making each query repeat an opaque four-element tuple type.
-type RememberedProfileRow = (
-    String,
-    Option<String>,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-);
+/// making each query repeat an opaque tuple type.
+type RememberedProfileRow = (String, Option<i64>, Option<i64>, Option<String>);
 
-/// A host identity followed by its optional remembered-default row.
+/// A known host's optional remembered-default row, as the LEFT JOIN in
+/// [`HelmStore::remember_profile_default_with_source`] projects it:
+/// `(profile_id, source_creation_seq, source_created_at, source_session_id)`,
+/// every column `NULL` when the host has no default yet.
 ///
-/// The joined projection distinguishes an unknown host from a known host
-/// that has not remembered a profile yet; flattening either case into one
-/// `Option` would lose that distinction at the write boundary.
-type HostRememberedProfileRow = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-);
+/// The query's outer `Option` is the host's existence; this tuple's inner
+/// options are the default's. Flattening the two into one `Option` would lose
+/// the unknown-host case at the write boundary, where it is a typed 404.
+type HostRememberedProfileRow = (Option<String>, Option<i64>, Option<i64>, Option<String>);
 
 /// Compare provenance from one supervisor, preferring its strict sequence.
 ///
@@ -1465,14 +1456,10 @@ pub struct HelmStore {
 ///   the supervisor owns the catalog and knows nothing about which profile
 ///   a particular user last picked, and a remembered default is per-HOST
 ///   because a profile id only means anything on the host that minted it.
-/// - 6: `remembered_profiles.host_identity`, which makes that default
-///   identity-bound AT REST rather than only at write time. A version-5 row
-///   records no identity and therefore cannot be validated against the
-///   install the host currently is — and since starter profile ids collide
-///   across installs by construction, an unvalidatable default RESOLVES on a
-///   successor install rather than merely dangling. The migration drops the
-///   old rows for that reason; see [`HelmStore::remembered_profile`] for the
-///   read-time check the column exists to serve.
+/// - 6: `remembered_profiles.host_identity`, which bound that default to
+///   the install it was recorded against and was revalidated on every read.
+///   Removed again at version 12; the migration dropped the version-5 rows,
+///   which is why a version-5 database arrives at 12 with no defaults.
 /// - 7: PLAN_M7.md item 3 — web-token authentication and device sessions.
 /// - 8: PLAN_M7.md item 4 — provenance for the remembered profile default,
 ///   so a completed drain can advance it without letting an older snapshot
@@ -1495,6 +1482,13 @@ pub struct HelmStore {
 ///   either, unlike the pre-existing creation order: `HelmStore::scan_page`
 ///   already reads every order through the per-host `UNION ALL` merge, so a
 ///   global index here would never be read by anything.
+/// - 12: `remembered_profiles.host_identity` goes. The remembered default is
+///   a bare profile id per registry row (SPEC.md, Sessions / Creation): not
+///   bound to the install behind the row, not revalidated on read, and no
+///   longer deleted by a retarget or an adoption. The rows are carried
+///   forward — a same-id profile on a successor install being preselected is
+///   exactly the accepted outcome — and the table is rebuilt rather than
+///   `DROP COLUMN`ed so its stored DDL matches the fresh-create branch.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1715,20 +1709,19 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- state the product HAS (SPEC.md's ask-don't-guess fallback),
              -- and the client resolves it against the catalog it is served
              -- in the same reply.
-             -- host_identity is the identity the host was reporting when
-             -- the default was recorded (NULL for a host that reports
-             -- none), and it is what makes the row identity-bound AT REST
-             -- rather than merely at write time. Starter profile ids
-             -- collide across installs by construction, so a row that
-             -- outlived the install it was recorded against would RESOLVE
-             -- on the successor and be offered back as the user's own last
-             -- choice. Adoption and retarget delete the row outright; this
-             -- column is what refuses any row that escapes both.
+             -- The row is a bare id per registry row and deliberately
+             -- records nothing about the INSTALL behind the row (SPEC.md,
+             -- Sessions / Creation): a host reinstalled or retargeted onto
+             -- an install carrying the same id gets it preselected, which
+             -- is accepted because a default is a suggestion in a
+             -- dropdown, never an action. The source_* columns are
+             -- provenance for ORDERING only -- which observation of a
+             -- profile-backed create is newer -- so a delayed drain cannot
+             -- roll the default backward past a newer create.
              CREATE TABLE remembered_profiles (
                  host_id       INTEGER PRIMARY KEY
                                REFERENCES hosts (id) ON DELETE CASCADE,
                  profile_id    TEXT NOT NULL,
-                 host_identity TEXT,
                  source_created_at INTEGER,
                  source_session_id TEXT,
                  source_creation_seq INTEGER,
@@ -1749,7 +1742,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  cookie_hash BLOB PRIMARY KEY CHECK (length(cookie_hash) = 32),
                  created_at  INTEGER NOT NULL
              ) STRICT;
-             PRAGMA user_version = 11;",
+             PRAGMA user_version = 12;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1885,31 +1878,32 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         version = 5;
     }
     if version == 5 {
-        // The remembered default becomes identity-bound at rest. A
-        // version-5 row records only (host_id, profile_id), so there is
-        // nothing in it to validate against the install the host currently
-        // is — and "no identity recorded" cannot be told apart from "this
-        // host reports no identity", which is a value the new column
-        // legitimately stores.
-        //
-        // So the old rows GO rather than being carried forward with a NULL
-        // that would validate against every identity-less host. The cost is
-        // one create dialog per host asking which profile to use instead of
-        // defaulting — exactly SPEC.md's ask-don't-guess fallback, which is
-        // the safe direction — and the next profile-backed create restores
-        // the default with an identity attached.
+        // Version 6 made the remembered default identity-bound at rest, and
+        // this rung originally DROPPED the version-5 rows: a bare
+        // (host_id, profile_id) had nothing to validate against the new
+        // column. Version 12 removed the binding again, so the FINAL
+        // contract is exactly the bare shape version 5 shipped — and the
+        // rows are now carried forward with a NULL identity instead of
+        // being forgotten across an upgrade that lands where they started.
+        // Reshaping a historical rung is safe here because nothing between
+        // this step and version 12 READS the table (later rungs only
+        // reshape it): the NULL that version-6-era code would have
+        // mistrusted never meets that code on the upgrade path.
         //
         // Rebuilt rather than `ALTER TABLE ... ADD COLUMN`, so the stored
-        // DDL is byte-identical to the fresh-create branch's (pinned by
-        // `a_migrated_database_matches_a_freshly_created_one`).
+        // DDL is byte-identical to what the fresh-create branch wrote in
+        // that era (pinned by `a_migrated_database_matches_a_freshly_created_one`).
         tx.execute_batch(
-            "DROP TABLE remembered_profiles;
+            "ALTER TABLE remembered_profiles RENAME TO remembered_profiles_v5;
              CREATE TABLE remembered_profiles (
                  host_id       INTEGER PRIMARY KEY
                                REFERENCES hosts (id) ON DELETE CASCADE,
                  profile_id    TEXT NOT NULL,
                  host_identity TEXT
              ) STRICT;
+             INSERT INTO remembered_profiles (host_id, profile_id)
+             SELECT host_id, profile_id FROM remembered_profiles_v5;
+             DROP TABLE remembered_profiles_v5;
              PRAGMA user_version = 6;",
         )
         .context("migrating helm.db to schema version 6")?;
@@ -2199,6 +2193,35 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 11")?;
         version = 11;
+    }
+    if version == 11 {
+        // A rebuild rather than `ALTER TABLE ... DROP COLUMN`, so the stored
+        // DDL is byte-identical to the fresh-create branch's (pinned by
+        // `a_migrated_database_matches_a_freshly_created_one`). Every row
+        // survives with its provenance: the identity column was the only
+        // thing that could make a stored default unreadable, and without it
+        // each row is simply the last profile used on that registry row.
+        tx.execute_batch(
+            "ALTER TABLE remembered_profiles RENAME TO remembered_profiles_v11;
+             CREATE TABLE remembered_profiles (
+                 host_id       INTEGER PRIMARY KEY
+                               REFERENCES hosts (id) ON DELETE CASCADE,
+                 profile_id    TEXT NOT NULL,
+                 source_created_at INTEGER,
+                 source_session_id TEXT,
+                 source_creation_seq INTEGER,
+                 CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
+             ) STRICT;
+             INSERT INTO remembered_profiles (
+                 host_id, profile_id, source_created_at, source_session_id, source_creation_seq
+             )
+             SELECT host_id, profile_id, source_created_at, source_session_id, source_creation_seq
+             FROM remembered_profiles_v11;
+             DROP TABLE remembered_profiles_v11;
+             PRAGMA user_version = 12;",
+        )
+        .context("migrating helm.db to schema version 12")?;
+        version = 12;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2978,39 +3001,16 @@ impl HelmStore {
     /// registry that validated only one of the two paths would be
     /// validating nothing.
     ///
-    /// ## What a retarget FORGETS
+    /// ## What a retarget leaves alone
     ///
-    /// The remembered default profile, whenever the destination actually
-    /// moved. Retargeting points a registry row at a different install, and a
-    /// profile id means nothing away from the supervisor that minted it —
-    /// except that starter ids collide across installs by construction, so
-    /// the id would RESOLVE on the new endpoint and be offered back as the
-    /// user's own last choice. The identity binding alone does not cover this
-    /// case: an identity-less host retargeted to another identity-less
-    /// install matches `NULL` against `NULL` and the row would survive.
-    ///
-    /// A byte-identical destination update KEEPS it, deliberately: that is a
-    /// caller re-affirming what the row already says (a resubmitted form, a
-    /// reconcile), and forgetting a preference over a write that changed
-    /// nothing would be a user-visible loss with no cause behind it.
-    ///
-    /// The learned identity and the session cache are NOT cleared here, and
-    /// the asymmetry is the point: those are facts about an install, and the
-    /// next handshake against the new endpoint decides what happens to them
-    /// (a mismatch freezes, and adoption is what purges). A remembered
-    /// default is a PREFERENCE, and there is no later moment at which anyone
-    /// re-examines it.
-    ///
-    /// That forgetting is only complete if no write can land after it. This
-    /// transaction fences its own readers, but the write it races is a
-    /// `remember_profile_default` that has ALREADY passed its claim check and
-    /// is about to commit — a claim the retarget invalidates only afterwards,
-    /// through the manager's reconcile. Callers therefore hold the host's
-    /// write lock across both (`crate::hosts::set_destination`, and
-    /// `ConnectionManager::host_write_lock` for why that is the right lock).
-    /// The identity binding cannot substitute: an identity-less host
-    /// retargeted to another identity-less install matches `NULL` against
-    /// `NULL` on every later read.
+    /// Everything else the helm knows about the row. The learned identity and
+    /// the session cache are facts about an install, and the next handshake
+    /// against the new endpoint decides what happens to them (a mismatch
+    /// freezes, and adoption is what purges). The remembered default profile
+    /// survives too: it is a bare id per registry row (SPEC.md, Sessions /
+    /// Creation), and if the new endpoint carries the same id — every fresh
+    /// supervisor seeds the same starter ids — preselecting it is the accepted
+    /// outcome, not one to detect.
     pub async fn update_ssh_destination(
         &self,
         host: HostId,
@@ -3028,30 +3028,23 @@ impl HelmStore {
             let tx = conn
                 .transaction()
                 .context("beginning update destination transaction")?;
-            // The current destination comes back with the kind, in the same
-            // read and therefore the same transaction: "did this retarget
-            // actually move the row" decides whether the remembered default
-            // survives, and a second read for it could straddle another
-            // writer.
-            let current: Option<(String, Option<String>)> = tx
+            let current: Option<String> = tx
                 .query_row(
-                    "SELECT kind, destination FROM hosts WHERE id = ?1",
+                    "SELECT kind FROM hosts WHERE id = ?1",
                     rusqlite::params![host],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| r.get(0),
                 )
                 .optional()
                 .context("looking up host before updating its destination")?;
             let current = current
-                .map(|(kind, destination)| {
-                    HostKind::from_column(&kind).map(|kind| (kind, destination))
-                })
+                .map(|kind| HostKind::from_column(&kind))
                 .transpose()?;
             match current {
                 None => Err(anyhow::Error::new(HostStoreError::HostNotFound(host))),
-                Some((HostKind::Local, _)) => {
+                Some(HostKind::Local) => {
                     Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
                 }
-                Some((HostKind::Ssh, previous)) => {
+                Some(HostKind::Ssh) => {
                     let changed = tx
                         .execute(
                             "UPDATE OR IGNORE hosts SET destination = ?2 WHERE id = ?1",
@@ -3062,16 +3055,6 @@ impl HelmStore {
                         return Err(anyhow::Error::new(HostStoreError::DuplicateDestination(
                             destination,
                         )));
-                    }
-                    // Only when the row genuinely moved — see this method's
-                    // docs for why a re-affirming write keeps the preference
-                    // and a real retarget must not.
-                    if previous.as_deref() != Some(destination.as_str()) {
-                        tx.execute(
-                            "DELETE FROM remembered_profiles WHERE host_id = ?1",
-                            rusqlite::params![host],
-                        )
-                        .context("forgetting the retargeted host's remembered default profile")?;
                     }
                     tx.commit().context("committing destination update")?;
                     Ok(())
@@ -3222,9 +3205,9 @@ impl HelmStore {
 
     /// Compare-and-swap a host's identity: succeeds ONLY when the currently
     /// stored value equals `expected_old`, replacing it with `new` and
-    /// erasing everything the OLD install left behind — that host's
-    /// `session_cache` rows and its remembered default profile — in the SAME
-    /// transaction. PLAN_M6.md item 4's user-initiated adoption of an
+    /// erasing what the OLD install left behind — that host's
+    /// `session_cache` rows — in the SAME transaction. PLAN_M6.md item 4's
+    /// user-initiated adoption of an
     /// identity-mismatched host (SPEC.md: the helm never silently merges;
     /// this is the explicit acknowledgment that performs the merge the user
     /// chose after seeing [`FirstContactOutcome::Mismatch`]).
@@ -3237,14 +3220,11 @@ impl HelmStore {
     /// one. A separate follow-up call could leave the two writes torn by a
     /// crash or a concurrent reader between them; one transaction cannot.
     ///
-    /// The REMEMBERED DEFAULT goes for a sharper version of the same reason,
-    /// and it is the one an adoption is most likely to get wrong. Profile ids
-    /// are minted per supervisor AND every fresh supervisor seeds the same
-    /// starter profiles, so an id recorded against the superseded install
-    /// does not merely go stale on the successor — it RESOLVES there, to a
-    /// profile the user never chose, offered back as their own last choice.
-    /// Purging costs one create dialog that asks instead of guessing, which
-    /// is exactly SPEC.md's fallback.
+    /// The remembered default profile is NOT purged. It is a bare id per
+    /// registry row (SPEC.md, Sessions / Creation): if the adopted install
+    /// carries the same id — every fresh supervisor seeds the same starter
+    /// ids — it gets preselected, and if it does not, the create dialog asks.
+    /// Neither outcome needs the row erased.
     ///
     /// A STALE `expected_old` (the stored value has already moved on — a
     /// second adoption, or a first contact that landed first) is refused as
@@ -3308,11 +3288,6 @@ impl HelmStore {
                 rusqlite::params![host],
             )
             .context("purging the superseded identity's cached sessions")?;
-            tx.execute(
-                "DELETE FROM remembered_profiles WHERE host_id = ?1",
-                rusqlite::params![host],
-            )
-            .context("purging the superseded identity's remembered default profile")?;
             tx.commit().context("committing identity adoption")?;
             generation.fetch_add(1, Ordering::Release);
             Ok(())
@@ -3580,85 +3555,85 @@ impl HelmStore {
             let mut default_changed = false;
             let remembered: Option<RememberedProfileRow> = tx
                 .query_row(
-                    "SELECT profile_id, host_identity, source_creation_seq, \
-                            source_created_at, source_session_id \
+                    "SELECT profile_id, source_creation_seq, source_created_at, \
+                            source_session_id \
                      FROM remembered_profiles WHERE host_id = ?1",
                     rusqlite::params![host],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )
                 .optional()
                 .context("reading remembered profile provenance")?;
             let source_disappeared = remembered
                 .as_ref()
-                .and_then(|(_, _, _, _, session_id)| session_id.as_deref())
+                .and_then(|(_, _, _, session_id)| session_id.as_deref())
                 .is_some_and(|session_id| !present_session_ids.contains(session_id));
-            if source_disappeared && newest_profile_source.is_none() {
-                default_changed = tx
-                    .execute(
-                        "DELETE FROM remembered_profiles WHERE host_id = ?1",
-                        rusqlite::params![host],
-                    )
-                    .context("clearing a remembered profile whose source disappeared")?
-                    != 0;
-            } else if let Some((creation_seq, created_at, session_id, profile_id)) =
-                newest_profile_source
+            // A remembered source that is no longer among this host's
+            // sessions is the retarget/adopt/reinstall shape (or a plain
+            // deletion of the establishing session). Under the bare-id
+            // contract the PREFERENCE survives it — deleting the row here
+            // would quietly rebuild the install eviction schema v12 removed
+            // — but the provenance does not: it was minted in an ordering
+            // domain this drain can no longer see, and keeping it would let
+            // a predecessor's high sequence numbers veto the successor's
+            // genuinely newer creates. So the id is kept and the source_*
+            // columns are cleared, which drops the row into the same
+            // "opaque until a direct create re-establishes provenance"
+            // state a v7-era migrated preference starts in.
+            if source_disappeared {
+                tx.execute(
+                    "UPDATE remembered_profiles SET source_creation_seq = NULL, \
+                     source_created_at = NULL, source_session_id = NULL WHERE host_id = ?1",
+                    rusqlite::params![host],
+                )
+                .context("orphaning a remembered profile whose source disappeared")?;
+            }
+            if let Some((creation_seq, created_at, session_id, profile_id)) = newest_profile_source
             {
-                let advances = source_disappeared
-                    || match &remembered {
-                        None => true,
-                        Some((
-                            _,
-                            stored_identity,
-                            stored_seq,
-                            Some(stored_at),
-                            Some(stored_id),
-                        )) if stored_identity.as_deref() == Some(identity.as_str()) => {
-                            source_is_newer(
-                                creation_seq,
-                                created_at,
-                                &session_id,
-                                stored_seq.and_then(|seq| u64::try_from(seq).ok()),
-                                *stored_at,
-                                stored_id,
-                            )
-                        }
-                        // A v7 -> v8 migrated preference has no source at
-                        // all. The first post-upgrade drain cannot prove its
-                        // newest SURVIVING session is newer than the session
-                        // the user actually chose before upgrading: that
-                        // source may already have been deleted. Keep the
-                        // opaque preference until a direct create records a
-                        // real source, after which ordinary drain ordering
-                        // applies again.
-                        Some((_, stored_identity, None, None, None))
-                            if stored_identity.as_deref() == Some(identity.as_str()) =>
-                        {
-                            false
-                        }
-                        Some(_) => true,
-                    };
+                // Only a demonstrably NEWER source advances the default,
+                // judged against the provenance as it stood BEFORE any
+                // orphaning above — a disappeared source is no longer a
+                // license to promote whatever survived (the old rule), it
+                // only stops mattering as a comparison point once cleared.
+                // A survivor that fails the comparison leaves the bare id
+                // in place.
+                let advances = match &remembered {
+                    None => true,
+                    Some((_, stored_seq, Some(stored_at), Some(stored_id))) => source_is_newer(
+                        creation_seq,
+                        created_at,
+                        &session_id,
+                        stored_seq.and_then(|seq| u64::try_from(seq).ok()),
+                        *stored_at,
+                        stored_id,
+                    ),
+                    // A v7 -> v8 migrated preference has no source at
+                    // all. The first post-upgrade drain cannot prove its
+                    // newest SURVIVING session is newer than the session
+                    // the user actually chose before upgrading: that
+                    // source may already have been deleted. Keep the
+                    // opaque preference until a direct create records a
+                    // real source, after which ordinary drain ordering
+                    // applies again.
+                    Some((_, None, None, None)) => false,
+                    Some(_) => true,
+                };
                 if advances {
-                    default_changed = remembered.as_ref().is_none_or(
-                        |(stored_profile, stored_identity, _, _, _)| {
-                            stored_profile != &profile_id
-                                || stored_identity.as_deref() != Some(identity.as_str())
-                        },
-                    );
+                    default_changed = remembered
+                        .as_ref()
+                        .is_none_or(|(stored_profile, _, _, _)| stored_profile != &profile_id);
                     tx.execute(
                         "INSERT INTO remembered_profiles (\
-                             host_id, profile_id, host_identity, source_creation_seq, \
+                             host_id, profile_id, source_creation_seq, \
                              source_created_at, source_session_id\
-                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                         ) VALUES (?1, ?2, ?3, ?4, ?5) \
                          ON CONFLICT (host_id) DO UPDATE SET \
                              profile_id = excluded.profile_id, \
-                             host_identity = excluded.host_identity, \
                              source_creation_seq = excluded.source_creation_seq, \
                              source_created_at = excluded.source_created_at, \
                              source_session_id = excluded.source_session_id",
                         rusqlite::params![
                             host,
                             profile_id,
-                            identity,
                             creation_seq
                                 .map(i64::try_from)
                                 .transpose()
@@ -4690,39 +4665,18 @@ impl HelmStore {
     /// No such claim is needed: the client's answer to any mismatch is the
     /// same single behavior, ask instead of guess.
     ///
-    /// ## Validated against the host's identity, at READ time
-    ///
-    /// The stored row carries the identity it was recorded against, and a row
-    /// whose identity is not the host's current one is answered as `None` —
-    /// the same as never having had a default, which is exactly the state it
-    /// describes.
-    ///
-    /// This is the third of three defences and the only one that covers a row
-    /// nobody deleted. Adoption erases the default in its own transaction and
-    /// a genuine retarget erases it in its; both are point-in-time actions,
-    /// and neither can account for a row written by a request that was
-    /// already in flight, a future path that moves a host some other way, or
-    /// a database edited by hand. Since a starter profile id RESOLVES on the
-    /// successor install rather than merely dangling, "probably fine" is not
-    /// a safe posture — so the identity travels with the row and is checked
-    /// every time it is read.
-    ///
-    /// One statement, joined against `hosts`, so the row and the identity it
-    /// is judged against come from one moment. A `NULL` on both sides matches
-    /// (a host that reports no identity may still have a remembered default);
-    /// that is the one case this check cannot sharpen, and it is why the two
-    /// deletions above exist rather than being left to this.
+    /// Nor is it validated against the INSTALL behind the row. The row is a
+    /// bare id per registry entry (SPEC.md, Sessions / Creation): a host
+    /// reinstalled or retargeted onto an install that carries the same id gets
+    /// it preselected, accepted because a default is a suggestion in a
+    /// dropdown, never an action. Machinery to detect "same id, different
+    /// install" is not wanted.
     pub async fn remembered_profile(&self, host: HostId) -> anyhow::Result<Option<String>> {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
             let conn = conn.lock().expect("helm db mutex poisoned");
             conn.query_row(
-                "SELECT remembered.profile_id \
-                 FROM remembered_profiles AS remembered \
-                 JOIN hosts ON hosts.id = remembered.host_id \
-                 WHERE remembered.host_id = ?1 \
-                   AND ((remembered.host_identity IS NULL AND hosts.host_identity IS NULL) \
-                        OR remembered.host_identity = hosts.host_identity)",
+                "SELECT profile_id FROM remembered_profiles WHERE host_id = ?1",
                 rusqlite::params![host],
                 |r| r.get(0),
             )
@@ -4742,10 +4696,9 @@ impl HelmStore {
     pub async fn remember_profile_default(
         &self,
         host: HostId,
-        identity: Option<&str>,
         profile_id: &str,
     ) -> anyhow::Result<bool> {
-        self.remember_profile_default_with_source(host, identity, profile_id, None, None, None)
+        self.remember_profile_default_with_source(host, profile_id, None, None, None)
             .await
     }
 
@@ -4753,7 +4706,6 @@ impl HelmStore {
     pub async fn remember_profile_default_from_session(
         &self,
         host: HostId,
-        identity: Option<&str>,
         profile_id: &str,
         source_creation_seq: Option<u64>,
         source_created_at: i64,
@@ -4761,7 +4713,6 @@ impl HelmStore {
     ) -> anyhow::Result<bool> {
         self.remember_profile_default_with_source(
             host,
-            identity,
             profile_id,
             source_creation_seq,
             Some(source_created_at),
@@ -4778,59 +4729,32 @@ impl HelmStore {
     /// from the profile; merely opening a picker does not. Their supervisor
     /// creation sequence decides chronology, with `(created_at, session id)`
     /// retained only for older peers that omit the additive sequence field.
-    /// Returns whether the visible `(profile_id, host_identity)` pair
-    /// changed, so the invalidation feed does not wake every client each time
-    /// a user creates from the same profile twice in a row. `false` does not
-    /// necessarily mean the candidate matched the stored provenance: it also
-    /// means an out-of-order candidate was rejected as older. Callers must not
-    /// treat it as proof that this observation became the remembered source.
+    /// Returns whether the visible profile id changed, so the invalidation
+    /// feed does not wake every client each time a user creates from the same
+    /// profile twice in a row. `false` does not necessarily mean the candidate
+    /// matched the stored provenance: it also means an out-of-order candidate
+    /// was rejected as older. Callers must not treat it as proof that this
+    /// observation became the remembered source.
     ///
-    /// "Changed" means the whole `(profile_id, host_identity)` pair, compared
-    /// NULL-safely, and the identity half is not bookkeeping. Consider the
-    /// natural sequence: an identity-less host remembers P, the host later
-    /// learns an identity, and the stored row — bound to `NULL` — stops being
-    /// readable ([`Self::remembered_profile`] revalidates the binding, so the
-    /// default silently disappears from every create dialog). The next
-    /// profile-backed create on P REPAIRS it, rewriting the row against the
-    /// learned identity, and the remembered default flips from absent back to
-    /// P. Comparing the profile id alone calls that "unchanged" and publishes
-    /// nothing, so the repair reaches no open client until something unrelated
-    /// happens to bump.
-    ///
-    /// IDENTITY-BOUND, exactly like every session-cache write here, and for
-    /// a sharper reason than symmetry: a profile id is minted per supervisor
-    /// and the STARTER profiles every fresh supervisor seeds collide across
-    /// installs by construction. So a create whose reply landed after the
-    /// row was retargeted or adopted away would not merely record a stale
-    /// preference — it could record an id that RESOLVES on the new host to a
-    /// completely different profile, and the next create dialog would offer
-    /// it as the user's own last choice. `identity` is what the caller
-    /// believed this host was when it made the request: `Some` for an
-    /// ordinary host, `None` for one that reports no identity at all (which
-    /// must still match — a host that has since LEARNED one is not the host
-    /// the caller was talking to either).
-    ///
-    /// The identity is also STORED beside the default, not merely checked on
-    /// the way in, so the binding survives at rest and every read revalidates
-    /// it (see [`Self::remembered_profile`]). Checking only the write leaves
-    /// a row whose host has moved on since perfectly readable.
+    /// Keyed by the registry row alone — not bound to the install behind it,
+    /// unlike the session-cache writes here (SPEC.md, Sessions / Creation:
+    /// the default is a bare id per registry entry). A create whose reply
+    /// lands after the row was retargeted records its id against the row all
+    /// the same; the worst case is a wrong DEFAULT in a dropdown the user can
+    /// change before clicking create.
     ///
     /// [`HostStoreError::HostNotFound`] for an unregistered host rather
     /// than a silent no-op: the foreign key would refuse the insert anyway,
-    /// and a typed refusal is what the REST edge maps to a 404. A stale
-    /// identity is [`HostStoreError::IdentityMismatch`], with nothing
-    /// written.
+    /// and a typed refusal is what the REST edge maps to a 404.
     async fn remember_profile_default_with_source(
         &self,
         host: HostId,
-        identity: Option<&str>,
         profile_id: &str,
         source_creation_seq: Option<u64>,
         source_created_at: Option<i64>,
         source_session_id: Option<&str>,
     ) -> anyhow::Result<bool> {
         let conn = Arc::clone(&self.conn);
-        let identity = identity.map(str::to_string);
         let profile_id = profile_id.to_string();
         let source_session_id = source_session_id.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
@@ -4842,37 +4766,25 @@ impl HelmStore {
             let tx = conn
                 .transaction()
                 .context("beginning remembered-default transaction")?;
-            // ONE statement for both facts this write is judged against: the
-            // host's identity (the outer row — its absence IS the unknown
+            // ONE statement for both facts this write is judged against: that
+            // the host exists (the outer row — its absence IS the unknown
             // host) and the row being replaced (the LEFT JOIN — its columns
             // are NULL when there is no prior default). Two statements would
             // read the same transaction twice to answer one question.
             let known: Option<HostRememberedProfileRow> = tx
                 .query_row(
-                    "SELECT hosts.host_identity, remembered.profile_id, remembered.host_identity, \
-                            remembered.source_creation_seq, remembered.source_created_at, \
-                            remembered.source_session_id \
+                    "SELECT remembered.profile_id, remembered.source_creation_seq, \
+                            remembered.source_created_at, remembered.source_session_id \
                      FROM hosts \
                      LEFT JOIN remembered_profiles AS remembered ON remembered.host_id = hosts.id \
                      WHERE hosts.id = ?1",
                     rusqlite::params![host],
-                    |r| {
-                        Ok((
-                            r.get(0)?,
-                            r.get(1)?,
-                            r.get(2)?,
-                            r.get(3)?,
-                            r.get(4)?,
-                            r.get(5)?,
-                        ))
-                    },
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )
                 .optional()
                 .context("checking the host a remembered default names")?;
             let Some((
-                current,
                 previous_profile,
-                previous_identity,
                 previous_creation_seq,
                 previous_created_at,
                 previous_session_id,
@@ -4880,50 +4792,36 @@ impl HelmStore {
             else {
                 return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
             };
-            if current.as_deref() != identity.as_deref() {
-                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
-                    host,
-                    expected: identity.unwrap_or_default(),
-                    actual: current,
-                }));
-            }
             if let (Some(candidate_at), Some(candidate_id), Some(stored_at), Some(stored_id)) = (
                 source_created_at,
                 source_session_id.as_deref(),
                 previous_created_at,
                 previous_session_id.as_deref(),
-            ) && previous_identity.as_deref() == identity.as_deref()
-                && !source_is_newer(
-                    source_creation_seq,
-                    candidate_at,
-                    candidate_id,
-                    previous_creation_seq.and_then(|seq| u64::try_from(seq).ok()),
-                    stored_at,
-                    stored_id,
-                )
-            {
+            ) && !source_is_newer(
+                source_creation_seq,
+                candidate_at,
+                candidate_id,
+                previous_creation_seq.and_then(|seq| u64::try_from(seq).ok()),
+                stored_at,
+                stored_id,
+            ) {
                 tx.commit()
                     .context("committing an unchanged remembered default")?;
                 return Ok(false);
             }
-            // Both halves of the row, so an identity REPAIR under an unchanged
-            // profile id counts as a change — see this method's docs.
-            let changed = previous_profile.as_deref() != Some(profile_id.as_str())
-                || previous_identity.as_deref() != identity.as_deref();
+            let changed = previous_profile.as_deref() != Some(profile_id.as_str());
             tx.execute(
                 "INSERT INTO remembered_profiles (\
-                     host_id, profile_id, host_identity, source_creation_seq, \
+                     host_id, profile_id, source_creation_seq, \
                      source_created_at, source_session_id\
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                 ) VALUES (?1, ?2, ?3, ?4, ?5) \
                  ON CONFLICT (host_id) DO UPDATE SET profile_id = excluded.profile_id, \
-                     host_identity = excluded.host_identity, \
                      source_creation_seq = excluded.source_creation_seq, \
                      source_created_at = excluded.source_created_at, \
                      source_session_id = excluded.source_session_id",
                 rusqlite::params![
                     host,
                     profile_id,
-                    identity,
                     stored_source_creation_seq,
                     source_created_at,
                     source_session_id
@@ -6181,32 +6079,33 @@ mod tests {
         );
     }
 
-    /// The version-6 migration DROPS the remembered defaults it inherits.
+    /// A version-5 bare default climbs the whole ladder and is still served
+    /// at version 12.
     ///
-    /// Spec: a database whose `remembered_profiles` rows predate the
-    /// identity column comes up with no default for any host.
+    /// Spec: a database whose `remembered_profiles` rows predate version 6
+    /// comes up with each host's default intact (provenance unknown), and
+    /// with its hosts intact.
     ///
-    /// Carrying them forward would have been the polite migration and is the
-    /// unsafe one. A version-5 row records nothing about which install it was
-    /// chosen on, and a `NULL` in the new column is a value that legitimately
-    /// MEANS "a host reporting no identity" — so a preserved row would
-    /// validate against every identity-less host, and starter profile ids
-    /// collide across installs by construction. Dropping costs one create
-    /// dialog that asks instead of defaulting, which is SPEC.md's own
-    /// fallback and the direction that cannot be wrong.
+    /// A version-5 row is ALREADY in the shape the final contract wants — a
+    /// bare (host, profile id) — and the only thing between it and version
+    /// 12 was the identity-bound era's drop-and-recreate, a design the
+    /// current schema has rejected. The reshaped version-6 rung carries the
+    /// rows through with a NULL identity instead, so an operator upgrading
+    /// across the whole era keeps their last-used choices rather than losing
+    /// them to a binding that no longer exists on either side of it.
     ///
     /// The v5 state is constructed by downgrading a real database rather than
     /// hand-building one, so the row this asserts about sits in the schema
     /// the previous release actually shipped.
     #[tokio::test]
-    async fn the_identity_migration_forgets_defaults_it_cannot_validate() {
+    async fn a_version_5_bare_default_survives_to_the_final_schema() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
         let host = {
             let store = HelmStore::open(&path).await.expect("create");
             let host = store.add_ssh_host("user@host", None, None).await.unwrap();
             store
-                .remember_profile_default(host, None, "starter-claude")
+                .remember_profile_default(host, "starter-claude")
                 .await
                 .unwrap();
             host
@@ -6247,9 +6146,10 @@ mod tests {
 
         let migrated = HelmStore::open(&path).await.expect("migrate");
         assert_eq!(
-            migrated.remembered_profile(host).await.unwrap(),
-            None,
-            "a default nothing can validate must be forgotten rather than served"
+            migrated.remembered_profile(host).await.unwrap().as_deref(),
+            Some("starter-claude"),
+            "a bare version-5 default is exactly what version 12 stores; the ladder must carry \
+             it, not forget it"
         );
         // And the host itself survives — this is a forgotten preference, not
         // a lost registry.
@@ -6260,6 +6160,75 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|row| row.id == host)
+        );
+    }
+
+    /// A version-11 row's provenance survives the version-12 identity drop
+    /// value for value.
+    ///
+    /// The v11 -> v12 step is an `INSERT ... SELECT` into a rebuilt table,
+    /// and the other fixtures that cross it carry NULL provenance — so a
+    /// dropped column, or two similarly typed columns mapped in the wrong
+    /// order, would pass unseen there while silently corrupting the ordering
+    /// data later drains and creates are judged against. This plants one row
+    /// with every provenance field non-null and asserts each value exactly.
+    #[tokio::test]
+    async fn a_version_11_rows_provenance_survives_the_identity_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let host = {
+            let store = HelmStore::open(&path).await.unwrap();
+            store.add_ssh_host("v11@host", None, None).await.unwrap()
+        };
+        {
+            // Down to the version-11 shape: the same columns plus the
+            // identity column version 12 removes. Only this table moves —
+            // the 11 -> 12 rung touches nothing else, so the rest of the
+            // database can stay at the current shape.
+            let conn = Connection::open(&path).expect("reopen raw");
+            conn.execute_batch(
+                "DROP TABLE remembered_profiles;
+                 CREATE TABLE remembered_profiles (
+                     host_id       INTEGER PRIMARY KEY
+                                   REFERENCES hosts (id) ON DELETE CASCADE,
+                     profile_id    TEXT NOT NULL,
+                     host_identity TEXT,
+                     source_created_at INTEGER,
+                     source_session_id TEXT,
+                     source_creation_seq INTEGER,
+                     CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
+                 ) STRICT;
+                 PRAGMA user_version = 11;",
+            )
+            .expect("downgrade the table");
+            conn.execute(
+                "INSERT INTO remembered_profiles (host_id, profile_id, host_identity, \
+                 source_created_at, source_session_id, source_creation_seq) \
+                 VALUES (?1, 'p-keep', 'install-x', 700, 'sess-700', 7)",
+                rusqlite::params![host],
+            )
+            .expect("plant a version-11 row with full provenance");
+        }
+
+        let migrated = HelmStore::open(&path).await.expect("migrate");
+        assert_eq!(
+            migrated.remembered_profile(host).await.unwrap().as_deref(),
+            Some("p-keep")
+        );
+        drop(migrated);
+        let conn = Connection::open(&path).expect("reopen raw");
+        let row: (i64, i64, String) = conn
+            .query_row(
+                "SELECT source_creation_seq, source_created_at, source_session_id \
+                 FROM remembered_profiles WHERE host_id = ?1",
+                rusqlite::params![host],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("read the carried provenance");
+        assert_eq!(
+            row,
+            (7, 700, "sess-700".to_string()),
+            "each provenance value must arrive under its own column"
         );
     }
 
@@ -6351,7 +6320,6 @@ mod tests {
             store
                 .remember_profile_default_from_session(
                     host,
-                    Some("v7-identity"),
                     "established-profile",
                     Some(2),
                     200,
@@ -9207,25 +9175,14 @@ mod tests {
         // `None` throughout: neither of these hosts has ever reported an
         // identity, which is itself the value the write must match.
         assert!(
-            store
-                .remember_profile_default(local, None, "p-1")
-                .await
-                .unwrap(),
+            store.remember_profile_default(local, "p-1").await.unwrap(),
             "the first remembered default is a change"
         );
         assert!(
-            !store
-                .remember_profile_default(local, None, "p-1")
-                .await
-                .unwrap(),
+            !store.remember_profile_default(local, "p-1").await.unwrap(),
             "creating from the same profile twice changes nothing observable"
         );
-        assert!(
-            store
-                .remember_profile_default(local, None, "p-2")
-                .await
-                .unwrap()
-        );
+        assert!(store.remember_profile_default(local, "p-2").await.unwrap());
         assert_eq!(
             store.remembered_profile(local).await.unwrap(),
             Some("p-2".to_string()),
@@ -9250,297 +9207,85 @@ mod tests {
         // And forgotten with its host: removing a host forgets everything
         // the helm knew about it, in one statement (the same CASCADE the
         // session cache rides).
-        reopened
-            .remember_profile_default(ssh, None, "p-3")
-            .await
-            .unwrap();
+        reopened.remember_profile_default(ssh, "p-3").await.unwrap();
         reopened.remove_ssh_host(ssh).await.unwrap();
         assert_eq!(reopened.remembered_profile(ssh).await.unwrap(), None);
     }
 
-    /// REPAIRING a remembered default's identity binding — same profile id,
-    /// newly learned identity — counts as a CHANGE.
+    /// The remembered default is a bare id per registry row: it survives the
+    /// host learning an identity, an adoption, and a retarget alike.
     ///
-    /// Spec: `remember_profile_default` compares the whole stored
-    /// `(profile_id, host_identity)` pair, so writing the same id against an
-    /// identity the row does not carry answers `true`.
+    /// Spec (SPEC.md, Sessions / Creation): "last-used" is a plain profile id
+    /// remembered per registry entry, not bound to the install behind the
+    /// entry. A reinstalled or retargeted host with a profile under the same
+    /// id gets it preselected, and machinery to detect "same id, different
+    /// install" is not wanted.
     ///
-    /// The sequence is ordinary rather than contrived, which is what makes the
-    /// naive comparison dangerous: an identity-less host remembers P; the host
-    /// later learns an identity, at which point the stored row stops being
-    /// readable and the default silently vanishes from every create dialog;
-    /// the next profile-backed create on P rewrites the binding and brings it
-    /// back. Comparing the profile id alone calls that "no change", so the
-    /// caller publishes no invalidation and the default's return reaches no
-    /// open client — a create dialog somewhere else goes on offering nothing
-    /// until something unrelated happens to wake it.
+    /// Each of these three transitions used to purge or hide the row, and
+    /// the starter id is used deliberately: it is the id that exists on both
+    /// sides of every one of them, so this pins that the row is neither
+    /// deleted by the transition nor filtered on read afterwards. The
+    /// session cache's own identity-bound behavior is untouched by this and
+    /// is asserted elsewhere.
     #[tokio::test]
-    async fn repairing_a_remembered_defaults_identity_binding_is_a_change() {
+    async fn a_remembered_default_is_not_bound_to_the_install_behind_the_row() {
         let (_dir, store) = fresh_store().await;
         let host = store
             .add_ssh_host("user@learner", None, None)
             .await
             .unwrap();
-
-        // Recorded while the host reported no identity at all.
         assert!(
             store
-                .remember_profile_default(host, None, "starter-claude")
+                .remember_profile_default(host, "starter-claude")
                 .await
                 .unwrap()
         );
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            Some("starter-claude".to_string())
-        );
 
         // The host's first successful hello teaches the registry an identity.
-        // The stored row is bound to NULL, so it is no longer readable.
         store
             .record_first_contact(host, &dialed_as(&store, host).await, "identity-1")
             .await
             .unwrap();
         assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            None,
-            "a row bound to no identity is not this install's preference"
+            store.remembered_profile(host).await.unwrap().as_deref(),
+            Some("starter-claude"),
+            "learning an identity is not a reason to forget a preference"
         );
 
-        assert!(
-            store
-                .remember_profile_default(host, Some("identity-1"), "starter-claude")
-                .await
-                .unwrap(),
-            "the same id under a different binding is a different row, and the default going from \
-             absent back to present is exactly what other clients must be told about"
-        );
+        // The install behind the row is replaced and the user adopts it.
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-1",
+                "identity-2",
+            )
+            .await
+            .unwrap();
         assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            Some("starter-claude".to_string())
+            store.remembered_profile(host).await.unwrap().as_deref(),
+            Some("starter-claude"),
+            "an adoption purges the session cache, not the remembered default"
         );
 
-        // And a genuinely idempotent write — same id, same binding — is still
-        // no change, which is the property this must not have traded away.
+        // And the row is pointed somewhere else entirely.
+        store
+            .update_ssh_destination(host, "user@elsewhere")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap().as_deref(),
+            Some("starter-claude"),
+            "a retarget leaves the remembered default alone"
+        );
+
+        // Writing the same id again is still no change, so the invalidation
+        // feed is not woken for a user creating from one profile repeatedly.
         assert!(
             !store
-                .remember_profile_default(host, Some("identity-1"), "starter-claude")
+                .remember_profile_default(host, "starter-claude")
                 .await
                 .unwrap()
-        );
-    }
-
-    /// ADOPTION erases the remembered default, and a write made against the
-    /// superseded install is refused.
-    ///
-    /// This is not symmetry with the session-cache writes; it is the case
-    /// that makes profiles different. Profile ids are minted per supervisor
-    /// AND every fresh supervisor seeds the same starter profiles, so an id
-    /// carried across an adoption does not merely dangle — it RESOLVES on the
-    /// successor install, to a profile the user never chose, offered back as
-    /// their own last choice. Both halves therefore have to hold: the stored
-    /// row goes with the install it described, and a write still in flight
-    /// across that moment is refused rather than stored.
-    ///
-    /// The purge is asserted from the same transaction that purges the
-    /// session cache, because a follow-up call could be torn by a crash or
-    /// observed half-done by a concurrent reader — and the half a reader
-    /// would catch is exactly the one that resolves wrongly.
-    #[tokio::test]
-    async fn adoption_forgets_the_superseded_installs_remembered_default() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "user@host", "identity-1").await;
-
-        assert!(
-            store
-                .remember_profile_default(host, Some("identity-1"), "starter-claude")
-                .await
-                .unwrap()
-        );
-
-        // The install this host points at was replaced, and the user adopted
-        // the new identity. A create that was in flight across that moment
-        // still carries the OLD one.
-        store
-            .adopt_identity(
-                host,
-                &dialed_as(&store, host).await,
-                "identity-1",
-                "identity-2",
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            None,
-            "the adopted install has no last-used profile, and the superseded install's id would \
-             resolve here rather than dangle"
-        );
-
-        let error = store
-            .remember_profile_default(host, Some("identity-1"), "starter-codex")
-            .await
-            .expect_err("a write made against the superseded install must not land");
-        assert!(matches!(
-            error.downcast_ref::<HostStoreError>(),
-            Some(HostStoreError::IdentityMismatch { .. })
-        ));
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            None,
-            "and nothing was written"
-        );
-
-        // A host that has LEARNED an identity is not the identity-less host
-        // an earlier caller was talking to either, so `None` is refused too
-        // rather than treated as "do not care".
-        assert!(
-            store
-                .remember_profile_default(host, None, "starter-codex")
-                .await
-                .is_err()
-        );
-    }
-
-    /// A default recorded against one install must never be served for
-    /// another, even when the two mint the SAME id.
-    ///
-    /// Spec: after an adoption, `remembered_profile` answers `None` for a
-    /// starter id both installs happen to define — the id resolving on the
-    /// successor is precisely what makes carrying it forward dangerous rather
-    /// than merely stale, and SPEC.md's rule is to ask rather than guess.
-    ///
-    /// Staged with a shared starter id specifically because the tempting
-    /// wrong fix — "a stale default is harmless, it just will not be found in
-    /// the catalog" — is exactly the assumption this breaks.
-    #[tokio::test]
-    async fn a_shared_starter_id_does_not_survive_an_adoption() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "user@host", "identity-1").await;
-        // The id every fresh supervisor seeds, so it means something on both
-        // sides of the adoption.
-        store
-            .remember_profile_default(host, Some("identity-1"), "starter-claude")
-            .await
-            .unwrap();
-
-        store
-            .adopt_identity(
-                host,
-                &dialed_as(&store, host).await,
-                "identity-1",
-                "identity-2",
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            None,
-            "an id that resolves on the new install must not be offered as the user's own last \
-             choice there"
-        );
-        // And the new install can establish its own, which is what makes this
-        // a purge rather than a permanent hole.
-        store
-            .remember_profile_default(host, Some("identity-2"), "starter-claude")
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            Some("starter-claude".to_string())
-        );
-    }
-
-    /// RETARGETING a host forgets its remembered default — including when
-    /// neither install reports an identity at all.
-    ///
-    /// Spec: a destination change that actually moves the row deletes the
-    /// default; a byte-identical destination update keeps it.
-    ///
-    /// The identity-less case is the one that needs its own staging. The
-    /// identity binding cannot help there — `NULL` matches `NULL`, so two
-    /// entirely different installs look alike to it — and starter profile ids
-    /// collide by construction, so the default would resolve on whatever the
-    /// row now points at. The re-affirming half is asserted beside it because
-    /// a resubmitted form or an idempotent reconcile must not cost the user a
-    /// preference over a write that changed nothing.
-    #[tokio::test]
-    async fn retargeting_forgets_the_remembered_default_even_with_no_identity() {
-        let (_dir, store) = fresh_store().await;
-        let host = store.add_ssh_host("user@first", None, None).await.unwrap();
-        // No identity on either side of the move: the case the binding cannot
-        // distinguish.
-        store
-            .remember_profile_default(host, None, "starter-claude")
-            .await
-            .unwrap();
-
-        // Re-affirming the SAME destination keeps it.
-        store
-            .update_ssh_destination(host, "user@first")
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            Some("starter-claude".to_string()),
-            "a write that changed nothing must not cost a preference"
-        );
-
-        // A genuine retarget does not.
-        store
-            .update_ssh_destination(host, "user@second")
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            None,
-            "the row now points at a different install, whose starter ids collide with the old \
-             one's by construction"
-        );
-    }
-
-    /// A remembered default whose stored identity is not the host's current
-    /// one is answered as `None` — the last defence, for a row neither the
-    /// adoption purge nor the retarget purge deleted.
-    ///
-    /// Spec: `remembered_profile` validates the identity it stored against
-    /// the identity the host currently holds, and refuses on disagreement.
-    ///
-    /// Staged by moving the HOST's identity directly rather than through
-    /// adoption, because the point is a row that escaped both deletions — a
-    /// write already in flight, a future path that moves a host some other
-    /// way, a hand-edited database. Since a starter id resolves on the
-    /// successor rather than dangling, "probably fine" is not a posture this
-    /// can take.
-    #[tokio::test]
-    async fn a_remembered_default_from_a_superseded_identity_is_not_served() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "user@host", "identity-1").await;
-        store
-            .remember_profile_default(host, Some("identity-1"), "starter-claude")
-            .await
-            .unwrap();
-
-        // The host's identity moves without the row being touched.
-        {
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || {
-                conn.lock()
-                    .unwrap()
-                    .execute(
-                        "UPDATE hosts SET host_identity = 'identity-2' WHERE id = ?1",
-                        rusqlite::params![host],
-                    )
-                    .unwrap();
-            })
-            .await
-            .unwrap();
-        }
-
-        assert_eq!(
-            store.remembered_profile(host).await.unwrap(),
-            None,
-            "a row recorded against an install this host no longer is must not be served"
         );
     }
 
@@ -9554,7 +9299,7 @@ mod tests {
     async fn remembering_a_default_for_an_unknown_host_is_a_typed_not_found() {
         let (_dir, store) = fresh_store().await;
         let error = store
-            .remember_profile_default(9_999, None, "p-1")
+            .remember_profile_default(9_999, "p-1")
             .await
             .expect_err("an unregistered host cannot have a default");
         assert!(matches!(
@@ -10563,14 +10308,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "profiles@host", "profile-identity").await;
         store
-            .remember_profile_default_from_session(
-                host,
-                Some("profile-identity"),
-                "profile-old",
-                Some(2),
-                200,
-                "old-source",
-            )
+            .remember_profile_default_from_session(host, "profile-old", Some(2), 200, "old-source")
             .await
             .unwrap();
 
@@ -10656,19 +10394,100 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(retreated.default_changed);
+        assert!(
+            !retreated.default_changed,
+            "the visible default did not move, so nobody is woken"
+        );
         assert_eq!(
             store.remembered_profile(host).await.unwrap().as_deref(),
-            Some("profile-older"),
-            "when the remembered source disappears, the remaining newest source wins"
+            Some("profile-new"),
+            "a drain that orphans the provenance keeps the bare id rather than guessing from \
+             survivors"
         );
 
         let cleared = store
             .replace_host_sessions(host, "profile-identity", Vec::new())
             .await
             .unwrap();
-        assert!(cleared.default_changed);
-        assert_eq!(store.remembered_profile(host).await.unwrap(), None);
+        assert!(!cleared.default_changed);
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap().as_deref(),
+            Some("profile-new"),
+            "an empty drain does not forget the preference either — the id is a registry-row \
+             fact, not a session fact"
+        );
+    }
+
+    /// A retarget-shaped drain — the remembered source is gone and nothing
+    /// provably newer replaces it — keeps the bare default and re-opens it
+    /// to the next direct create.
+    ///
+    /// This is the install transition the bare-id contract exists for.
+    /// Deleting the row here would rebuild the install-bound eviction schema
+    /// v12 removed; replacing it from a surviving session would guess; and
+    /// keeping the predecessor's provenance would let its high sequence
+    /// numbers refuse the successor's own first create (a fresh supervisor
+    /// restarts sequences low). So: the id survives, the provenance is
+    /// cleared, survivors do not advance it, and a direct create with a
+    /// RESET sequence does.
+    #[tokio::test]
+    async fn a_retarget_shaped_drain_keeps_the_bare_default() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "moving@host", "moving-identity").await;
+        store
+            .remember_profile_default_from_session(
+                host,
+                "profile-kept",
+                Some(9),
+                900,
+                "gone-source",
+            )
+            .await
+            .unwrap();
+
+        // The successor install knows nothing of the establishing session.
+        let survived = store
+            .replace_host_sessions(host, "moving-identity", Vec::new())
+            .await
+            .unwrap();
+        assert!(
+            !survived.default_changed,
+            "the visible default did not move, so nobody is woken"
+        );
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap().as_deref(),
+            Some("profile-kept")
+        );
+
+        // A surviving OLDER session is not evidence of a newer choice.
+        let not_replaced = store
+            .replace_host_sessions(
+                host,
+                "moving-identity",
+                vec![sequenced_profiled_session("older", 300, 1, "profile-other")],
+            )
+            .await
+            .unwrap();
+        assert!(!not_replaced.default_changed);
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap().as_deref(),
+            Some("profile-kept"),
+            "an orphaned preference stays opaque rather than being replaced from survivors"
+        );
+
+        // A fresh supervisor's first create restarts sequence numbers low.
+        // With the predecessor's provenance cleared it must win — refused,
+        // it would leave the default permanently stuck on the old id.
+        assert!(
+            store
+                .remember_profile_default_from_session(host, "profile-new", Some(1), 100, "fresh")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap().as_deref(),
+            Some("profile-new")
+        );
     }
 
     /// Old supervisors omit creation sequences, so equal-second drains keep
@@ -10702,27 +10521,13 @@ mod tests {
         let host = host_with_identity(&store, "direct@host", "direct-identity").await;
         assert!(
             store
-                .remember_profile_default_from_session(
-                    host,
-                    Some("direct-identity"),
-                    "new",
-                    Some(10),
-                    100,
-                    "new-source",
-                )
+                .remember_profile_default_from_session(host, "new", Some(10), 100, "new-source",)
                 .await
                 .unwrap()
         );
         assert!(
             !store
-                .remember_profile_default_from_session(
-                    host,
-                    Some("direct-identity"),
-                    "old",
-                    Some(9),
-                    200,
-                    "old-source",
-                )
+                .remember_profile_default_from_session(host, "old", Some(9), 200, "old-source",)
                 .await
                 .unwrap()
         );

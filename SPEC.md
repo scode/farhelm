@@ -38,7 +38,9 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
   `claude --resume {conversation}`); and optional agent-specific integrations (status heuristics, conversation-identity
   capture — see Status and Durability). Both invocations may reference the session's working directory as `{cwd}`, for
   launchers that take the directory as an argument. The user controls the invocations completely; the integrations are
-  the only per-agent machinery Farhelm itself carries.
+  the only per-agent machinery Farhelm itself carries. Profile edits are last-write-wins: two clients editing the same
+  profile at once is not a case Farhelm guards, because it is one user's rare action, and no optimistic-concurrency
+  check on profile writes is wanted.
 
 ## Topology
 
@@ -172,7 +174,11 @@ Session creation is one action, not a wizard. Only the working directory is fund
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
 - Agent profile: defaults to the last-used profile on the target host; if that profile no longer exists, the client asks
-  instead of guessing.
+  instead of guessing. "Last-used" is a plain profile id remembered per registry entry, and that is the whole mechanism:
+  it is not bound to the install behind the entry, carries no precondition, and is revalidated against nothing beyond
+  the host's current catalog. A reinstalled or retargeted host that has a profile under the same id gets it preselected.
+  That is accepted because a default is a suggestion in a dropdown, never an action; machinery to detect "same id,
+  different install" is not wanted.
 - Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
   session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
   different install after the session was selected falls back to the helm's own host rather than silently aiming the

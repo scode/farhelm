@@ -49,7 +49,7 @@
 
 use crate::skew;
 use crate::{Host, HostId, Profile, RestartOffer, Session, Tab};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Mirror of one PAGE of the helm's `GET /api/sessions` response
 /// (farhelm-helm's `SessionPageBody`): `{"sessions": [...], "total": N,
@@ -1347,7 +1347,8 @@ pub(crate) enum CreateAgent<'a> {
     Command(&'a str),
     /// A `Profile::id` from the TARGET host's own catalog — profiles are
     /// per-supervisor, so an id from another host names nothing here and the
-    /// create fails its precondition rather than falling back to anything.
+    /// create simply fails to resolve it, rather than falling back to
+    /// anything.
     Profile(&'a str),
 }
 
@@ -1378,9 +1379,9 @@ pub(crate) enum CreateAgent<'a> {
 /// the helm's own — as a value the CLIENT decided, because only the client
 /// knows what the user is looking at. `None` leaves the helm to fall back to
 /// its local row, which is what every hand-written caller means on a
-/// single-machine setup. A host that is not connected fails the create as a
-/// precondition, and that refusal arrives here as the helm's own words like
-/// any other.
+/// single-machine setup. A host that is not connected fails the create with
+/// an ordinary conflict, and that refusal arrives here as the helm's own
+/// words like any other.
 ///
 /// `agent` selects between the two creation modes PLAN_M6_75.md item 3 made
 /// mutually exclusive on the wire — see [`CreateAgent`] for why they arrive
@@ -1392,7 +1393,7 @@ pub(crate) async fn create_session(
     title: &str,
     intent_key: &str,
     host: Option<HostId>,
-    expectation: Expectation<'_>,
+    expected_incarnation: Option<u64>,
 ) -> Result<Session, String> {
     let url = format!("{base}/api/sessions");
     let resp = send(client().post(&url).json(&create_body(
@@ -1401,7 +1402,7 @@ pub(crate) async fn create_session(
         title,
         intent_key,
         host,
-        expectation,
+        expected_incarnation,
     )))
     .await?;
     if !resp.status().is_success() {
@@ -1423,7 +1424,7 @@ fn create_body(
     title: &str,
     intent_key: &str,
     host: Option<HostId>,
-    expectation: Expectation<'_>,
+    expected_incarnation: Option<u64>,
 ) -> serde_json::Value {
     // `title` is the API's `Option<String>`, not a bare string: an empty
     // field means "auto-generate", per SPEC.md's "Title: optional;
@@ -1450,11 +1451,32 @@ fn create_body(
     // starters, so the wrong install is a successful launch of the wrong
     // thing rather than a refusal. Sent in raw mode too: the directory and
     // the command were chosen for a machine, and the same substitution puts
-    // them on another one.
-    if let Some(incarnation) = expectation.incarnation {
+    // them on another one. This is the only request in the API that still
+    // carries such a claim; profile edits and catalog reads carry none.
+    if let Some(incarnation) = expected_incarnation {
         body["expected_incarnation"] = serde_json::json!(incarnation);
     }
     body
+}
+
+/// The marker the helm appends to a create refused because the host is no
+/// longer on the connection the create named (`precondition.rs` in the helm).
+const INCARNATION_MARKER: &str = "[farhelm:precondition/incarnation]";
+
+/// Classify a create refusal: `(stale, prose)`, where `stale` says the helm
+/// refused because the world moved under the request — re-read and re-seed,
+/// rather than show a permanent error — and `prose` is the sentence with the
+/// machine marker stripped for display.
+///
+/// Every OTHER 409 (a host that is not connected, a supervisor's own refusal)
+/// carries no marker and must not be answered by re-reading, which is why
+/// this is a marker check and not a status check.
+pub(crate) fn precondition_of(refusal: &str) -> (bool, String) {
+    let trimmed = refusal.trim_end();
+    match trimmed.strip_suffix(INCARNATION_MARKER) {
+        Some(prose) => (true, prose.trim_end().to_string()),
+        None => (false, refusal.to_string()),
+    }
 }
 
 /// The JavaScript the WEB (wasm) build's random client-side identifiers
@@ -2295,20 +2317,6 @@ pub(crate) struct ProfileCatalog {
     /// deliberately does not filter it out, and neither does this.
     #[serde(default)]
     pub(crate) default_profile: Option<String>,
-    /// Each profile's DEFINITION fingerprint, by profile id — the value an
-    /// editor hands back as `expected_definition` when it saves.
-    ///
-    /// Served by the helm rather than computed here, and echoed back opaque.
-    /// That asymmetry is the point: the comparison is exact string equality,
-    /// so a client building its own would have to reproduce the helm's
-    /// encoding byte for byte in another language, and any drift would show up
-    /// as guarded updates refusing forever with nothing actually wrong.
-    ///
-    /// `#[serde(default)]` for a helm that predates it: an editor with no
-    /// fingerprint to send simply sends no definition precondition, which is
-    /// the behavior that helm already has.
-    #[serde(default)]
-    pub(crate) definitions: std::collections::BTreeMap<String, String>,
 }
 
 /// A profile's whole definition, as a create or an edit sends it.
@@ -2321,7 +2329,12 @@ pub(crate) struct ProfileCatalog {
 ///
 /// Owned rather than borrowed, unlike [`CreateAgent`]: the editing surface
 /// assembles one of these from drafts it owns and hands it over.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Serialized DIRECTLY as the request body of both mutations — the type is
+/// the wire shape. That is a guard, not a convenience: the far side replaces
+/// the whole definition, so a hand-written body that fell out of sync with
+/// the struct would silently clear whichever field it stopped sending.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ProfileSpec {
     pub(crate) name: String,
     pub(crate) invocation: String,
@@ -2337,126 +2350,6 @@ pub(crate) struct ProfileSpec {
     pub(crate) resume_template: Option<Vec<String>>,
 }
 
-impl ProfileSpec {
-    /// This spec as the request body both mutations take, with whatever
-    /// preconditions the caller can state attached.
-    ///
-    /// Written once because the two endpoints send exactly the same shape,
-    /// and a second copy is how one of them would eventually stop sending a
-    /// field — silently clearing it on every edit, since the far side
-    /// replaces the whole definition.
-    ///
-    /// Both preconditions are OMITTED rather than sent null when there is
-    /// nothing to assert (a host that has never connected, a catalog served by
-    /// a helm that predates fingerprints, a create — which has no prior
-    /// definition and is refused outright for carrying one).
-    fn body(&self, expectation: &Expectation<'_>) -> serde_json::Value {
-        let mut body = serde_json::json!({
-            "name": self.name,
-            "invocation": self.invocation,
-            "agent_kind": self.agent_kind,
-            "resume_template": self.resume_template,
-        });
-        if let Some(incarnation) = expectation.incarnation {
-            body["expected_incarnation"] = serde_json::json!(incarnation);
-        }
-        if let Some(definition) = expectation.definition {
-            body["expected_definition"] = serde_json::json!(definition);
-        }
-        body
-    }
-}
-
-/// What a mutation asserts about the world it was prepared against
-/// (farhelm-helm's `precondition` module).
-///
-/// A request carrying these cannot execute against a different install, and an
-/// update cannot silently overwrite a definition that changed under an open
-/// editor. Both are optional on the wire and both are optional here, for the
-/// same reason: a client with nothing to assert (a host that has never
-/// connected, a helm that predates the fields) must still be able to mutate,
-/// exactly as it always could.
-///
-/// The fingerprint is borrowed because every caller already holds one (from
-/// the catalog read) and nothing here stores it; the connection token is a
-/// `u64` and is simply copied — borrowing an integer would be ceremony.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct Expectation<'a> {
-    /// The connection this request was prepared against (`Host::incarnation`).
-    /// `None`, or a zero token, asserts nothing.
-    pub(crate) incarnation: Option<u64>,
-    /// The definition fingerprint an editor was seeded from
-    /// (`ProfileCatalog::definitions`). UPDATE ONLY — the helm refuses a
-    /// create that carries one, deliberately, so that a caller which believes
-    /// it sent a precondition is never quietly served without it.
-    ///
-    /// What it guards is STALENESS: an update whose stored definition has
-    /// moved since the editor opened is refused rather than silently reverting
-    /// somebody else's change. It says nothing about the bytes this request
-    /// carries — keeping an untouched field byte-identical to what was stored
-    /// is `profiles::ProfileDraft::spec`'s job, and no precondition could
-    /// check it, since the far side has only what was sent.
-    pub(crate) definition: Option<&'a str>,
-}
-
-impl<'a> Expectation<'a> {
-    /// The expectation for a connection token, treating the helm's "never
-    /// connected" zero as nothing to assert — which is what it means.
-    pub(crate) fn on(incarnation: u64) -> Expectation<'a> {
-        Expectation {
-            incarnation: (incarnation != 0).then_some(incarnation),
-            definition: None,
-        }
-    }
-
-    /// The same, plus the definition an update means to replace.
-    pub(crate) fn replacing(incarnation: u64, definition: Option<&'a str>) -> Expectation<'a> {
-        Expectation {
-            definition,
-            ..Expectation::on(incarnation)
-        }
-    }
-}
-
-/// The two markers farhelm-helm appends to a precondition refusal.
-///
-/// Kept as data rather than as a `Precondition` enum, and that is a decision
-/// worth recording because it looks like lost information: NEITHER consumer
-/// branches on WHICH precondition failed. The profiles section closes the
-/// editor, invalidates and re-reads; the create dialog drops the stale binding
-/// and re-reads. Both are answering the same question — "the world moved, so
-/// what you were shown is not what is there" — and the recovery is identical.
-/// An enum would be a distinction the code makes and nothing uses, which is
-/// the kind of thing that rots into a wrong branch later. If a consumer ever
-/// does need it (a definition conflict could reasonably offer "reapply my
-/// changes to the current definition" where an incarnation conflict cannot),
-/// the markers are already distinct here and the enum comes back with it.
-const PRECONDITION_MARKERS: [&str; 2] = [
-    "[farhelm:precondition/incarnation]",
-    "[farhelm:precondition/definition]",
-];
-
-/// Whether a refusal is a stale PRECONDITION, and the sentence without its
-/// marker.
-///
-/// The marker is API and the prose is for a person, so the two are separated
-/// here rather than at each render site — a user should not be shown a
-/// bracketed token they cannot act on, and no surface should have to know the
-/// token's spelling to strip it.
-///
-/// `false` is the important answer: a conflict carrying no marker is a
-/// different kind entirely (a host that is not connected, a supervisor's own
-/// refusal), and those are NOT fixed by re-reading and re-seeding — treating
-/// them as if they were would send a client round a loop that cannot converge.
-pub(crate) fn precondition_of(refusal: &str) -> (bool, String) {
-    for marker in PRECONDITION_MARKERS {
-        if let Some(prose) = refusal.trim_end().strip_suffix(marker) {
-            return (true, prose.trim_end().to_string());
-        }
-    }
-    (false, refusal.to_string())
-}
-
 /// Read one host's profile catalog and this helm's remembered default for it.
 ///
 /// A live read from the owning supervisor — the helm holds no cache for it —
@@ -2464,21 +2357,8 @@ pub(crate) fn precondition_of(refusal: &str) -> (bool, String) {
 /// naming the state. That is the honest behavior for a picker: a cached
 /// catalog would let a user choose a profile from a machine that cannot be
 /// reached to launch it.
-pub(crate) async fn fetch_profiles(
-    base: &str,
-    host: HostId,
-    expectation: Expectation<'_>,
-) -> Result<ProfileCatalog, String> {
-    // The READ states its expectation too, in the query — a catalog fetched
-    // from an install that replaced this one mid-flight would be rendered as
-    // this host's, and its ids would RESOLVE against anything this client then
-    // did with them. A helm that does not know the parameter ignores it, which
-    // is the same posture every other precondition takes.
-    let guard = expectation
-        .incarnation
-        .map(|incarnation| format!("?expected_incarnation={incarnation}"))
-        .unwrap_or_default();
-    let url = format!("{base}/api/hosts/{host}/profiles{guard}");
+pub(crate) async fn fetch_profiles(base: &str, host: HostId) -> Result<ProfileCatalog, String> {
+    let url = format!("{base}/api/hosts/{host}/profiles");
     let resp = send(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
@@ -2498,16 +2378,8 @@ pub(crate) async fn fetch_profiles(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProfileCommit {
     /// Accepted, and the reply described the result: the profile as the
-    /// supervisor now holds it, and — from a helm that serves it — the
-    /// fingerprint of that committed definition.
-    ///
-    /// The fingerprint travels with the profile rather than being fetched
-    /// afterwards because the two must not be able to describe different
-    /// moments: an editor reopened before the authoritative read lands is
-    /// seeded from this pair, and a definition paired with the PREVIOUS
-    /// fingerprint would send a precondition the helm refuses as stale — a
-    /// conflict reported over a change this client itself just made.
-    Confirmed(Profile, Option<String>),
+    /// supervisor now holds it.
+    Confirmed(Profile),
     /// Accepted, but the reply could not be read by this build. Carries the
     /// decode failure, for a warning line — and, deliberately, nothing to
     /// reconcile from: an unread reply is exactly the case where only the
@@ -2520,28 +2392,12 @@ pub(crate) enum ProfileCommit {
 /// The catalog — not the hosts list — is what settles a profile change, and
 /// this is where that is said (see [`unvalidated_note`]).
 async fn profile_commit(resp: reqwest::Response) -> ProfileCommit {
-    match resp.json::<CommittedProfile>().await {
-        Ok(committed) => ProfileCommit::Confirmed(committed.profile, committed.fingerprint),
+    match resp.json::<Profile>().await {
+        Ok(profile) => ProfileCommit::Confirmed(profile),
         Err(error) => {
             ProfileCommit::Unvalidated(unvalidated_note(error, "this host's profile list below"))
         }
     }
-}
-
-/// A profile mutation's success body: the profile, plus the fingerprint of the
-/// definition just committed.
-///
-/// Flattened and OPTIONAL so both shapes decode — a helm that serves the
-/// fingerprint and one that does not. The absent case is not a failure and
-/// must not be treated as one: it costs the next editor its definition
-/// precondition (it has nothing to name) and nothing else, which is exactly
-/// the posture the whole precondition feature takes toward callers that cannot
-/// state one.
-#[derive(Deserialize)]
-struct CommittedProfile {
-    #[serde(flatten)]
-    profile: Profile,
-    fingerprint: Option<String>,
 }
 
 /// Define a new profile on one host (`POST /api/hosts/{id}/profiles`).
@@ -2562,10 +2418,9 @@ pub(crate) async fn create_profile(
     base: &str,
     host: HostId,
     spec: &ProfileSpec,
-    expectation: Expectation<'_>,
 ) -> Result<ProfileCommit, String> {
     let url = format!("{base}/api/hosts/{host}/profiles");
-    let resp = send(client().post(&url).json(&spec.body(&expectation))).await?;
+    let resp = send(client().post(&url).json(&spec)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -2589,13 +2444,12 @@ pub(crate) async fn update_profile(
     host: HostId,
     profile_id: &str,
     spec: &ProfileSpec,
-    expectation: Expectation<'_>,
 ) -> Result<ProfileCommit, String> {
     let url = format!(
         "{base}/api/hosts/{host}/profiles/{}",
         encode_path_segment(profile_id)
     );
-    let resp = send(client().post(&url).json(&spec.body(&expectation))).await?;
+    let resp = send(client().post(&url).json(&spec)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -2617,17 +2471,9 @@ pub(crate) async fn delete_profile(
     base: &str,
     host: HostId,
     profile_id: &str,
-    expectation: Expectation<'_>,
 ) -> Result<(), String> {
-    // The precondition rides in the QUERY here rather than in a body, because
-    // this verb has no body — the helm's delete route reads
-    // `?expected_incarnation=` for exactly that reason.
-    let guard = expectation
-        .incarnation
-        .map(|incarnation| format!("?expected_incarnation={incarnation}"))
-        .unwrap_or_default();
     let url = format!(
-        "{base}/api/hosts/{host}/profiles/{}{guard}",
+        "{base}/api/hosts/{host}/profiles/{}",
         encode_path_segment(profile_id)
     );
     let resp = send(client().delete(&url)).await?;
@@ -2803,7 +2649,7 @@ mod tests {
             "",
             "key-1",
             Some(7),
-            Expectation::on(11),
+            Some(11),
         );
         assert_eq!(raw["invocation"], serde_json::json!("claude"));
         assert!(
@@ -2824,7 +2670,7 @@ mod tests {
             "named",
             "key-2",
             Some(7),
-            Expectation::on(11),
+            Some(11),
         );
         assert_eq!(by_profile["profile_id"], serde_json::json!("p-1"));
         assert!(
@@ -2832,6 +2678,60 @@ mod tests {
             "a profile already says what to run, and a body naming both is refused outright"
         );
         assert_eq!(by_profile["title"], serde_json::json!("named"));
+    }
+
+    /// A create carries the connection it was prepared against, in both
+    /// modes, and omits the field when it has nothing to assert.
+    ///
+    /// This is the one precondition the API still has, and the guard it
+    /// feeds refuses a create that would otherwise LAUNCH the wrong profile
+    /// on a retargeted host; the absent form is what keeps a caller with no
+    /// connection to name (a script, an older client) able to create at all.
+    #[test]
+    fn a_create_names_the_connection_it_was_prepared_against() {
+        let body = create_body(
+            "/tmp",
+            CreateAgent::Profile("starter-claude"),
+            "",
+            "key",
+            Some(3),
+            Some(12),
+        );
+        assert_eq!(body["expected_incarnation"], serde_json::json!(12));
+        let unguarded = create_body(
+            "/tmp",
+            CreateAgent::Command("claude"),
+            "",
+            "key",
+            Some(3),
+            None,
+        );
+        assert!(
+            unguarded.get("expected_incarnation").is_none(),
+            "a caller with nothing to assert must still be able to create"
+        );
+    }
+
+    /// A create refusal is recognized as stale by its MARKER, and the marker
+    /// is stripped before the sentence is shown.
+    ///
+    /// The marker is what tells a client "the world moved, re-read" apart
+    /// from every other 409, which must NOT be answered by re-reading; and it
+    /// is a machine token a user cannot act on, so it never reaches the form.
+    #[test]
+    fn a_stale_create_refusal_is_classified_by_marker_and_shown_without_it() {
+        let (stale, prose) = precondition_of(
+            "host 1 is not the connection this request was prepared against \
+             [farhelm:precondition/incarnation]",
+        );
+        assert!(stale);
+        assert_eq!(
+            prose,
+            "host 1 is not the connection this request was prepared against"
+        );
+        let (stale, prose) = precondition_of("host 1 is not connected");
+        assert!(!stale);
+        assert_eq!(prose, "host 1 is not connected");
     }
 
     /// An edit sends the profile's WHOLE definition, every field present.
@@ -2853,7 +2753,7 @@ mod tests {
                 "{conversation}".into(),
             ]),
         };
-        let body = spec.body(&Expectation::replacing(4, Some("n3:old;")));
+        let body = serde_json::to_value(&spec).expect("a spec always serializes");
         assert_eq!(body["name"], serde_json::json!("Claude Code"));
         assert_eq!(body["invocation"], serde_json::json!("claude"));
         assert_eq!(body["agent_kind"], serde_json::json!("claude"));
@@ -2867,109 +2767,10 @@ mod tests {
             ..spec
         };
         assert_eq!(
-            generic.body(&Expectation::default())["resume_template"],
+            serde_json::to_value(&generic).expect("a spec always serializes")["resume_template"],
             serde_json::Value::Null,
             "absence is a value here, and it has to be SENT to replace a template that was there"
         );
-    }
-
-    /// A mutation carries exactly the preconditions it can state, and omits
-    /// the ones it cannot.
-    ///
-    /// Both halves matter. Sending a precondition the caller cannot back up —
-    /// a zero connection token, meaning "never connected" — would assert
-    /// something about a world this client has not seen; and dropping one it
-    /// CAN state is the silent case, since the request then succeeds against
-    /// whatever install now answers, which for profile ids that collide across
-    /// installs is a successful mutation of the wrong thing.
-    #[test]
-    fn a_mutation_states_the_preconditions_it_has_and_omits_the_rest() {
-        let spec = ProfileSpec {
-            name: "Codex".to_string(),
-            invocation: "codex".to_string(),
-            agent_kind: "codex".to_string(),
-            resume_template: None,
-        };
-
-        let guarded = spec.body(&Expectation::replacing(9, Some("n5:Codex;")));
-        assert_eq!(guarded["expected_incarnation"], serde_json::json!(9));
-        assert_eq!(
-            guarded["expected_definition"],
-            serde_json::json!("n5:Codex;"),
-            "an update names the definition it means to replace, so the far side can refuse one \
-             that changed under the editor"
-        );
-
-        // A create has no prior definition, and the helm REFUSES one that
-        // carries the field rather than ignoring it — so it must not be sent.
-        let created = spec.body(&Expectation::on(9));
-        assert_eq!(created["expected_incarnation"], serde_json::json!(9));
-        assert!(created.get("expected_definition").is_none());
-
-        // Never connected: nothing to assert, and asserting zero would be a
-        // claim about a connection that has never existed.
-        let unguarded = spec.body(&Expectation::on(0));
-        assert!(unguarded.get("expected_incarnation").is_none());
-        assert!(unguarded.get("expected_definition").is_none());
-    }
-
-    /// A create carries the connection it was prepared against, in both modes.
-    #[test]
-    fn a_create_names_the_connection_it_was_prepared_against() {
-        let body = create_body(
-            "/tmp",
-            CreateAgent::Profile("starter-claude"),
-            "",
-            "key",
-            Some(3),
-            Expectation::on(12),
-        );
-        assert_eq!(body["expected_incarnation"], serde_json::json!(12));
-        let unguarded = create_body(
-            "/tmp",
-            CreateAgent::Command("claude"),
-            "",
-            "key",
-            Some(3),
-            Expectation::default(),
-        );
-        assert!(
-            unguarded.get("expected_incarnation").is_none(),
-            "a caller with nothing to assert must still be able to create, exactly as before \
-             these preconditions existed"
-        );
-    }
-
-    /// A precondition refusal is recognized by its MARKER, and the marker is
-    /// stripped before the sentence is shown.
-    ///
-    /// Both halves are contract. The marker is what tells a client "this is
-    /// the world moving, re-read and re-seed" apart from every other 409 (a
-    /// host that is not connected, a supervisor's own refusal) — which must
-    /// NOT be answered by re-reading. And it is a machine token: showing it to
-    /// a user would put a bracketed string they cannot act on at the end of an
-    /// otherwise actionable sentence.
-    #[test]
-    fn a_precondition_refusal_is_classified_by_marker_and_shown_without_it() {
-        let (stale, prose) = precondition_of(
-            "host 3 is not the connection this request was prepared against \
-             [farhelm:precondition/incarnation]",
-        );
-        assert!(stale);
-        assert!(prose.ends_with("prepared against"), "got {prose:?}");
-
-        let (stale, prose) = precondition_of(
-            "profile p-1 on host 3 has been changed since this editor was opened \
-             [farhelm:precondition/definition]",
-        );
-        assert!(stale, "both markers mean the same thing to every consumer");
-        assert!(!prose.contains("farhelm:precondition"));
-
-        // Every other refusal is left exactly as the helm wrote it, and is
-        // NOT a stale-precondition case: re-reading does not fix a host that
-        // is unreachable, so a client that retried on one would loop.
-        let plain = "host 3 is unreachable-reprobing, so this operation is refused";
-        assert_eq!(precondition_of(plain), (false, plain.to_string()));
     }
 
     /// A catalog with no remembered default decodes as "none ever", and one

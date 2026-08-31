@@ -1590,17 +1590,16 @@ test.describe("agent profiles", () => {
         }
         markStarted!();
         await held;
-        // A precondition refusal becomes a section-level notice. Without the
-        // lease guard it would remain visible after the old editor closes,
-        // which makes the negative assertion below capable of catching that
+        // A refusal becomes a form error on the row (profile routes carry no
+        // precondition, so every 409 is shown as plain prose). Without the
+        // lease guard it would be written after the old editor closes, which
+        // makes the negative assertions below capable of catching that
         // broken implementation.
         await route.fulfill({
           status: 409,
           contentType: "text/plain",
           headers: { "x-farhelm-build": build },
-          body:
-            "a refusal about an install nobody is looking at any more " +
-            "[farhelm:precondition/incarnation]",
+          body: "a refusal about an install nobody is looking at any more",
         });
       },
     );
@@ -1609,10 +1608,9 @@ test.describe("agent profiles", () => {
     // the lease the held save is running under stops being current.
     //
     // Deliberately NOT the connection token. That is the other half of the
-    // same identity, but it is also what every guarded request now hands back
-    // as `expected_incarnation` — so a fabricated one makes the helm refuse
-    // this section's own catalog reads, and the successor rows this test then
-    // waits for would never arrive. Moving a field the helm does not compare
+    // same identity, but it is also what a session create hands back as
+    // `expected_incarnation`, and keeping the fabricated hosts reply honest
+    // about it costs nothing: moving a field the helm does not compare
     // changes the identity while leaving every request answerable.
     let moved = false;
     await page.route(
@@ -1743,31 +1741,26 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * A save prepared against one connection is REFUSED after the host is
-   * re-pointed, and the UI says so instead of retrying.
+   * A save the helm REFUSES is shown on the open editor, as the helm's own
+   * sentence, and is not retried; the request carries no precondition.
    *
-   * The precondition the helm added exists for a window this client cannot
-   * close on its own — between its own check and the helm's routing — and the
-   * consequence of losing that race is not a failure but a SUCCESS on the
-   * wrong machine, because profile ids collide across installs by
-   * construction. Here the refusal is staged (a real adoption mid-save cannot
-   * be arranged against a stack the rest of the suite is using), and what is
-   * pinned is the client's half: the request carries the expectation, and a
-   * marked conflict closes the editor with the helm's sentence rather than
-   * resubmitting.
+   * Profile writes are last-write-wins (SPEC.md, Concepts / Agent profile):
+   * the request names nothing about which connection or which definition it
+   * was prepared against, and a 409 from a profile route is an ordinary
+   * refusal rather than "the world moved, re-read". What is pinned is the
+   * client's half of that contract — the wire body has no `expected_*`
+   * fields, the editor stays open with the draft still in it (a refused name
+   * is usually one keystroke from an accepted one), and the client does not
+   * insist by resubmitting. The refusal is staged because the helm has no
+   * reason of its own to refuse a well-formed edit here.
    */
-  test("a save refused by its precondition reports the conflict and does not retry", async ({
+  test("a refused save is shown on the open editor and does not retry", async ({
     page,
     request,
   }) => {
     const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `stale-${Date.now()}` });
+    const profile = await createProfile(request, local, { name: `refused-${Date.now()}` });
     profiles.push({ host: local, id: profile.id });
-    // What the helm serves is what the request has to echo — captured here so
-    // the assertions below are equality rather than existence.
-    const hostRow = (await listHosts(request)).find((host) => host.id === local);
-    const servedFingerprint = (await listProfiles(request, local)).definitions[profile.id];
-    expect(servedFingerprint, "the helm serves a fingerprint per profile").toBeTruthy();
 
     const sent: Record<string, unknown>[] = [];
     await page.route(
@@ -1781,10 +1774,7 @@ test.describe("agent profiles", () => {
         await route.fulfill({
           status: 409,
           contentType: "text/plain",
-          body:
-            "host 1 is not the connection this request was prepared against: a retarget, an " +
-            "adoption, or a reconnection has replaced what answers on that host, so nothing was " +
-            "changed. Re-read the host and try again [farhelm:precondition/incarnation]",
+          body: "the supervisor declined this edit",
         });
       },
     );
@@ -1794,41 +1784,40 @@ test.describe("agent profiles", () => {
     const editing = profileRow(page, local, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
     await editing.locator(".profile-edit").click();
-    await editing.locator(".profile-name-input").fill(`stale-${Date.now()}-edited`);
+    const draft = `refused-${Date.now()}-edited`;
+    await editing.locator(".profile-name-input").fill(draft);
     await editing.locator(".profile-save").click();
 
-    const notice = section(page, local).locator(".profiles-notice");
-    await expect(notice).toBeVisible({ timeout: 20_000 });
-    await expect(notice).toContainText("prepared against");
-    await expect(
-      notice,
-      "the marker is machine vocabulary and must not be shown to a person",
-    ).not.toContainText("farhelm:precondition");
+    const formError = editing.locator(".profile-form-error");
+    await expect(formError).toBeVisible({ timeout: 20_000 });
+    await expect(formError).toContainText("declined this edit");
     await expect(
       editing.locator(".profile-form"),
-      "a conflict closes the editor: the definition it was seeded from is not the one out there",
+      "a refusal leaves the editor open with the draft still in it",
+    ).toHaveCount(1);
+    // The draft's VALUE, not merely the form's existence: a form rebuilt and
+    // reseeded from the catalog would pass the count assertion while losing
+    // the user's edit.
+    expect(
+      await editing.locator(".profile-name-input").inputValue(),
+      "the draft survives the refusal byte for byte",
+    ).toBe(draft);
+    await expect(
+      section(page, local).locator(".profiles-notice"),
+      "an ordinary refusal is the form's business, not a section-level notice",
     ).toHaveCount(0);
 
-    // Exactly one attempt, ever — a resubmit would be this client insisting on
-    // a state the helm just told it is gone. The barrier is the conflict's OWN
-    // consequence: a marked refusal invalidates the held catalog and asks for
-    // an authoritative read, so once that read has landed (the rows are back)
-    // any retry the client was going to make has had its chance. A sleep would
-    // only prove the test waited.
-    await expect(profileRow(page, local, profile.id)).toBeVisible({ timeout: 20_000 });
-    expect(sent.length, "a marked conflict must never be retried automatically").toBe(1);
-    // Byte for byte against what the helm SERVED, not merely "something was
-    // sent": a precondition that carries the wrong connection or a fingerprint
-    // this client computed itself is a precondition that refuses forever with
-    // nothing actually wrong, and "is defined" cannot tell those apart.
-    expect(
-      sent[0].expected_incarnation,
-      "the request must name the connection the hosts read reported",
-    ).toBe(hostRow!.incarnation);
-    expect(
-      sent[0].expected_definition,
-      "and the fingerprint the catalog served for this profile, echoed opaque",
-    ).toBe(servedFingerprint);
+    // Exactly one attempt: the save's operation token is released only after
+    // the refusal has been rendered, so once the form error is on screen any
+    // retry the client was going to make has had its chance. The body carries
+    // no precondition of either kind, which is the contract SPEC.md states
+    // for profile writes.
+    await expect(section(page, local).locator(".new-profile-button")).toBeEnabled({
+      timeout: 20_000,
+    });
+    expect(sent.length, "a refusal must never be retried automatically").toBe(1);
+    expect(sent[0].expected_incarnation, "profile writes name no connection").toBeUndefined();
+    expect(sent[0].expected_definition, "and no definition fingerprint").toBeUndefined();
   });
 
   /**

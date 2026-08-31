@@ -12,9 +12,14 @@
 //! [`CatalogRead`] stores the host its answer describes and hands back
 //! [`CatalogLookup::Pending`] for any other one, why a catalog for a
 //! different host replaces rather than merges, and why the create dialog
-//! drops a profile choice when its target host moves. The helm enforces the
-//! same rule from its side (see farhelm-helm's `profiles` module); this is
-//! the client half, and neither is trusted alone.
+//! drops a profile choice when its target host moves. The enforcement is
+//! CLIENT-side and lives in [`HostTarget`]: a catalog is keyed to a registry
+//! row plus its install fingerprint, and an answer from a superseded target
+//! is discarded rather than shown. The helm's profile routes carry no
+//! counterpart check (profile writes are last-write-wins); the one
+//! server-side guard against acting across an install boundary is the
+//! session create's incarnation precondition, which protects the LAUNCH
+//! rather than the catalog.
 //!
 //! ## Ask, do not guess
 //!
@@ -81,8 +86,8 @@ use crate::{ApiBase, Host, HostId, Profile, ProfileExistence, SourceProfile};
 // What a catalog belongs to
 // ---------------------------------------------------------------------
 
-/// The thing a profile catalog is ABOUT: a registry row together with the
-/// incarnation behind it.
+/// The thing a profile catalog is ABOUT: a registry row together with its
+/// install identity.
 ///
 /// A `HostId` alone is not enough, and the gap is not theoretical. A host id
 /// is a registry ROW that survives every edit made to it — a retarget points
@@ -95,32 +100,25 @@ use crate::{ApiBase, Host, HostId, Profile, ProfileExistence, SourceProfile};
 /// confirmation would delete the successor's, and a create dialog would offer
 /// the predecessor's catalog for a launch on the new machine.
 ///
-/// The incarnation is `hosts::host_incarnation`'s fingerprint — the same
-/// value the create dialog's idempotency key is bound to, and for the same
-/// reason. Compared, never parsed or displayed.
+/// The profile routes carry no precondition (SPEC.md: profile edits are
+/// last-write-wins, and the remembered default is a bare id per registry
+/// row), so a retarget or an adopt is caught HERE, by keying the catalog on
+/// the fingerprint below and re-reading whenever it moves. A refusal from a
+/// profile route is shown as ordinary prose; nothing about it is parsed for
+/// staleness. The session CREATE is the one request that still names the
+/// connection it was prepared against — see `list::create_form`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HostTarget {
     pub(crate) host: HostId,
-    /// The helm's CONNECTION token for this host (`Host::incarnation`), which
-    /// is also what every mutation prepared here hands back as
-    /// `expected_incarnation`.
-    ///
-    /// Part of the identity, so a reconnection re-activates the surface rather
-    /// than letting a request prepared on one connection be sent on another.
-    /// That costs an open editor its draft on a transient blip, which is the
-    /// deliberate side of the trade: the helm compares connections, so binding
-    /// this UI's state to anything coarser would mean the client-side check
-    /// and the server-side check disagree about what "the same install" is.
-    /// `0` is "never connected" and asserts nothing.
-    pub(crate) connection: u64,
     /// The registry row's own fingerprint (`hosts::host_incarnation`): the
-    /// destination, the install fields, the recorded identity.
+    /// destination, the install fields, the recorded identity — the same
+    /// value the create dialog's idempotency key is bound to, and for the
+    /// same reason. Compared, never parsed or displayed.
     ///
-    /// Kept ALONGSIDE the connection because they cover different windows. A
-    /// host that is down has no connection to change, so a retarget while it
-    /// is unreachable moves nothing above — but it changes what the row will
-    /// reach, and a create dialog aimed at it must not carry a choice across
-    /// that. Compared, never parsed or displayed.
+    /// This is what makes a retarget or an adopt re-activate the surface: a
+    /// host that is down has no connection to change, but a retarget while
+    /// it is unreachable still moves the fingerprint, and a stale catalog or
+    /// open editor must not survive that.
     fingerprint: String,
 }
 
@@ -129,7 +127,6 @@ impl HostTarget {
     pub(crate) fn of(host: &Host) -> HostTarget {
         HostTarget {
             host: host.id,
-            connection: host.incarnation,
             fingerprint: host_incarnation(host),
         }
     }
@@ -139,22 +136,13 @@ impl HostTarget {
     /// Built from the option rather than re-derived from the registry because
     /// the option already carries the fingerprint the create's key is bound
     /// to, and two derivations of one value is one too many.
-    pub(crate) fn new(host: HostId, connection: u64, fingerprint: String) -> HostTarget {
-        HostTarget {
-            host,
-            connection,
-            fingerprint,
-        }
-    }
-
-    /// What a mutation prepared against this target asserts about the world.
-    pub(crate) fn expectation(&self) -> api::Expectation<'static> {
-        api::Expectation::on(self.connection)
+    pub(crate) fn new(host: HostId, fingerprint: String) -> HostTarget {
+        HostTarget { host, fingerprint }
     }
 
     /// Whether two targets name the same INSTALL — the registry row and
-    /// everything about it that decides which machine and which binary answer,
-    /// ignoring which connection to it is current.
+    /// everything about it that decides which machine and which binary
+    /// answer.
     ///
     /// The distinction exists for one rule that would otherwise be violated
     /// quietly. A create's idempotency key must survive an ordinary
@@ -267,19 +255,7 @@ impl CatalogRead {
             return;
         };
         match change {
-            CatalogChange::Upsert(profile, fingerprint) => {
-                // The fingerprint moves with the definition, atomically. A
-                // stale one left behind is worse than none at all: the next
-                // edit would carry it as its precondition and be refused over
-                // a change this client itself just made.
-                match fingerprint {
-                    Some(fingerprint) => {
-                        catalog.definitions.insert(profile.id.clone(), fingerprint);
-                    }
-                    None => {
-                        catalog.definitions.remove(&profile.id);
-                    }
-                }
+            CatalogChange::Upsert(profile) => {
                 match catalog
                     .profiles
                     .iter_mut()
@@ -295,7 +271,6 @@ impl CatalogRead {
             }
             CatalogChange::Remove(id) => {
                 catalog.profiles.retain(|held| held.id != id);
-                catalog.definitions.remove(&id);
             }
         }
     }
@@ -344,18 +319,8 @@ pub(crate) struct CatalogLease {
 /// One change this client made and has already been told succeeded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CatalogChange {
-    /// A profile as the supervisor now holds it — a create or an edit —
-    /// together with the fingerprint of that committed definition, where the
-    /// helm served one.
-    ///
-    /// The two travel together because they are folded in together: an editor
-    /// reopened before the authoritative read is seeded from this pair, and a
-    /// definition paired with the PREVIOUS fingerprint would send a
-    /// precondition the helm refuses as stale — a conflict reported over this
-    /// client's own change. A create whose fingerprint never arrives leaves
-    /// the first edit of that profile unguarded instead, which is the lesser
-    /// of the two and is what an absent value means.
-    Upsert(Profile, Option<String>),
+    /// A profile as the supervisor now holds it — a create or an edit.
+    Upsert(Profile),
     /// A profile that is gone, by id.
     Remove(String),
 }
@@ -469,13 +434,13 @@ impl CatalogSurface {
         let Some((target, activation, generation)) = started else {
             return true;
         };
-        // The READ carries the same expectation its mutations do. Without it
-        // a catalog can be fetched from the successor of a host that was
-        // adopted mid-flight and then rendered as this target's — the ids
-        // would resolve, because starters collide across installs. A refusal
-        // arrives as an ordinary failed read: the section says the catalog
-        // could not be read, and the next activation asks again.
-        let outcome = api::fetch_profiles(&base, target.host, target.expectation()).await;
+        // There is no precondition on the wire to carry any more — a host
+        // adopted mid-flight is instead caught by `HostTarget`'s fingerprint:
+        // a retarget or an adopt bumps it, which re-activates this surface and
+        // supersedes any read already in flight (see `asking` below). A
+        // refusal arrives as an ordinary failed read: the section says the
+        // catalog could not be read, and the next activation asks again.
+        let outcome = api::fetch_profiles(&base, target.host).await;
         let answered = outcome.is_ok();
         // Superseded ACTIVATIONS are refused here, in addition to the
         // ordinary generation gate below. The two catch different things: the
@@ -1132,10 +1097,6 @@ struct ProfileDraft {
     /// escaped display safe: an untouched field round-trips byte for byte,
     /// however exotic.
     seed: Option<Profile>,
-    /// The fingerprint the seed was served with (`ProfileCatalog::definitions`),
-    /// echoed back as this update's `expected_definition`. `None` for a create,
-    /// and for a helm that does not serve fingerprints.
-    definition: Option<String>,
 }
 
 /// Which of the editor's text fields have been typed in.
@@ -1181,7 +1142,7 @@ impl ProfileDraft {
     /// Nothing is lost by it: [`ProfileDraft::spec`] sends the RAW seed for
     /// every field nobody typed in, so an untouched exotic name survives a
     /// save exactly.
-    fn of(profile: &Profile, definition: Option<&str>) -> ProfileDraft {
+    fn of(profile: &Profile) -> ProfileDraft {
         ProfileDraft {
             name: display_peer(&profile.name),
             invocation: display_peer(&profile.invocation),
@@ -1189,7 +1150,6 @@ impl ProfileDraft {
             resume: display_peer(&resume_text(profile.resume_template.as_deref())),
             edited: EditedFields::default(),
             seed: Some(profile.clone()),
-            definition: definition.map(str::to_string),
         }
     }
 
@@ -1305,9 +1265,9 @@ pub(crate) fn ProfilesSection(
     // account of what it did.
     let mut warning = use_signal(|| None::<String>);
     // Something happened to this catalog that the user did not do and has to
-    // be told about: a precondition refusal (the world moved under an editor),
-    // or a profile disappearing from under an open form. Distinct from
-    // `form_error`, which belongs to a form that is still open and still
+    // be told about: a profile disappearing from under an open editor or
+    // delete confirmation because another client changed it first. Distinct
+    // from `form_error`, which belongs to a form that is still open and still
     // holding a draft.
     let mut notice = use_signal(|| None::<String>);
 
@@ -1367,15 +1327,6 @@ pub(crate) fn ProfilesSection(
                 return;
             }
         };
-        // UPDATE ONLY, and only where the helm served one: the fingerprint the
-        // editor was seeded from, handed back so the far side refuses an edit
-        // that would silently overwrite somebody else's change. A create
-        // carrying it is refused outright, which is why it is dropped here
-        // rather than sent as `None`.
-        let definition = match &editing_now {
-            Editing::New => None,
-            Editing::Existing(_) => draft.peek().definition.clone(),
-        };
         let base = base.peek().clone();
         form_error.set(None);
         // A warning describes the mutation that produced it and nothing else,
@@ -1384,24 +1335,9 @@ pub(crate) fn ProfilesSection(
         warning.set(None);
         notice.set(None);
         spawn(async move {
-            // Each verb states exactly the expectations it may: a create has
-            // no prior definition (and the helm refuses one claiming a
-            // definition it cannot have), an update names both.
             let sent = match &editing_now {
-                Editing::New => {
-                    create_profile(&base, lease.target.host, &spec, lease.target.expectation())
-                        .await
-                }
-                Editing::Existing(id) => {
-                    update_profile(
-                        &base,
-                        lease.target.host,
-                        id,
-                        &spec,
-                        api::Expectation::replacing(lease.target.connection, definition.as_deref()),
-                    )
-                    .await
-                }
+                Editing::New => create_profile(&base, lease.target.host, &spec).await,
+                Editing::Existing(id) => update_profile(&base, lease.target.host, id, &spec).await,
             };
             // NOTHING below writes UI state unless this surface is still
             // asking the question this mutation was dispatched for.
@@ -1410,14 +1346,14 @@ pub(crate) fn ProfilesSection(
                 return;
             }
             match sent {
-                Ok(ProfileCommit::Confirmed(profile, fingerprint)) => {
+                Ok(ProfileCommit::Confirmed(profile)) => {
                     // Folded in BEFORE the token is released, which is what
                     // makes the window empty rather than merely short: until
                     // the authoritative re-read lands, reopening this row
                     // would otherwise seed the editor from the PRE-EDIT
                     // definition, and saving that would undo an update the
                     // supervisor has already accepted.
-                    surface.absorb_change(&lease, CatalogChange::Upsert(profile, fingerprint));
+                    surface.absorb_change(&lease, CatalogChange::Upsert(profile));
                     editing.set(None);
                     surface.request(Trigger::Explicit);
                 }
@@ -1432,34 +1368,13 @@ pub(crate) fn ProfilesSection(
                     editing.set(None);
                     surface.request(Trigger::Explicit);
                 }
-                Err(refusal) => {
-                    let (stale, prose) = api::precondition_of(&refusal);
-                    match stale {
-                        // The world moved under this editor. Never retried
-                        // automatically — a resubmit would be this client
-                        // insisting on a definition that is no longer the one
-                        // it was shown — so the form closes, the reason stands,
-                        // and the re-read below re-seeds whatever comes next.
-                        true => {
-                            editing.set(None);
-                            notice.set(Some(prose));
-                            // The refusal is PROOF the held catalog is stale —
-                            // it is what the precondition compared against. So
-                            // it is dropped rather than left reopenable until
-                            // the authoritative read lands: an editor seeded
-                            // from it would send the same doomed precondition,
-                            // and the user would be told twice about one
-                            // change they cannot see.
-                            surface.invalidate(&lease);
-                            surface.request(Trigger::Explicit);
-                        }
-                        // An ordinary refusal: the form STAYS open with what
-                        // was typed still in it — a refused name is usually one
-                        // keystroke from an accepted one, and closing it would
-                        // throw the draft away with the reason still on screen.
-                        false => form_error.set(Some(prose)),
-                    }
-                }
+                // An ordinary refusal — the helm no longer distinguishes a
+                // stale precondition from any other conflict, so this is
+                // shown as-is. The form STAYS open with what was typed still
+                // in it: a refused name is usually one keystroke from an
+                // accepted one, and closing it would throw the draft away
+                // with the reason still on screen.
+                Err(refusal) => form_error.set(Some(refusal)),
             }
             // Released on every path: a leaked token leaves the whole page
             // inert with nothing on screen to explain why.
@@ -1488,8 +1403,7 @@ pub(crate) fn ProfilesSection(
         notice.set(None);
         let base = base.peek().clone();
         spawn(async move {
-            let sent =
-                delete_profile(&base, lease.target.host, &id, lease.target.expectation()).await;
+            let sent = delete_profile(&base, lease.target.host, &id).await;
             if !surface.holds(&lease) {
                 ops.release();
                 return;
@@ -1502,20 +1416,11 @@ pub(crate) fn ProfilesSection(
                     surface.absorb_change(&lease, CatalogChange::Remove(id));
                     surface.request(Trigger::Explicit);
                 }
+                // An ordinary refusal, recorded per row (see the `errors` map
+                // above) exactly like any other operation this section can
+                // fail.
                 Err(refusal) => {
-                    let (stale, prose) = api::precondition_of(&refusal);
-                    match stale {
-                        true => {
-                            notice.set(Some(prose));
-                            // Same argument as the editor's: what this delete
-                            // was refused against is the catalog on screen.
-                            surface.invalidate(&lease);
-                            surface.request(Trigger::Explicit);
-                        }
-                        false => {
-                            errors.write().insert(id, prose);
-                        }
-                    }
+                    errors.write().insert(id, refusal);
                 }
             }
             ops.release();
@@ -1615,9 +1520,9 @@ pub(crate) fn ProfilesSection(
                     parts: vec![DetailPart::Peer(unread)],
                 }
             }
-            // A conflict or a disappearance, in the helm's own words where it
-            // has any (its precondition refusals name what moved and what to
-            // do). Rendered through the peer discipline like every other
+            // A profile the user was editing or about to delete disappearing
+            // out from under them, because another client changed the catalog
+            // first. Rendered through the peer discipline like every other
             // sentence this UI did not write.
             if let Some(said) = notice() {
                 PeerLine {
@@ -1676,21 +1581,15 @@ pub(crate) fn ProfilesSection(
                                 error: errors.read().get(&profile.id).cloned(),
                                 form_error: form_error.read().clone(),
                                 host_name: shown_host.clone(),
-                                // The fingerprint this row was SERVED with,
-                                // handed to the editor so a save can say which
-                                // definition it means to replace. Taken from
-                                // the same read as the profile beside it, so
-                                // the two cannot describe different moments.
-                                definition: catalog.definitions.get(&profile.id).cloned(),
                                 draft,
-                                on_edit_start: move |(profile, definition): (Profile, Option<String>)| {
+                                on_edit_start: move |profile: Profile| {
                                     if ops.busy_now() {
                                         return;
                                     }
                                     confirming.set(None);
                                     form_error.set(None);
                                     notice.set(None);
-                                    draft.set(ProfileDraft::of(&profile, definition.as_deref()));
+                                    draft.set(ProfileDraft::of(&profile));
                                     editing.set(Some(Editing::Existing(profile.id)));
                                 },
                                 on_submit,
@@ -1784,12 +1683,8 @@ fn ProfileRow(
     /// The host's name, ALREADY escaped by the section (every row shows the
     /// same one, so escaping it once above beats escaping it per row).
     host_name: String,
-    /// This profile's definition fingerprint as served, or `None` from a helm
-    /// that does not serve them. Carried into the editor and back out as an
-    /// update's `expected_definition`.
-    definition: Option<String>,
     draft: Signal<ProfileDraft>,
-    on_edit_start: EventHandler<(Profile, Option<String>)>,
+    on_edit_start: EventHandler<Profile>,
     on_submit: EventHandler<()>,
     on_cancel: EventHandler<()>,
     on_delete_start: EventHandler<String>,
@@ -1800,7 +1695,7 @@ fn ProfileRow(
     let shown_name = display_peer(&profile.name);
     let shown_invocation = display_peer(&profile.invocation);
     let shown_resume = display_peer(&resume_text(profile.resume_template.as_deref()));
-    let edit_target = (profile.clone(), definition.clone());
+    let edit_target = profile.clone();
 
     rsx! {
         div { class: "profile-row", "data-profile-id": "{profile.id}",
@@ -2098,14 +1993,13 @@ mod tests {
         ProfileCatalog {
             profiles,
             default_profile: default_profile.map(str::to_string),
-            definitions: Default::default(),
         }
     }
 
-    /// A target for the tests below: a host id plus an incarnation, which is
+    /// A target for the tests below: a host id plus a fingerprint, which is
     /// what a catalog actually belongs to.
-    fn target(host: HostId, incarnation: &str) -> HostTarget {
-        HostTarget::new(host, 1, incarnation.to_string())
+    fn target(host: HostId, fingerprint: &str) -> HostTarget {
+        HostTarget::new(host, fingerprint.to_string())
     }
 
     /// A catalog read for one target says NOTHING about another, however
@@ -2259,34 +2153,8 @@ mod tests {
         let mut read = CatalogRead::default();
         read.record(&host, 1, Ok(catalog(vec![profile("p-1", "Before")], None)));
 
-        read.absorb(
-            &host,
-            1,
-            CatalogChange::Upsert(profile("p-1", "After"), Some("after-fp".to_string())),
-        );
-        read.absorb(
-            &host,
-            1,
-            CatalogChange::Upsert(profile("p-2", "Fresh"), Some("fresh-fp".to_string())),
-        );
-        // The fingerprint moves WITH the definition: a stale one left behind
-        // is what the next editor would send as its precondition, and the helm
-        // would refuse it over a change this client itself just made.
-        match read.answer_for(Some(&host), 1) {
-            CatalogLookup::Known { catalog, .. } => {
-                assert_eq!(
-                    catalog.definitions.get("p-1").map(String::as_str),
-                    Some("after-fp")
-                );
-                assert_eq!(
-                    catalog.definitions.get("p-2").map(String::as_str),
-                    Some("fresh-fp"),
-                    "a created profile is guarded from its FIRST edit, which needs a fingerprint \
-                     it never had before"
-                );
-            }
-            other => panic!("the catalog must still be readable, got {other:?}"),
-        }
+        read.absorb(&host, 1, CatalogChange::Upsert(profile("p-1", "After")));
+        read.absorb(&host, 1, CatalogChange::Upsert(profile("p-2", "Fresh")));
         match read.answer_for(Some(&host), 1) {
             CatalogLookup::Known { catalog, .. } => {
                 assert_eq!(
@@ -2303,10 +2171,6 @@ mod tests {
             CatalogLookup::Known { catalog, .. } => {
                 assert_eq!(catalog.profiles.len(), 1);
                 assert_eq!(catalog.profiles[0].id, "p-2");
-                assert!(
-                    !catalog.definitions.contains_key("p-1"),
-                    "a deleted profile's fingerprint goes with it"
-                );
             }
             other => panic!("the catalog must still be readable, got {other:?}"),
         }
@@ -2317,13 +2181,9 @@ mod tests {
         read.absorb(
             &target(1, "install-b"),
             1,
-            CatalogChange::Upsert(profile("p-9", "Elsewhere"), None),
+            CatalogChange::Upsert(profile("p-9", "Elsewhere")),
         );
-        read.absorb(
-            &host,
-            2,
-            CatalogChange::Upsert(profile("p-8", "Later"), None),
-        );
+        read.absorb(&host, 2, CatalogChange::Upsert(profile("p-8", "Later")));
         match read.answer_for(Some(&host), 1) {
             CatalogLookup::Known { catalog, .. } => assert_eq!(catalog.profiles.len(), 1),
             other => panic!("the catalog must be untouched, got {other:?}"),
@@ -2600,7 +2460,7 @@ mod tests {
             invocation: "claude --dangerously-skip-permissions".to_string(),
             ..profile("p-1", "Claude Code")
         };
-        let spec = ProfileDraft::of(&stored, Some("fingerprint"))
+        let spec = ProfileDraft::of(&stored)
             .spec()
             .expect("an untouched draft needs no parsing");
         assert_eq!(spec.name, stored.name);
@@ -2628,7 +2488,7 @@ mod tests {
             resume_template: Some(vec!["claude".into(), "--note=a b".into()]),
             ..profile("p-1", "unused")
         };
-        let draft = ProfileDraft::of(&stored, Some("fingerprint"));
+        let draft = ProfileDraft::of(&stored);
         assert_eq!(
             draft.name, "Claude<U+202E>Code",
             "the field has to say what is stored"

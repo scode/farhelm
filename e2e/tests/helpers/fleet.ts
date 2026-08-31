@@ -101,9 +101,10 @@ export interface SessionPage {
 export interface HostRow {
   id: number;
   kind: string;
-  /** The helm's connection token, which every guarded mutation echoes back as
+  /** The helm's connection token, which a session create echoes back as
    * `expected_incarnation` — captured by the wire specs so they can assert the
-   * request carried THIS value rather than merely some value. */
+   * request carried THIS value rather than merely some value. The create is
+   * the only guarded request; profile reads and edits carry no precondition. */
   incarnation: number;
 }
 
@@ -114,8 +115,6 @@ export interface HostRow {
  * All of them are, now. The preservation spec reads the whole definition back
  * to prove an edit of one field rewrote nothing else, so the type says so
  * rather than leaving a reader to believe this suite only ever looks at names.
- * `definitions` is not here because it belongs to the REPLY rather than to a
- * profile — it is declared on [`ProfilesView`], where the wire specs read it.
  */
 export interface ProfileRow {
   id: string;
@@ -137,17 +136,6 @@ export interface ProfileRow {
 export interface ProfilesView {
   profiles: ProfileRow[];
   default_profile: string | null;
-  /**
-   * Each profile's definition fingerprint, by id — what an editor echoes back
-   * as `expected_definition`.
-   *
-   * Declared because the wire specs DO assert on it: they capture what the
-   * helm served and compare it byte for byte against what the UI sent, which
-   * is the only assertion that can tell an echoed value apart from one the
-   * client computed itself (a client-computed one refuses forever with nothing
-   * actually wrong).
-   */
-  definitions: Record<string, string>;
 }
 
 /** Fail loudly rather than returning a half-decoded body: every caller here

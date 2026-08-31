@@ -4881,7 +4881,7 @@ mod tests {
         // Written through the store's administrative entry point, which is
         // the one that records no source session — see the docstring.
         h.store
-            .remember_profile_default(local, Some("local-identity"), "local-p9")
+            .remember_profile_default(local, "local-p9")
             .await
             .expect("seeding a remembered default");
         let handler = HelmAgentRequests::for_state(&h.state);

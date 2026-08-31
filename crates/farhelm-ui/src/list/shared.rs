@@ -139,10 +139,11 @@ pub(super) struct HostOption {
     /// machine since the key was minted is a different intent.
     pub(super) incarnation: String,
     /// The helm's CONNECTION token for this host (`Host::incarnation`), which
-    /// a create hands back as its `expected_incarnation` so the helm can
-    /// refuse one prepared against an install that has since been replaced.
-    /// Distinct from the fingerprint above: that one describes the registry
-    /// ROW, this one the live connection behind it.
+    /// a session create hands back as its `expected_incarnation` so the helm
+    /// can refuse one prepared against an install that has since been
+    /// replaced. Distinct from the fingerprint above: that one describes the
+    /// registry ROW, this one the live connection behind it. The create is
+    /// the only request that still carries it; profile reads and edits do not.
     pub(super) connection: u64,
     /// The registry's recorded install identity (`Host::identity`), the
     /// third identity notion here and the one the create DEFAULT compares

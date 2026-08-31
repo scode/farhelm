@@ -680,16 +680,11 @@ pub struct HostSnapshot {
     /// [`ActorStatus::incarnation`], and read from the same borrow as the
     /// state beside it.
     ///
-    /// Published so a CLIENT can name the connection it prepared a request
-    /// against (`crate::precondition`). Without it the token exists only
-    /// inside the helm, and a browser that read a host's catalog, showed a
-    /// dialog, and posted an edit has no way to say which install it meant —
-    /// which is exactly the window a retarget or an adoption in another tab
-    /// lands in, and colliding starter profile ids make the result RESOLVE
-    /// on the successor rather than fail.
+    /// Published (`hosts::HostView::incarnation`) so a CLIENT can tell one
+    /// connection to a host from the next without interpreting the state
+    /// beside it; the UI's provisioning panel binds a displayed plan to it.
     ///
-    /// Zero means "never connected", so a client that has only ever seen a
-    /// down host has nothing to assert and must send no expectation.
+    /// Zero means "never connected".
     pub incarnation: u64,
 }
 
@@ -1144,10 +1139,6 @@ pub struct ConnectionManager {
     /// unconstructible rather than unlikely.
     reconcile: tokio::sync::Mutex<()>,
     actors: Mutex<ActorMap>,
-    /// How many callers are waiting in [`ConnectionManager::host_write_lock`]
-    /// — instrumentation, see that method's counterpart
-    /// [`ConnectionManager::queued_host_writes`].
-    host_write_queue: std::sync::atomic::AtomicUsize,
     /// The handler every connection this manager opens uses to answer an
     /// agent's questions, filled once by startup (see
     /// [`Self::set_agent_requests`]) and shared with each
@@ -1157,21 +1148,6 @@ pub struct ConnectionManager {
     /// harnesses, which have no fleet-wide state to describe. Such a
     /// connection still answers an upcall, with a refusal.
     agent_requests: crate::agent_requests::AgentRequestSlot,
-}
-
-/// Decrements [`ConnectionManager::host_write_queue`] however its waiter
-/// leaves — acquired, cancelled, or unwound.
-///
-/// A drop guard rather than a matching `fetch_sub`, because the wait it counts
-/// happens inside an axum handler whose future is dropped when its client
-/// disconnects; a plain decrement after the `await` would be skipped exactly
-/// then, and an instrument that only climbs is worse than none.
-struct QueuedHostWrite<'a>(&'a std::sync::atomic::AtomicUsize);
-
-impl Drop for QueuedHostWrite<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
 }
 
 /// The running actors, plus the one bit that can retire the whole set.
@@ -1457,7 +1433,6 @@ impl ConnectionManager {
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
-            host_write_queue: std::sync::atomic::AtomicUsize::new(0),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         });
         manager.sync_registry().await?;
@@ -2179,111 +2154,15 @@ impl ConnectionManager {
         Ok(())
     }
 
-    /// Remember which profile a host's session was last created from —
-    /// against the connection the create actually used.
-    ///
-    /// The same claim discipline as [`Self::remember_session`], and it is
-    /// not ceremony borrowed from it: a profile id means something only on
-    /// the supervisor that minted it, and every fresh supervisor seeds
-    /// STARTER profiles, so ids collide across installs by construction.
-    /// A retarget, a reconnect, or an adoption between the create and this
-    /// write would therefore record one install's profile id as another
-    /// install's default — an id that may well RESOLVE over there, to a
-    /// profile the user never chose. Checking the claim under this host's
-    /// cache lock, and binding the write to the identity the claim carries,
-    /// closes two of the three halves of that window: the check narrows it,
-    /// the store's own identity binding closes the reconnect and adoption
-    /// cases. The RETARGET case needs the lock taken here to also be taken by
-    /// the retarget — an identity-less host pointed at another identity-less
-    /// install passes the binding check on every read — which is what
-    /// [`Self::host_write_lock`] exists for.
-    ///
-    /// Returns whether the stored ROW changed — profile id AND identity
-    /// binding, see `crate::store::HelmStore::remember_profile_default` — so a
-    /// caller can invalidate only when there is something new to see. A stale
-    /// claim is an error rather than a silent skip, because the caller's
-    /// correct response is to say nothing rather than to publish a change that
-    /// did not happen.
-    pub async fn remember_profile_default(
-        &self,
-        claim: &SessionClaim,
-        profile_id: &str,
-    ) -> anyhow::Result<bool> {
-        let (status, cache_lock) = {
-            let map = self.actors.lock().expect("actor map mutex poisoned");
-            let Some(handle) = map.actors.get(&claim.host) else {
-                return Err(anyhow::Error::new(ManagerError::NoSuchHost(claim.host)));
-            };
-            (Arc::clone(&handle.status), Arc::clone(&handle.cache_lock))
-        };
-        let _writing = cache_lock.lock().await;
-        if !self.claim_is_current(claim, &status) {
-            anyhow::bail!(
-                "host {}'s connection changed between the create and its remembered-default \
-                 write; the preference was not recorded",
-                claim.host
-            );
-        }
-        self.store
-            .remember_profile_default(claim.host, claim.identity.as_deref(), profile_id)
-            .await
-    }
-
-    /// Remember a profile-backed create together with the session that
-    /// proves when that preference was established.
-    ///
-    /// The claim discipline is identical to [`Self::remember_profile_default`].
-    /// Keeping the provenance in the same identity-bound write lets later
-    /// drains converge on newer creates while refusing delayed older ones.
-    pub async fn remember_profile_default_from_session(
-        &self,
-        claim: &SessionClaim,
-        profile_id: &str,
-        session: &SessionInfo,
-    ) -> anyhow::Result<bool> {
-        let (status, cache_lock) = {
-            let map = self.actors.lock().expect("actor map mutex poisoned");
-            let Some(handle) = map.actors.get(&claim.host) else {
-                return Err(anyhow::Error::new(ManagerError::NoSuchHost(claim.host)));
-            };
-            (Arc::clone(&handle.status), Arc::clone(&handle.cache_lock))
-        };
-        let _writing = cache_lock.lock().await;
-        if !self.claim_is_current(claim, &status) {
-            anyhow::bail!(
-                "host {}'s connection changed between the create and its remembered-default \
-                 write; the preference was not recorded",
-                claim.host
-            );
-        }
-        self.store
-            .remember_profile_default_from_session(
-                claim.host,
-                claim.identity.as_deref(),
-                profile_id,
-                session.creation_seq,
-                session.created_at,
-                &session.id,
-            )
-            .await
-    }
-
     /// Hold this host's cache-write lock — the one every writer of its
     /// durable state already takes ([`Self::remember_session`],
-    /// [`Self::forget_session`], [`Self::remember_profile_default`], and the
-    /// actor's own refresh commit).
+    /// [`Self::forget_session`], and the actor's own refresh commit).
     ///
-    /// Exists for the REGISTRY writes that invalidate what those writers are
-    /// allowed to record, which is one specific pair: a retarget deletes the
-    /// remembered default inside the store's transaction, and the reconcile
-    /// that follows is what invalidates outstanding claims. Between the two, a
-    /// remembered-default write already past its claim check can land its row
-    /// AFTER the delete removed it — and an identity-less host retargeted to
-    /// another identity-less install matches `NULL` against `NULL` on every
-    /// later read, so the residue is served as the new install's own last
-    /// choice. Taking this across the whole retarget puts the two on one
-    /// queue: the write commits before the delete and is erased by it, or it
-    /// waits and finds its claim superseded.
+    /// Exists for the REGISTRY writes that must not interleave with those
+    /// writers: a retarget or a removal takes it so the row cannot move under
+    /// a cache write in flight, and provisioning holds it for its whole
+    /// confirmed run so a retarget cannot move the registry out from under a
+    /// frozen host plan.
     ///
     /// `None` for a host with no actor — nothing can be recording anything
     /// for an id the map does not hold, so there is nothing to serialize
@@ -2297,27 +2176,7 @@ impl ConnectionManager {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             Arc::clone(&map.actors.get(&host)?.cache_lock)
         };
-        self.host_write_queue
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let _queued = QueuedHostWrite(&self.host_write_queue);
         Some(cache_lock.lock_owned().await)
-    }
-
-    /// How many callers are currently BLOCKED in [`Self::host_write_lock`].
-    ///
-    /// Instrumentation, for the same reason the REST edge counts its profile
-    /// queue: "the retarget waited for the write already in flight" is the
-    /// entire content of the fence, and a `tokio::sync::Mutex` publishes no
-    /// waiter count of its own — so a test could otherwise only sleep, which
-    /// passes just as happily against a retarget that fences nothing.
-    ///
-    /// Counts only THIS entry point, never the actor's own commits or the
-    /// manager's session writes: what a test needs to observe is a registry
-    /// mutation queueing behind them, and folding every writer into one number
-    /// would make a refresh landing mid-test look like the thing under test.
-    pub fn queued_host_writes(&self) -> usize {
-        self.host_write_queue
-            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Ask `host` to refresh NOW, without disturbing anything else.
@@ -5246,7 +5105,13 @@ mod tests {
     }
 
     /// A refresh whose session cache is byte-identical still publishes when
-    /// disappearance repair changes only the remembered default.
+    /// the remembered default alone changes.
+    ///
+    /// The change staged here is a surviving source proving itself NEWER
+    /// than the stored provenance (the stored default's source is gone and
+    /// its sequence is older) — under the bare-id contract, disappearance
+    /// alone no longer replaces a default, so a genuinely newer survivor is
+    /// what makes the default move while the session rows stay identical.
     #[tokio::test(start_paused = true)]
     async fn default_changed_alone_bumps_the_fleet_revision() {
         let profiled = SessionInfo {
@@ -5298,14 +5163,7 @@ mod tests {
 
         fixture
             .store
-            .remember_profile_default_from_session(
-                host,
-                Some("defaults-identity"),
-                "profile-b",
-                Some(2),
-                100,
-                "gone-source-b",
-            )
+            .remember_profile_default_from_session(host, "profile-b", Some(0), 100, "gone-source-b")
             .await
             .unwrap();
         let before = fixture.manager.events().revision();
@@ -5344,7 +5202,7 @@ mod tests {
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "disappearance repair never finished publishing: still remembers \
+                "the newer-survivor advance never finished publishing: still remembers \
                  {remembered:?}, fleet revision {revision} (was {before})"
             );
             tokio::time::sleep(REFRESH_INTERVAL / 2).await;

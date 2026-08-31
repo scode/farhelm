@@ -889,7 +889,9 @@ remains that can never be represented on any page.
   derived by one catalog lookup when a reply is built (one per reply, not one per session), so an edit or a delete never
   rewrites historical rows and there is only one copy of existence truth. Creating a session from a profile that has
   since been deleted fails as a precondition — before any launch, with no session left behind — and never falls back to
-  another profile.
+  another profile. Profile writes carry no optimistic-concurrency check: an update replaces the stored definition whole,
+  last write wins (SPEC.md, Concepts / Agent profile), and the helm serves no definition fingerprint for a client to
+  echo back.
 - Sessions launch through the user's shell as an interactive login shell inside the PTY —
   `$SHELL -l -i -c 'exec farhelm internal launch ...'` as the window's command, with the shim doing the final exec of
   the profile invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different
