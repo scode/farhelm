@@ -112,11 +112,11 @@ impl TmuxDriver {
 /// because tmux rejects a command carrying on the order of ~1000
 /// arguments as "command too long", and each input byte becomes one hex
 /// argument; 256 stays far below that ceiling with comfortable margin.
-/// Chunks are written and their replies read strictly one at a time —
-/// there is no pipelining — which is fine because nothing else ever
-/// contends for this client's stdin/stdout: unlike `OutputStream`'s
-/// former shared-stdin design, there is no concurrent-caller reordering
-/// hazard here to guard against.
+/// Chunks are pipelined in bounded batches before their ordered replies are
+/// read. Nothing else contends for this client's stdin/stdout, so reply order
+/// is enough to keep each confirmation paired with its command; the bound
+/// prevents tmux's replies from filling the client pipe while writes are
+/// still in progress. See [`InputClient::send`] for the full contract.
 pub struct InputClient {
     /// Never read directly — `#[allow(dead_code)]` documents that this is
     /// deliberate, not an oversight. Kept alive purely so dropping this
