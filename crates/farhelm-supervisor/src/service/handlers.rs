@@ -30,9 +30,8 @@ use super::launch_artifacts::{
 use super::listing::{
     LIST_BYTE_BUDGET, LIST_SESSION_CAP, ListQuery, build_list_reply, decode_list_cursor, list_page,
 };
-use super::snapshots::{capture_alt_screen_before_stop, publish_alt_screen_snapshot};
 use super::status::{dead_pane_exit_code, entry_info, observe_entry};
-use super::sweep::{StopFailure, SweepTarget, reap_process_tree, stop_live_agent};
+use super::sweep::{SweepTarget, reap_process_tree, stop_live_agent};
 use super::teardown::{ArchiveError, TeardownError};
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
@@ -726,10 +725,9 @@ async fn handle_list_sessions(
 /// session's attach, input, and list/stop/delete behind this
 /// one stop. Safe for the same locking reason: this handler's
 /// `sessions` lookup is a single lock-guarded clone, and stop
-/// leaves attachment entries intact (it briefly takes the
-/// attachment-map lock to serialize the stop snapshot against
-/// deletion, but never removes or replaces an entry) and never
-/// touches `input_routes` at all (see `ControlMsg::StopSession`'s
+/// never takes the attachment-map lock at all — it leaves every
+/// attachment entry intact — and never touches `input_routes`
+/// either (see `ControlMsg::StopSession`'s
 /// own docs on why the existing attachment is left untouched).
 /// Tracked and admitted exactly like `ListSessions` above — see
 /// `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`.
@@ -838,12 +836,10 @@ async fn handle_stop_session(
             },
             None => None,
         };
-        // One "alive" check deciding BOTH which lifecycle this stop
-        // runs and whether an alt-screen capture is worth
-        // attempting, rather than two independent `!pane.dead`
-        // checks scattered across this handler. The stale pid a
-        // dead pane still reports is deliberately never read; it
-        // may already be recycled.
+        // The one "alive" check that decides which lifecycle this
+        // stop runs (kill a live tree, or classify a dead pane). The
+        // stale pid a dead pane still reports is deliberately never
+        // read; it may already be recycled.
         let alive_pane = pane_state.filter(|pane| !pane.dead);
 
         // What this stop records, and why the two branches differ.
@@ -877,65 +873,17 @@ async fn handle_stop_session(
         // handler's alone: it records a CLASSIFICATION rather than
         // an intent, and has no annotation to write.
         let stop_error = if let Some(pane) = alive_pane {
-            // Capture the alt-screen snapshot (if any) BEFORE the
-            // kill destroys it, but do NOT write it to disk yet —
-            // see `publish_alt_screen_snapshot`'s docs for why
-            // publishing waits until the kill's own outcome is
-            // known. `capture_alt_screen_before_stop` itself
-            // decides (atomically, in tmux) whether that pane is
-            // really on the alternate screen.
-            //
-            // Deliberately taken before the durable intent too,
-            // which is a change from when this handler owned the
-            // whole lifecycle inline: the capture is a READ (one
-            // tmux `capture-pane`) that signals nothing, so it
-            // cannot violate the "nothing dies before the intent is
-            // recorded" rule the intent exists to enforce — and
-            // moving it out of the middle is what lets intent,
-            // sweep, and outcome stay one shared unit.
-            let pending_snapshot = match entry.terminal.as_ref() {
-                Some(terminal) => capture_alt_screen_before_stop(&sup, &session_id, terminal).await,
-                None => None,
-            };
-            // Published into `Supervisor::pending_snapshots` (see
-            // that field's own docs) BEFORE the kill runs:
-            // `kill_process_tree` can take up to a couple of
-            // seconds against an uncooperative tree, and tmux can
-            // mark the pane dead well before that returns. Making
-            // the capture visible to a concurrent `Attach` for this
-            // whole window — not only after
-            // `publish_alt_screen_snapshot` finally writes it to
-            // disk — is what closes the "attach lands mid-stop,
-            // sees a dead pane with nothing to show" gap. Cloned
-            // rather than moved: this handler still needs its own
-            // copy below regardless of what `Attach` does with the
-            // map's copy concurrently.
-            if let Some(bytes) = pending_snapshot.clone() {
-                sup.pending_snapshots
-                    .lock()
-                    .await
-                    .insert(session_id.clone(), bytes);
-            }
-            let stopped = stop_live_agent(&sup, &session_id, &entry, Some(pane.pid)).await;
-            // Published only for the two outcomes that leave the
-            // agent provably dead. A stop whose intent never
-            // recorded (nothing was killed) or whose sweep could
-            // not be confirmed must never plant a snapshot file
-            // that a later, unrelated exit's own dead-pane replay
-            // could be mistaken for.
-            if matches!(stopped, Ok(()) | Err(StopFailure::UnrecordedOutcome(_)))
-                && let Some(bytes) = pending_snapshot
-            {
-                publish_alt_screen_snapshot(&sup, &session_id, &bytes, crate::files::RealFs).await;
-            }
-            // Removed only now, AFTER publish has run (or been
-            // skipped because there was never anything to publish):
-            // a concurrent `Attach` must be able to see this entry
-            // for the entire capture-to-published-file window, not
-            // just up to this point — see
-            // `Supervisor::pending_snapshots`'s docs.
-            sup.pending_snapshots.lock().await.remove(&session_id);
-            stopped.err().map(|failure| failure.message())
+            // Nothing is read off the pane before the kill. A stop
+            // used to capture an alternate-screen app's last frame
+            // here and replay it on the dead pane afterwards; SPEC.md
+            // (Terminal experience) now says a full-screen program's
+            // last frame is not retained after it exits and no
+            // snapshot of it is taken or stored. What the dead pane
+            // shows is whatever tmux itself still holds.
+            stop_live_agent(&sup, &session_id, &entry, Some(pane.pid))
+                .await
+                .err()
+                .map(|failure| failure.message())
         } else {
             let current = entry
                 .outcome
@@ -1827,9 +1775,9 @@ async fn handle_attach(
     // infallible and instant.
     permit.send(reply_frame(&ControlMsg::Attached { req_id, channel }));
 
-    // Everything from here on — the replay prefill, the dead-pane
-    // snapshot, and the live pump — happens inside the forwarder
-    // task rather than here, and that placement is load-bearing.
+    // Everything from here on — the replay prefill and the live
+    // pump — happens inside the forwarder task rather than here,
+    // and that placement is load-bearing.
     // A full replay is megabytes of 32 KiB frames, and this
     // handler runs under the supervisor-wide `attachments` mutex;
     // sending them here would mean AWAITING a bounded queue (see
@@ -1837,8 +1785,7 @@ async fn handle_attach(
     // slow client stall every other session's attach and input.
     // Ordering is unaffected: the forwarder is this channel's
     // only writer, so its prefill necessarily precedes its own
-    // live output. The dead-pane stop snapshot moved with it —
-    // see `Forwarder::send_dead_pane_snapshot`.
+    // live output.
     let (pause_tx, pause_rx) = watch::channel(None);
     let (forwarder_shutdown, shutdown_rx) = watch::channel(false);
     let (forwarder_cleanup, cleanup_rx) = watch::channel(None);

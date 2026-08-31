@@ -302,6 +302,22 @@ pub(crate) async fn supervisor_process_with_env(
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
 ) -> SupervisorProcess {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
+    supervisor_process_on_state(state, env).await
+}
+
+/// [`supervisor_process_with_env`], on a caller-prepared state directory.
+///
+/// Exists for tests that must plant on-disk state (an older build's
+/// leftovers, say) BEFORE the supervisor's own startup sequence runs over
+/// it — the in-process [`harness`] cannot serve them, because it wires its
+/// client straight into `handle_connection` and never runs `serve`, which
+/// is where the startup sweeps live. This spawns the real
+/// `supervisor run` CLI, so what runs over the planted state is the
+/// production startup path, byte for byte.
+pub(crate) async fn supervisor_process_on_state(
+    state: farhelm_teststate::TestDir,
+    env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
+) -> SupervisorProcess {
     let mut command = tokio::process::Command::new(farhelm_bin());
     command
         .args(["supervisor", "run", "--state-dir"])
@@ -1164,23 +1180,13 @@ pub(crate) async fn wait_for(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &s
 /// Like [`wait_for`], but ordered: first wait until `first` appears, then
 /// keep reading until `then` appears strictly AFTER `first`'s position.
 ///
-/// Exists for the snapshot replays whose fixture died still ON the
-/// alternate screen: whether a dead pane's capture retains the app's last
-/// frame or substitutes tmux's "Pane is dead" placeholder is
-/// version-dependent (3.4 retains it, 3.7b substitutes — observed
-/// directly on both), so the PREFILL may already contain the same marker
-/// text the snapshot suffix carries. A plain `wait_for(marker)` then
-/// returns before the divider/snapshot frames ever arrive and any
-/// assertion about them races. Anchoring the content wait after the
-/// divider's own position is version-proof: the divider exists only in
-/// the suffix.
-///
-/// Its second job is the fixture-readiness barrier: `("FAKE-AGENT READY",
-/// "> ")` waits for the fake agent's PROMPT rather than its ready marker,
-/// which is what a test must do before it types if it later asserts on the
+/// Its job is the fixture-readiness barrier: `("FAKE-AGENT READY", "> ")`
+/// waits for the fake agent's PROMPT rather than its ready marker, which
+/// is what a test must do before it types if it later asserts on the
 /// startup rows (see `reattach_replays_history_and_modes`). Anchoring
-/// matters there for a different reason than above — `"> "` is not unique
-/// to startup, so only its position after the marker identifies it.
+/// matters because `"> "` is not unique to startup, so only its position
+/// after the marker identifies it. (It once also anchored assertions on a
+/// dead pane's appended stop-time snapshot; that mechanism is gone.)
 pub(crate) async fn wait_for_after(
     rx: &mut TermStream,
     seen: &mut Vec<u8>,

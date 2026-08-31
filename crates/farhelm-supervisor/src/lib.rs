@@ -55,15 +55,12 @@ pub mod service;
 pub mod store;
 pub mod tmux;
 
-// Re-exported at the crate root so `crate::write_private_file` /
-// `crate::overwrite_private_file` reads naturally at every call site: both
-// keep `service.rs`'s pre-existing spelling unchanged (the write-atomicity
-// policy and its fault-injection seam live in `files`, PLAN_M3.md item 5,
-// but moving the helpers there is a re-homing, not a rename), while
-// `tmux.rs` is a NEW consumer of `overwrite_private_file` added in this
-// same change (see that module's docs for why the tmux config joined this
-// tier), not a call site this re-export is preserving.
-pub use files::{overwrite_private_file, write_private_file};
+// Re-exported at the crate root so `crate::write_private_file` reads
+// naturally at its call site: it keeps `service.rs`'s pre-existing
+// spelling unchanged (the write-atomicity policy and its fault-injection
+// seam live in `files`, PLAN_M3.md item 5, but moving the helper there
+// was a re-homing, not a rename).
+pub use files::write_private_file;
 
 /// Create a state directory (and parents) restricted to the owning user.
 ///

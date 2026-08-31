@@ -10,7 +10,6 @@
 use super::capture::note_first_input;
 use super::core::Supervisor;
 use super::handlers::{handle_control, handle_restricted_control};
-use super::snapshots::load_alt_screen_snapshot;
 use super::terminals::{ActiveAttach, AttachmentKey, InputRoute, OutputReapOutcome, TerminalId};
 use super::uploads::{
     UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal, prune_finished_uploads,
@@ -961,14 +960,11 @@ enum ForwarderEnd {
 /// eight captured variables through free functions read far worse than
 /// methods on the thing they all belong to.
 ///
-/// It never takes `Supervisor::attachments`. That is the invariant — and
-/// only that one — which lets the takeover, detach, and delete paths request
-/// shutdown and await a forwarder while holding that mutex; the one place
-/// this task needs the map (the stall teardown) hands the work to a separate
-/// task for exactly that reason. It is NOT lock-free in general:
-/// `send_dead_pane_snapshot` briefly takes `pending_snapshots`, which is
-/// safe precisely because nothing ever holds that lock across a wait on a
-/// forwarder.
+/// It never takes `Supervisor::attachments`. That is the invariant which
+/// lets the takeover, detach, and delete paths request shutdown and await a
+/// forwarder while holding that mutex; the one place this task needs the
+/// map (the stall teardown) hands the work to a separate task for exactly
+/// that reason.
 pub(crate) struct Forwarder {
     pub(crate) sup: Arc<Supervisor>,
     pub(crate) session_id: String,
@@ -1135,41 +1131,7 @@ impl Forwarder {
             .await?;
         self.send_bytes(content).await?;
         self.send_bytes(modes.post_content_sequences().into_bytes())
-            .await?;
-        if modes.pane_dead {
-            self.send_dead_pane_snapshot(modes.alternate_on).await?;
-        }
-        Ok(())
-    }
-
-    /// Append the stop-time alt-screen snapshot, if this session has one,
-    /// after a dead pane's ordinary prefill.
-    ///
-    /// See [`load_alt_screen_snapshot`] for what is appended and why the
-    /// gate is the snapshot's existence rather than the pane's current
-    /// screen. `pane_alternate` decides only PLACEMENT: when the dead pane
-    /// is still on the alternate screen, `\x1b[?1049l` leaves it first, so
-    /// the divider and snapshot land on the primary screen whose real
-    /// scrollback can absorb whatever does not fit — otherwise they would
-    /// land in the scrollback-less alternate buffer the mode replay just
-    /// re-entered and bury their own top rows with nowhere to overflow to.
-    ///
-    /// Sent as separate pieces rather than one concatenated buffer, and
-    /// through [`Self::send_bytes`] like every other byte a forwarder
-    /// writes: avoids a second full copy of a snapshot that may be
-    /// megabytes, and inherits the same chunking, pause gating, and stall
-    /// deadline as the rest of the replay.
-    async fn send_dead_pane_snapshot(&mut self, pane_alternate: bool) -> Result<(), ForwarderEnd> {
-        let Some(bytes) = load_alt_screen_snapshot(&self.sup, &self.session_id).await else {
-            return Ok(());
-        };
-        if pane_alternate {
-            self.send_bytes(b"\x1b[?1049l".to_vec()).await?;
-        }
-        self.send_bytes(b"\r\n\x1b[2m-- last screen before stop --\x1b[0m\r\n".to_vec())
-            .await?;
-        self.send_bytes(bytes).await?;
-        self.send_bytes(b"\r\n".to_vec()).await
+            .await
     }
 
     /// Tell the client its attach's catch-up is over: every byte this

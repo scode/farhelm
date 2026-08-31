@@ -18,7 +18,6 @@
 mod control_codec;
 mod input;
 mod sink;
-mod snapshot;
 mod stream;
 #[cfg(test)]
 mod test_support;
@@ -26,8 +25,6 @@ mod test_support;
 pub use control_codec::unescape_control_output;
 pub use input::InputClient;
 pub use sink::SessionSink;
-pub use snapshot::AltScreenCapture;
-pub(crate) use snapshot::within_snapshot_cap;
 pub(crate) use stream::ReplayStreamCandidate;
 pub use stream::{OutputEvent, OutputReaper, OutputStream};
 
@@ -38,7 +35,6 @@ use control_codec::{
     PANE_FACT_FORMAT, PANE_MARKER_FORMAT, any_session_has_several_windows, join_pane_markers,
     parse_pane_facts,
 };
-use snapshot::parse_alt_screen_capture;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -241,20 +237,9 @@ fn control_cleanup_retry_delay(failures: u32) -> std::time::Duration {
 }
 
 /// The format is deliberately comma-separated. See [`PaneModes::parse`].
-///
-/// `#{pane_dead}` rides along on this same query rather than a separate
-/// `pane_process` call from the `Attach` handler — `pane_process` is a
-/// plain (non-control-mode) tmux invocation of its own, and this format is
-/// already fetched as part of the control-mode replay cutover command
-/// group in `OutputStream::snapshot_then_cutover`, so folding the dead
-/// flag in here avoids that extra round trip entirely rather than merely
-/// avoiding a second CONTROL-mode one. The dead flag is what the `Attach`
-/// handler (service.rs) uses to decide whether to append the alt-screen
-/// stop snapshot.
 const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_all_flag},\
                                 #{mouse_button_flag},#{mouse_standard_flag},#{mouse_sgr_flag},\
-                                #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y},\
-                                #{pane_dead}";
+                                #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y}";
 
 /// How long `OutputStream::foreign_panes` gives tmux to list a
 /// session's panes, independently of the attach's own budget.
@@ -1122,12 +1107,6 @@ pub struct PaneModes {
     pub cursor_x: u16,
     /// Cursor row, 0-based; see `cursor_x`.
     pub cursor_y: u16,
-    /// tmux's `#{pane_dead}` at the moment replay was captured — the same
-    /// flag [`PaneProcess::dead`] reports, fetched here instead so the
-    /// `Attach` handler (service.rs) can decide whether to append the
-    /// alt-screen stop snapshot without a second tmux round trip. See
-    /// [`PANE_MODE_FORMAT`]'s docs.
-    pub pane_dead: bool,
 }
 
 impl PaneModes {
@@ -1155,12 +1134,6 @@ impl PaneModes {
         let mut num = || -> u16 { it.next().and_then(|v| v.parse().ok()).unwrap_or(0) };
         let cursor_x = num();
         let cursor_y = num();
-        // `num`'s borrow of `it` ends at `cursor_y` above (its last use),
-        // so this can read `it` directly rather than reusing either
-        // closure. `Some("")` and `None` both fall through to `false`
-        // here exactly as `flag`'s default does, since `matches!` only
-        // matches the literal `Some("1")`.
-        let pane_dead = matches!(it.next(), Some("1"));
         PaneModes {
             alternate_on,
             bracket_paste,
@@ -1172,7 +1145,6 @@ impl PaneModes {
             app_cursor_keys,
             cursor_x,
             cursor_y,
-            pane_dead,
         }
     }
 
@@ -1306,10 +1278,9 @@ pub struct PaneProcess {
 /// `Supervisor::known_session_tmux_name`, which every lifecycle call site
 /// consults.
 ///
-/// Modelled as an outcome rather than an error — the precedent is
-/// [`AltScreenCapture::SessionMismatch`], which already distinguishes the
-/// same hazard for captures — because a foreign owner is not a failure to
-/// ask tmux anything. It is a decisive answer about the NAME, and each
+/// Modelled as an outcome rather than an error because a foreign owner is
+/// not a failure to ask tmux anything. It is a decisive answer about the
+/// NAME, and each
 /// caller decides what that means for its own operation: the lifecycle
 /// verbs proceed on other kill mechanisms for a recycled id and refuse
 /// otherwise, while a pane this process created moments ago being foreign
@@ -1339,8 +1310,8 @@ pub enum PaneProbe {
 
 /// One read-buffer's worth of bytes pulled per `read` call while
 /// streaming a bounded capture. 64 KiB balances syscall count against
-/// wasted allocation for the common case (a snapshot far under the cap).
-const ALT_SCREEN_READ_CHUNK: usize = 64 * 1024;
+/// wasted allocation for the common case (a capture far under the cap).
+const CAPTURE_READ_CHUNK: usize = 64 * 1024;
 
 /// Headroom `capture_pane_plain` retains beyond the caller's `max_bytes`
 /// while streaming a capture.
@@ -1353,19 +1324,6 @@ const ALT_SCREEN_READ_CHUNK: usize = 64 * 1024;
 /// tens of kilobytes rather than the tens of megabytes an unbounded read
 /// of that same pane would reach.
 const TAIL_RETAIN_ALLOWANCE: usize = 64 * 1024;
-
-/// Slack added on top of a caller's `max_bytes` cap before
-/// [`TmuxDriver::capture_alt_screen_if_active`] gives up and discards.
-///
-/// The combined invocation's output is the `display-message` header
-/// (`"<0|1> <session-name>\n"`, at most a couple hundred bytes for any
-/// realistic tmux session name) followed by the `capture-pane` body,
-/// which is what the cap is actually meant to bound. Without this slack,
-/// a capture whose BODY is legitimately exactly at the cap would be
-/// discarded purely because the header pushed the combined stream a few
-/// bytes over — an off-by-header-size rejection with no bearing on
-/// whether the body itself was reasonably sized.
-const ALT_SCREEN_HEADER_SLACK: usize = 1024;
 
 /// One pane's liveness as [`TmuxDriver::pane_states`] reports it —
 /// `ListSessions`'s cheaper cousin of [`PaneProcess`]: no pid (status
@@ -1602,13 +1560,12 @@ impl std::error::Error for TmuxCommandFailure {}
 /// So this form answers "never another session's terminal", not "exactly
 /// this pane or nothing". Every caller must therefore address a pane it
 /// has just resolved and holds still — which is what the session lifecycle
-/// claim buys the tab operations — and the two queries whose whole job is
-/// to DETECT a vanished or recycled pane ([`TmuxDriver::pane_process`] and
-/// [`TmuxDriver::capture_alt_screen_if_active`]) deliberately use the bare
-/// pane id instead: it expands empty for a pane that is gone, which is the
-/// signal they are built to read, and each cross-checks `#{session_name}`
-/// from the same atomic invocation for the scoping this form would have
-/// given them.
+/// claim buys the tab operations — and the one query whose whole job is
+/// to DETECT a vanished or recycled pane ([`TmuxDriver::pane_process`])
+/// deliberately uses the bare pane id instead: it expands empty for a pane
+/// that is gone, which is the signal it is built to read, and it
+/// cross-checks `#{session_name}` from the same atomic invocation for the
+/// scoping this form would have given it.
 fn pane_in_session(session: &str, pane: &str) -> String {
     format!("={session}:.{pane}")
 }
@@ -1617,61 +1574,6 @@ fn env_assignments(env: &[(String, String)]) -> Vec<String> {
     env.iter()
         .map(|(name, value)| format!("{name}={value}"))
         .collect()
-}
-
-/// What [`TmuxDriver::plan_pane_relaunch`] arranged before a respawn,
-/// and what the caller still owes because of it.
-///
-/// Split from the respawn itself because the two halves have to
-/// straddle a step that belongs to neither: the preamble has to be in
-/// the launch spec BEFORE the new process starts, and the geometry has
-/// to be restored AFTER it. Returning a plan rather than doing it all
-/// inline is what lets the caller sequence spec-write → respawn →
-/// restore without this module knowing about launch specs.
-///
-/// ## Why either half exists
-///
-/// `respawn-pane` retains a pane's scrollback HISTORY but
-/// reinitializes its visible grid (measured on every version audited
-/// below), so what the user last saw is precisely what a naive respawn
-/// throws away. Two mechanisms recover it, and which one applies is
-/// decided here:
-///
-/// - **The shrink** (`restore`): shrinking a window scrolls the lines
-///   it no longer has room for into history, and growing it back pulls
-///   them out. Shrinking to one row therefore moves the ENTIRE visible
-///   screen into history before the respawn can clear it. Applies to a
-///   pane on the primary screen with more than one row.
-/// - **The carried-over frame** (`carry_over`): an ALTERNATE-screen
-///   grid has no history to scroll into (that is what the alternate
-///   screen is), so shrinking preserves nothing; a one-row window has
-///   nothing to shrink. In both cases the frame is captured instead and
-///   handed back for the new run to re-emit through its launch spec
-///   (`launch::LaunchSpec::preamble`) — the same content the stop
-///   snapshot already captures for a dead alt-screen pane, put to the
-///   one use that survives a respawn.
-///
-/// Version floor: `respawn-pane -k`, `-e` environment injection,
-/// history retention, the shrink-scrolls-into-history rule, and the
-/// grow-pulls-back rule were all audited empirically against tmux 3.3a
-/// (the crate's floor when this was written), 3.4 (Ubuntu 24.04's
-/// package, so CI's), and 3.7b (the development host at the time; today's
-/// [`TMUX_FLOOR`] is newer still). All three behave identically; nothing
-/// here needs a version gate, and raising the floor past them only
-/// narrowed the range this evidence has to cover.
-///
-/// Every step is BEST EFFORT and never fails the relaunch: a resize or
-/// capture that does not land costs scrollback fidelity, while refusing
-/// to relaunch over it would cost the user their agent. A shrink whose
-/// restore never runs (a crash mid-restart) is not permanent either —
-/// every attach resizes the window to its own client size.
-pub struct PaneRelaunchPlan {
-    /// The geometry to restore after the respawn, when this plan
-    /// shrank the window to push its visible screen into history.
-    pub restore: Option<(u16, u16)>,
-    /// The prior run's last visible frame, for the cases the shrink
-    /// cannot cover; the caller emits it through the new launch.
-    pub carry_over: Option<Vec<u8>>,
 }
 
 impl TmuxDriver {
@@ -2454,108 +2356,6 @@ impl TmuxDriver {
         Ok(pane.trim().to_string())
     }
 
-    /// Prepare `pane` to be respawned so the prior run's last screen
-    /// survives it; see [`PaneRelaunchPlan`] for what the two halves do and
-    /// why the work is split around the caller's own launch publication.
-    ///
-    /// `max_carry_over` bounds the captured frame exactly like the stop
-    /// snapshot bounds its own (see
-    /// [`TmuxDriver::capture_alt_screen_if_active`]): the bytes travel
-    /// through a launch spec and then through the pane, and an unbounded
-    /// capture of a 10,000-row pane is not something either should have to
-    /// carry.
-    pub async fn plan_pane_relaunch(
-        &self,
-        session: &str,
-        pane: &str,
-        max_carry_over: usize,
-    ) -> PaneRelaunchPlan {
-        let geometry = match self
-            .run(&[
-                "display-message",
-                "-p",
-                "-t",
-                &pane_in_session(session, pane),
-                "#{window_width} #{window_height} #{alternate_on}",
-            ])
-            .await
-        {
-            Ok(out) => out,
-            Err(e) => {
-                warn!(
-                    session, error = %e,
-                    "could not inspect this window before a relaunch; relaunching without \
-                     carrying the prior run's visible screen over"
-                );
-                return PaneRelaunchPlan {
-                    restore: None,
-                    carry_over: None,
-                };
-            }
-        };
-        let mut fields = geometry.split_whitespace();
-        let parsed = fields
-            .next()
-            .and_then(|w| w.parse::<u16>().ok())
-            .zip(fields.next().and_then(|h| h.parse::<u16>().ok()));
-        let alternate = fields.next() == Some("1");
-        let Some((cols, rows)) = parsed else {
-            warn!(
-                session,
-                geometry = %geometry.trim(),
-                "tmux reported an unparseable window size before a relaunch; relaunching \
-                 without carrying the prior run's visible screen over"
-            );
-            return PaneRelaunchPlan {
-                restore: None,
-                carry_over: None,
-            };
-        };
-        // The two cases the shrink cannot serve (see `PaneRelaunchPlan`):
-        // an alternate-screen grid, which has no history to scroll into,
-        // and a window with nothing to scroll.
-        if alternate || rows <= 1 {
-            let carry_over = match self
-                .capture_alt_screen_if_active(session, pane, max_carry_over)
-                .await
-            {
-                Ok(AltScreenCapture::Captured(bytes)) => Some(bytes),
-                // A one-row PRIMARY screen lands here (nothing to capture
-                // that is worth a second capture path), as does an
-                // oversized or mismatched capture. Losing the frame costs
-                // the same as the respawn's own grid reset would.
-                Ok(_) => None,
-                Err(e) => {
-                    warn!(
-                        session, error = %e,
-                        "could not capture this pane's last frame before a relaunch; the new \
-                         run starts without it above"
-                    );
-                    None
-                }
-            };
-            return PaneRelaunchPlan {
-                restore: None,
-                carry_over,
-            };
-        }
-        if let Err(e) = self.resize_window(session, pane, cols, 1).await {
-            warn!(
-                session, error = %e,
-                "could not shrink this window before a relaunch; the prior run's visible \
-                 screen may be cleared by the respawn"
-            );
-            return PaneRelaunchPlan {
-                restore: None,
-                carry_over: None,
-            };
-        }
-        PaneRelaunchPlan {
-            restore: Some((cols, rows)),
-            carry_over: None,
-        }
-    }
-
     /// Run `window_cmd` in an EXISTING pane (PLAN_M3.md item 9's terminal
     /// reuse), replacing whatever was there.
     ///
@@ -2920,189 +2720,15 @@ impl TmuxDriver {
         Ok(PaneProbe::Owned(PaneProcess { pid, dead }))
     }
 
-    /// Atomically check whether `pane` is on the alternate screen and, if
-    /// so, capture its visible content — in ONE tmux invocation, not two.
-    ///
-    /// The flag and the capture MUST come from the same tmux process
-    /// call: two separate calls (a `display-message` to read
-    /// `#{alternate_on}`, then a later `capture-pane`) can straddle a
-    /// genuine screen transition happening between them, either
-    /// capturing primary-screen content while believing it was the
-    /// (now-vacated) alternate screen, or missing an alt-screen frame
-    /// entirely because the flag read landed just before the app switched
-    /// into it. Chaining `display-message ... ';' capture-pane ...` as
-    /// one tmux command line closes that window: tmux executes both
-    /// against the same pane state before this process ever sees either
-    /// result. `;` needs no shell escaping here — these are literal
-    /// argv-per-command elements to `tmux` itself (this driver never goes
-    /// through a shell, see [`TmuxDriver::command`]), not a shell
-    /// metacharacter.
-    ///
-    /// `#{session_name}` rides along in the SAME `display-message` for the
-    /// same reason `pane_process` checks it: exists purely as the
-    /// [`AltScreenCapture::SessionMismatch`] guard against a recycled pane
-    /// id, at no extra round-trip cost since the flag query already needs
-    /// one `display-message` regardless.
-    ///
-    /// `-N` on `capture-pane` preserves trailing-cell STYLING — background
-    /// color painted past the last non-blank character, common in
-    /// full-screen TUIs that fill a row with a colored bar. Without it
-    /// tmux trims styled trailing blank cells from each captured line,
-    /// silently losing that padding (verified empirically: an
-    /// inverse-video banner padded with spaces loses its trailing color
-    /// without `-N`). `-e` keeps the escape sequences themselves, same as
-    /// ordinary replay capture.
-    ///
-    /// # Bounded reading
-    ///
-    /// `max_bytes` bounds how much of the combined invocation's stdout
-    /// this reads into memory before giving up: a pane resized to tmux's
-    /// own maximum (10,000×10,000, `-N` capturing styling for every one
-    /// of those cells) can emit well over 100 MiB, and reading that
-    /// wholesale — which is what a `Command::output()`-style call
-    /// (`TmuxDriver::run_bytes`) does internally, buffering the ENTIRE
-    /// stream before this function ever sees a single byte — would let a
-    /// single oversized pane balloon this process's memory on every stop.
-    /// This method instead streams the child's stdout in
-    /// [`ALT_SCREEN_READ_CHUNK`]-sized reads, accumulating at most
-    /// `max_bytes + `[`ALT_SCREEN_HEADER_SLACK`] bytes total before
-    /// killing the child outright and returning [`AltScreenCapture::TooLarge`]
-    /// — the discarded remainder is never read at all, so the OS pipe
-    /// buffer (bounded, ~64 KiB) is the actual ceiling on how much of an
-    /// enormous capture this process ever holds, not `max_bytes` itself.
-    ///
-    /// This bounding is what makes the single-invocation design (see
-    /// above) affordable even though tmux itself has no way to skip
-    /// `capture-pane` when it turns out the pane was not on the alternate
-    /// screen: EVERY call here pays for however much of the (possibly
-    /// oversized) capture gets read before the bound trips, whether the
-    /// header says `NotAlternate`, `SessionMismatch`, or genuinely
-    /// `Captured` — there is no way to know which, without decoding the
-    /// header, before the capture body has already been requested and
-    /// started arriving. Accepting that fixed, BOUNDED cost on every call
-    /// (rather than optimizing away captures this function is about to
-    /// discard anyway) is the price of keeping the flag-check and the
-    /// capture atomic; a two-invocation design could skip the capture
-    /// call entirely for a primary-screen pane, at the cost of
-    /// reintroducing the screen-transition race this method exists to
-    /// close.
-    ///
-    /// The child's stderr is drained concurrently on a background task
-    /// (not sequentially after stdout) so a tmux failure message large
-    /// enough to fill ITS OWN pipe buffer — vanishingly unlikely for the
-    /// short diagnostics tmux actually emits, but not to be assumed away
-    /// — can never wedge this function waiting on a stdout EOF that a
-    /// stalled-on-stderr child will never produce.
-    pub async fn capture_alt_screen_if_active(
-        &self,
-        session: &str,
-        pane: &str,
-        max_bytes: usize,
-    ) -> anyhow::Result<AltScreenCapture> {
-        let read_cap = max_bytes.saturating_add(ALT_SCREEN_HEADER_SLACK);
-        let mut child = self
-            .command()
-            .args([
-                "display-message",
-                "-p",
-                "-t",
-                pane,
-                "#{alternate_on} #{session_name}",
-                ";",
-                "capture-pane",
-                "-e",
-                "-p",
-                "-N",
-                "-t",
-                pane,
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .context("spawning tmux for alt-screen capture")?;
-        let mut stdout = child.stdout.take().expect("piped stdout");
-        let mut stderr = child.stderr.take().expect("piped stderr");
-        let stderr_task = tokio::spawn(async move {
-            let mut buf = Vec::new();
-            let _ = stderr.read_to_end(&mut buf).await;
-            buf
-        });
-
-        let mut buf = Vec::new();
-        // Heap, not `[0u8; ALT_SCREEN_READ_CHUNK]`. A 64 KiB array here is a
-        // local held across an `.await`, so it becomes part of this
-        // function's FUTURE — and every future that composes this one grows
-        // by that much in turn, which on the restart path is a chain several
-        // deep (`restart_session` → `relaunch` → `relaunch_into_terminal` →
-        // `plan_pane_relaunch` → here). Inflating those futures inflates the
-        // stack the `poll` chain needs to drive them, and a debug build's
-        // restart tests were running within a few hundred kilobytes of a
-        // test thread's default stack because of it; adding one more await
-        // to that chain (the cgroup work's `reap_process_tree`) tipped it
-        // over. One allocation per capture buys the whole chain back.
-        let mut chunk = vec![0u8; ALT_SCREEN_READ_CHUNK];
-        let too_large = loop {
-            let n = stdout
-                .read(&mut chunk)
-                .await
-                .context("reading tmux alt-screen capture output")?;
-            if n == 0 {
-                break false;
-            }
-            buf.extend_from_slice(&chunk[..n]);
-            if !within_snapshot_cap(buf.len(), read_cap) {
-                break true;
-            }
-        };
-        // Dropping the read half here (rather than leaving it borrowed by
-        // `child` past this point) is not load-bearing for correctness —
-        // `kill_on_drop`/the explicit `kill` below make the child's exit
-        // unconditional either way — but it does let the pipe's read end
-        // close immediately if this function returns without reaching
-        // `child.wait()` on some future error path, instead of staying
-        // open for the remainder of this scope.
-        drop(stdout);
-
-        if too_large {
-            // The child may still be trying to write an arbitrarily large
-            // remaining capture into a pipe nobody is draining anymore —
-            // kill it outright rather than continuing to read (and
-            // discard) however much more it has queued up. `wait()`
-            // afterward reaps it; `kill_on_drop` alone would only
-            // guarantee that eventually, not before this function
-            // returns.
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            let _ = stderr_task.await;
-            return Ok(AltScreenCapture::TooLarge);
-        }
-
-        let stderr_bytes = stderr_task.await.unwrap_or_default();
-        let status = child
-            .wait()
-            .await
-            .context("waiting for tmux alt-screen capture to exit")?;
-        if !status.success() {
-            bail!(
-                "tmux alt-screen capture failed ({status}): {}",
-                String::from_utf8_lossy(&stderr_bytes).trim()
-            );
-        }
-        Ok(parse_alt_screen_capture(&buf, session, max_bytes))
-    }
-
     /// The last thing `pane` printed, as plain text, bounded to
     /// `max_bytes`.
     ///
     /// Exists for exactly one caller: the refused `OpenTab`'s error detail
-    /// (PLAN_M4.md item 2 — "the pane's last words"). Deliberately NOT
-    /// [`Self::capture_alt_screen_if_active`]: this wants human-readable
-    /// prose to put inside a protocol error message, so escape sequences
-    /// are left out (`-e` omitted) and the alternate screen is
-    /// irrelevant — a shell that could not start prints a line or two to
-    /// the primary screen and dies.
+    /// (PLAN_M4.md item 2 — "the pane's last words"). This wants
+    /// human-readable prose to put inside a protocol error message, so
+    /// escape sequences are left out (`-e` omitted) and the alternate
+    /// screen is irrelevant — a shell that could not start prints a line
+    /// or two to the primary screen and dies.
     ///
     /// # Why history, not the visible screen
     ///
@@ -3266,11 +2892,15 @@ impl TmuxDriver {
             let _ = stderr.read_to_end(&mut buf).await;
             buf
         });
-        // Heap rather than a stack array, for the same future-size reason
-        // `capture_alt_screen_if_active` spells out: this buffer is held
-        // across an await and would otherwise inflate every future that
-        // composes this one.
-        let mut chunk = vec![0u8; ALT_SCREEN_READ_CHUNK];
+        // Heap, not a `[u8; CAPTURE_READ_CHUNK]` stack array. A 64 KiB
+        // local held across an `.await` becomes part of this function's
+        // FUTURE, and every future that composes this one grows by that
+        // much in turn — which inflates the stack the `poll` chain needs
+        // to drive them. A debug build's tests once ran within a few
+        // hundred kilobytes of a test thread's default stack because of
+        // exactly this pattern in a since-removed capture path. One
+        // allocation per capture keeps the futures small.
+        let mut chunk = vec![0u8; CAPTURE_READ_CHUNK];
         let mut tail: Vec<u8> = Vec::new();
         let drained = tokio::time::timeout(self.pane_list_timeout, async {
             loop {

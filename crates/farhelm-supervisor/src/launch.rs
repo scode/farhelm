@@ -128,31 +128,6 @@ pub struct LaunchSpec {
     /// so an agent invoking `farhelm` by name reaches the same artifact
     /// that launched it before considering any ambient installation.
     pub farhelm_bin_dir: PathBuf,
-    /// Bytes the shim writes to the terminal before `exec`, or empty for
-    /// the ordinary launch.
-    ///
-    /// Exists for one job (PLAN_M3.md item 9's terminal reuse): carrying a
-    /// dying run's last visible frame into the NEW run's scrollback when
-    /// tmux itself cannot. `respawn-pane` keeps a pane's history but
-    /// reinitializes its visible grid, and the supervisor's shrink trick
-    /// (`TmuxDriver::relaunch_in_pane`) recovers that grid only for a pane
-    /// on the PRIMARY screen with room to scroll — an alternate-screen TUI
-    /// (whose grid has no history at all) and a one-row window both fall
-    /// outside it. For those, the supervisor captures the frame before
-    /// respawning and hands it here, so what the user saw last is still
-    /// above the new run rather than silently discarded.
-    ///
-    /// Written by the SHIM rather than by the supervisor because there is
-    /// no other moment it can be written at: the pane's process is
-    /// replaced by the respawn, and nothing can write to a pane's output
-    /// stream except the process inside it. Emitted before `exec` and
-    /// never on any failure path, so a launch that could not start leaves
-    /// its own sentinel rather than a resurrected frame.
-    ///
-    /// `#[serde(default)]` keeps a spec written by an older build (or by a
-    /// launch that needs no preamble) decoding cleanly.
-    #[serde(default)]
-    pub preamble: Vec<u8>,
 }
 
 /// Resolve the shell to launch sessions through: `$SHELL`, then the
@@ -761,20 +736,14 @@ pub fn exec_launch_spec_with_seam(
          from its own path — service.rs's create_session and this derivation must never \
          disagree, or the exec-failure path below would write to the wrong place"
     );
-    // The retained-terminal preamble (see `LaunchSpec::preamble`), written
-    // immediately before `exec` so it lands above the new run's own first
-    // byte. Best-effort by design: a write that fails costs scrollback
-    // fidelity, and refusing to start the agent over it would cost the
-    // user their session — so the failure is reported into the shim's own
-    // error path only if `exec` ALSO fails, and otherwise passes silently
-    // into a terminal that simply lacks the prior frame.
-    if !spec.preamble.is_empty() {
-        use std::io::Write as _;
-        let mut out = std::io::stdout().lock();
-        let _ = out.write_all(&spec.preamble);
-        let _ = out.flush();
-    }
-    // exec only returns on failure. `Command::env` adds to (never clears)
+    // Nothing is written to the terminal before `exec`. The shim once
+    // painted a "preamble" here — the previous run's captured last screen,
+    // handed over by a restart — and SPEC.md now forbids exactly that: a
+    // frame with no process behind it looks live, accepts typing, and is
+    // overwritten when the real program draws. The agent's own first byte
+    // is the first thing the relaunched pane shows.
+    //
+    // `exec` only returns on failure. `Command::env` adds to (never clears)
     // the shim's own inherited environment, so this joins the rc-file
     // variables the login shell already sourced rather than replacing
     // them — SPEC.md's environment contract is otherwise untouched.
@@ -973,7 +942,6 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
-            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
         run_exec_failure_child(&spec_path, "real");
@@ -1081,7 +1049,6 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
-            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -1132,7 +1099,6 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
-            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -1208,7 +1174,6 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
-            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -1241,7 +1206,6 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
-            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -1279,6 +1243,39 @@ mod tests {
         );
     }
 
+    /// The shim's window command writes NOTHING to the terminal before the
+    /// `exec` — SPEC.md's rule that Farhelm must never paint a captured
+    /// screen back ahead of a new process (a launch "preamble" once did
+    /// exactly that from inside the shim). Pinned structurally rather than
+    /// by full-string equality so incidental argv growth cannot rot it:
+    /// the `-c` script must BE a single `exec` command — it starts with
+    /// `exec ` and contains no separator that could smuggle an earlier
+    /// command (and therefore an earlier terminal write) in front of it.
+    /// Exercised with a scope prefix, the one thing that legitimately
+    /// splices into the command, to show it lands after the `exec` word
+    /// rather than as a command of its own.
+    #[test]
+    fn window_command_script_runs_nothing_before_the_exec() {
+        let cmd = window_command(
+            "/bin/bash",
+            Path::new("/opt/farhelm"),
+            Path::new("/state/launch/abc.json"),
+            vec!["systemd-run".to_string(), "--scope".to_string()],
+        );
+        let script = &cmd[4];
+        assert!(
+            script.starts_with("exec "),
+            "the shim script's first and only command must be the exec: {script:?}"
+        );
+        for separator in [";", "&&", "||", "\n", "|", "`", "$("] {
+            assert!(
+                !script.contains(separator),
+                "the shim script must be a single command with no {separator:?} that could \
+                 run anything (or write anything to the terminal) before the exec: {script:?}"
+            );
+        }
+    }
+
     /// The final exec receives the session credential and the exact socket
     /// that minted it; neither may depend on a guessed state-directory path.
     #[test]
@@ -1290,7 +1287,6 @@ mod tests {
             session_token: "private-token".to_string(),
             supervisor_sock: PathBuf::from("/run/user/1000/farhelm.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
-            preamble: Vec::new(),
         };
         let command = agent_command(&spec);
         let env = command

@@ -30,10 +30,6 @@ use super::launch_artifacts::{
     read_launch_sentinel, remove_fail_closed, sentinel_could_still_apply, sweep_launch_dir,
     wrapper_failure_detail,
 };
-use super::snapshots::{
-    MAX_ALT_SCREEN_SNAPSHOT_BYTES, capture_alt_screen_before_stop, snapshot_path,
-    sweep_snapshot_temp_files,
-};
 use super::status::source_profile_existence;
 use super::sweep::{
     StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit, reap_process_tree, stop_live_agent,
@@ -2786,21 +2782,59 @@ struct Relaunched {
     tabs: Vec<TabInfo>,
 }
 
+/// Delete the `<state_dir>/snapshots/` directory an OLDER build left
+/// behind, whole, on startup.
+///
+/// Exists only for upgrades. Builds before the change that removed the
+/// stop-time alt-screen snapshot ("stop preserving a terminal's last
+/// screen past its process") wrote one file per stopped session under
+/// this directory, each holding a captured terminal frame — content the
+/// old code treated as secret-bearing and removed fail-closed on delete.
+/// Nothing reads or removes those files any more, so without this sweep an
+/// upgrade would strand them for good, in contradiction of SPEC.md's rule
+/// that terminal content lives only as long as the host-side terminal.
+///
+/// Same placement as the other startup sweeps (after the exclusivity
+/// bind, so this process is provably the state dir's one supervisor).
+/// Fail-open: a directory that cannot be removed is logged and left, never
+/// a reason to refuse to start — nothing this supervisor does depends on
+/// the directory's absence, and because this runs on EVERY startup, a
+/// failed removal is retried on every later one rather than lost, which
+/// is what makes fail-open sound here. An absent directory is the
+/// ordinary case on every fresh install and after the first successful
+/// sweep, and is not worth a log line.
+///
+/// May be deleted once no install that predates the removal can exist.
+async fn sweep_legacy_snapshots_dir(state_dir: &Path) {
+    let snapshots_dir = state_dir.join("snapshots");
+    match tokio::fs::remove_dir_all(&snapshots_dir).await {
+        Ok(()) => info!(
+            path = %snapshots_dir.display(),
+            "removed the snapshots directory an older build left behind"
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => warn!(
+            path = %snapshots_dir.display(), error = %e,
+            "could not remove the snapshots directory an older build left behind; captured \
+             terminal frames may remain on disk"
+        ),
+    }
+}
+
 /// Sweep abandoned `overwrite_private_file` staging files (`.tmux.conf.tmp-*`)
 /// directly out of `<state_dir>` (the tmux config's own location — the
 /// one write-atomicity-tier file that lives at the state-dir ROOT rather
-/// than under `launch/` or `snapshots/`, so neither of those sweeps would
-/// ever see its debris). Same placement and reasoning as
-/// [`sweep_snapshot_temp_files`]: after the exclusivity bind, best-effort
-/// and log-only.
+/// than under `launch/`, so the launch-dir sweep would never see its
+/// debris). Same placement and reasoning as [`sweep_launch_dir`]: after
+/// the exclusivity bind, best-effort and log-only.
 ///
 /// Scoped specifically to names starting with `.tmux.conf` (not a bare
 /// [`crate::files::is_staged_temp_name`] check against the whole state
 /// dir) because the state-dir root also holds `supervisor.db`,
 /// `supervisor.sock`, and `supervisor.lock` — none of which stage temp
-/// files this way — and `launch/`/`snapshots/` as subdirectories; a
-/// prefix match keeps this sweep from ever needing to reason about
-/// entries that are not its concern at all.
+/// files this way — and `launch/` as a subdirectory; a prefix match keeps
+/// this sweep from ever needing to reason about entries that are not its
+/// concern at all.
 async fn sweep_tmux_config_temp_files(state_dir: &Path) {
     const CONFIG_TEMP_PREFIX: &str = ".tmux.conf.tmp-";
     let mut entries = match tokio::fs::read_dir(state_dir).await {
@@ -3132,10 +3166,9 @@ pub(crate) struct SessionEntry {
 /// That cap lives in the `Attach` handler's lease check, not in the shape
 /// of this map: see [`AttachmentKey`] and `terminals::same_lease_client`.
 ///
-/// Lock discipline: the two mutexes are never held at once, with two
-/// deliberate exceptions (`DeleteSession` and `snapshots`'
-/// `publish_alt_screen_snapshot`), and no tmux call happens while `sessions` is held
-/// on its own. ("The two" means `sessions` and `attachments` throughout
+/// Lock discipline: the two mutexes are never held at once, with one
+/// deliberate exception (`DeleteSession`), and no tmux call happens while
+/// `sessions` is held on its own. ("The two" means `sessions` and `attachments` throughout
 /// this discussion; `sinks` and `uploads` arrived later and neither is
 /// ever held alongside either of the two — see their own docs — so they
 /// add no case to the rules below.) `attachments` is deliberately the exception for holding it
@@ -3153,18 +3186,13 @@ pub(crate) struct SessionEntry {
 /// that is disappearing out from under it — but deliberately NOT across
 /// its process-tree sweep, which can take seconds and would otherwise
 /// stall every other session's attach/input behind one slow delete (see
-/// that handler's own comment). `DeleteSession` is also ONE of two paths
-/// that ever hold both mutexes at once, briefly: it removes the
-/// in-memory map entry while `attachments` is still held for the notify
-/// decision, and `publish_alt_screen_snapshot` (`snapshots`) does the same
-/// — checks `sessions` for continued existence while still holding
-/// `attachments` — to make its own existence-check-then-write atomic with
-/// respect to a racing delete (see that function's own docs for the full
-/// argument). Both establish, and both rely on, the SAME lock-ordering
-/// rule, the only one that needs to exist as long as nothing else ever
-/// needs both: `attachments` first, `sessions` second, never the reverse
-/// (anything acquiring both in the opposite order would be a deadlock
-/// waiting for a second caller to exist).
+/// that handler's own comment). `DeleteSession` is also the ONE path that
+/// ever holds both mutexes at once, briefly: it removes the in-memory map
+/// entry while `attachments` is still held for the notify decision. It
+/// establishes the only lock-ordering rule that needs to exist as long as
+/// nothing else ever needs both: `attachments` first, `sessions` second,
+/// never the reverse (anything acquiring both in the opposite order would
+/// be a deadlock waiting for a second caller to exist).
 ///
 /// Known coarseness, acceptable in M1 and revisit at M2: the map-wide
 /// mutex serializes input for EVERY session behind any in-flight attach
@@ -3292,44 +3320,6 @@ pub struct Supervisor {
     /// durable, so nothing outlives the process that could collide with a
     /// restarted one's numbering.
     pub(crate) next_transfer: AtomicU64,
-    /// Alt-screen snapshots captured by an IN-FLIGHT `StopSession` call,
-    /// keyed by session id, visible to `Attach` before the corresponding
-    /// `publish_alt_screen_snapshot` has written anything to disk.
-    ///
-    /// Exists to close a real gap: `StopSession` captures the snapshot
-    /// BEFORE calling `kill_process_tree` (which can itself take up to a
-    /// couple of seconds against an uncooperative process tree — see that
-    /// function's own docs on the SIGTERM-grace/SIGSTOP-quiesce/SIGKILL
-    /// sequence), and only publishes it to disk AFTER the kill returns
-    /// `Ok`. tmux itself, independently, can mark the pane dead the
-    /// MOMENT the process actually exits — which for a tree-kill can be
-    /// well before `kill_process_tree` itself returns, since it keeps
-    /// polling for confirmation and reaping stragglers afterward. An
-    /// `Attach` landing in that window would otherwise see a dead pane
-    /// with no snapshot file yet on disk and stay blank forever — the
-    /// exact bug this whole feature exists to fix, reintroduced at a
-    /// smaller time scale. `Attach`'s dead-primary replay path
-    /// (`send_alt_screen_snapshot`) consults this map only as a fallback,
-    /// after the file itself is confirmed absent.
-    ///
-    /// Honesty argument for why this is safe to SERVE, not just safe to
-    /// exist: during the window this map is consulted, the bytes it holds
-    /// are exactly what the pane's alternate screen held at the moment
-    /// `StopSession` captured them — a real, complete frame, not a
-    /// partial or synthesized one. Serving it early is strictly more
-    /// useful than the alternative (blocking or blanking), and no less
-    /// accurate than serving the same bytes moments later once they have
-    /// been written to disk.
-    ///
-    /// An entry is inserted right after a successful capture (before
-    /// `kill_process_tree` runs) and removed only after
-    /// `publish_alt_screen_snapshot` has run (on the success path) or
-    /// immediately (on a failed kill, where nothing is ever published at
-    /// all) — see the `StopSession` handler. Never touched by anything
-    /// else: unlike `sessions`/`attachments`, no cross-handler lock-
-    /// ordering rule applies to this map, since nothing ever holds it
-    /// alongside either of the other two.
-    pub(crate) pending_snapshots: Mutex<HashMap<String, Vec<u8>>>,
     /// This binary's own path: the launch shim is a subcommand of it.
     farhelm_exe: PathBuf,
     /// [`Self::farhelm_exe`] as a `str`, or `None` when that path is not
@@ -3873,7 +3863,6 @@ impl Supervisor {
             sinks: Arc::new(std::sync::Mutex::new(Default::default())),
             uploads: Mutex::new(HashMap::new()),
             next_transfer: AtomicU64::new(1),
-            pending_snapshots: Mutex::new(HashMap::new()),
             farhelm_exe,
             farhelm_exe_str,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
@@ -4768,8 +4757,8 @@ impl Supervisor {
         let known_sessions: std::collections::HashSet<String> =
             self.sessions.lock().await.keys().cloned().collect();
         sweep_launch_dir(&self.state_dir.join("launch"), &known_sessions).await;
-        sweep_snapshot_temp_files(&self.state_dir).await;
         sweep_tmux_config_temp_files(&self.state_dir).await;
+        sweep_legacy_snapshots_dir(&self.state_dir).await;
         // The attachments tree's own reconciliation, which needs the same
         // authoritative session set the launch-dir sweep does: staging
         // files a hard crash stranded, directories a delete parked but
@@ -6273,7 +6262,6 @@ impl Supervisor {
                 cols,
                 rows,
                 None,
-                None,
                 launch_scope.as_deref(),
             )
             .await;
@@ -6952,19 +6940,6 @@ impl Supervisor {
             None => None,
         };
         let alive_pane = pane_state.filter(|pane| !pane.dead);
-        // Captured BEFORE the kill, exactly as `StopSession` captures its
-        // own snapshot and for the same reason: an alternate-screen app's
-        // frame is gone the moment its process is, so the only chance to
-        // carry it into the relaunched terminal is now. Skipped entirely
-        // when nothing is alive to be on the alternate screen — the
-        // dead-pane case is handled by the relaunch plan itself, which can
-        // still read a retained alt grid off the dead pane.
-        let live_frame = match (entry.terminal.as_ref(), alive_pane) {
-            (Some(terminal), Some(_)) => {
-                capture_alt_screen_before_stop(self, session_id, terminal).await
-            }
-            _ => None,
-        };
         if let Some(pane) = alive_pane {
             if !stop_if_running {
                 return Err(RequestError::new(
@@ -7056,7 +7031,6 @@ impl Supervisor {
                 argv,
                 launch_cwd,
                 terminal_survives,
-                live_frame,
             )
             .await
         });
@@ -7106,7 +7080,6 @@ impl Supervisor {
     /// with the one it superseded — a fresh-terminal restart would lose its
     /// new pane to a reply-building error, which no failure to describe a
     /// session has any standing to do.
-    #[allow(clippy::too_many_arguments)]
     async fn relaunch(
         self: &Arc<Self>,
         entry: &Arc<SessionEntry>,
@@ -7115,7 +7088,6 @@ impl Supervisor {
         argv: Vec<String>,
         launch_cwd: String,
         terminal_survives: bool,
-        live_frame: Option<Vec<u8>>,
     ) -> anyhow::Result<SessionInfo> {
         let id = entry.info.id.clone();
         // A relaunch that is not resuming a captured identity opens a FRESH
@@ -7191,7 +7163,6 @@ impl Supervisor {
                     argv,
                     launch_cwd,
                     terminal_survives,
-                    live_frame,
                     reset_capture,
                 )
                 .await
@@ -7328,9 +7299,11 @@ impl Supervisor {
     ///
     /// `terminal_survives` is the caller's own pane probe: `true` means the
     /// pane still exists (alive or dead-but-retained) and the relaunch
-    /// respawns into it, keeping the prior run above in scrollback
-    /// (SPEC.md); `false` means the terminal is gone — an interrupted
-    /// session, or one whose tmux server died — and a fresh one is built.
+    /// respawns into it, keeping only the scrollback tmux had already
+    /// retained — the prior run's visible grid is wiped by the respawn and
+    /// deliberately not preserved (SPEC.md, Lifecycle operations/Restart);
+    /// `false` means the terminal is gone — an interrupted session, or one
+    /// whose tmux server died — and a fresh one is built.
     ///
     /// Every failure says whether it is DEFINITIVE (nothing outside this
     /// process changed) so the caller knows whether the previous outcome
@@ -7344,7 +7317,6 @@ impl Supervisor {
         argv: Vec<String>,
         launch_cwd: String,
         terminal_survives: bool,
-        live_frame: Option<Vec<u8>>,
         reset_capture: bool,
     ) -> Result<SessionInfo, RelaunchFailure> {
         let id = entry.info.id.clone();
@@ -7391,10 +7363,9 @@ impl Supervisor {
                 }
             },
         };
-        // Read every fallible durable launch input before removing a
-        // snapshot, killing a tmux husk, or shrinking a reusable pane. A
-        // credential read failure must leave the previous terminal exactly
-        // as it was rather than strand the temporary relaunch geometry.
+        // Read every fallible durable launch input before killing a tmux
+        // husk or touching the reusable pane. A credential read failure
+        // must leave the previous terminal exactly as it was.
         let session_token = match self.store.session_token(&id).await {
             Ok(Some(token)) => token,
             Ok(None) => {
@@ -7409,23 +7380,6 @@ impl Supervisor {
                 ));
             }
         };
-        // A snapshot stored for the PREVIOUS run must not survive into this
-        // one: `Attach`'s dead-pane replay would otherwise show the old
-        // run's last screen as if it were the new run's, the moment the new
-        // agent exits. Fail-closed for the same reason the launch artifacts
-        // are — a file this process could not remove is one a later replay
-        // will happily read.
-        if let Err(e) = remove_fail_closed(
-            &snapshot_path(&self.state_dir, &id),
-            "the previous run's alt-screen snapshot",
-        )
-        .await
-        {
-            return Err(RelaunchFailure::definitive(anyhow::anyhow!(
-                "not relaunching session {}: {e}",
-                truncate_for_error(&id)
-            )));
-        }
         let reuse = terminal.filter(|_| terminal_survives);
         if reuse.is_none() {
             // The pane this session knew is gone, but a tmux session under
@@ -7440,27 +7394,15 @@ impl Supervisor {
                 )));
             }
         }
-        // The prior run's last screen, for the cases tmux's own respawn
-        // cannot carry across (see `TmuxDriver::plan_pane_relaunch`). A
-        // frame captured before the kill wins over one read off the dead
-        // pane now: it is the same content, but taken while the app was
-        // still there to have it.
-        let plan = match reuse {
-            Some(terminal) => {
-                self.tmux
-                    .plan_pane_relaunch(
-                        &terminal.tmux_name,
-                        &terminal.pane,
-                        MAX_ALT_SCREEN_SNAPSHOT_BYTES,
-                    )
-                    .await
-            }
-            None => crate::tmux::PaneRelaunchPlan {
-                restore: None,
-                carry_over: None,
-            },
-        };
-        let preamble = live_frame.or(plan.carry_over);
+        // Nothing is done to the reused pane's visible screen before the
+        // respawn. `respawn-pane` keeps the pane's scrollback history but
+        // reinitializes its visible grid, and that loss is accepted
+        // (SPEC.md, Lifecycle operations/Restart): the pane stays blank
+        // until the new agent draws. Farhelm once pushed the grid into
+        // history by shrinking the window, and captured an alt-screen
+        // frame for the launch shim to paint back — both removed, because
+        // a painted frame with no process behind it looks live and accepts
+        // typing, which is worse than blank.
         let spawned = self
             .spawn_agent(
                 &id,
@@ -7483,34 +7425,9 @@ impl Supervisor {
                 RELAUNCH_COLS,
                 RELAUNCH_ROWS,
                 reuse,
-                preamble,
                 scope.as_deref(),
             )
             .await;
-        // Restored whatever the spawn did: this window was shrunk by the
-        // plan above, and leaving it one row tall because the launch failed
-        // would be a second, unrelated injury.
-        //
-        // Addressed through the pane, like every window-scoped command
-        // since tabs (PLAN_M4.md item 2): a bare session target names the
-        // session's CURRENT window, which a tab can be. `plan.restore` is
-        // only ever `Some` on the reuse path, where `reuse` names the very
-        // pane whose window `plan_pane_relaunch` shrank — and `respawn-pane`
-        // keeps that pane id across the relaunch, so it is still the right
-        // handle here.
-        if let Some((cols, rows)) = plan.restore
-            && let Some(reused) = reuse
-            && let Err(e) = self
-                .tmux
-                .resize_window(&tmux_name, &reused.pane, cols, rows)
-                .await
-        {
-            warn!(
-                session = %id, error = %format!("{e:#}"),
-                "could not restore this window's size after a relaunch; the next attach's \
-                 own resize will correct it"
-            );
-        }
         let Spawned {
             pane,
             spec_path,
@@ -9176,8 +9093,9 @@ impl Supervisor {
     ///
     /// `reuse` is the ONLY difference between the two callers: `None`
     /// creates a fresh tmux session (create, and a restart whose terminal
-    /// is gone), `Some(pane)` respawns into an existing pane so the prior
-    /// run stays in scrollback (see [`TmuxDriver::relaunch_in_pane`]).
+    /// is gone), `Some(pane)` respawns into an existing pane, keeping the
+    /// scrollback tmux had already retained — not the prior run's visible
+    /// grid, which the respawn wipes (see [`TmuxDriver::relaunch_in_pane`]).
     ///
     /// `snapshot` is here for one reason: this is where argv becomes a
     /// process, so it is where the conversation hook has to be appended
@@ -9213,7 +9131,6 @@ impl Supervisor {
         cols: u16,
         rows: u16,
         reuse: Option<&Terminal>,
-        preamble: Option<Vec<u8>>,
         scope: Option<&str>,
     ) -> Result<Spawned, SpawnFailure> {
         // Placeholder substitution is the FIRST transformation and hook
@@ -9259,10 +9176,6 @@ impl Supervisor {
                 .parent()
                 .expect("an absolute farhelm executable has a parent directory")
                 .to_path_buf(),
-            // Only ever set by a restart reusing a terminal whose visible
-            // frame tmux cannot carry across the respawn itself; see
-            // `LaunchSpec::preamble`.
-            preamble: preamble.unwrap_or_default(),
         };
         // Serialized before the write so the (practically impossible)
         // encoding failure shares the write's rollback path rather than
@@ -10310,6 +10223,43 @@ pub(crate) mod tests {
             !tmp.path().join(".tmux.conf.tmp-deadbeef").exists(),
             "an orphaned tmux-config temp file must be removed"
         );
+    }
+
+    /// The upgrade sweep for the removed stop-time snapshot store: a
+    /// `snapshots/` directory an older build left behind, files and all,
+    /// must be gone after startup — while its siblings (here, a `launch/`
+    /// directory) are untouched, proving the sweep is a targeted removal
+    /// and not a state-dir wipe.
+    #[tokio::test]
+    async fn sweep_legacy_snapshots_dir_removes_the_directory_and_its_frames() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snapshots = tmp.path().join("snapshots");
+        std::fs::create_dir(&snapshots).unwrap();
+        std::fs::write(snapshots.join("some-session-id"), b"\x1b[7m FRAME \x1b[0m").unwrap();
+        std::fs::create_dir(tmp.path().join("launch")).unwrap();
+
+        sweep_legacy_snapshots_dir(tmp.path()).await;
+
+        assert!(
+            !snapshots.exists(),
+            "an older build's snapshots directory must be removed whole"
+        );
+        assert!(
+            tmp.path().join("launch").exists(),
+            "the sweep must touch nothing but the snapshots directory"
+        );
+    }
+
+    /// The ordinary case on a fresh install and after the first sweep: no
+    /// `snapshots/` directory at all. Pinned so the sweep's fail-open
+    /// contract cannot regress into an error or a panic on the common
+    /// path; what this asserts is only that the call returns and creates
+    /// nothing (log output is not captured here).
+    #[tokio::test]
+    async fn sweep_legacy_snapshots_dir_tolerates_a_missing_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        sweep_legacy_snapshots_dir(tmp.path()).await;
+        assert!(!tmp.path().join("snapshots").exists());
     }
 
     /// PLAN_M3.md item 2's "unsupported host" branch: a host with no

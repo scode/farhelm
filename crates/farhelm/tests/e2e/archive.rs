@@ -146,9 +146,6 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
     }
     std::fs::write(&spec_path, b"credential-bearing launch spec").expect("plant launch spec");
     std::fs::write(&status_path, b"exec failure detail").expect("plant launch status");
-    let snapshot = h.state.path().join("snapshots").join(&session.id);
-    std::fs::create_dir_all(snapshot.parent().expect("snapshot parent")).unwrap();
-    std::fs::write(&snapshot, b"terminal secret").expect("plant snapshot");
     let second_pid = work.path().join("second.pid");
     std::fs::write(
         &script,
@@ -214,7 +211,6 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
         !status_path.exists(),
         "archive removes launch status artifacts"
     );
-    assert!(!snapshot.exists(), "archive removes terminal snapshots");
 
     let listed = h
         .client
