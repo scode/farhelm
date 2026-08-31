@@ -42,6 +42,11 @@ const KILL_GRACE: Duration = Duration::from_millis(500);
 /// failure (see that function's docs), not a silent "close enough".
 const MAX_QUIESCE_PASSES: usize = 5;
 
+/// Maximum number of newly found process identities retained from one
+/// quiesce pass for a non-convergence error. The sweep still reports the
+/// true count; this only bounds the diagnostic attached to the control reply.
+const MAX_QUIESCE_IDENTITIES_PER_PASS: usize = 8;
+
 /// Total time [`kill_process_tree`] polls for its SIGKILLed pids to
 /// actually disappear before giving up and reporting survivors as a sweep
 /// failure. `SIGKILL` cannot be blocked or ignored, so this is generous
@@ -310,40 +315,35 @@ pub(crate) enum TabReapAnchor {
 struct ProcSnapshot {
     /// pid → (ppid, starttime). Absent means this process's row could not
     /// be read because it exited mid-scan — the ordinary, tolerated case
-    /// ([`procs::snapshot`] simply omits it). A partial map built
-    /// this way only ever UNDER-collects candidates for the PPID closure
-    /// below; it can never invent an ancestor relationship that does not
-    /// exist. That under-collection is a SEPARATE concern from pid
-    /// reuse, which this map does nothing to close on its own: a pid
-    /// found here can still have been reused by the time it is acted on
-    /// later (after a sleep, a signal round, another walk).
-    /// [`signal_validated`] is what actually closes that gap, by
-    /// re-checking start-time at the moment of signaling regardless of
-    /// how fresh or stale the value recorded here is.
-    ///
-    /// Accepted residual, and NOT one the cgroup hardening addresses
-    /// (a cgroup kill names a unit, never a pid, so it neither creates
-    /// nor fixes this): this map is
-    /// still just ONE sequential pass, not an atomic system-wide
-    /// snapshot, so in principle a pid could exit and be recycled to an
-    /// unrelated process WHILE this same walk is still in progress — an
-    /// edge this one snapshot cannot itself detect or rule out. Two
-    /// things bound how much that can matter rather than eliminating it
-    /// outright: `signal_validated` re-reads and re-checks identity at
-    /// the actual moment of signaling (so a within-this-walk recycling
-    /// only risks a wrong PPID edge being followed, never an unvalidated
-    /// signal reaching the wrong process), and `kill_process_tree`
-    /// re-runs the whole closure on every later round rather than
-    /// trusting this one walk's shape indefinitely. The remainder — a
-    /// closure edge briefly followed on the strength of a since-recycled
-    /// pid, within one walk, before the next walk or signal re-validates
-    /// it — is accepted as the honest cost of a single-pass enumeration.
+    /// ([`procs::snapshot`] simply omits it). Omitted rows only
+    /// UNDER-collect candidates. Rows that were both read can still span
+    /// different moments, however: an old parent row and a later child row
+    /// can share a recycled PID number without describing one real edge.
+    /// [`expand_ppid_closure`] closes that ownership gap by re-reading both
+    /// endpoints after the scan and accepting the edge only while the child
+    /// still names the recorded parent and both identities still match.
+    /// [`signal_validated`] separately re-checks each selected process at the
+    /// moment of signaling.
     stats: procs::ProcessTable,
     /// pids this sweep's markers CLAIMED in this same walk, per
     /// [`SweepTarget::claims`] — positive selection throughout, so a
     /// process is here because something said it belongs to this sweep,
     /// never merely because nothing excluded it.
     marked: HashSet<u32>,
+}
+
+/// One enumeration's admitted identities and the PPIDs observed with them.
+///
+/// `identities` is the ownership result and the only map used for signaling.
+/// `parents` is diagnostic evidence from the same sequential snapshot; it
+/// must never be used to grant ownership because the relationship may already
+/// have changed by the time a caller formats it.
+#[derive(Clone)]
+struct ProcessTree {
+    /// Process identities this enumeration proved belong to the sweep.
+    identities: HashMap<u32, u64>,
+    /// Snapshot PPIDs retained only to explain bounded quiesce failures.
+    parents: HashMap<u32, u32>,
 }
 
 /// Walk the process table once, in full, for `session_id`, and decide
@@ -384,6 +384,100 @@ fn snapshot_proc(
     Ok((ProcSnapshot { stats, marked }, soft_errors))
 }
 
+/// Read one process identity at most once for a PPID-closure expansion.
+///
+/// Gone processes and read failures are cached as rejected identities. The
+/// latter are also reported once, so a process with several candidate edges
+/// cannot flood the sweep error with duplicates.
+fn read_cached_process_identity(
+    pid: u32,
+    live_processes: &mut HashMap<u32, Option<(u32, u64)>>,
+    soft_errors: &mut Vec<String>,
+    read_process: &mut impl FnMut(u32) -> Result<Option<(u32, u64)>, String>,
+) -> Option<(u32, u64)> {
+    if let Some(&cached) = live_processes.get(&pid) {
+        return cached;
+    }
+    let process = match read_process(pid) {
+        Ok(process) => process,
+        Err(error) => {
+            soft_errors.push(format!(
+                "re-validating pid {pid} before expanding process-tree edge: {error}"
+            ));
+            None
+        }
+    };
+    live_processes.insert(pid, process);
+    process
+}
+
+/// Expand a snapshot's PPID closure only through edges that still exist after
+/// the host-wide scan has finished.
+///
+/// A PPID is only a number, and a sequential process-table walk can observe
+/// either endpoint before PID reuse or reparenting and the other afterward.
+/// Comparing rows within that same snapshot cannot prove the edge existed at
+/// one instant. `read_process` supplies independent later reads: the candidate
+/// child must still have its snapshot identity and parent, then the parent must
+/// still have the identity already admitted into `found`. Each process is read
+/// at most once per enumeration, regardless of how many candidate edges use
+/// it.
+///
+/// Reusing a positive parent read later in the same expansion is safe because
+/// the kernel reparents a surviving child before its parent can disappear and
+/// that PID can be reused. The child's own later `(ppid, starttime)` check
+/// therefore rejects the old edge; a replacement child fails the start-time
+/// half of the same check.
+///
+/// A gone, changed, or reparented process simply closes the unproven edge. A
+/// real read failure also closes it and is appended to `soft_errors`,
+/// preserving the sweep's rule that an unreadable process it meant to trust
+/// cannot disappear into a falsely clean result.
+fn expand_ppid_closure(
+    stats: &procs::ProcessTable,
+    found: &mut HashMap<u32, u64>,
+    soft_errors: &mut Vec<String>,
+    mut read_process: impl FnMut(u32) -> Result<Option<(u32, u64)>, String>,
+) {
+    let mut live_processes: HashMap<u32, Option<(u32, u64)>> = HashMap::new();
+    loop {
+        let mut grew = false;
+        for (&pid, &(ppid, starttime)) in stats {
+            if found.contains_key(&pid) {
+                continue;
+            }
+            let Some(&expected_parent_starttime) = found.get(&ppid) else {
+                continue;
+            };
+            if read_cached_process_identity(
+                pid,
+                &mut live_processes,
+                soft_errors,
+                &mut read_process,
+            ) != Some((ppid, starttime))
+            {
+                continue;
+            }
+            if !read_cached_process_identity(
+                ppid,
+                &mut live_processes,
+                soft_errors,
+                &mut read_process,
+            )
+            .is_some_and(|(_parent_ppid, parent_starttime)| {
+                parent_starttime == expected_parent_starttime
+            }) {
+                continue;
+            }
+            found.insert(pid, starttime);
+            grew = true;
+        }
+        if !grew {
+            break;
+        }
+    }
+}
+
 /// One enumeration for [`kill_process_tree`]: the transitive PPID closure
 /// expanded from EVERY root — the pane's process (`root_pid`, only ever
 /// meaningful on the very first call; see below), every process carrying
@@ -411,10 +505,10 @@ fn snapshot_proc(
 /// re-enters the result only if independently rediscovered via the PPID
 /// closure or the marker scan this same round.
 ///
-/// Returns pid → starttime for everything found in THIS one walk, plus
-/// any soft per-pid errors `snapshot_proc` collected — the values a
-/// caller re-validates via [`signal_validated`] before ever signaling, so
-/// nothing here is trusted past the moment it was read.
+/// Returns every pid identity found in THIS one walk, the PPID observed with
+/// each identity for bounded diagnostics, and any soft per-pid errors. A
+/// caller re-validates identities via [`signal_validated`] before ever
+/// signaling, so neither map is trusted past the moment it was read.
 ///
 /// `target` decides which markers admit a process as a ROOT (PLAN_M4.md
 /// item 2's marker split — see [`SweepTarget`] for the three sets and why
@@ -427,8 +521,8 @@ fn enumerate_tree(
     session_id: &str,
     seeds: &HashMap<u32, u64>,
     target: &SweepTarget,
-) -> Result<(HashMap<u32, u64>, Vec<String>), String> {
-    let (snapshot, soft_errors) = snapshot_proc(session_id, target)?;
+) -> Result<(ProcessTree, Vec<String>), String> {
+    let (snapshot, mut soft_errors) = snapshot_proc(session_id, target)?;
     let mut found: HashMap<u32, u64> = HashMap::new();
 
     // Marker pids first: roots the closure expands FROM.
@@ -452,18 +546,24 @@ fn enumerate_tree(
         }
     }
 
-    loop {
-        let mut grew = false;
-        for (&pid, &(ppid, starttime)) in &snapshot.stats {
-            if found.contains_key(&ppid) && found.insert(pid, starttime).is_none() {
-                grew = true;
-            }
-        }
-        if !grew {
-            break;
-        }
-    }
-    Ok((found, soft_errors))
+    expand_ppid_closure(&snapshot.stats, &mut found, &mut soft_errors, |pid| {
+        procs::read_process(pid)
+            .map(|process| process.map(|(ppid, starttime, _state)| (ppid, starttime)))
+    });
+    // Every admission path above begins with an entry in this snapshot,
+    // including closure expansion. Keep that invariant explicit here: a new
+    // off-snapshot path should not silently lose the parent used for diagnostics.
+    let parents = found
+        .keys()
+        .map(|&pid| (pid, snapshot.stats[&pid].0))
+        .collect();
+    Ok((
+        ProcessTree {
+            identities: found,
+            parents,
+        },
+        soft_errors,
+    ))
 }
 
 /// Re-read `pid`'s start-time and signal it only if that read still
@@ -539,12 +639,12 @@ fn signal_all(pids: &HashMap<u32, u64>, signal: i32) -> Vec<String> {
 async fn enumerate_or_reuse(
     root_pid: Option<u32>,
     session_id: &str,
-    fallback: &HashMap<u32, u64>,
+    fallback: &ProcessTree,
     target: &SweepTarget,
     errors: &mut Vec<String>,
-) -> HashMap<u32, u64> {
+) -> ProcessTree {
     let session_id = session_id.to_string();
-    let seeds = fallback.clone();
+    let seeds = fallback.identities.clone();
     let target = target.clone();
     match tokio::task::spawn_blocking(move || {
         enumerate_tree(root_pid, &session_id, &seeds, &target)
@@ -564,6 +664,88 @@ async fn enumerate_or_reuse(
             fallback.clone()
         }
     }
+}
+
+/// Render one quiesce pass's new identities as stable, bounded numeric
+/// evidence suitable for a user-visible sweep error.
+///
+/// Command lines and environments are deliberately absent: both can contain
+/// prompts, credentials, and other terminal-owned data. PID, PPID, and the
+/// opaque start-time token let maintainers correlate identities and parent
+/// numbers across passes; they do not by themselves prove why an edge was
+/// admitted. Sorting removes `HashMap` iteration noise, while the omission
+/// count preserves the scale of a fork storm without allowing an unbounded
+/// control reply.
+fn format_quiesce_growth(
+    pass: usize,
+    newly_found: &HashMap<u32, u64>,
+    parents: &HashMap<u32, u32>,
+) -> String {
+    let mut identities = newly_found
+        .iter()
+        .map(|(&pid, &starttime)| (pid, parents.get(&pid).copied(), starttime))
+        .collect::<Vec<_>>();
+    identities.sort_unstable_by_key(|&(pid, _ppid, _starttime)| pid);
+    let total = identities.len();
+    let shown = identities
+        .into_iter()
+        .take(MAX_QUIESCE_IDENTITIES_PER_PASS)
+        .map(|(pid, ppid, starttime)| match ppid {
+            Some(ppid) => format!("(pid={pid}, ppid={ppid}, starttime={starttime})"),
+            None => format!("(pid={pid}, ppid=unknown, starttime={starttime})"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    if total > MAX_QUIESCE_IDENTITIES_PER_PASS {
+        format!(
+            "pass {pass}: {shown}, {} more omitted",
+            total - MAX_QUIESCE_IDENTITIES_PER_PASS
+        )
+    } else {
+        format!("pass {pass}: {shown}")
+    }
+}
+
+/// Record one quiesce pass and return the identities that still need stopping.
+///
+/// Identity comparison, parent pairing, and evidence accumulation live here
+/// together so the process-free regression test exercises the same path as the
+/// production fixpoint rather than only its string formatter.
+fn record_quiesce_pass(
+    pass: usize,
+    previous: &ProcessTree,
+    next: &ProcessTree,
+    quiesce_growth: &mut Vec<String>,
+) -> HashMap<u32, u64> {
+    let newly_found = next
+        .identities
+        .iter()
+        .filter(|&(&pid, &starttime)| previous.identities.get(&pid) != Some(&starttime))
+        .map(|(&pid, &starttime)| (pid, starttime))
+        .collect::<HashMap<_, _>>();
+    if !newly_found.is_empty() {
+        quiesce_growth.push(format_quiesce_growth(pass, &newly_found, &next.parents));
+    }
+    newly_found
+}
+
+/// Build the bounded evidence that must lead an aggregated quiesce failure.
+fn format_quiesce_failure(quiesce_growth: &[String]) -> String {
+    format!(
+        "quiesce did not converge within {MAX_QUIESCE_PASSES} passes; the process tree may \
+         not be fully frozen; newly found identities by pass: {}",
+        quiesce_growth.join("; ")
+    )
+}
+
+/// Give non-convergence evidence a guaranteed place in the capped error list.
+///
+/// A noisy host may already have more per-process failures than
+/// [`summarize_errors`] can show. Prepending here is part of the diagnostic
+/// contract, so production and its regression share the ordering operation
+/// instead of merely constructing the same final vector independently.
+fn prioritize_quiesce_failure(errors: &mut Vec<String>, quiesce_growth: &[String]) {
+    errors.insert(0, format_quiesce_failure(quiesce_growth));
 }
 
 /// Poll every identity in `found` until each has been CONFIRMED gone — a
@@ -730,17 +912,21 @@ async fn kill_process_tree(
     // grace period can run first: a pane pid read before that window and
     // trusted after it could name a completely unrelated process by the
     // time this walk starts.
-    let seed: HashMap<u32, u64> = root.into_iter().collect();
+    let seed = ProcessTree {
+        identities: root.into_iter().collect(),
+        parents: HashMap::new(),
+    };
     let mut found = enumerate_or_reuse(None, session_id, &seed, target, &mut errors).await;
-    errors.extend(signal_all(&found, libc::SIGTERM));
+    errors.extend(signal_all(&found.identities, libc::SIGTERM));
 
     tokio::time::sleep(KILL_GRACE).await;
 
     found = enumerate_or_reuse(None, session_id, &found, target, &mut errors).await;
-    errors.extend(signal_all(&found, libc::SIGSTOP));
+    errors.extend(signal_all(&found.identities, libc::SIGSTOP));
 
     let mut converged = false;
-    for _ in 0..MAX_QUIESCE_PASSES {
+    let mut quiesce_growth = Vec::new();
+    for pass in 1..=MAX_QUIESCE_PASSES {
         let next = enumerate_or_reuse(None, session_id, &found, target, &mut errors).await;
         // Identity, not just pid: a pid present in BOTH `found` and `next`
         // but with a DIFFERENT starttime is not the same process anymore
@@ -748,11 +934,7 @@ async fn kill_process_tree(
         // so it counts as newly found here and gets SIGSTOPped like any
         // other survivor, rather than being silently treated as already
         // handled because its number happened to repeat.
-        let newly_found: HashMap<u32, u64> = next
-            .iter()
-            .filter(|&(&pid, &starttime)| found.get(&pid) != Some(&starttime))
-            .map(|(&pid, &starttime)| (pid, starttime))
-            .collect();
+        let newly_found = record_quiesce_pass(pass, &found, &next, &mut quiesce_growth);
         found = next;
         if newly_found.is_empty() {
             converged = true;
@@ -761,14 +943,14 @@ async fn kill_process_tree(
         errors.extend(signal_all(&newly_found, libc::SIGSTOP));
     }
     if !converged {
-        errors.push(format!(
-            "quiesce did not converge within {MAX_QUIESCE_PASSES} passes; the process tree may \
-             not be fully frozen"
-        ));
+        // This diagnostic explains why the bounded fixpoint failed. It leads
+        // the list so earlier per-process failures cannot push it beyond
+        // `summarize_errors`' detail cap on the noisy hosts that need it most.
+        prioritize_quiesce_failure(&mut errors, &quiesce_growth);
     }
 
-    errors.extend(signal_all(&found, libc::SIGKILL));
-    errors.extend(confirm_gone(&found, KILL_CONFIRM_TIMEOUT).await);
+    errors.extend(signal_all(&found.identities, libc::SIGKILL));
+    errors.extend(confirm_gone(&found.identities, KILL_CONFIRM_TIMEOUT).await);
 
     if errors.is_empty() {
         Ok(())
@@ -1200,6 +1382,323 @@ pub(crate) async fn stop_live_agent(
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// A recycled parent number must not turn the replacement process's
+    /// children into members of the session being swept.
+    ///
+    /// This models the non-atomic Linux walk directly: the snapshot retained
+    /// parent `10` at start-time `100`, then observed a later child whose PPID
+    /// is also `10`, while the post-snapshot single-PID read sees that `10`
+    /// now has start-time `999`. Comparing only values inside the snapshot
+    /// would admit the child; the independent live identity must reject it.
+    #[test]
+    fn ppid_closure_rejects_children_of_a_recycled_parent_number() {
+        let stats = HashMap::from([
+            (10, (1, 100)),
+            (20, (10, 200)),
+            (21, (10, 210)),
+            (30, (20, 300)),
+        ]);
+        let mut found = HashMap::from([(10, 100)]);
+        let mut errors = Vec::new();
+        let mut reads = Vec::new();
+
+        expand_ppid_closure(&stats, &mut found, &mut errors, |pid| {
+            reads.push(pid);
+            Ok(match pid {
+                10 => Some((1, 999)),
+                20 => Some((10, 200)),
+                _ => stats.get(&pid).copied(),
+            })
+        });
+
+        assert_eq!(found, HashMap::from([(10, 100)]));
+        reads.sort_unstable();
+        assert_eq!(reads, vec![10, 20, 21], "each identity is read only once");
+        assert!(
+            errors.is_empty(),
+            "PID reuse is ordinary churn, not an error"
+        );
+    }
+
+    /// A stale child row must not attach to an independently owned process
+    /// that reused its former parent's PID later in the same snapshot.
+    ///
+    /// This is the reverse ordering of the preceding race: the scan sees the
+    /// child before reparenting, then sees the replacement parent. Parent-only
+    /// validation accepts that false edge, so the fresh child read is the
+    /// safety fence this case specifically pins.
+    #[test]
+    fn ppid_closure_rejects_a_reparented_child_of_a_recycled_parent() {
+        let stats = HashMap::from([(10, (1, 999)), (20, (10, 200)), (30, (20, 300))]);
+        let mut found = HashMap::from([(10, 999)]);
+        let mut errors = Vec::new();
+        let mut reads = Vec::new();
+
+        expand_ppid_closure(&stats, &mut found, &mut errors, |pid| {
+            reads.push(pid);
+            Ok(match pid {
+                20 => Some((1, 200)),
+                _ => stats.get(&pid).copied(),
+            })
+        });
+
+        assert_eq!(found, HashMap::from([(10, 999)]));
+        assert_eq!(reads, vec![20], "a stale child cannot reach its parent");
+        assert!(errors.is_empty());
+    }
+
+    /// A reused child PID must not be admitted on a matching parent number
+    /// alone.
+    ///
+    /// The snapshot identity has start-time `200`, while the live process now
+    /// wearing PID `20` has start-time `999` under the same parent. Requiring
+    /// the full child identity prevents a stale row from joining the closure.
+    #[test]
+    fn ppid_closure_rejects_a_recycled_child_identity() {
+        let stats = HashMap::from([(10, (1, 100)), (20, (10, 200)), (30, (20, 300))]);
+        let mut found = HashMap::from([(10, 100)]);
+        let mut errors = Vec::new();
+        let mut reads = Vec::new();
+
+        expand_ppid_closure(&stats, &mut found, &mut errors, |pid| {
+            reads.push(pid);
+            Ok(match pid {
+                20 => Some((10, 999)),
+                _ => stats.get(&pid).copied(),
+            })
+        });
+
+        assert_eq!(found, HashMap::from([(10, 100)]));
+        assert_eq!(reads, vec![20], "a reused child cannot reach its parent");
+        assert!(errors.is_empty());
+    }
+
+    /// Live parent identities still admit the complete transitive tree.
+    ///
+    /// This is the completeness fence around the PID-reuse fix: requiring a
+    /// fresh identity read must narrow only stale edges, not stop the ordinary
+    /// root-child-grandchild walk or re-read one parent for every child.
+    #[test]
+    fn ppid_closure_expands_transitively_through_live_parents() {
+        let stats = HashMap::from([
+            (10, (1, 100)),
+            (20, (10, 200)),
+            (21, (10, 210)),
+            (30, (20, 300)),
+        ]);
+        let mut found = HashMap::from([(10, 100)]);
+        let mut errors = Vec::new();
+        let mut reads = Vec::new();
+
+        expand_ppid_closure(&stats, &mut found, &mut errors, |pid| {
+            reads.push(pid);
+            Ok(stats.get(&pid).copied())
+        });
+
+        assert_eq!(
+            found,
+            HashMap::from([(10, 100), (20, 200), (21, 210), (30, 300)])
+        );
+        reads.sort_unstable();
+        assert_eq!(
+            reads,
+            vec![10, 20, 21, 30],
+            "one live read per process participating in an admitted edge"
+        );
+        assert!(errors.is_empty());
+    }
+
+    /// A cached live parent must not override the child's later evidence that
+    /// the edge disappeared.
+    ///
+    /// The closure admits and caches parent `20`, then observes that the same
+    /// child `30` has been reparented. This pins the lineage invariant that
+    /// makes one live read per PID safe across a transitive expansion.
+    #[test]
+    fn ppid_closure_rejects_reparented_child_despite_cached_live_parent() {
+        let stats = HashMap::from([(10, (1, 100)), (20, (10, 200)), (30, (20, 300))]);
+        let mut found = HashMap::from([(10, 100)]);
+        let mut errors = Vec::new();
+        let mut reads = Vec::new();
+
+        expand_ppid_closure(&stats, &mut found, &mut errors, |pid| {
+            reads.push(pid);
+            Ok(match pid {
+                30 => Some((1, 300)),
+                _ => stats.get(&pid).copied(),
+            })
+        });
+
+        assert_eq!(found, HashMap::from([(10, 100), (20, 200)]));
+        reads.sort_unstable();
+        assert_eq!(reads, vec![10, 20, 30]);
+        assert!(errors.is_empty());
+    }
+
+    /// An unreadable branch must fail closed without hiding a healthy branch.
+    ///
+    /// One failed identity read is reported exactly once, while an independent
+    /// readable root still admits its child and grandchild transitively. This
+    /// keeps a local process-table failure from aborting the rest of the sweep.
+    #[test]
+    fn ppid_closure_reports_an_unreadable_parent_and_rejects_its_children() {
+        let stats = HashMap::from([
+            (10, (1, 100)),
+            (20, (10, 200)),
+            (30, (20, 300)),
+            (40, (1, 400)),
+            (50, (40, 500)),
+            (60, (50, 600)),
+        ]);
+        let mut found = HashMap::from([(10, 100), (40, 400)]);
+        let mut errors = Vec::new();
+
+        expand_ppid_closure(&stats, &mut found, &mut errors, |pid| {
+            if pid == 10 {
+                Err("fixture read failed".to_string())
+            } else {
+                Ok(stats.get(&pid).copied())
+            }
+        });
+
+        assert_eq!(
+            found,
+            HashMap::from([(10, 100), (40, 400), (50, 500), (60, 600)])
+        );
+        assert_eq!(
+            errors,
+            ["re-validating pid 10 before expanding process-tree edge: fixture read failed"]
+        );
+    }
+
+    /// A parent disappearing after the snapshot is ordinary churn, not an
+    /// ownership proof or a sweep failure.
+    ///
+    /// The matching child row is rejected when its parent is gone, descendants
+    /// remain unreachable, and the cached absence avoids repeated reads.
+    #[test]
+    fn ppid_closure_quietly_rejects_children_of_a_gone_parent() {
+        let stats = HashMap::from([
+            (10, (1, 100)),
+            (20, (10, 200)),
+            (21, (10, 210)),
+            (30, (20, 300)),
+        ]);
+        let mut found = HashMap::from([(10, 100)]);
+        let mut errors = Vec::new();
+        let mut reads = Vec::new();
+
+        expand_ppid_closure(&stats, &mut found, &mut errors, |pid| {
+            reads.push(pid);
+            Ok((pid != 10).then(|| stats[&pid]))
+        });
+
+        assert_eq!(found, HashMap::from([(10, 100)]));
+        reads.sort_unstable();
+        assert_eq!(
+            reads,
+            vec![10, 20, 21],
+            "siblings share the gone parent's one cached read"
+        );
+        assert!(errors.is_empty(), "ordinary process exit is not an error");
+    }
+
+    /// Non-convergence errors retain stable identity evidence without letting
+    /// a fork storm create an unbounded control reply.
+    #[test]
+    fn quiesce_growth_diagnostics_are_sorted_and_bounded() {
+        let newly_found = (1..=MAX_QUIESCE_IDENTITIES_PER_PASS as u32 + 2)
+            .map(|pid| (pid, u64::from(pid) * 10))
+            .collect::<HashMap<_, _>>();
+        let parents = newly_found
+            .keys()
+            .map(|&pid| (pid, pid + 100))
+            .collect::<HashMap<_, _>>();
+
+        let rendered = format_quiesce_growth(3, &newly_found, &parents);
+
+        assert_eq!(
+            rendered,
+            "pass 3: (pid=1, ppid=101, starttime=10), \
+             (pid=2, ppid=102, starttime=20), \
+             (pid=3, ppid=103, starttime=30), \
+             (pid=4, ppid=104, starttime=40), \
+             (pid=5, ppid=105, starttime=50), \
+             (pid=6, ppid=106, starttime=60), \
+             (pid=7, ppid=107, starttime=70), \
+             (pid=8, ppid=108, starttime=80), 2 more omitted"
+        );
+    }
+
+    /// A PID reused between quiesce passes is a new identity that still needs
+    /// SIGSTOP.
+    ///
+    /// Comparing only PID numbers would incorrectly declare convergence and
+    /// leave the replacement able to fork before the final kill phase. The
+    /// returned stop set and diagnostic must both carry its new start time.
+    #[test]
+    fn quiesce_pass_treats_a_reused_pid_as_new() {
+        let previous = ProcessTree {
+            identities: HashMap::from([(42, 100)]),
+            parents: HashMap::from([(42, 1)]),
+        };
+        let next = ProcessTree {
+            identities: HashMap::from([(42, 999)]),
+            parents: HashMap::from([(42, 7)]),
+        };
+        let mut growth = Vec::new();
+
+        let newly_found = record_quiesce_pass(2, &previous, &next, &mut growth);
+
+        assert_eq!(newly_found, HashMap::from([(42, 999)]));
+        assert_eq!(growth, ["pass 2: (pid=42, ppid=7, starttime=999)"]);
+    }
+
+    /// Every nonempty quiesce pass must survive the real aggregate-error cap.
+    ///
+    /// The archive flake was opaque because only the final failure was known.
+    /// This drives the production accumulator through all five allowed passes,
+    /// then proves that twenty earlier per-process failures cannot hide any of
+    /// the bounded identity trail.
+    #[test]
+    fn quiesce_failure_preserves_all_passes_ahead_of_capped_errors() {
+        let mut previous = ProcessTree {
+            identities: HashMap::new(),
+            parents: HashMap::new(),
+        };
+        let mut growth = Vec::new();
+        for pass in 1..=MAX_QUIESCE_PASSES {
+            let mut identities = previous.identities.clone();
+            let mut parents = previous.parents.clone();
+            let first_pid = pass as u32 * 100 + 1;
+            for offset in 0..MAX_QUIESCE_IDENTITIES_PER_PASS as u32 + 2 {
+                let pid = first_pid + offset;
+                identities.insert(pid, u64::from(pid) * 10);
+                parents.insert(pid, pid + 1_000);
+            }
+            let next = ProcessTree {
+                identities,
+                parents,
+            };
+            let newly_found = record_quiesce_pass(pass, &previous, &next, &mut growth);
+            assert_eq!(newly_found.len(), MAX_QUIESCE_IDENTITIES_PER_PASS + 2);
+            assert!(growth[pass - 1].ends_with("2 more omitted"));
+            previous = next;
+        }
+
+        let mut errors = (0..MAX_REPORTED_ERRORS)
+            .map(|index| format!("earlier error {index}"))
+            .collect::<Vec<_>>();
+        prioritize_quiesce_failure(&mut errors, &growth);
+        let rendered = summarize_errors(&errors);
+
+        for pass in 1..=MAX_QUIESCE_PASSES {
+            assert!(rendered.contains(&growth[pass - 1]));
+        }
+        assert!(rendered.starts_with("21 error(s), first 20 shown: quiesce did not converge"));
+        assert!(rendered.ends_with("(1 more omitted)"));
+    }
 
     /// The environment-marker scanner's whole job: match COMPLETE, exact
     /// NUL-delimited entries and nothing looser.
