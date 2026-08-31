@@ -71,6 +71,16 @@ Within a bucket, no order.
 
 ## Maybe later
 
+- Guard provisioning against pushing payloads older than the helm's own protocol. A release-shaped helm built from a
+  commit newer than the latest release (the local stable-binary flow does exactly this) provisions remote hosts with
+  DOWNLOADED released payloads by default (D13), so the freshly provisioned supervisor can speak an older protocol than
+  the helm that just installed it — and the helm then refuses it at the hello gate. Nothing is damaged (the refusal is
+  the version rule working), but the failure arrives one step late, as a skewed host instead of a refused provisioning
+  attempt. Possible shapes: compare the payload's version against the helm's `PROTOCOL_VERSION` before pushing and
+  refuse with a message naming the mismatch; or make the staged-payload path (`--payload-dir`,
+  `FARHELM_HELM_PAYLOAD_DIR`) the documented answer for from-main helms. Noted 2026-08-31 when upgrading the stable
+  install to a from-main build while the newest release was still 0.1.1.
+
 - Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
   activity time, the cwd line, the profile chip and the header's archive button) but the browser owns their ~1s delay
   and nothing — no CSS, attribute, or JS — shortens it; WebKit's web content ignores the macOS tooltip-delay default
