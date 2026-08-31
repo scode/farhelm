@@ -3263,10 +3263,13 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
         .send_input(chan, b"a\x7fb\x1b[A\x03".to_vec())
         .await;
     // A plain printable byte with no special meaning to tmux or a
-    // raw-mode pty, sent as a separate call. Its own hex line is the sync
-    // point that proves the control-byte input above already made it
-    // through, without depending on how `hexecho`'s read() calls happen
-    // to chunk the payload into lines.
+    // raw-mode pty, sent as a separate call. Its emitted `7a` token is the
+    // sync point that proves every earlier byte crossed the ordered helm
+    // writer, tmux's confirmed `send-keys`, the raw application reader, and
+    // the output stream — regardless of which fixture read or output line
+    // contains it. This end-to-end acknowledgement is stronger than a
+    // separate metadata request, which would only prove the supervisor had
+    // handled the input frame.
     h.client.send_input(chan, b"z".to_vec()).await;
     wait_for(&mut rx, &mut seen, "7a", 10).await;
 
@@ -3276,8 +3279,9 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
     let bytes = hex_tokens(&transcript);
     let contains_sequence = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
     assert!(
-        contains_sequence(&[0x61, 0x7f, 0x62, 0x1b, 0x5b, 0x41, 0x03]),
-        "control bytes must arrive verbatim; transcript:\n{transcript}"
+        contains_sequence(&[0x61, 0x7f, 0x62, 0x1b, 0x5b, 0x41, 0x03, 0x7a]),
+        "control bytes and their trailing acknowledgement must arrive verbatim and in order; \
+         transcript:\n{transcript}"
     );
     assert!(
         !contains_sequence(&[0x5e, 0x3f]),
@@ -4946,6 +4950,30 @@ async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
 /// roots.
 #[tokio::test]
 async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding() {
+    /// Read the live parent edge this test is about without treating an
+    /// unreadable or zombie process as successful setup.
+    fn live_parent(pid: u32) -> (u32, String) {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .unwrap_or_else(|e| panic!("test setup: reading /proc/{pid}/stat: {e}"));
+        let tail = &stat[stat
+            .rfind(')')
+            .unwrap_or_else(|| panic!("test setup: malformed /proc/{pid}/stat: {stat:?}"))
+            + 1..];
+        let mut fields = tail.split_whitespace();
+        let state = fields
+            .next()
+            .unwrap_or_else(|| panic!("test setup: missing state in /proc/{pid}/stat: {stat:?}"));
+        let parent = fields
+            .next()
+            .and_then(|field| field.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("test setup: missing ppid in /proc/{pid}/stat: {stat:?}"));
+        assert_ne!(
+            state, "Z",
+            "test setup: pid {pid} became a zombie before stop_session"
+        );
+        (parent, state.to_string())
+    }
+
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
@@ -4966,13 +4994,41 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
     let unmarked_child_pid = wait_for_pid_file(&work.path().join("unmarked-child.pid"), 10).await;
+    let unmarked_ready = work.path().join("unmarked-child.ready");
+    // `$!` is available as soon as the marked daemon forks, before the
+    // child's `env -u` has necessarily execed. The ready file is written
+    // by the replacement shell, so only it makes the negative marker
+    // assertion a statement about the intended fixture rather than that
+    // transient inherited image.
+    wait_for_file(&unmarked_ready, 10).await;
+    let marked = marked_pids(&session.id);
     assert!(
-        marked_pids(&session.id).contains(&daemon_pid),
-        "test setup: the daemon must actually carry the marker"
+        marked.contains(&daemon_pid),
+        "test setup: the daemon must actually carry the marker; marked={marked:?}"
     );
+    let child_cmdline = std::fs::read(format!("/proc/{unmarked_child_pid}/cmdline"))
+        .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', " "));
     assert!(
-        !marked_pids(&session.id).contains(&unmarked_child_pid),
-        "test setup: the child must NOT carry the marker — that is the point"
+        !marked.contains(&unmarked_child_pid),
+        "test setup: the post-exec child must NOT carry the marker — that is the point; \
+         ready={}, cmdline={child_cmdline:?}, marked={marked:?}",
+        unmarked_ready.display()
+    );
+
+    // Re-read both rows at the operation boundary. The ready file and
+    // marker scan describe earlier instants; only this check proves the
+    // live unmarked process is still the daemon's child when closure
+    // seeding begins.
+    let (daemon_parent, daemon_state) = live_parent(daemon_pid);
+    let (child_parent, child_state) = live_parent(unmarked_child_pid);
+    assert_eq!(
+        child_parent,
+        daemon_pid,
+        "test setup: the live unmarked child must still hang from the marked daemon; \
+         daemon={daemon_pid} parent={daemon_parent} state={daemon_state}, \
+         child={unmarked_child_pid} parent={child_parent} state={child_state}, \
+         ready={}, cmdline={child_cmdline:?}, marked={marked:?}",
+        unmarked_ready.display()
     );
 
     h.client.stop_session(&session.id).await.expect("stop");

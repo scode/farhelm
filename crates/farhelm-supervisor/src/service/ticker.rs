@@ -1880,7 +1880,11 @@ mod tests {
     /// calling every pane changed — a capture that carried styling noise,
     /// or a baseline that counted the first sample as output — which would
     /// have item 2's classifier report every session running forever. The
-    /// still pane is the negative evidence.
+    /// still pane is the negative evidence. Their clocks are deliberately
+    /// decoupled: after the still pane qualifies as quiet, the test waits
+    /// for a LATER busy comparison that observes change. Sampling the busy
+    /// pane at the instant its peer reaches a threshold can legitimately
+    /// catch one unchanged grid on a loaded runner.
     #[tokio::test]
     async fn samples_accumulate_for_a_busy_pane_and_stay_quiet_for_a_still_one() {
         let state = StateDir::new();
@@ -1905,17 +1909,24 @@ mod tests {
             || still.lock().expect("activity mutex").unchanged_streak >= 3,
         )
         .await;
+        let busy_samples_after_still_qualified = busy.lock().expect("activity mutex").samples;
+        wait_until(
+            "the busy pane observed a change after its quiet peer qualified",
+            || {
+                let sample = busy.lock().expect("activity mutex");
+                sample.samples > busy_samples_after_still_qualified && sample.unchanged_streak == 0
+            },
+        )
+        .await;
         ticker.shutdown().await;
+
+        assert_eq!(classify(&sup, "busy").await, SessionStatus::Running);
+        assert_eq!(classify(&sup, "still").await, SessionStatus::Idle);
 
         let busy = busy.lock().expect("activity mutex");
         assert!(
             busy.samples > 1,
             "change can only be established by comparing two samples"
-        );
-        assert_eq!(
-            busy.unchanged_streak, 0,
-            "a pane printing a new line every 50ms must have changed at its most recent \
-             comparison; a streak here is change detection that never fires"
         );
         assert!(
             busy.tail
