@@ -46,7 +46,9 @@ import {
   openHostMenu,
   openHostsPanel,
   openRowMenu,
+  patchPreferences,
   pinAutoSelect,
+  readPreferences,
   SESSION_LISTING,
   stubFeed,
 } from "./helpers/fleet";
@@ -2159,6 +2161,12 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     await expect(row(page, older.id)).toBeVisible({ timeout: 20_000 });
     await row(page, older.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toContainText("policy-older-");
+    // The preference write is fire-and-forget: only the helm's row itself
+    // says the click was persisted, and reloading before it lands would
+    // race the very state this test restores from.
+    await expect
+      .poll(async () => (await readPreferences(request)).last_selected, { timeout: 20_000 })
+      .toBe(older.id);
     await page.reload();
     await expect(page.locator(".titlebar .title")).toContainText("policy-older-", {
       timeout: 20_000,
@@ -2168,11 +2176,8 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
 
     // A stale remembered id — a session that no longer exists — falls
     // back to the newest-created non-archived session.
-    await page.evaluate(() => {
-      const raw = window.localStorage.getItem("farhelm.last-selected")!;
-      const record = JSON.parse(raw);
-      record.id = "00000000-0000-0000-0000-000000000000";
-      window.localStorage.setItem("farhelm.last-selected", JSON.stringify(record));
+    await patchPreferences(request, {
+      last_selected: "00000000-0000-0000-0000-000000000000",
     });
     await page.reload();
     await expect(page.locator(".titlebar .title")).toContainText("policy-newer-", {
@@ -2207,12 +2212,21 @@ test("a second client's launch alone takes the terminal over", async ({
     await row(page, session.id).locator(".session-row-open").click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
 
-    // The second client remembers the same session and merely LOADS.
+    // Client one's click is the ONLY preference write in this test: the
+    // second client must inherit the selection from the helm's shared row.
+    // Seeding it here (the old pinAutoSelect staging) would let the test
+    // pass with client one's click never persisting anything — it would
+    // prove client two can read a hand-planted value, not that a click in
+    // one client is what another client opens with.
+    await expect
+      .poll(async () => (await readPreferences(request)).last_selected, { timeout: 20_000 })
+      .toBe(session.id);
+
+    // The second client merely LOADS.
     second = await browser.newContext({
       storageState: await page.context().storageState(),
     });
     const page2 = await second.newPage();
-    await pinAutoSelect(page2, session.id);
     await page2.goto("/");
     await page2.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
       timeout: 20_000,

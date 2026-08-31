@@ -9,8 +9,8 @@ use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
-    ListSort, SessionFilter, SessionListing, archive_session, delete_session, fetch_hosts,
-    fetch_session, fetch_sessions, rename_session, stop_session,
+    self, ListSort, Preferences, SessionFilter, SessionListing, archive_session, delete_session,
+    fetch_hosts, fetch_session, fetch_sessions, rename_session, stop_session,
 };
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -23,7 +23,7 @@ use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner, listing_is_complete,
     menu_row_reordered, retire_vanished_renames, settle_optimistic_renames,
 };
-use crate::{ApiBase, HostId, HostKind, Session};
+use crate::{ApiBase, HostId, Session};
 
 use super::create_form::{CreatePrefill, CreateSessionForm, prefill_from};
 use super::row::SessionRow;
@@ -32,207 +32,87 @@ use super::shared::{
     session_is_local,
 };
 
-/// The client's remembered selection, for auto-select on load.
+/// The shared preference (SPEC.md, Session list) as this page holds it:
+/// the chosen list order and the last user-selected session, seeded once
+/// from the helm by `PreferencesGate` and provided to this view as context.
 ///
-/// The interviewed decision (BUGS_BURNDOWN.md issue 5): an empty right
-/// pane auto-selects the client's own last-selected session, falling back
-/// to the newest-created non-archived one; a placeholder appears only for
-/// an empty fleet. Browser builds persist the pair in localStorage —
-/// origin-scoped, and additionally keyed by HELM IDENTITY (the local host
-/// row's install identity), per the recorded decision: two helms behind
-/// one origin (a state-dir swap, a restored backup) must not inherit each
-/// other's selection, where an id collision would silently auto-attach an
-/// unrelated session.
+/// The helm remembers ONE preference for every client — no client keeps
+/// its own copy, and per-client persistence (browser storage, a desktop
+/// state file) is not wanted. This signal is the page's in-memory view of
+/// that row: reads seed the sort control and the auto-select effect on
+/// their first run (the gate holds this component off the screen until the
+/// row has been read, so there is no frame that shows a fallback and then
+/// corrects it), and every user-initiated change writes the signal first
+/// and then a one-field patch to the helm. Writing the signal first is what
+/// keeps the choice in force in this client when the write fails: SPEC.md
+/// makes this persistence best-effort, and a failed write costs the next
+/// launch, never the current choice.
 ///
 /// Only USER-initiated selections are remembered (row clicks, creation).
 /// The auto-select fallback deliberately never writes: a remembered row
 /// that happens to sit beyond a TRUNCATED listing's bound must survive
 /// that listing, not be overwritten by whichever row the fallback picked.
 ///
-/// Desktop uses the same record and localStorage key. Its native renderer
-/// mirrors the value in process memory because native Rust cannot read the
-/// webview's storage synchronously; desktop bootstrap guarantees the native
-/// copy and attempts the page copy before this component mounts. User changes
-/// cross the eval channel before the native state-file writer records them.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RememberedSelection {
-    pub(crate) helm: String,
-    pub(crate) id: String,
-}
-
-#[cfg(target_arch = "wasm32")]
-fn stored_selection(helm: &str) -> Option<String> {
-    let raw = web_sys::window()?
-        .local_storage()
-        .ok()
-        .flatten()?
-        .get_item("farhelm.last-selected")
-        .ok()
-        .flatten()?;
-    let stored: RememberedSelection = serde_json::from_str(&raw).ok()?;
-    (stored.helm == helm).then_some(stored.id)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn remember_selection(helm: &str, id: &str) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let record = RememberedSelection {
-            helm: helm.to_string(),
-            id: id.to_string(),
-        };
-        if let Ok(raw) = serde_json::to_string(&record) {
-            // Best-effort: a full or disabled storage must never break
-            // selection itself.
-            let _ = storage.set_item("farhelm.last-selected", &raw);
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-static LAST_SELECTED: std::sync::OnceLock<std::sync::RwLock<Option<RememberedSelection>>> =
-    std::sync::OnceLock::new();
-
-#[cfg(not(target_arch = "wasm32"))]
-fn stored_selection(helm: &str) -> Option<String> {
-    let slot = LAST_SELECTED.get_or_init(Default::default).read().ok()?;
-    slot.as_ref()
-        .filter(|record| record.helm == helm)
-        .map(|record| record.id.clone())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn remember_selection(helm: &str, id: &str) {
-    let record = RememberedSelection {
-        helm: helm.to_string(),
-        id: id.to_string(),
-    };
-    if let Ok(mut slot) = LAST_SELECTED.get_or_init(Default::default).write() {
-        *slot = Some(record.clone());
-    }
-    #[cfg(feature = "desktop")]
-    crate::desktop::report_selection_preference(record);
-}
-
-/// Where this client's chosen listing order is kept: the bare wire word, in
-/// the same localStorage the selection uses.
+/// Because the row is the helm's, a "second client" attaches to whatever
+/// was most recently selected ANYWHERE, taking it over per the
+/// one-attached-client rule — the consequence SPEC.md's Terminal
+/// experience section names.
 ///
-/// A bare word rather than the selection's `{helm, id}` record, and NOT keyed
-/// by helm identity, because an order is not a pointer at an object. The
-/// selection is keyed because two helms behind one origin could otherwise
-/// auto-attach each other's session ids; "show me the most recently active
-/// first" says nothing about any particular fleet and is exactly as true of
-/// the second helm as of the first.
+/// One signal for both fields, so a write to either dirties every reader
+/// of the struct: a sort change with an empty right pane re-runs the
+/// auto-select effect. That effect is idempotent (its `resolving_*`
+/// guards), so this is a wasted run rather than a wrong one, and one
+/// signal keeps the seed and the two writers trivially consistent.
+#[derive(Clone, Copy)]
+pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
+
+/// The remembered selection, if any: the bare session id.
 ///
-/// The value is written on CHANGE only (see `apply_sort`), so a client that
-/// never touches the control never writes here at all.
-///
-/// Browser builds only, like the storage it names — the desktop half is the
-/// process-local `LIST_SORT` below, which holds the same word so that both
-/// arms decode through one function.
-#[cfg(target_arch = "wasm32")]
-const SORT_STORAGE_KEY: &str = "farhelm.sort";
+/// A bare id rather than the `{helm, id}` record the browser once kept in
+/// localStorage. That record was keyed by helm identity because origin-
+/// scoped storage could outlive a state-directory swap and hand one helm
+/// another's session id; a row in this helm's own database cannot describe
+/// any other helm's fleet, so the key would guard against nothing.
+fn stored_selection(preferences: SharedPreferences) -> Option<String> {
+    preferences.0.read().last_selected.clone()
+}
+
+/// Record a USER-initiated selection (a row click, a creation): the signal
+/// first, so the choice is in force in this client whatever the helm says,
+/// then a one-field patch through `api::store_preference`'s serialized
+/// queue. The auto-select fallback never calls this (see
+/// `SharedPreferences`).
+fn remember_selection(base: &str, mut preferences: SharedPreferences, id: &str) {
+    preferences.0.write().last_selected = Some(id.to_string());
+    api::store_preference(base, api::PreferenceField::Selected, id.to_string());
+}
 
 /// A stored preference as an order: anything this build does not recognize —
 /// absent, junk, a word a later build wrote — is the default.
 ///
-/// Split out from the storage arms below so the decision is testable without
-/// a browser, and so both targets provably make the same one. Falling back
-/// rather than failing is the whole contract: a page that refused to list
-/// sessions because of a word in localStorage would be broken by a value the
-/// user cannot see and did not knowingly write.
+/// Split out from the signal reads so the decision is testable without a
+/// component. Falling back rather than failing is the whole contract: a page
+/// that refused to list sessions because of a word the helm remembers would
+/// be broken by a value the user cannot see and did not knowingly write —
+/// the helm refuses to STORE an unknown word, but the row outlives the
+/// build that validated it.
 fn decoded_sort(raw: Option<&str>) -> ListSort {
     raw.and_then(ListSort::from_key).unwrap_or_default()
 }
 
-#[cfg(target_arch = "wasm32")]
-fn stored_sort() -> ListSort {
-    let raw = web_sys::window()
-        .and_then(|window| window.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(SORT_STORAGE_KEY).ok().flatten());
-    decoded_sort(raw.as_deref())
+/// The remembered order as this build understands it (see `decoded_sort`).
+fn stored_sort(preferences: SharedPreferences) -> ListSort {
+    decoded_sort(preferences.0.read().list_sort.as_deref())
 }
 
-#[cfg(target_arch = "wasm32")]
-fn remember_sort(sort: ListSort) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        // Best-effort, exactly like the selection record: a full or disabled
-        // storage must cost the user their preference NEXT load, never this
-        // load's re-sort.
-        let _ = storage.set_item(SORT_STORAGE_KEY, sort.key());
-    }
-}
-
-/// Desktop's synchronous mirror of the page's persisted preference.
+/// Record a chosen order: written on CHANGE only (see `apply_sort`), so a
+/// client that never touches the control never writes at all.
 ///
-/// It holds the stored WORD rather than a decoded [`ListSort`] so both
-/// renderers go through [`decoded_sort`]. Desktop bootstrap fills it from
-/// `desktop-client.json` before `ListView` mounts; writes update it before
-/// their best-effort eval/state-file round trip, so this process responds to
-/// the user's choice even when persistence fails.
-#[cfg(not(target_arch = "wasm32"))]
-static LIST_SORT: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
-    std::sync::OnceLock::new();
-
-#[cfg(not(target_arch = "wasm32"))]
-fn stored_sort() -> ListSort {
-    let raw = LIST_SORT
-        .get_or_init(Default::default)
-        .read()
-        .ok()
-        .and_then(|slot| slot.clone());
-    decoded_sort(raw.as_deref())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn remember_sort(sort: ListSort) {
-    if let Ok(mut slot) = LIST_SORT.get_or_init(Default::default).write() {
-        *slot = Some(sort.key().to_string());
-    }
-    #[cfg(feature = "desktop")]
-    crate::desktop::report_sort_preference(sort.key().to_string());
-}
-
-/// Install desktop bootstrap's durable preferences into the native
-/// renderer's synchronous mirrors.
-///
-/// `DesktopBootstrapGate` calls this only after the auth JavaScript has
-/// attempted the same localStorage seed, and immediately before it mounts
-/// `AppBody`. These native mirrors are the guaranteed ordering edge that
-/// makes `stored_sort` and the auto-select effect see restart state on their
-/// first run rather than choosing their fallbacks and correcting later.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-pub(crate) fn seed_desktop_preferences(
-    selection: Option<RememberedSelection>,
-    sort: Option<String>,
-) {
-    if let Ok(mut slot) = LAST_SELECTED.get_or_init(Default::default).write() {
-        *slot = selection;
-    }
-    if let Ok(mut slot) = LIST_SORT.get_or_init(Default::default).write() {
-        *slot = sort;
-    }
-}
-
-/// Snapshot both native preference mirrors for the synchronous close flush.
-///
-/// They are updated before any best-effort IPC begins, so they remain the
-/// authoritative latest choices when shutdown interrupts a debounce or eval.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-pub(crate) fn desktop_preferences_snapshot() -> crate::desktop::DesktopPreferences {
-    let remembered_selection = LAST_SELECTED
-        .get_or_init(Default::default)
-        .read()
-        .ok()
-        .and_then(|slot| slot.clone());
-    let list_sort = LIST_SORT
-        .get_or_init(Default::default)
-        .read()
-        .ok()
-        .and_then(|slot| slot.clone());
-    crate::desktop::DesktopPreferences {
-        remembered_selection,
-        list_sort,
-    }
+/// The bare wire word goes to the helm, which validates it against the
+/// same vocabulary its `?sort=` accepts.
+fn remember_sort(base: &str, mut preferences: SharedPreferences, sort: ListSort) {
+    preferences.0.write().list_sort = Some(sort.key().to_string());
+    api::store_preference(base, api::PreferenceField::Sort, sort.key().to_string());
 }
 
 /// The orders the sidebar offers, in the order it offers them, each with the
@@ -577,6 +457,9 @@ pub(crate) fn ListView(
     layout_epoch: ReadSignal<u64>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    // The helm's shared preference, already read by `PreferencesGate` —
+    // this component never mounts before it has (see `SharedPreferences`).
+    let preferences = use_context::<SharedPreferences>();
     let mut row_ops = row_ops;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // The same generation discipline the hosts read has, for the same
@@ -832,8 +715,8 @@ pub(crate) fn ListView(
     // the filter whose results are on screen rather than a half-typed one.
     let mut filter = use_signal(SessionFilter::default);
     let mut filter_draft = use_signal(SessionFilter::default);
-    // The order the reads are carrying, seeded from this client's remembered
-    // preference (`stored_sort`).
+    // The order the reads are carrying, seeded from the helm's shared
+    // remembered order (`stored_sort` over the `SharedPreferences` context).
     //
     // ONE signal, unlike the filter's applied/draft pair, because a sort has
     // no draft state to speak of: picking an option IS the decision, there is
@@ -843,7 +726,7 @@ pub(crate) fn ListView(
     // stay apart, and note that every reconciliation predicate on this page
     // reads the FILTER: a re-sorted listing covers exactly what the same
     // filter's listing covered, so nothing about evidence changes with it.
-    let mut sort = use_signal(stored_sort);
+    let mut sort = use_signal(move || stored_sort(preferences));
 
     // The two surfaces' readers (`reader::SurfaceReader`): one reader each,
     // coalescing every trigger into a single live read and retrying one that
@@ -1398,14 +1281,15 @@ pub(crate) fn ListView(
     // still stays put. Here even the row survives: it is still listed, just
     // elsewhere, so it goes on rendering as the selected one.
     let sort_read = request_listing.clone();
+    let sort_base = base.clone();
     let mut apply_sort = move |next: ListSort| {
         // Re-selecting the option already in force is not a change: acting on
-        // it would restart the walk and rewrite storage for nothing.
+        // it would restart the walk and write the helm's row for nothing.
         if *sort.peek() == next {
             return;
         }
         sort.set(next);
-        remember_sort(next);
+        remember_sort(&sort_base, preferences, next);
         sort_read(Trigger::Explicit);
     };
 
@@ -1965,24 +1849,18 @@ pub(crate) fn ListView(
     // what the button renders with, and a render-time value is exactly what
     // a click landing in the same frame as the operation it should have
     // seen would read as idle.
+    // Closures below need OWNED copies of the API base (`open_base` here,
+    // `sort_base` and `created_base` likewise): each is `move`d into a
+    // handler that outlives this render, so a borrow cannot serve.
+    let open_base = base.clone();
     let guarded_open = move |session: Session| {
         if ops.busy_now() || !pending.peek().is_empty() {
             return;
         }
         // A USER-initiated selection is what gets remembered — the
         // auto-select fallback deliberately never writes (see
-        // `stored_selection`). Best-effort: no identity yet (hosts read
-        // still out) just means this click is not recorded.
-        if let Some(helm) = hosts
-            .peek()
-            .hosts()
-            .unwrap_or_default()
-            .iter()
-            .find(|host| host.kind == HostKind::Local)
-            .and_then(|host| host.identity.clone())
-        {
-            remember_selection(&helm, &session.id);
-        }
+        // `SharedPreferences`).
+        remember_selection(&open_base, preferences, &session.id);
         on_open.call(session);
     };
 
@@ -2001,17 +1879,17 @@ pub(crate) fn ListView(
     // specifically the newest-created session.
     // Everything consulted is a TRACKED read, deliberately: the
     // effect must rerun when the listing commits, when the selection
-    // clears, when the hosts read lands (the remembered id is keyed by
-    // helm identity, which comes from the local host row), and when the
-    // write gates drain — an auto-select refused during a busy operation
-    // would otherwise be lost until unrelated fleet activity.
+    // clears, and when the write gates drain — an auto-select refused
+    // during a busy operation would otherwise be lost until unrelated
+    // fleet activity. The remembered id itself needs no waiting on: the
+    // helm's preference was read before this component mounted.
     //
     // A remembered id ABSENT from a TRUNCATED listing is not evidence it
     // is gone (the helm's cap cut the view); it is resolved directly
     // instead, and only a definite not-found retires it in favor of the
     // fallback. The fallback itself deliberately does not re-persist:
     // overwriting the user's real choice with whichever row a cut listing
-    // happened to hold would erase it permanently (see `stored_selection`).
+    // happened to hold would erase it permanently (see `SharedPreferences`).
     //
     // The fallback picks from the rows in hand even when the listing is
     // incomplete. Under a non-creation order the newest session may sit
@@ -2030,18 +1908,8 @@ pub(crate) fn ListView(
         }
         let page_busy = ops.busy();
         let rows_busy = *row_ops.read() > 0;
-        let hosts_read = hosts.read();
         let listing_read = listing.read();
         let Some(Ok(listing_ok)) = listing_read.as_ref() else {
-            return;
-        };
-        let Some(helm) = hosts_read
-            .hosts()
-            .unwrap_or_default()
-            .iter()
-            .find(|host| host.kind == HostKind::Local)
-            .and_then(|host| host.identity.clone())
-        else {
             return;
         };
         if page_busy || rows_busy {
@@ -2050,7 +1918,7 @@ pub(crate) fn ListView(
         // A TRACKED read: retiring the remembered id (the 404 arm below)
         // must rerun this effect so the fallback can proceed.
         let remembered =
-            stored_selection(&helm).filter(|id| remembered_dead.read().as_ref() != Some(id));
+            stored_selection(preferences).filter(|id| remembered_dead.read().as_ref() != Some(id));
         let in_page = listing_ok
             .sessions
             .iter()
@@ -2176,6 +2044,9 @@ pub(crate) fn ListView(
     // different arguments, not two operations.
     let mut submit_filter = apply_filter.clone();
     let mut clear_filter = apply_filter;
+    // The create form's own copy of the API base, for recording a created
+    // session as the selection (see `remember_selection`).
+    let created_base = base.clone();
 
     rsx! {
         // The sidebar leads with two on-demand toggles (BUGS_BURNDOWN.md
@@ -2579,16 +2450,7 @@ pub(crate) fn ListView(
                 prefill: clone_prefill(),
                 on_created: move |session: Session| {
                     // Creation is a user-initiated selection too.
-                    if let Some(helm) = hosts
-                        .peek()
-                        .hosts()
-                        .unwrap_or_default()
-                        .iter()
-                        .find(|host| host.kind == HostKind::Local)
-                        .and_then(|host| host.identity.clone())
-                    {
-                        remember_selection(&helm, &session.id);
-                    }
+                    remember_selection(&created_base, preferences, &session.id);
                     show_create.set(false);
                     // The other close path. This component STAYS mounted
                     // under the sidebar layout, so without this clear the
@@ -2837,13 +2699,13 @@ mod tests {
     /// The three cases are the three ways this value actually arrives. VALID
     /// is the whole point of persisting it. ABSENT is every first visit, and
     /// is why the default has to be a real answer rather than an empty one.
-    /// INVALID is the case worth a test of its own: storage is writable by
-    /// the user, survives across builds, and a later build may well store a
-    /// word this one has never heard of — and the helm answers an
-    /// unrecognized `sort` with a 400, so a value passed through unchecked
-    /// would not sort the list differently, it would leave the sidebar
-    /// reading "failed to load sessions" until someone cleared their browser
-    /// storage.
+    /// INVALID is the case worth a test of its own: the helm-owned row
+    /// outlives the build that validated it — current writes refuse unknown
+    /// words, but a build with a different sort vocabulary can have written
+    /// the row this one reads — and the helm answers an unrecognized `sort=`
+    /// with a 400, so a value passed through unchecked would not sort the
+    /// list differently, it would leave the sidebar reading "failed to load
+    /// sessions" until someone fixed the row by hand.
     #[test]
     fn an_unrecognized_stored_sort_falls_back_to_the_default() {
         assert_eq!(decoded_sort(Some("title")), ListSort::Title);

@@ -1114,7 +1114,6 @@ pub fn App() -> Element {
         // render's edits are applied, so "first hook" is early enough.
         desktop::use_embedded_asset_handler();
         desktop::use_foreground_on_launch();
-        desktop::use_preference_close_flush();
         webview_watchdog::use_webview_watchdog();
         return rsx! {
             // First script in the tree, ahead of `DesktopBootstrapGate`
@@ -1194,148 +1193,253 @@ fn AppBody() -> Element {
         if token_required && !build_skew {
             auth::TokenPrompt {}
         } else {
-            // Beside it, and outside the match for a related reason: the
-            // invalidation feed is the whole page's channel, and a subscription
-            // owned by the keyed view below would be torn down and
-            // re-handshaked on every selection switch — a window with no
-            // live updates and a fallback poll spinning back up to cover
-            // it, several times a working hour. It renders nothing (PLAN_M6_75.md
-            // item 6); what it produces is the revision counter each page
-            // re-reads on.
-            feed::FleetFeed {}
-            // Beside the feed, and for the same reason: the coarse "now"
-            // every relative activity age is computed against belongs to
-            // the PAGE, not to whichever pane happens to print an age, and
-            // a clock owned by the keyed view below would restart on every
-            // selection switch. Renders nothing (see `activity`).
-            activity::ActivityClock {}
-            // The two-pane shell (BUGS_BURNDOWN.md issue 5): the session
-            // list is a permanent SIDEBAR and the right pane holds the
-            // selected session — both mounted at once, which is the whole
-            // point (the agent list stays visible while a terminal is on
-            // screen). `current` is now a SELECTION rather than a page
-            // switch, but it remains the single owner of what the right
-            // pane shows.
-            //
-            // The `key` on `SessionView` is load-bearing, not decorative:
-            // the view seeds per-session state from its prop via
-            // `use_signal` and reads the id in memos, so switching
-            // sessions MUST remount it — under the old either/or match
-            // that remount was implicit in the arm swap, and without the
-            // key a selection change would leave the view talking to the
-            // previous session.
-            div {
-                class: "app-shell",
-                // See `layout_epoch`'s own doc above: this element's
-                // OWN horizontal scrolling (a legal narrow window, per
-                // this class's app.css comment) moves everything inside
-                // it, including whatever row an open actions panel was
-                // measured against.
-                onscroll: move |_| layout_epoch += 1,
+            // The whole authenticated tree sits behind the one read of the
+            // helm's shared preference (see `PreferencesGate`): the list
+            // must not mount before the remembered order and selection
+            // are in hand. Inside the token branch, deliberately, so a
+            // token exchange remounts the gate and re-reads with the new
+            // credential — the read is protected like every other.
+            PreferencesGate {
+                    // Inside the gate but outside the match below, for a related
+                // reason: the invalidation feed is the whole page's channel,
+                // and a subscription owned by the keyed view would be torn
+                // down and re-handshaked on every selection switch — a window
+                // with no live updates and a fallback poll spinning back up
+                // to cover it, several times a working hour. The gate above
+                // it remounts only when the token branch does (a credential
+                // exchange), which is when the feed had to re-handshake
+                // anyway. It renders nothing (PLAN_M6_75.md item 6); what it
+                // produces is the revision counter each page re-reads on.
+                feed::FleetFeed {}
+                // Beside the feed, and for the same reason: the coarse "now"
+                // every relative activity age is computed against belongs to
+                // the PAGE, not to whichever pane happens to print an age, and
+                // a clock owned by the keyed view below would restart on every
+                // selection switch. Renders nothing (see `activity`).
+                activity::ActivityClock {}
+                // The two-pane shell (BUGS_BURNDOWN.md issue 5): the session
+                // list is a permanent SIDEBAR and the right pane holds the
+                // selected session — both mounted at once, which is the whole
+                // point (the agent list stays visible while a terminal is on
+                // screen). `current` is now a SELECTION rather than a page
+                // switch, but it remains the single owner of what the right
+                // pane shows.
+                //
+                // The `key` on `SessionView` is load-bearing, not decorative:
+                // the view seeds per-session state from its prop via
+                // `use_signal` and reads the id in memos, so switching
+                // sessions MUST remount it — under the old either/or match
+                // that remount was implicit in the arm swap, and without the
+                // key a selection change would leave the view talking to the
+                // previous session.
                 div {
-                    class: "app-sidebar",
-                    // As above, for THIS element's own vertical
-                    // scrolling — the sidebar's usual case.
+                    class: "app-shell",
+                    // See `layout_epoch`'s own doc above: this element's
+                    // OWN horizontal scrolling (a legal narrow window, per
+                    // this class's app.css comment) moves everything inside
+                    // it, including whatever row an open actions panel was
+                    // measured against.
                     onscroll: move |_| layout_epoch += 1,
-                    // A window resize does not scroll anything, but it can
-                    // still move every row: the sidebar's width is fixed
-                    // (see this class's own app.css comment), so a resize
-                    // narrow enough to trigger `.app-shell`'s horizontal
-                    // scroll changes what is under the fold without any
-                    // `onscroll` firing on its own. `ResizeObserver`-backed
-                    // (Dioxus 0.7's `onresize`) rather than a window-level
-                    // `resize` listener: observing THIS element directly is
-                    // exactly what the fixed-panel coordinates actually
-                    // depend on, and Dioxus's own JS interpreter wires
-                    // `onresize` through the SAME `ResizeObserver` machinery
-                    // on both the `web` (wasm-bindgen) and `desktop`
-                    // (wry/webview IPC) renderer targets — confirmed by
-                    // reading `dioxus-interpreter-js`'s shared
-                    // `BaseInterpreter.createListener`/`createResizeObserver`,
-                    // which both targets load unmodified — so this is not a
-                    // web-only affordance despite `ResizeObserver` sounding
-                    // browser-specific.
-                    onresize: move |_| layout_epoch += 1,
-                    ListView {
-                        // Selection memory lives in `ListView` (it knows
-                        // the helm identity the stored id is keyed by and
-                        // which selections were user-initiated); this
-                        // handler only owns the signal.
-                        on_open: move |session: Session| current.set(Some(session)),
-                        // The id AND the install identity the row reported,
-                        // snapshotted together at selection time: the pair is
-                        // what lets the create default notice the row id
-                        // being retargeted onto another install after this
-                        // selection was made (see `list::OpenHost`).
-                        open_host: current
-                            .read()
-                            .as_ref()
-                            .and_then(list::OpenHost::of_session),
-                        selected: selected_id,
-                        fleet_empty,
-                        // A confirmed rename patches the selected session's
-                        // TITLE in place — same id, same key, no remount —
-                        // so the titlebar can never sit on the old name
-                        // while the sidebar shows the new one (the feed
-                        // normally reconciles this, but a latched build
-                        // mismatch withdraws it).
-                        on_renamed: move |(id, title): (String, String)| {
-                            let mut current = current;
-                            let selected_matches =
-                                current.peek().as_ref().is_some_and(|session| session.id == id);
-                            if selected_matches
-                                && let Some(session) = current.write().as_mut()
-                            {
-                                session.title = title;
-                            }
-                        },
-                        ops: page_ops,
-                        row_ops,
-                        // Selection reconciliation: a session the LIST
-                        // removed (successful delete, or an archive under
-                        // the default filter) must not stay selected — the
-                        // right pane would keep a terminal/detail surface
-                        // for an object this client knows is gone.
-                        on_removed: move |id: String| {
-                            if current.peek().as_ref().is_some_and(|session| session.id == id) {
-                                current.set(None);
-                            }
-                        },
-                        layout_epoch,
-                    }
-                }
-                div { class: "app-main",
-                    match &*current.read() {
-                        None => rsx! {
-                            // Three honest states, not one claim: an empty
-                            // fleet may only be ANNOUNCED once a committed
-                            // listing proved it (`fleet_empty`); before
-                            // that the pane says it is loading, and a
-                            // non-empty fleet with nothing selected shows
-                            // nothing at all — auto-select is about to end
-                            // that state (see `ListView`). "Active"
-                            // matters in the wording: an archived-only
-                            // fleet has sessions, but none the default
-                            // view lists or auto-select may take.
-                            div { class: "main-empty",
-                                match *fleet_empty.read() {
-                                    Some(true) => "no active sessions — create one",
-                                    Some(false) => "",
-                                    None => "loading sessions…",
+                    div {
+                        class: "app-sidebar",
+                        // As above, for THIS element's own vertical
+                        // scrolling — the sidebar's usual case.
+                        onscroll: move |_| layout_epoch += 1,
+                        // A window resize does not scroll anything, but it can
+                        // still move every row: the sidebar's width is fixed
+                        // (see this class's own app.css comment), so a resize
+                        // narrow enough to trigger `.app-shell`'s horizontal
+                        // scroll changes what is under the fold without any
+                        // `onscroll` firing on its own. `ResizeObserver`-backed
+                        // (Dioxus 0.7's `onresize`) rather than a window-level
+                        // `resize` listener: observing THIS element directly is
+                        // exactly what the fixed-panel coordinates actually
+                        // depend on, and Dioxus's own JS interpreter wires
+                        // `onresize` through the SAME `ResizeObserver` machinery
+                        // on both the `web` (wasm-bindgen) and `desktop`
+                        // (wry/webview IPC) renderer targets — confirmed by
+                        // reading `dioxus-interpreter-js`'s shared
+                        // `BaseInterpreter.createListener`/`createResizeObserver`,
+                        // which both targets load unmodified — so this is not a
+                        // web-only affordance despite `ResizeObserver` sounding
+                        // browser-specific.
+                        onresize: move |_| layout_epoch += 1,
+                        ListView {
+                            // Selection memory lives in `ListView` (it knows
+                            // which selections were user-initiated, and writes
+                            // those to the helm's shared preference); this
+                            // handler only owns the signal.
+                            on_open: move |session: Session| current.set(Some(session)),
+                            // The id AND the install identity the row reported,
+                            // snapshotted together at selection time: the pair is
+                            // what lets the create default notice the row id
+                            // being retargeted onto another install after this
+                            // selection was made (see `list::OpenHost`).
+                            open_host: current
+                                .read()
+                                .as_ref()
+                                .and_then(list::OpenHost::of_session),
+                            selected: selected_id,
+                            fleet_empty,
+                            // A confirmed rename patches the selected session's
+                            // TITLE in place — same id, same key, no remount —
+                            // so the titlebar can never sit on the old name
+                            // while the sidebar shows the new one (the feed
+                            // normally reconciles this, but a latched build
+                            // mismatch withdraws it).
+                            on_renamed: move |(id, title): (String, String)| {
+                                let mut current = current;
+                                let selected_matches =
+                                    current.peek().as_ref().is_some_and(|session| session.id == id);
+                                if selected_matches
+                                    && let Some(session) = current.write().as_mut()
+                                {
+                                    session.title = title;
                                 }
-                            }
-                        },
-                        Some(session) => rsx! {
-                            SessionView {
-                                key: "{session.id}",
-                                session: session.clone(),
-                                gate: ops::PaneGate::new(page_ops, row_ops),
-                            }
-                        },
+                            },
+                            ops: page_ops,
+                            row_ops,
+                            // Selection reconciliation: a session the LIST
+                            // removed (successful delete, or an archive under
+                            // the default filter) must not stay selected — the
+                            // right pane would keep a terminal/detail surface
+                            // for an object this client knows is gone.
+                            on_removed: move |id: String| {
+                                if current.peek().as_ref().is_some_and(|session| session.id == id) {
+                                    current.set(None);
+                                }
+                            },
+                            layout_epoch,
+                        }
                     }
-                }
+                    div { class: "app-main",
+                        match &*current.read() {
+                            None => rsx! {
+                                // Three honest states, not one claim: an empty
+                                // fleet may only be ANNOUNCED once a committed
+                                // listing proved it (`fleet_empty`); before
+                                // that the pane says it is loading, and a
+                                // non-empty fleet with nothing selected shows
+                                // nothing at all — auto-select is about to end
+                                // that state (see `ListView`). "Active"
+                                // matters in the wording: an archived-only
+                                // fleet has sessions, but none the default
+                                // view lists or auto-select may take.
+                                div { class: "main-empty",
+                                    match *fleet_empty.read() {
+                                        Some(true) => "no active sessions — create one",
+                                        Some(false) => "",
+                                        None => "loading sessions…",
+                                    }
+                                }
+                            },
+                            Some(session) => rsx! {
+                                SessionView {
+                                    key: "{session.id}",
+                                    session: session.clone(),
+                                    gate: ops::PaneGate::new(page_ops, row_ops),
+                                }
+                            },
+                        }
+                    }
+            }
             }
         }
+    }
+}
+
+/// Hold the authenticated tree until the helm's shared preference has been
+/// read once, then provide it as `list::SharedPreferences` context.
+///
+/// The read is the seed for two things the list decides on its FIRST run:
+/// which order the sort control starts in, and which session auto-select
+/// opens. Mounting the list before the answer arrives would show the
+/// defaults and then correct them — a visible re-sort and, worse, an
+/// attach to the newest session followed by a takeover of the remembered
+/// one. So the gate renders NOTHING until the read lands. On desktop that
+/// is invisible (the IPC gate already holds the tree, and the read is one
+/// loopback hop). In the browser it is a deliberate blank first frame for
+/// one round trip to the helm: a page with a valid credential used to paint
+/// its sidebar synchronously from localStorage, and now waits on this read
+/// instead — the trade SPEC_impl.md records, taken because a list that
+/// appears in one order and then changes is worse than a short blank.
+///
+/// A failed read is "nothing remembered", not an error surface: SPEC.md's
+/// Errors and diagnostics makes this preference the one best-effort
+/// exception, and a helm that cannot answer it can still list sessions —
+/// which is the page the user came for. The failure is logged and the
+/// defaults apply — and "failed" includes slow: the read runs under
+/// `api::PREFERENCE_SEED_TIMEOUT` (seconds, not the funnel's sixty), so a
+/// stalled preference endpoint costs the remembered values, never a
+/// minute of blank page. A recognized 401 takes an engine-specific path:
+/// in the browser `api::send` raises the token prompt and `AppBody`
+/// unmounts this gate in favor of it; on desktop the funnel refreshes the
+/// native credential, remounts the webview authentication gate (which
+/// unmounts this one), and retries. Either way the gate remounts after
+/// recovery and re-reads — and `api::seed_with_local_changes` overlays any
+/// choice made in THIS client whose write never got through, so recovery
+/// cannot roll the current client back to the helm's older row.
+#[component]
+fn PreferencesGate(children: Element) -> Element {
+    let base = use_context::<ApiBase>().0;
+    // Provided from the first render (hooks cannot be conditional), but
+    // no consumer can observe the placeholder default: the children that
+    // read it mount only once `loaded` says the seed is in the signal.
+    let mut preferences =
+        use_context_provider(|| list::SharedPreferences(Signal::new(api::Preferences::default())));
+    let mut loaded = use_signal(|| false);
+    use_future(move || {
+        let base = base.clone();
+        async move {
+            // The retired per-client copies (`farhelm.sort`,
+            // `farhelm.last-selected`) are scrubbed on every browser
+            // startup: SPEC.md now forbids any client-side copy, and a key
+            // an old build left behind would otherwise sit in localStorage
+            // forever, waiting for a rollback to revive it. Best-effort,
+            // like everything else about the preference. The desktop
+            // webview's copies are scrubbed by desktop-auth.js in the same
+            // spirit.
+            #[cfg(target_arch = "wasm32")]
+            scrub_retired_preference_keys();
+            let seed = match api::fetch_preferences(&base).await {
+                Ok(seed) => seed,
+                Err(detail) => {
+                    dioxus::logger::tracing::warn!(
+                        target: "preferences",
+                        "could not read the list preference from the helm; using defaults: \
+                         {detail}"
+                    );
+                    api::Preferences::default()
+                }
+            };
+            preferences.0.set(api::seed_with_local_changes(&base, seed));
+            loaded.set(true);
+        }
+    });
+    if *loaded.read() {
+        rsx! { {children} }
+    } else {
+        // Deliberately empty rather than a "loading" line: the wait is one
+        // loopback round trip, and a message that flashes for that long
+        // reads as a glitch rather than as information.
+        rsx! {}
+    }
+}
+
+/// Best-effort removal of the localStorage keys the retired per-client
+/// preference persistence used (`farhelm.sort`, `farhelm.last-selected`).
+///
+/// An upgraded browser keeps whatever an old build stored; SPEC.md's
+/// Session list section now says outright that no client keeps its own
+/// copy, and a stale `{helm, id}` record left in place is exactly the
+/// per-client answer a rollback or cached old bundle would resurrect.
+/// Failures are swallowed: a blocked or full storage must not delay or
+/// break startup over cleanup.
+#[cfg(target_arch = "wasm32")]
+fn scrub_retired_preference_keys() {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("farhelm.sort");
+        let _ = storage.remove_item("farhelm.last-selected");
     }
 }
 

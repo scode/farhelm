@@ -48,14 +48,12 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
     let config = use_context::<crate::desktop::WebviewBootstrap>();
     let mut ready = use_signal(|| false);
     let mut failure = use_signal(|| None::<String>);
-    let mut preferences_seeded = use_signal(|| false);
     let generation = *DESKTOP_AUTH_GENERATION.read();
     let mut active_generation = use_signal(|| generation);
 
     let mut authentication = use_future(move || {
         let config = config.clone();
         async move {
-            let preference_seed = (!*preferences_seeded.peek()).then(|| config.preferences.clone());
             // Stop the console shim from SPENDING the outgoing credential
             // before its replacement exists: this future restarting is
             // exactly the reauthentication window in which the old device
@@ -86,10 +84,6 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                 "base": config.base,
                 "token": token,
                 "persisted": config.persisted_secret,
-                "preferences": preference_seed.as_ref().map(|preferences| serde_json::json!({
-                    "remembered_selection": preferences.remembered_selection,
-                    "list_sort": preferences.list_sort,
-                })),
             })) {
                 failure.set(Some(format!(
                     "sending desktop authentication over IPC: {error}"
@@ -172,20 +166,6 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                         .to_string(),
                 ));
                 return;
-            }
-            // The JavaScript success message is also the preference seed's
-            // ordering edge: desktop-auth.js attempts the browser-shaped
-            // writes before sending `ready`, swallowing localStorage errors.
-            // Fill native Rust's guaranteed synchronous mirrors only now,
-            // then mount `AppBody`; the list's sort signal and auto-select
-            // effect therefore cannot observe their fallbacks first and
-            // "correct" after an async round trip.
-            if let Some(preferences) = preference_seed {
-                crate::list::seed_desktop_preferences(
-                    preferences.remembered_selection,
-                    preferences.list_sort,
-                );
-                preferences_seeded.set(true);
             }
             // Arm the console shim now that a device session genuinely
             // exists (committed to disk, not merely exchanged) — see

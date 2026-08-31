@@ -352,19 +352,12 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   //
   // The CREDENTIAL only, rebuilt in global-setup.ts's exact shape rather than
   // dumped from `page.context().storageState()`. This file is the baseline
-  // localStorage every later project's contexts start from, and this page has
-  // by now used the product: it clicked a row, so the UI wrote
-  // `farhelm.last-selected` (list/view.rs's `remember_selection`), and a whole
-  // dump hands that remembered selection to every context for the rest of the
-  // run. Nothing after this point asked for it, and it is not inert — the
-  // sidebar's auto-select resolves a remembered id against the helm before it
-  // considers its own fallback. That is how sort.spec.ts's incomplete-walk
-  // fallback test came to open the shared session instead of the newest-created
-  // one, on both engines, in a full run and nowhere else — the projects that
-  // run it on its own never execute this test, so the residue is invisible
-  // outside the full suite. Any other preference this page leaves behind (the
-  // list sort, say) would travel the same way, so the filter is on the whole
-  // shape rather than on the one key that has bitten us.
+  // localStorage every later project's contexts start from, and a whole dump
+  // would carry along anything else this page's origin storage holds. The
+  // list preference (sort order, last selection) is no longer among it — it
+  // lives in the helm now, shared by every client — but the filter stays on
+  // the whole shape rather than on a key list, so nothing a future build
+  // stores can ride out of here unnoticed.
   const { cookies } = await page.context().storageState();
   await writeFile(
     AUTH_STORAGE_STATE_PATH,

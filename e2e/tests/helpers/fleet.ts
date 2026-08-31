@@ -705,58 +705,77 @@ export async function forceBuildSkew(page: Page, stamp: string): Promise<void> {
   });
 }
 
-/**
- * Pin which session the page will auto-select on every load this page
- * performs from here on (the init script re-runs per navigation).
- *
- * Auto-select (BUGS_BURNDOWN.md issue 5) opens the remembered session —
- * localStorage `farhelm.last-selected`, a `{helm, id}` record keyed by the
- * helm's local-host identity — falling back to the newest-created
- * non-archived one. Tests that stage route holds or stubs around a
- * SPECIFIC session's first reads must pin the selection AWAY from that
- * session (usually to the shared e2e-session) before `goto`, or the
- * auto-open races the staging exactly like a user clicking too early.
- * The identity is fetched here so the record matches what the UI will
- * verify; a mismatched or bare id would be ignored and the pin would
- * silently not pin.
- */
-export async function pinAutoSelect(page: Page, id: string): Promise<void> {
-  const hosts = (await (await page.request.get("/api/hosts")).json()) as {
-    hosts: { kind: string; identity?: string | null }[];
-  };
-  const helm = hosts.hosts.find((h) => h.kind === "local")?.identity;
-  if (!helm) throw new Error("pinAutoSelect: the local host row has no identity");
-  await page.addInitScript(
-    (record) => {
-      window.localStorage.setItem("farhelm.last-selected", record);
-    },
-    JSON.stringify({ helm, id }),
-  );
+/** The helm's shared client preference as `GET /api/preferences` answers it. */
+export interface Preferences {
+  list_sort?: string;
+  last_selected?: string;
+}
+
+/** Read the helm's shared preference row (SPEC.md, Session list). */
+export async function readPreferences(request: APIRequestContext): Promise<Preferences> {
+  const response = await request.get("/api/preferences");
+  if (!response.ok()) throw new Error(`GET /api/preferences: ${response.status()}`);
+  return (await response.json()) as Preferences;
 }
 
 /**
- * The opposite of {@link pinAutoSelect}: guarantee this page has NO
- * remembered selection on every load it performs from here on.
+ * Write a sparse patch to the helm's shared preference: an absent field is
+ * untouched, an explicit `null` clears it, a value replaces it.
+ */
+export async function patchPreferences(
+  request: APIRequestContext,
+  patch: { list_sort?: string | null; last_selected?: string | null },
+): Promise<void> {
+  const response = await request.put("/api/preferences", { data: patch });
+  if (!response.ok()) throw new Error(`PUT /api/preferences: ${response.status()}`);
+}
+
+/**
+ * Put the helm's shared preference back to "nothing remembered".
+ *
+ * The preference is ONE row on the helm shared by every client, and this
+ * suite runs every spec against one helm: whatever the previous test chose
+ * (an order, a selected row) is what the next test's page opens with. A
+ * spec whose subject is the order or the auto-select must therefore reset
+ * the row in `beforeEach` rather than inherit the last test's answer.
+ */
+export async function resetPreferences(request: APIRequestContext): Promise<void> {
+  await patchPreferences(request, { list_sort: null, last_selected: null });
+}
+
+/**
+ * Pin which session the page will auto-select on its next load.
+ *
+ * Auto-select (BUGS_BURNDOWN.md issue 5) opens the remembered session — the
+ * helm's shared preference `last_selected`, one row for every client — falling
+ * back to the newest-created non-archived one. Tests that stage route holds
+ * or stubs around a SPECIFIC session's first reads must pin the selection
+ * AWAY from that session (usually to the shared e2e-session) before `goto`,
+ * or the auto-open races the staging exactly like a user clicking too early.
+ *
+ * Unlike the localStorage init script this replaced, the pin is not
+ * re-applied per navigation: it is the helm's row, and a later user click in
+ * the test (or in any other client) overwrites it — which is the product's
+ * own "most recently selected anywhere" rule, not a harness quirk.
+ */
+export async function pinAutoSelect(page: Page, id: string): Promise<void> {
+  await patchPreferences(page.request, { last_selected: id });
+}
+
+/**
+ * The opposite of {@link pinAutoSelect}: guarantee the next load has NO
+ * remembered selection.
  *
  * For the tests whose subject is the FALLBACK — what a client with nothing
  * remembered opens (SPEC.md's newest-created non-archived session). A
  * remembered id short-circuits that path entirely: the sidebar resolves it
  * against the helm and opens it, and the fallback the test came to check
- * never runs. Such a test therefore has to state the precondition rather
- * than inherit it, because the baseline it inherits is not its own — every
- * context starts from the shared `storageState` file the harness mints, and
- * auth.spec.ts rewrites that file mid-run to carry a rotated credential.
- * That rewrite has already leaked a selection once (see the comment on its
- * write), which is exactly the kind of cross-project residue no single test
- * can see coming.
- *
- * Removes rather than skips the write, so it also clears a value some
- * earlier navigation in THIS page left behind.
+ * never runs. Such a test has to state the precondition rather than inherit
+ * it, because the row is shared: every earlier test that clicked a row left
+ * its selection there.
  */
 export async function forgetAutoSelect(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    window.localStorage.removeItem("farhelm.last-selected");
-  });
+  await patchPreferences(page.request, { last_selected: null });
 }
 
 /**

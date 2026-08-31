@@ -1,22 +1,24 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { authenticate, report } = require("../assets/desktop-auth.js");
+const { authenticate } = require("../assets/desktop-auth.js");
 
-function channel(replies, trace = []) {
+// The native side of the IPC channel: scripted replies in, everything the
+// script sends captured in `sent`.
+function channel(replies) {
   const sent = [];
   return {
     sent,
     recv: async () => replies.shift(),
-    send: (value) => {
-      sent.push(value);
-      trace.push({ kind: "message", value });
-    },
+    send: (value) => sent.push(value),
   };
 }
 
+// The browser primitives the script is handed, with an in-memory
+// localStorage whose contents (`values`) the tests read back directly.
+// `options.throwRemove` makes removeItem throw, for the tests that pin
+// cleanup as best-effort.
 function platform(fetch, WebSocket, exchangeTimeoutMs, options = {}) {
   const values = new Map();
-  const trace = options.trace || [];
   return {
     fetch,
     WebSocket,
@@ -25,21 +27,69 @@ function platform(fetch, WebSocket, exchangeTimeoutMs, options = {}) {
     values,
     storage: {
       getItem: (key) => values.get(key) || null,
-      setItem: (key, value) => {
-        if (options.throwSet) throw new Error("setItem refused");
-        values.set(key, value);
-        trace.push({ kind: "set", key, value });
-      },
+      setItem: (key, value) => values.set(key, value),
       removeItem: (key) => {
         if (options.throwRemove) throw new Error("removeItem refused");
         values.delete(key);
-        trace.push({ kind: "remove", key });
       },
     },
     setTimeout,
     clearTimeout,
   };
 }
+
+// The successful-validation socket most upgrade tests need: accepts the
+// device credential by answering the event-socket handshake immediately.
+class AcceptingSocket {
+  constructor() {
+    queueMicrotask(() => this.onmessage());
+  }
+  close() {}
+}
+
+// An upgraded webview still carries the localStorage keys the retired
+// per-client preference persistence wrote. The preference lives in the helm
+// now with no client-side copy wanted (SPEC.md, Session list), so a
+// successful authentication is also the upgrade point that scrubs exactly
+// those keys — and nothing else.
+test("authentication scrubs the retired preference keys and keeps the rest", async () => {
+  const ipc = channel([{
+    base: "http://127.0.0.1:7433",
+    token: "token",
+    persisted: "persisted-device",
+  }, { persisted: true }]);
+  const browser = platform(async () => ({ ok: true, status: 204 }), AcceptingSocket);
+  browser.values.set("farhelm.sort", "title");
+  browser.values.set("farhelm.last-selected", JSON.stringify({ helm: "h", id: "old" }));
+  browser.values.set("farhelm.unrelated", "kept");
+
+  await authenticate(ipc, browser);
+
+  assert.equal(browser.values.has("farhelm.sort"), false);
+  assert.equal(browser.values.has("farhelm.last-selected"), false);
+  assert.equal(browser.values.get("farhelm.unrelated"), "kept");
+  assert.deepEqual(ipc.sent, [{ secret: "persisted-device" }, { ready: true }]);
+});
+
+// Cleanup is best-effort by contract: a storage that refuses removal must
+// cost only the cleanup, never authentication readiness.
+test("a storage that refuses removal still reaches ready", async () => {
+  const ipc = channel([{
+    base: "http://127.0.0.1:7433",
+    token: "token",
+    persisted: "persisted-device",
+  }, { persisted: true }]);
+  const browser = platform(
+    async () => ({ ok: true, status: 204 }),
+    AcceptingSocket,
+    undefined,
+    { throwRemove: true },
+  );
+
+  await authenticate(ipc, browser);
+
+  assert.deepEqual(ipc.sent, [{ secret: "persisted-device" }, { ready: true }]);
+});
 
 // A valid device row followed by a transport-level socket failure is not an
 // authentication rejection. Minting here would churn the bounded device table
@@ -153,187 +203,4 @@ test("a stalled exchange body is aborted by the absolute deadline", async () => 
   await authenticate(ipc, browser);
 
   assert.deepEqual(ipc.sent, [{ error: "exchange aborted" }]);
-});
-
-test("bootstrap seeds preferences before reporting ready", async () => {
-  const trace = [];
-  const ipc = channel([{
-    base: "http://127.0.0.1:7433",
-    token: "token",
-    persisted: "persisted-device",
-    preferences: {
-      remembered_selection: { helm: "helm-a", id: "session-old" },
-      list_sort: "title",
-    },
-  }, { persisted: true }], trace);
-  class AcceptedSocket {
-    constructor() {
-      queueMicrotask(() => this.onmessage());
-    }
-    close() {}
-  }
-  const browser = platform(
-    async () => ({ ok: true, status: 204 }),
-    AcceptedSocket,
-    undefined,
-    { trace },
-  );
-
-  await authenticate(ipc, browser);
-
-  assert.equal(
-    browser.values.get("farhelm.last-selected"),
-    JSON.stringify({ helm: "helm-a", id: "session-old" }),
-  );
-  assert.equal(browser.values.get("farhelm.sort"), "title");
-  assert.deepEqual(ipc.sent, [
-    { secret: "persisted-device" },
-    { ready: true },
-  ]);
-  const ready = trace.findIndex((entry) => entry.kind === "message" && entry.value.ready);
-  const selection = trace.findIndex((entry) => entry.key === "farhelm.last-selected");
-  const sort = trace.findIndex((entry) => entry.key === "farhelm.sort");
-  assert.ok(selection >= 0 && selection < ready, "selection must be stored before ready");
-  assert.ok(sort >= 0 && sort < ready, "sort must be stored before ready");
-});
-
-test("preference reports use the browser keys and echo the native payload", async () => {
-  const update = {
-    remembered_selection: { helm: "helm-a", id: "session-picked" },
-  };
-  const ipc = channel([update]);
-  const browser = platform(() => {}, class UnusedSocket {});
-
-  await report(ipc, browser.storage);
-
-  assert.equal(
-    browser.values.get("farhelm.last-selected"),
-    JSON.stringify(update.remembered_selection),
-  );
-  assert.deepEqual(ipc.sent, [update]);
-});
-
-test("null bootstrap preference fields clear stale browser copies", async () => {
-  const ipc = channel([{
-    base: "http://127.0.0.1:7433",
-    token: "token",
-    persisted: "persisted-device",
-    preferences: { remembered_selection: null, list_sort: null },
-  }, { persisted: true }]);
-  class AcceptedSocket {
-    constructor() { queueMicrotask(() => this.onmessage()); }
-    close() {}
-  }
-  const browser = platform(async () => ({ ok: true, status: 204 }), AcceptedSocket);
-  browser.values.set("farhelm.last-selected", "stale-selection");
-  browser.values.set("farhelm.sort", "created");
-
-  await authenticate(ipc, browser);
-
-  assert.equal(browser.values.has("farhelm.last-selected"), false);
-  assert.equal(browser.values.has("farhelm.sort"), false);
-  assert.deepEqual(ipc.sent.at(-1), { ready: true });
-});
-
-test("reauthentication without a preference seed preserves post-launch choices", async () => {
-  const ipc = channel([{
-    base: "http://127.0.0.1:7433",
-    token: "token",
-    persisted: "persisted-device",
-    preferences: null,
-  }, { persisted: true }]);
-  class AcceptedSocket {
-    constructor() { queueMicrotask(() => this.onmessage()); }
-    close() {}
-  }
-  const browser = platform(async () => ({ ok: true, status: 204 }), AcceptedSocket);
-  browser.values.set("farhelm.last-selected", "post-launch-selection");
-  browser.values.set("farhelm.sort", "title");
-
-  await authenticate(ipc, browser);
-
-  assert.equal(browser.values.get("farhelm.last-selected"), "post-launch-selection");
-  assert.equal(browser.values.get("farhelm.sort"), "title");
-  assert.deepEqual(ipc.sent.at(-1), { ready: true });
-});
-
-test("storage write failures do not block authentication readiness", async () => {
-  const ipc = channel([{
-    base: "http://127.0.0.1:7433",
-    token: "token",
-    persisted: "persisted-device",
-    preferences: {
-      remembered_selection: { helm: "helm-a", id: "session-a" },
-      list_sort: "title",
-    },
-  }, { persisted: true }]);
-  class AcceptedSocket {
-    constructor() { queueMicrotask(() => this.onmessage()); }
-    close() {}
-  }
-  const browser = platform(
-    async () => ({ ok: true, status: 204 }),
-    AcceptedSocket,
-    undefined,
-    { throwSet: true },
-  );
-
-  await authenticate(ipc, browser);
-
-  assert.deepEqual(ipc.sent, [{ secret: "persisted-device" }, { ready: true }]);
-});
-
-test("storage removal failures do not block authentication readiness", async () => {
-  const ipc = channel([{
-    base: "http://127.0.0.1:7433",
-    token: "token",
-    persisted: "persisted-device",
-    preferences: { remembered_selection: null, list_sort: null },
-  }, { persisted: true }]);
-  class AcceptedSocket {
-    constructor() { queueMicrotask(() => this.onmessage()); }
-    close() {}
-  }
-  const browser = platform(
-    async () => ({ ok: true, status: 204 }),
-    AcceptedSocket,
-    undefined,
-    { throwRemove: true },
-  );
-
-  await authenticate(ipc, browser);
-
-  assert.deepEqual(ipc.sent, [{ secret: "persisted-device" }, { ready: true }]);
-});
-
-test("preference report acknowledgement survives storage failures", async () => {
-  const update = { list_sort: "title" };
-  const ipc = channel([update]);
-  const browser = platform(
-    () => {},
-    class UnusedSocket {},
-    undefined,
-    { throwSet: true },
-  );
-
-  await report(ipc, browser.storage);
-
-  assert.deepEqual(ipc.sent, [update]);
-});
-
-test("sparse preference reports preserve the other browser value", async () => {
-  const browser = platform(() => {}, class UnusedSocket {});
-  browser.values.set("farhelm.last-selected", JSON.stringify({ helm: "helm-a", id: "old" }));
-  browser.values.set("farhelm.sort", "created");
-
-  await report(channel([{
-    remembered_selection: { helm: "helm-a", id: "new" },
-  }]), browser.storage);
-  assert.equal(browser.values.get("farhelm.sort"), "created");
-
-  await report(channel([{ list_sort: "title" }]), browser.storage);
-  assert.equal(
-    browser.values.get("farhelm.last-selected"),
-    JSON.stringify({ helm: "helm-a", id: "new" }),
-  );
 });

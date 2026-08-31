@@ -33,6 +33,14 @@
 //! WebSocket's path and query. `encode_bytes` is their shared,
 //! module-private implementation.
 //!
+//! One endpoint deliberately breaks the one-async-fn-per-endpoint,
+//! error-as-displayable-string mold: the shared preference
+//! (`fetch_preferences`, `store_preference`, and the serialized write queue
+//! behind it). Its writes are fire-and-forget — SPEC.md's Errors and
+//! diagnostics makes preference persistence the one best-effort exception,
+//! so failures are logged here and never surfaced — and its reader is
+//! `lib.rs`'s `PreferencesGate` rather than a view component.
+//!
 //! Every protected request below is issued through this module's own [`send`],
 //! which attaches the device secret and reads the helm's build stamp off the
 //! reply (`skew`). The sole exception is [`exchange_token`]: it is the public
@@ -260,13 +268,13 @@ impl ListSort {
 
     /// One of the three words, or `None` for anything else.
     ///
-    /// `None` is what a persisted preference from a build that knew another
-    /// order decodes to, and what a hand-edited or truncated storage value
-    /// decodes to. The PERSISTED-PREFERENCE decoder
+    /// `None` is what the helm-stored preference decodes to when the row was
+    /// written by a build with a different sort vocabulary — the row outlives
+    /// the build that validated it. The PERSISTED-PREFERENCE decoder
     /// (`list::view::decoded_sort`) answers that with the default rather than
     /// with an error: a stored preference is a convenience, and refusing to
     /// draw a list over one would be a page that will not load because of a
-    /// word in localStorage.
+    /// word the user cannot see and did not knowingly write.
     ///
     /// Defaulting is that decoder's rule and not a property of this
     /// function, which is why it returns an `Option` at all. The select
@@ -283,6 +291,319 @@ impl ListSort {
             _ => None,
         }
     }
+}
+
+/// The one client preference the helm remembers for every client at once
+/// (SPEC.md, Session list): the chosen list order and the last
+/// user-selected session. The wire shape of `GET`/`PUT /api/preferences`.
+///
+/// Both fields are `Option` because one type is the whole reply AND the
+/// sparse patch a write sends: on the way in, `None` is "never chosen, use
+/// the default"; on the way out, `None` is "leave that field alone", which
+/// is what lets two clients sharing the row each write only the field the
+/// user changed (see [`store_preference`]). `list_sort` stays the bare wire
+/// word rather than a decoded [`ListSort`] so an unrecognized value can be
+/// carried through to `list::view::decoded_sort`'s fallback instead of
+/// failing the decode of the whole reply.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub(crate) struct Preferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) list_sort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) last_selected: Option<String>,
+}
+
+/// How long the seed read of the shared preference may take before the
+/// gate gives up and mounts with defaults.
+///
+/// Deliberately much shorter than [`REQUEST_TIMEOUT`]: `PreferencesGate`
+/// holds the ENTIRE authenticated tree behind this one read, and the
+/// preference is best-effort startup convenience — a stalled
+/// `/api/preferences` must cost a few seconds and the remembered values,
+/// never a minute of blank page in front of a helm whose session list is
+/// perfectly able to answer.
+const PREFERENCE_SEED_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Read the shared preference once, right after authentication.
+///
+/// The caller (`PreferencesGate`) holds the whole authenticated tree off
+/// the screen until this answers, which is what makes the first render
+/// seeded rather than corrected: the sort control and the auto-select
+/// effect see the remembered values on their first run, never their
+/// fallbacks. A failure — including [`PREFERENCE_SEED_TIMEOUT`] running
+/// out — is the caller's to treat as "nothing remembered": SPEC.md makes
+/// this preference best-effort, and a helm that cannot answer it can still
+/// list sessions.
+pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String> {
+    let url = format!("{base}/api/preferences");
+    let resp = send_within(client().get(&url), PREFERENCE_SEED_TIMEOUT).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<Preferences>().await.map_err(|e| e.to_string())
+}
+
+/// Which half of the shared preference a write names.
+///
+/// The write queue below serializes writes PER FIELD: the two fields are
+/// independent last-writer-wins values (the helm merges sparse patches per
+/// field), so a slow selection write must not delay a sort write, while two
+/// writes to the SAME field must reach the helm in the order the user made
+/// them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PreferenceField {
+    Sort,
+    Selected,
+}
+
+impl PreferenceField {
+    /// The field's wire key in a `PUT /api/preferences` patch.
+    fn key(self) -> &'static str {
+        match self {
+            PreferenceField::Sort => "list_sort",
+            PreferenceField::Selected => "last_selected",
+        }
+    }
+}
+
+/// One field's slice of the write queue.
+///
+/// `latest` is the newest locally chosen value this session, `acked`
+/// whether a PUT carrying exactly that value has succeeded, `in_flight`
+/// whether a writer task currently owns the field. "Dirty" — chosen but
+/// not acked — is the state [`PreferenceWrites::dirty`] reports and the
+/// reauthentication replay exists for.
+#[derive(Default)]
+struct FieldWrite {
+    latest: Option<String>,
+    acked: bool,
+    in_flight: bool,
+}
+
+/// The write queue's whole state: a latest-wins slot per field.
+///
+/// This is a pure state machine, deliberately separate from the async
+/// writer that acts on it, so the ordering contract — the reason it exists
+/// — is unit-testable without a runtime. The contract: at most one PUT per
+/// field is ever in flight, and when a newer value is recorded mid-flight
+/// the writer sends it AFTER the current request settles. Independent
+/// spawned requests could finish in either order, and the stale value
+/// finishing last would silently win the row (the page would show the new
+/// choice while every other client — and the next launch — read the old
+/// one).
+///
+/// It also carries this client's unpersisted choices across an
+/// authentication remount: `PreferencesGate` re-reads the helm's row after
+/// a credential exchange, and without [`Self::dirty`] overlaying the
+/// still-unacked local values, that re-read would roll the current client
+/// back to whatever the helm last stored — a silent persistence failure
+/// becoming a visible reversal, which SPEC.md's best-effort clause does
+/// not license. The state is a process-wide static precisely so it lives
+/// OUTSIDE every remounted subtree.
+#[derive(Default)]
+struct PreferenceWrites {
+    sort: FieldWrite,
+    selected: FieldWrite,
+}
+
+impl PreferenceWrites {
+    fn field(&mut self, field: PreferenceField) -> &mut FieldWrite {
+        match field {
+            PreferenceField::Sort => &mut self.sort,
+            PreferenceField::Selected => &mut self.selected,
+        }
+    }
+
+    /// Record a new local choice. Returns whether the caller must start a
+    /// writer (none is running for this field).
+    fn record(&mut self, field: PreferenceField, value: String) -> bool {
+        let slot = self.field(field);
+        slot.latest = Some(value);
+        slot.acked = false;
+        if slot.in_flight {
+            return false;
+        }
+        slot.in_flight = true;
+        true
+    }
+
+    /// The value the writer should send next — always the newest recorded.
+    fn next_to_send(&mut self, field: PreferenceField) -> Option<String> {
+        self.field(field).latest.clone()
+    }
+
+    /// A PUT for `sent` settled. Returns whether the writer must go again
+    /// because a newer value arrived while it was out; otherwise the field
+    /// is released (and marked acked on success).
+    ///
+    /// A FAILED write is not retried on its own: the value stays dirty for
+    /// the next reauthentication replay or the next user change, per the
+    /// fire-and-forget policy — persistence failures cost the next launch,
+    /// never a retry loop against a helm that is refusing.
+    fn finished(&mut self, field: PreferenceField, sent: &str, success: bool) -> bool {
+        let slot = self.field(field);
+        if slot.latest.as_deref() != Some(sent) {
+            return true;
+        }
+        slot.acked = success;
+        slot.in_flight = false;
+        false
+    }
+
+    /// The writer was cancelled mid-request (its task dropped): release the
+    /// field so a later write can start a replacement, keeping the value
+    /// dirty so nothing pretends it was persisted.
+    fn writer_lost(&mut self, field: PreferenceField) {
+        self.field(field).in_flight = false;
+    }
+
+    /// This session's newest choice for `field` when no PUT has confirmed
+    /// it — what a post-reauthentication seed must overlay and replay.
+    /// `None` both when nothing was chosen and when the choice is safely on
+    /// the helm (where the fetched row is the better answer: another client
+    /// may have written since).
+    fn dirty(&self, field: PreferenceField) -> Option<String> {
+        let slot = match field {
+            PreferenceField::Sort => &self.sort,
+            PreferenceField::Selected => &self.selected,
+        };
+        if slot.acked {
+            return None;
+        }
+        slot.latest.clone()
+    }
+
+    /// Claim a dirty field for a replay writer. Returns the value to send,
+    /// or `None` when there is nothing dirty or a writer already owns it.
+    fn begin_replay(&mut self, field: PreferenceField) -> Option<String> {
+        let value = self.dirty(field)?;
+        let slot = self.field(field);
+        if slot.in_flight {
+            return None;
+        }
+        slot.in_flight = true;
+        Some(value)
+    }
+}
+
+/// The process-wide write queue. A static, not component state, on
+/// purpose: it must survive `PreferencesGate` (and on desktop the whole
+/// `AppBody`) being unmounted and remounted by credential recovery — see
+/// [`PreferenceWrites`].
+static PREFERENCE_WRITES: std::sync::LazyLock<std::sync::Mutex<PreferenceWrites>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn preference_writes() -> std::sync::MutexGuard<'static, PreferenceWrites> {
+    PREFERENCE_WRITES
+        .lock()
+        .expect("preference write queue lock poisoned")
+}
+
+/// Clear `writer_lost` on drop unless the writer finished cleanly.
+///
+/// `spawn_forever` outlives any one component, but the app can still tear
+/// the task down mid-await; without this, a cancelled writer would strand
+/// `in_flight = true` and every later write to that field would enqueue
+/// forever behind a writer that no longer exists.
+struct WriterGuard {
+    field: PreferenceField,
+    armed: bool,
+}
+
+impl Drop for WriterGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            preference_writes().writer_lost(self.field);
+        }
+    }
+}
+
+/// Record one changed field of the shared preference and see that it
+/// reaches the helm, in order.
+///
+/// Fire-and-forget by contract (SPEC.md, Errors and diagnostics: the
+/// preference is the one best-effort exception): the choice has already
+/// taken effect in this client before any request leaves, and a failure
+/// costs the NEXT launch its convenience, never this one its choice —
+/// failures are logged here, not surfaced. Always a one-field patch,
+/// because the row is shared and a whole-row write would carry this
+/// client's stale copy of the other field over whatever another client
+/// wrote since. Same-field writes are serialized latest-wins through
+/// [`PreferenceWrites`] so a burst of changes cannot land on the helm in
+/// reverse order.
+pub(crate) fn store_preference(base: &str, field: PreferenceField, value: String) {
+    if preference_writes().record(field, value) {
+        spawn_preference_writer(base.to_string(), field);
+    }
+}
+
+/// Overlay this session's unpersisted choices onto a freshly fetched row,
+/// restarting their writes.
+///
+/// Called by `PreferencesGate` every time it (re)seeds — most importantly
+/// after credential recovery, where the fetched row predates a choice
+/// whose PUT died with the old credential. Fields whose last write was
+/// acknowledged are NOT overlaid: the helm's answer is newer authority for
+/// those (another client may have written since this one did).
+pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Preferences {
+    for field in [PreferenceField::Sort, PreferenceField::Selected] {
+        let claimed = {
+            let mut queue = preference_writes();
+            match queue.dirty(field) {
+                Some(value) => {
+                    let claimed = queue.begin_replay(field).is_some();
+                    match field {
+                        PreferenceField::Sort => seed.list_sort = Some(value),
+                        PreferenceField::Selected => seed.last_selected = Some(value),
+                    }
+                    claimed
+                }
+                None => false,
+            }
+        };
+        if claimed {
+            spawn_preference_writer(base.to_string(), field);
+        }
+    }
+    seed
+}
+
+/// Start the one writer task a claimed field gets.
+///
+/// `spawn_forever` rather than `spawn`: a scope-owned task would be
+/// cancelled with whatever component happened to call `store_preference`,
+/// and a selection made on the way out of a view still deserves its write.
+fn spawn_preference_writer(base: String, field: PreferenceField) {
+    dioxus::core::spawn_forever(async move {
+        let mut guard = WriterGuard { field, armed: true };
+        loop {
+            let Some(value) = preference_writes().next_to_send(field) else {
+                break;
+            };
+            let success = send_preference_patch(&base, field, &value).await;
+            if !preference_writes().finished(field, &value, success) {
+                break;
+            }
+        }
+        guard.armed = false;
+    });
+}
+
+/// One `PUT /api/preferences` carrying a single-field patch. Failures are
+/// logged and reported to the queue, never surfaced.
+async fn send_preference_patch(base: &str, field: PreferenceField, value: &str) -> bool {
+    let url = format!("{base}/api/preferences");
+    let patch = serde_json::json!({ field.key(): value });
+    let outcome = match send(client().put(&url).json(&patch)).await {
+        Ok(resp) if resp.status().is_success() => return true,
+        Ok(resp) => read_failure("PUT", &url, resp).await,
+        Err(detail) => detail,
+    };
+    dioxus::logger::tracing::warn!(
+        target: "preferences",
+        "could not store the list preference on the helm: {outcome}"
+    );
+    false
 }
 
 /// One listing request's whole query string: the order first, then the
@@ -549,7 +870,24 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// cannot turn one request's remaining budget into two fresh ones; browser
 /// builds retain the ordinary full-page token prompt.
 async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
-    send_inner(request).await.map_err(send_error_text)
+    send_inner(request, REQUEST_TIMEOUT)
+        .await
+        .map_err(send_error_text)
+}
+
+/// [`send`] with a caller-chosen deadline instead of [`REQUEST_TIMEOUT`].
+///
+/// One caller earns this: the preference seed behind `PreferencesGate`,
+/// which holds the whole authenticated tree and must give up in seconds
+/// rather than let a stalled best-effort read cost a minute of blank page
+/// (see [`PREFERENCE_SEED_TIMEOUT`]). Everything else goes through
+/// [`send`]; a deadline chosen per call site is a deadline someone
+/// eventually forgets.
+async fn send_within(
+    request: reqwest::RequestBuilder,
+    timeout: std::time::Duration,
+) -> Result<reqwest::Response, String> {
+    send_inner(request, timeout).await.map_err(send_error_text)
 }
 
 /// Failure at the one response-classification point every Rust-side API
@@ -575,12 +913,15 @@ fn send_error_text(error: SendError) -> String {
 }
 
 /// [`send`]'s typed body — split only so `send` can flatten the typed
-/// error at one seam; every caller goes through `send` and its
-/// [`REQUEST_TIMEOUT`]. (A deadline parameter lived here while the paged
-/// listing divided a budget across pages; no caller wants one now, so
-/// there is none to offer.)
-async fn send_inner(mut request: reqwest::RequestBuilder) -> Result<reqwest::Response, SendError> {
-    let timeout = REQUEST_TIMEOUT;
+/// error at one seam; every caller but one goes through `send` and its
+/// [`REQUEST_TIMEOUT`]. (A deadline parameter left when the paged listing
+/// went and returned with the preference seed: [`send_within`] is the one
+/// caller-chosen deadline, and `PreferencesGate`'s docs say why it earns
+/// the exception the paged listing lost.)
+async fn send_inner(
+    mut request: reqwest::RequestBuilder,
+    timeout: std::time::Duration,
+) -> Result<reqwest::Response, SendError> {
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     let deadline = tokio::time::Instant::now() + timeout;
     if let Some(secret) = crate::auth::device_secret() {
@@ -2735,5 +3076,118 @@ mod tests {
         // over: `.` is legal in a query value and not in a segment.
         assert_eq!(encode_query_value("a.b"), "a.b");
         assert_eq!(encode_path_segment("a.b"), "a%2Eb");
+    }
+}
+
+/// The preference write queue's ordering and replay contract, pinned on the
+/// pure state machine so no runtime or network is involved.
+#[cfg(test)]
+mod preference_write_tests {
+    use super::{PreferenceField, PreferenceWrites};
+
+    /// Same-field writes are serialized latest-wins: a value recorded while
+    /// a PUT is out is sent AFTER that PUT settles, and the settled PUT's
+    /// older value never releases the field as the final answer.
+    ///
+    /// This is the whole reason the queue exists (review F1): independent
+    /// spawned requests can finish in reverse order, and the older value
+    /// finishing last would win the helm's row while the page showed the
+    /// newer one — invisible until a reload or another client read it back.
+    #[test]
+    fn a_newer_value_recorded_mid_flight_is_sent_after_and_wins() {
+        let mut queue = PreferenceWrites::default();
+        assert!(
+            queue.record(PreferenceField::Sort, "created".to_string()),
+            "the first write starts a writer"
+        );
+        assert_eq!(
+            queue.next_to_send(PreferenceField::Sort).as_deref(),
+            Some("created")
+        );
+
+        assert!(
+            !queue.record(PreferenceField::Sort, "title".to_string()),
+            "a write while one is in flight must NOT start a second writer"
+        );
+        assert!(
+            queue.finished(PreferenceField::Sort, "created", true),
+            "settling the older value must send the writer around again"
+        );
+        assert_eq!(
+            queue.next_to_send(PreferenceField::Sort).as_deref(),
+            Some("title"),
+            "and what it sends next is the newest value"
+        );
+        assert!(!queue.finished(PreferenceField::Sort, "title", true));
+        assert_eq!(
+            queue.dirty(PreferenceField::Sort),
+            None,
+            "an acknowledged newest value is clean — the helm's row is authority again"
+        );
+    }
+
+    /// The two fields are independent queues: a selection write neither
+    /// waits behind nor is reordered against a sort write.
+    #[test]
+    fn the_two_fields_do_not_share_a_writer() {
+        let mut queue = PreferenceWrites::default();
+        assert!(queue.record(PreferenceField::Sort, "title".to_string()));
+        assert!(
+            queue.record(PreferenceField::Selected, "session-1".to_string()),
+            "a selection write starts its own writer even with a sort write in flight"
+        );
+    }
+
+    /// A failed write leaves the value DIRTY and the field free: no retry
+    /// loop (fire-and-forget), but the choice is not forgotten — it is what
+    /// the post-reauthentication seed overlays and replays (review F2).
+    #[test]
+    fn a_failed_write_stays_dirty_and_is_claimed_exactly_once_for_replay() {
+        let mut queue = PreferenceWrites::default();
+        assert!(queue.record(PreferenceField::Selected, "session-9".to_string()));
+        assert!(!queue.finished(PreferenceField::Selected, "session-9", false));
+
+        assert_eq!(
+            queue.dirty(PreferenceField::Selected).as_deref(),
+            Some("session-9"),
+            "the unpersisted choice must survive for the replay"
+        );
+        assert_eq!(
+            queue.begin_replay(PreferenceField::Selected).as_deref(),
+            Some("session-9")
+        );
+        assert_eq!(
+            queue.begin_replay(PreferenceField::Selected),
+            None,
+            "a second gate mount must not start a rival writer for the same field"
+        );
+        assert!(!queue.finished(PreferenceField::Selected, "session-9", true));
+        assert_eq!(queue.dirty(PreferenceField::Selected), None);
+    }
+
+    /// A cancelled writer releases the field but keeps the value dirty, so
+    /// a later write starts a fresh writer instead of queueing forever
+    /// behind a task that no longer exists.
+    #[test]
+    fn a_lost_writer_releases_the_field_without_forgetting_the_value() {
+        let mut queue = PreferenceWrites::default();
+        assert!(queue.record(PreferenceField::Sort, "title".to_string()));
+        queue.writer_lost(PreferenceField::Sort);
+        assert_eq!(queue.dirty(PreferenceField::Sort).as_deref(), Some("title"));
+        assert!(
+            queue.record(PreferenceField::Sort, "created".to_string()),
+            "the next write must be able to start a replacement writer"
+        );
+    }
+
+    /// A clean field yields nothing to replay: after an acknowledged write,
+    /// the fetched row (possibly another client's newer choice) wins.
+    #[test]
+    fn an_acknowledged_field_is_not_overlaid_onto_a_fetched_seed() {
+        let mut queue = PreferenceWrites::default();
+        assert!(queue.record(PreferenceField::Sort, "title".to_string()));
+        assert!(!queue.finished(PreferenceField::Sort, "title", true));
+        assert_eq!(queue.dirty(PreferenceField::Sort), None);
+        assert_eq!(queue.begin_replay(PreferenceField::Sort), None);
     }
 }

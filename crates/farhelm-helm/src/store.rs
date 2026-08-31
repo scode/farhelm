@@ -107,7 +107,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 13;
+const SCHEMA_VERSION: i64 = 14;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -497,6 +497,66 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
         "title" => Some(ListSort::Title),
         _ => None,
     }
+}
+
+/// The client preference this helm remembers for every client at once
+/// (SPEC.md, Session list): the chosen list order and the session the user
+/// last selected. One row, one shape — the stored row and the `GET` reply.
+///
+/// Both fields are `Option` because "never set" is a real state: the
+/// client's default applies. `list_sort` is the bare `?sort=` word
+/// ([`parse_sort_key`]), stored as the word rather than the enum so an
+/// unset value has an honest representation; `last_selected` is a bare
+/// session id, valid for this helm's fleet only, which is why the helm's
+/// own database and not client storage is where it belongs. A `PUT` sends a
+/// [`PreferencePatch`], not this type: a patch has to tell "leave alone"
+/// from "clear", and a plain `Option` cannot.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_sort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_selected: Option<String>,
+}
+
+/// A sparse change to [`Preferences`]: each field is absent (leave it as
+/// it is), `null` (clear it back to unset), or a value (replace it).
+///
+/// Three states, so `Option<Option<T>>`: the outer level is presence in
+/// the JSON, the inner is the value. Serde's default `Option` handling
+/// folds `null` and absence together, so a custom deserializer
+/// ([`double_option`]) keeps them apart — an absent key deserializes to
+/// `None` through `default`, and a present key (null or not) goes through
+/// the function and lands as `Some`. The distinction is what makes the
+/// row shareable: a client sends only the field the user changed and
+/// never carries its own stale copy of the other, yet a harness or a
+/// deselect can still put a field back to "nothing remembered".
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreferencePatch {
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub list_sort: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_selected: Option<Option<String>>,
+}
+
+/// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
+/// this when the key exists, so wrapping the inner `Option` in `Some` is
+/// exactly what distinguishes `"x": null` from no `"x"` at all.
+fn double_option<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Option<String> as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 impl SessionFilter {
@@ -972,6 +1032,11 @@ pub struct HelmStore {
 ///   transaction. The same step adds `hosts.cache_truncated`: whether a
 ///   host's cached list was cut at the wire's cap, kept with the cache so
 ///   the "could not read to the end" notice outlives the connection.
+/// - 14: the `preferences` singleton — the list order and last-selected
+///   session the helm remembers for every client at once (SPEC.md, Session
+///   list). Nothing migrates INTO it: the per-client copies it replaces
+///   lived in browser storage and the desktop state file, which the helm
+///   never saw, so every upgraded helm starts from defaults.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1163,7 +1228,19 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  cookie_hash BLOB PRIMARY KEY CHECK (length(cookie_hash) = 32),
                  created_at  INTEGER NOT NULL
              ) STRICT;
-             PRAGMA user_version = 13;",
+             -- The ONE client preference row (SPEC.md, Session list): the
+             -- chosen list order and the last user-selected session, shared
+             -- by every client of this helm. Singleton for the same reason
+             -- web_token is: no client keeps its own copy, so there is
+             -- exactly one answer to remember. Both columns nullable — an
+             -- unset preference is a real state (the default) and the row
+             -- may hold one without the other.
+             CREATE TABLE preferences (
+                 singleton     INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 list_sort     TEXT,
+                 last_selected TEXT
+             ) STRICT;
+             PRAGMA user_version = 14;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1528,6 +1605,25 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 13")?;
         version = 13;
+    }
+    if version == 13 {
+        // Version 14 moves the remembered list order and last-selected
+        // session from each client's own storage (browser localStorage,
+        // the desktop app's state file) into the helm, as one row every
+        // client reads and writes. Nothing is migrated INTO it: the old
+        // per-client copies were never visible to the helm, and starting
+        // from defaults is exactly what SPEC.md's best-effort clause
+        // allows a helm that lost the preference.
+        tx.execute_batch(
+            "CREATE TABLE preferences (
+                 singleton     INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 list_sort     TEXT,
+                 last_selected TEXT
+             ) STRICT;
+             PRAGMA user_version = 14;",
+        )
+        .context("migrating helm.db to schema version 14")?;
+        version = 14;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -1970,6 +2066,80 @@ impl HelmStore {
         })
         .await
         .expect("device-insert refusal task panicked");
+    }
+
+    // ---- The shared client preference ---------------------------------
+
+    /// The one preference row, or the all-unset default when no client has
+    /// written it yet.
+    ///
+    /// "Unset" and "absent row" deliberately read the same: a client seeds
+    /// its list order and auto-select from whatever comes back, and neither
+    /// answer should make it behave differently from a fresh install.
+    pub async fn preferences(&self) -> anyhow::Result<Preferences> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Preferences> {
+            conn.lock()
+                .expect("helm db mutex poisoned")
+                .query_row(
+                    "SELECT list_sort, last_selected FROM preferences WHERE singleton = 1",
+                    [],
+                    |row| {
+                        Ok(Preferences {
+                            list_sort: row.get(0)?,
+                            last_selected: row.get(1)?,
+                        })
+                    },
+                )
+                .optional()
+                .map(Option::unwrap_or_default)
+                .context("reading the client preference")
+        })
+        .await
+        .context("preference read task panicked")?
+    }
+
+    /// Merge `patch` into the preference row: an absent field is left as it
+    /// was, a `Some(None)` clears it, a `Some(Some(value))` replaces it.
+    ///
+    /// A MERGE rather than a whole-row replace, and the reason is the
+    /// preference being shared: two clients change different fields at
+    /// nearly the same time (one re-sorts, the other clicks a row), and a
+    /// whole-row write from either would reinstall its own stale copy of the
+    /// field the other just wrote. Sparse patches make the last writer win
+    /// per FIELD, which is the only order anyone can observe anyway. The
+    /// clear exists for a deselect and for test harnesses that need a "nothing
+    /// remembered" precondition; the UI's ordinary writes never send one.
+    ///
+    /// Validation (that `list_sort` is a word this helm serves) belongs to
+    /// the handler, not here: the store records what it is told, exactly as
+    /// it does for every other table.
+    pub async fn update_preferences(&self, patch: PreferencePatch) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            // Each field travels as (present, value): `CASE WHEN present`
+            // is what lets a NULL value mean "clear" rather than "keep",
+            // which a COALESCE could not express.
+            let sort_present = patch.list_sort.is_some();
+            let selected_present = patch.last_selected.is_some();
+            let sort = patch.list_sort.flatten();
+            let selected = patch.last_selected.flatten();
+            conn.lock()
+                .expect("helm db mutex poisoned")
+                .execute(
+                    "INSERT INTO preferences (singleton, list_sort, last_selected) \
+                     VALUES (1, ?1, ?2) \
+                     ON CONFLICT (singleton) DO UPDATE SET \
+                         list_sort = CASE WHEN ?3 THEN excluded.list_sort ELSE list_sort END, \
+                         last_selected = CASE WHEN ?4 THEN excluded.last_selected \
+                                              ELSE last_selected END",
+                    rusqlite::params![sort, selected, sort_present, selected_present],
+                )
+                .context("writing the client preference")?;
+            Ok(())
+        })
+        .await
+        .context("preference write task panicked")?
     }
 
     /// Every registered host, local row included, ordered by [`HostId`] —
@@ -4066,6 +4236,76 @@ mod tests {
         );
     }
 
+    // ---- The shared client preference ---------------------------------
+
+    /// The preference row is one shared answer with three-way per-field
+    /// merge semantics: a fresh store reads as all-unset, an ABSENT field in
+    /// a patch leaves the stored value alone, a `null` clears it, a value
+    /// replaces it, and a patch naming nothing changes nothing.
+    ///
+    /// Absent-versus-null is the property worth pinning. Two clients share
+    /// this row, and the failure a whole-row write would produce — a
+    /// re-sort in one window silently un-selecting what the other window
+    /// just clicked — is invisible until someone relaunches and lands on
+    /// the wrong session; the clear, conversely, must really clear, or a
+    /// harness asking for "nothing remembered" inherits the last test's row.
+    #[tokio::test]
+    async fn the_preference_row_merges_per_field_and_null_clears() {
+        let (_dir, store) = fresh_store().await;
+        assert_eq!(
+            store.preferences().await.unwrap(),
+            Preferences::default(),
+            "a fresh store has nothing remembered"
+        );
+
+        // The JSON shapes a client actually sends, decoded through serde so
+        // the absent/null distinction is exercised where it is made.
+        let patch = |json: &str| serde_json::from_str::<PreferencePatch>(json).unwrap();
+        store
+            .update_preferences(patch(r#"{"list_sort":"title"}"#))
+            .await
+            .unwrap();
+        store
+            .update_preferences(patch(r#"{"last_selected":"session-1"}"#))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("title".to_string()),
+                last_selected: Some("session-1".to_string()),
+            },
+            "a selection write must not discard the sort written before it"
+        );
+
+        store
+            .update_preferences(patch(r#"{"list_sort":"created"}"#))
+            .await
+            .unwrap();
+        store.update_preferences(patch("{}")).await.unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("created".to_string()),
+                last_selected: Some("session-1".to_string()),
+            },
+            "a later sort replaces the earlier one, and an empty patch is a no-op"
+        );
+
+        store
+            .update_preferences(patch(r#"{"last_selected":null}"#))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("created".to_string()),
+                last_selected: None,
+            },
+            "an explicit null clears exactly the field it names"
+        );
+    }
+
     // ---- Schema and the version mechanism ----------------------------
 
     /// A fresh database must come up on the current schema with the reserved
@@ -4658,6 +4898,7 @@ mod tests {
                 "DROP TABLE device_sessions;
                  DROP TABLE web_token;
                  DROP TABLE remembered_profiles;
+                 DROP TABLE preferences;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
@@ -4795,6 +5036,7 @@ mod tests {
             // (Version 12 already dropped the version-11 ordering columns.)
             conn.execute_batch(
                 "DROP TABLE remembered_profiles;
+                 DROP TABLE preferences;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (

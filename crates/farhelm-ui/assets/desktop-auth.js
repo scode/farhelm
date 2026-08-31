@@ -1,37 +1,15 @@
 (function () {
-  // Authenticate the desktop webview and maintain its browser-shaped copies.
-  // The Dioxus eval and node tests execute this same state machine; injected
-  // browser primitives keep the contract testable without pretending Node
-  // has a webview or a WebSocket.
-  function storePreference(storage, key, value) {
-    try {
-      if (value === undefined) return;
-      if (value === null) storage.removeItem(key);
-      else storage.setItem(key, value);
-    } catch (_) {
-      // Native remains authoritative. A full/disabled localStorage can leave
-      // this page-side copy stale, but must not block readiness or the current
-      // interaction.
-    }
-  }
-
-  function applyPreferences(storage, preferences) {
-    if (!preferences) return;
-    const selection = preferences.remembered_selection;
-    storePreference(
-      storage,
-      "farhelm.last-selected",
-      selection === undefined || selection === null ? selection : JSON.stringify(selection),
-    );
-    storePreference(storage, "farhelm.sort", preferences.list_sort);
-  }
-
-  async function report(channel, storage) {
-    const update = await channel.recv();
-    applyPreferences(storage, update);
-    channel.send(update);
-  }
-
+  // Authenticate the desktop webview: validate or mint the webview's own
+  // device credential and keep its localStorage copy current. The Dioxus
+  // eval and node tests execute this same state machine; injected browser
+  // primitives keep the contract testable without pretending Node has a
+  // webview or a WebSocket.
+  //
+  // Authentication is ALL this script does. It once also seeded the list
+  // preference (sort order, last selection) into localStorage on behalf of
+  // the native side; that preference now lives in the helm and reaches the
+  // page through an ordinary authenticated fetch after `ready`, so nothing
+  // here touches any key but the device secret.
   async function authenticate(channel, platform) {
     const bootstrap = await channel.recv();
     try {
@@ -123,12 +101,20 @@
         // Native committed the credential first and can seed the next launch.
         // Browser storage is a reusable cache, not an authentication commit.
       }
-      // Native sends BOTH keys on first bootstrap, including nulls for
-      // absent state, so its state file is authoritative over stale webview
-      // storage. Reauthentication omits the seed (`null`) and leaves choices
-      // made since launch untouched. The storage writes are attempted before
-      // `ready`, the message Rust gates the whole component tree on.
-      applyPreferences(platform.storage, bootstrap.preferences);
+      // Scrub the keys the retired per-client preference persistence used.
+      // An upgraded webview keeps whatever an old build stored there, and
+      // the preference now lives in the helm with no client-side copy
+      // wanted (SPEC.md, Session list). Best-effort, one key at a time:
+      // cleanup must never block readiness, and a failure on one key must
+      // not strand the other.
+      for (const retired of ["farhelm.sort", "farhelm.last-selected"]) {
+        try {
+          platform.storage.removeItem(retired);
+        } catch (_) {
+          // A blocked or broken storage costs only the cleanup.
+        }
+      }
+      // `ready` is the message Rust gates the whole component tree on.
       channel.send({ ready: true });
     } catch (error) {
       channel.send({ error: String(error && error.message ? error.message : error) });
@@ -136,9 +122,8 @@
   }
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { applyPreferences, authenticate, report };
+    module.exports = { authenticate };
   } else {
-    window.__farhelmDesktopPreferences = { report };
     return authenticate(
       {
         recv: function () { return dioxus.recv(); },

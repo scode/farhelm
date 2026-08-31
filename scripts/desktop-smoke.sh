@@ -666,41 +666,22 @@ SID_NEWEST=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d 
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail "the newest session did not reach the supervisor's tmux"
 
 # The default gate deliberately does not click rows: WebKitGTK's unreliable
-# Xvfb paint is why its CI leg is non-pixel. Seed a real identity-keyed record,
-# then observe restoration through the native request trace (`sort=title`) and
-# tmux's client ownership (the remembered, non-newest session gains the page's
-# output client). The state-file assertion remains as a check of the durable
-# input, not as a substitute for those behavioral observations.
+# Xvfb paint is why its CI leg is non-pixel. Seed the helm's shared preference
+# (SPEC.md, Session list: one row for every client, `PUT /api/preferences`)
+# with a non-default order and the non-newest session, then observe
+# restoration through the native request trace (`sort=title`) and tmux's
+# client ownership (the remembered, non-newest session gains the page's
+# output client). A `GET` read-back after the restart checks the durable
+# input survived the relaunch, as a check of the input rather than a
+# substitute for those behavioral observations.
 # The post-restart `sort=title` oracle proves nothing if the app already
 # asked for that order on its own, so the entire unseeded first launch — up
 # to this point, sessions created and all — must be free of such a request.
 grep -qxF 'desktop_smoke: session listing requested query=sort=title' "$X/desktop.log" \
   && fail "first boot requested sort=title before any preference was seeded"
-LOCAL_IDENTITY=$(curl_auth -sf --max-time 5 "$API/api/hosts" | python3 -c '
-import json,sys
-hosts=json.load(sys.stdin)["hosts"]
-print(next(h["identity"] for h in hosts if h["kind"] == "local"))
-') || fail "reading the local install identity for the preference seed"
-[ -n "$LOCAL_IDENTITY" ] || fail "the local host row carried no install identity"
-python3 -c '
-import json,os,sys,tempfile
-path, helm, session = sys.argv[1:]
-with open(path) as source:
-    state = json.load(source)
-state["remembered_selection"] = {"helm": helm, "id": session}
-state["list_sort"] = "title"
-fd, temporary = tempfile.mkstemp(prefix="desktop-client.", suffix=".tmp", dir=os.path.dirname(path))
-try:
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w") as target:
-        json.dump(state, target, separators=(",", ":"))
-        target.flush()
-        os.fsync(target.fileno())
-    os.replace(temporary, path)
-finally:
-    if os.path.exists(temporary):
-        os.unlink(temporary)
-' "$X/state/desktop-client.json" "$LOCAL_IDENTITY" "$SID" || fail "seeding desktop restart preferences"
+SEED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"list_sort": "title", "last_selected": sys.argv[1]}))' "$SID") || fail "encoding the preference seed"
+curl_auth -sf --max-time 5 -X PUT -H 'content-type: application/json' -d "$SEED_BODY" "$API/api/preferences" \
+  || fail "seeding the helm's shared preference for the restart"
 
 echo "== waiting for the window and nudging it to render"
 WID=""
@@ -777,11 +758,11 @@ RESTART_NATIVE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))
 RESTART_WEBVIEW=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["webview_device_secret"])' "$X/state/desktop-client.json")
 [ "$RESTART_NATIVE" = "$NATIVE_SECRET" ] || fail "restart replaced the persisted native device session"
 [ "$RESTART_WEBVIEW" = "$WEBVIEW_SECRET" ] || fail "restart replaced the persisted webview device session"
-RESTART_SELECTION=$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("remembered_selection"),sort_keys=True,separators=(",",":")))' "$X/state/desktop-client.json")
-EXPECTED_SELECTION=$(python3 -c 'import json,sys; print(json.dumps({"helm":sys.argv[1],"id":sys.argv[2]},sort_keys=True,separators=(",",":")))' "$LOCAL_IDENTITY" "$SID")
-RESTART_SORT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("list_sort") or "")' "$X/state/desktop-client.json")
-[ "$RESTART_SELECTION" = "$EXPECTED_SELECTION" ] || fail "restart changed the persisted desktop selection record"
-[ "$RESTART_SORT" = "title" ] || fail "restart dropped the persisted desktop sort"
+RESTART_PREFERENCES=$(curl_auth -sf --max-time 5 "$API/api/preferences") || fail "reading the shared preference after the restart"
+RESTART_SELECTION=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("last_selected") or "")')
+RESTART_SORT=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("list_sort") or "")')
+[ "$RESTART_SELECTION" = "$SID" ] || fail "restart changed the helm's remembered selection"
+[ "$RESTART_SORT" = "title" ] || fail "restart dropped the helm's remembered sort"
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
 wait_for_listing_request "$X/desktop-restart.log" "sort=title"
 RESTORED_ATTACHMENT=""
@@ -1174,16 +1155,16 @@ done
 [ -n "$SID" ] || fail "create through the desktop form did not yield exactly one new session (MT-5 class regression?)"
 echo "   created $SID"
 
-# Creation is a user-initiated selection, so it exercises the same eval and
-# debounced native write-back as a row click without adding another fragile
-# coordinate. Wait beyond the debounce through the observable file rather
+# Creation is a user-initiated selection, so it exercises the same
+# preference write (`PUT /api/preferences` through native reqwest) as a row
+# click without adding another fragile coordinate. Poll the helm's row rather
 # than sleeping for an assumed duration.
 for _ in $(seq 1 20); do
-  WRITTEN_ID=$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("remembered_selection") or {}).get("id") or "")' "$X/state/desktop-client.json" 2>/dev/null)
+  WRITTEN_ID=$(curl_auth -sf --max-time 5 "$API/api/preferences" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("last_selected") or "")' 2>/dev/null)
   [ "$WRITTEN_ID" = "$SID" ] && break
   sleep 0.25
 done
-[ "$WRITTEN_ID" = "$SID" ] || fail "the desktop page selection did not reach desktop-client.json"
+[ "$WRITTEN_ID" = "$SID" ] || fail "the desktop page selection did not reach the helm's preference row"
 
 echo "== typing into the terminal and asserting through tmux"
 # The create lands in the session view with the terminal mounted.

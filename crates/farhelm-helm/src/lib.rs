@@ -159,6 +159,9 @@ pub use provisioning::{LocalSupervisorDiscovery, discover_local_supervisor};
 /// launch on another. Kept on purpose when the profile routes lost theirs;
 /// the module docs say why.
 mod precondition;
+/// `/api/preferences` — the one client preference (list order, last
+/// selection) the helm remembers for every client at once.
+mod preferences;
 /// `/api/hosts/{id}/profiles` — agent profile CRUD, proxied to the owning
 /// supervisor, plus the helm-owned remembered default served beside it.
 mod profiles;
@@ -691,6 +694,13 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/hosts/{id}/profiles/{profile_id}",
             axum::routing::post(profiles::update_profile).delete(profiles::delete_profile),
+        )
+        // The shared client preference (SPEC.md, Session list). An ordinary
+        // protected route with no CORS wrapper — see `preferences.rs` for
+        // why the desktop webview never fetches it from JavaScript.
+        .route(
+            "/api/preferences",
+            get(preferences::get_preferences).put(preferences::put_preferences),
         )
         // The invalidation feed (PLAN_M6_75.md item 5). A WebSocket like the
         // terminal routes, and served beside them for the same reason they
