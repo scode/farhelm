@@ -75,33 +75,11 @@
 //! transaction as the write, so whichever caller loses gets a typed answer
 //! naming the winner instead of a durable collision.
 //!
-//! ## The generation counter: how a reader knows its data has not moved
-//!
-//! One piece of state here is not in the database at all. [`HelmStore`]
-//! carries an in-memory counter advanced by every committed write that
-//! CHANGED a cached row, and [`HelmStore::merged_page`] reads it inside the
-//! same lock hold that produces a page — so a page, its totals and that
-//! number are true of each other by construction.
-//!
-//! It exists because "how many sessions match this filter" is a full decode
-//! of the scope, and a reader that had to repeat it per page would make a
-//! walk quadratic in the fleet under the one mutex everything else needs.
-//! `crate::aggregate` remembers the answer and names the generation it was
-//! taken at; this side is the only place that can decide whether that is
-//! still true, because it is the only place a write cannot slip past the
-//! comparison. Nothing published AFTER a commit — the fleet's invalidation
-//! revision, most temptingly — can serve that purpose.
-//!
-//! It is process-local and starts at zero on every open, which is safe
-//! precisely because its only consumer is an in-memory cache that a restart
-//! empties too.
-
 use anyhow::Context;
 use farhelm_proto::{SessionInfo, SessionStatus};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use subtle::ConstantTimeEq;
@@ -129,16 +107,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 12;
-
-/// How many cached titles version 11's collation backfill folds at a time.
-///
-/// The backfill has to run in Rust (SQLite's `lower()` folds ASCII only), so
-/// the batch is what keeps an upgrade's peak memory off the size of the
-/// fleet's cache — see the loop in [`apply_schema`]. Any value bounds the
-/// memory; this one is large enough that the per-batch query is noise on a
-/// realistic cache and small enough to be crossed by a test.
-const TITLE_BACKFILL_BATCH: usize = 512;
+const SCHEMA_VERSION: i64 = 13;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -214,6 +183,13 @@ pub struct HostRow {
     /// `open` (see that method's docs on why minting is deliberately not
     /// this module's job).
     pub host_identity: Option<String>,
+    /// Whether this host's cached session list was cut at the wire's cap
+    /// when it was last written — the persisted half of SPEC.md's "could
+    /// not read to the end" notice, read by the merged list for every host
+    /// that serves from its cache, connected or not. Set by
+    /// [`HelmStore::replace_host_sessions`] and nothing else; a failed
+    /// refresh leaves it as it was, exactly as it leaves the rows.
+    pub cache_truncated: bool,
 }
 
 /// One `hosts` row's columns, read positionally by [`HelmStore::list_hosts`]
@@ -230,20 +206,38 @@ type RawHostRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    bool,
 );
 
-/// One cached session's identity plus its payload, as returned by
-/// [`HelmStore::cached_sessions_all`].
+/// One decodable row of the session cache as [`HelmStore::cached_rows`]
+/// reads it: which host filed it, the archive flag it was filed under, and
+/// its payload.
 ///
-/// A dedicated wrapper rather than a bare `Vec<SessionInfo>` because a
-/// merged, cross-host view is meaningless without knowing which host each
-/// row belongs to — [`HelmStore::cached_sessions`], scoped to one host by
-/// its caller, has no need for the same wrapper and returns the bare
-/// `SessionInfo` list instead.
+/// Only rows that DECODE come back as one of these. A cache row is
+/// last-known display data, so a payload that no longer decodes (or that
+/// names a different session than the row is filed under) is dropped from
+/// the read and logged, rather than failing the read — one bad blob must
+/// not take a whole host's stale list down — and rather than being carried
+/// as an unshowable placeholder: the merged list's counts describe rows a
+/// client can see, and a row nobody can render is corruption for the log,
+/// not an entry for the count (SPEC.md's Session list section).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CachedSession {
+pub struct CachedRow {
     pub host: HostId,
+    pub archived: bool,
     pub info: SessionInfo,
+}
+
+/// One consistent read of the cache for a set of hosts: the rows, and
+/// which of those hosts' caches were cut at the wire's cap — taken under
+/// one lock hold so the flag always describes exactly these rows. See
+/// [`HelmStore::cached_slice`] for why the pairing is load-bearing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CachedSlice {
+    pub rows: Vec<CachedRow>,
+    /// The subset of the requested hosts whose `cache_truncated` flag is
+    /// set. A `Vec` rather than a set: it is a handful of ids at most.
+    pub truncated_hosts: Vec<HostId>,
 }
 
 /// What one [`HelmStore::replace_host_sessions`] call did.
@@ -309,44 +303,6 @@ fn source_is_newer(
     }
 }
 
-/// One row of a [`HelmStore::scan_page`] scan: its ordering key always,
-/// its payload only when the stored JSON still decodes.
-///
-/// The split is the whole point. Display data can be skipped (a cache is
-/// last-known display data, not authority — see
-/// [`HelmStore::cached_sessions`]), but an ordering key cannot: a caller
-/// paging this order has to be able to advance past a row it cannot show,
-/// or that row becomes a permanent wall in front of everything after it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScannedRow {
-    pub key: CacheKey,
-    /// `None` for a row whose `info_json` no longer decodes. Logged when it
-    /// happens; not an error.
-    pub info: Option<SessionInfo>,
-}
-
-/// What one [`HelmStore::scan_page`] scan found.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CachePage {
-    /// Every row scanned, in order — decoded or not (see [`ScannedRow`]).
-    pub rows: Vec<ScannedRow>,
-    /// Whether the scan stopped because a bound was reached rather than
-    /// because the order ran out. Answered by the scan itself (it fetches
-    /// one row past the limit) rather than by a second query that could
-    /// disagree with it.
-    pub more: bool,
-    /// The key of the FIRST row this scan did not return, when `more` is
-    /// true — the fence a merger must not advance past.
-    ///
-    /// Load-bearing whenever the scan stops for its BYTE bound, which it can
-    /// do having returned fewer rows than asked for. The merge then still
-    /// has capacity, so it goes on taking items from the in-memory sources —
-    /// and every persisted row between here and wherever it stops is skipped
-    /// by a cursor that never named it. `None` when the order simply ran
-    /// out, which is the only case in which there is nothing beyond.
-    pub frontier: Option<CacheKey>,
-}
-
 /// The predicates a merged-view read is narrowed by — SPEC.md's filtering
 /// and search dimensions, including spawned-session parentage, as one value.
 ///
@@ -370,7 +326,7 @@ pub struct CachePage {
 /// - **archive is a default-off inclusion switch.** Withholding archived
 ///   rows is the ordinary view; enabling the switch removes that predicate
 ///   rather than selecting archived rows alone. It is also the one dimension
-///   the served `total` follows ([`HelmStore::count_rows`]): the switch picks
+///   the served `total` follows (`crate::aggregate`): the switch picks
 ///   which view is being counted, while every other dimension narrows a view
 ///   whose size the count goes on reporting.
 /// - **host, parent, status, profile — EXACT.** Each is an identifier or a
@@ -492,28 +448,20 @@ pub fn parse_status_key(text: &str) -> Option<&'static str> {
 /// ## Every order ends in the same total order
 ///
 /// Each variant names its own leading component and then falls back to
-/// `created_at` DESCENDING, session id ascending, host id ascending. That
-/// tail is not decoration: a page walk resumes strictly after a position, so
-/// an order that left equal ranks unordered would let two rows swap between
-/// two page fetches and a cursor would skip one and repeat the other. The
-/// leading component is allowed to tie; the order as a whole never is.
-///
-/// ## It is an order over the CACHE, not over the wire
-///
-/// Hosts keep listing their sessions in creation order — the wire order the
-/// drain validates (`crate::manager::drain_sessions`) and depends on. What
-/// this selects is how the helm's own merged view is walked, which is a
-/// property of helm.db's indexes and of the merge beside them. Nothing here
-/// reaches a supervisor.
+/// `created_at` DESCENDING, session id ascending, host id ascending. The
+/// tail is what makes every order total, so two reads of an unchanged fleet
+/// come back in the same sequence and the listing cap always cuts the same
+/// rows. The leading component is allowed to tie; the order as a whole
+/// never is. The comparison itself lives in `crate::aggregate::sort_rows`:
+/// the list is sorted in memory, per request, and nothing in this store
+/// orders by anything but the host slice a stale read asks for.
 ///
 /// ## Not part of [`SessionFilter`], deliberately
 ///
 /// A filter decides WHICH rows a view holds and a sort decides in what order
 /// it hands them over; folding the second into the first would make a
-/// re-sorted view look like a differently-filtered one, and the matching
-/// count cached per filter (`crate::aggregate::MatchingCounts`) would be
-/// recomputed for every sort even though the answer cannot change. Cursors
-/// are bound to BOTH, separately — see `crate::aggregate`'s cursor.
+/// re-sorted view look like a differently-filtered one, and neither count
+/// may move with the sort.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ListSort {
     /// `created_at` descending — the order every listing had before there
@@ -529,8 +477,10 @@ pub enum ListSort {
     /// output) sorts by its creation time rather than piling up at the
     /// epoch.
     Activity,
-    /// Folded title ascending, then the creation-order tail. See
-    /// [`title_sort_key`] for the collation this is over.
+    /// Lowercased title ascending, then the creation-order tail. The
+    /// collation is Rust's `str::to_lowercase` compared as code points —
+    /// case-insensitive across Unicode, otherwise ordinal, and deliberately
+    /// neither locale-aware nor SQLite's ASCII-only `NOCASE`.
     Title,
 }
 
@@ -549,105 +499,6 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
     }
 }
 
-/// The collated form of a title — what the title order actually compares.
-///
-/// ## The collation, and why it is this one
-///
-/// Rust's `str::to_lowercase`, compared afterwards as plain UTF-8 bytes,
-/// which for well-formed UTF-8 is code point order. So the order is
-/// CASE-INSENSITIVE and otherwise code-point ordinal: `apple` < `Banana` <
-/// `cherry`, and `Ärger` sorts after `zebra` because its first code point
-/// does.
-///
-/// Name it precisely, because two nearby things it is NOT get assumed. It is
-/// Unicode's locale-independent FULL lowercase mapping, not the SIMPLE
-/// (one-code-point-per-code-point) one: a fold may lengthen the string, as
-/// `İ` does by becoming `i` plus a combining dot. And it is lowercasing
-/// rather than case FOLDING, so the pairs case folding exists to unify but
-/// lowercasing does not — `ß` against `SS`, final `ς` against medial `σ` —
-/// remain distinct keys here. Neither costs correctness; both would make a
-/// docstring that named the wrong operation mislead the next reader into
-/// "fixing" the fold.
-///
-/// SQLite's `NOCASE` is deliberately NOT used. It folds ASCII only, so
-/// `Ärger` and `ärger` would be two different titles to it, and a helm whose
-/// sessions are titled in the user's own language would show a case-folding
-/// that works for half the alphabet. Folding in Rust also keeps ONE
-/// definition of the collation for the two sources an ordered page is merged
-/// from — the indexed column below and an identity-less host's in-memory
-/// rows — where a SQL-side collation would have to be re-implemented on the
-/// Rust side to match.
-///
-/// What it is NOT is locale-aware collation: no ICU, no language-specific
-/// tailoring, no accent folding. That is a dependency and a per-user
-/// configuration this milestone does not have, and the honest failure of
-/// leaving it out — non-Latin titles grouped after Latin ones — is visible
-/// and stable rather than subtly wrong.
-///
-/// ## The stored keys carry no version of the Unicode tables that made them
-///
-/// A folded key is written into `session_cache.title_sort` and compared there
-/// for as long as the row lives, but nothing records WHICH `std` the fold came
-/// from — and Rust's case-mapping tables do move with the Unicode standard, so
-/// two farhelm builds can in principle fold one exotic title differently.
-///
-/// What keeps that from mattering is the cache's write discipline rather than
-/// any versioning here: a drain replaces the host's WHOLE slice, so a
-/// reconnecting host's every key is re-folded by the running toolchain in one
-/// write. Only a host that is OFFLINE across the upgrade can hold keys folded
-/// by the old tables, and only until it comes back. The worst case is one row
-/// sorting slightly out of place in the title order in the meantime — no lost
-/// row and no broken walk, because the tail every order shares is what makes
-/// the sequence total. Not worth a stamped column and a re-fold pass.
-///
-/// Stored in a column at write time (see [`apply_schema`]'s version 11)
-/// rather than computed per read, for `created_at`'s reason: an ORDER BY
-/// must never mean decoding and folding every payload in the fleet.
-///
-/// ## Why it is BOUNDED, and why the bound is safe
-///
-/// Cut to [`TITLE_SORT_KEY_CHARS`] folded characters. Titles reach this helm
-/// from a peer, and the only cap on them anywhere is the supervisor's
-/// 64 KiB `CREATE_FIELD_CAP` — a ceiling for a request body, and far too
-/// large for a value that is ALSO an index key on every cached row and the
-/// leading component of a cursor the browser replays in a query string. An
-/// unbounded key would let one long title mint a `?cursor=` past a request
-/// head limit (stranding that walk at that row) and make every refresh of
-/// that host's slice copy the whole title into both title-order indexes.
-///
-/// Truncating is only sound because it happens HERE, in the one definition
-/// every writer and every comparison goes through: the cut value IS the
-/// ordering key, for the stored column, for the in-memory rows a merge sorts,
-/// for the cursor, and for the resume predicate alike. Two titles sharing the
-/// first [`TITLE_SORT_KEY_CHARS`] characters therefore TIE and fall through to
-/// the shared `created_at`/id/host tail, which is a legitimate tie and not a
-/// lost row — the same thing that happens to two identical titles. What must
-/// never happen is truncating at the CURSOR instead, where a shortened key
-/// would name a position the order does not contain and the walk would skip
-/// or repeat rows.
-///
-/// The cut is on a CHARACTER boundary of the FOLDED string, not a byte
-/// boundary of the original: slicing UTF-8 mid-code-point panics, and folding
-/// can change a string's length (see the `İ` case above), so measuring before
-/// the fold would bound the wrong string.
-pub fn title_sort_key(title: &str) -> String {
-    let folded = title.to_lowercase();
-    match folded.char_indices().nth(TITLE_SORT_KEY_CHARS) {
-        None => folded,
-        Some((cut, _)) => folded[..cut].to_string(),
-    }
-}
-
-/// How many folded characters of a title [`title_sort_key`] keeps.
-///
-/// Chosen to be comfortably longer than any title a person types into a
-/// sidebar while staying small enough that a title-ordered cursor is a short
-/// query-string component (at most this many characters of UTF-8, JSON-escaped
-/// and base64url'd) rather than a bound set by what a peer chose to send. It
-/// is a collation bound, not a display or storage one: the full title is
-/// untouched in `info_json` and is what every client renders.
-pub const TITLE_SORT_KEY_CHARS: usize = 128;
-
 impl SessionFilter {
     /// Admit archived rows as well as active ones.
     ///
@@ -663,10 +514,11 @@ impl SessionFilter {
     ///
     /// Exposed for the DENOMINATOR rather than for the predicate: unlike
     /// every other dimension, this one changes which view `total` is a count
-    /// of, so [`HelmStore::count_rows`] has to ask. [`Self::matches`] applies
-    /// it independently, on the same reasoning as [`Self::host_scope`] — the
-    /// predicate is the contract and this is what the SQL is allowed to know
-    /// about it.
+    /// of, so the merge (`crate::aggregate`) applies it as a scope before it
+    /// counts. [`Self::matches`] applies it independently — the predicate is
+    /// the contract and the scope is what makes the count right. The host
+    /// dimension deliberately has no such scope: it is a filter like any
+    /// other, and narrowing the read to it would make `total` follow it.
     pub fn includes_archived(&self) -> bool {
         self.include_archived
     }
@@ -708,128 +560,24 @@ impl SessionFilter {
         self
     }
 
-    /// Whether this filter narrows nothing, so a caller may take its
-    /// unfiltered fast path (an indexed `COUNT(*)`, a `LIMIT`ed scan)
-    /// instead of walking rows to find out.
-    pub fn is_empty(&self) -> bool {
-        *self == SessionFilter::default().include_archived(true)
-    }
-
-    /// The one host this filter admits, if it names one.
+    /// The one host this filter admits, when it names exactly one.
     ///
-    /// Exposed so the read can narrow its SQL SCOPE rather than decoding
-    /// every host's rows and rejecting them in Rust: the host dimension is
-    /// the only one the schema can answer by itself (it is an indexed
-    /// column, not a field inside the payload), and a fleet-wide scan to
-    /// serve "show me this host" is work nothing needs.
-    ///
-    /// [`Self::matches`] still checks the host independently. The scope is
-    /// an optimization; the predicate is the contract, and a caller that
-    /// forgot the scope must still get the right answer.
+    /// Read by the merge to SCOPE the truncation notice, not the rows: a
+    /// request for one host's sessions cannot be missing rows another
+    /// host's cap cut, so only the named host's flag may raise "could not
+    /// read to the end" there (`crate::aggregate`). The rows themselves are
+    /// still read fleet-wide — `total` is the whole view's size whatever
+    /// the filter says — and [`Self::matches`] still checks the host per
+    /// row.
     pub fn host_scope(&self) -> Option<HostId> {
         self.host
     }
 
-    /// The canonical encoding of what this filter selects — the input every
-    /// derived identity of a filter is built from.
-    ///
-    /// Length-prefixed per field rather than delimiter-joined, so no
-    /// combination of user text can spell another filter's encoding: a title
-    /// of `x|s=running` produces a different string than a title of `x`
-    /// beside a status of `running`, which a naive join would not.
-    ///
-    /// Compared, never parsed. It does NOT travel anywhere — it is unbounded
-    /// user text, and a cursor carrying it would grow with the search box
-    /// (see [`Self::digest`]).
-    pub fn fingerprint(&self) -> String {
-        fn field(out: &mut String, tag: char, value: Option<&str>) {
-            match value {
-                None => out.push_str(&format!("{tag}-;")),
-                Some(text) => out.push_str(&format!("{tag}{}:{text};", text.len())),
-            }
-        }
-        let mut out = String::new();
-        field(
-            &mut out,
-            'i',
-            Some(if self.include_archived { "1" } else { "0" }),
-        );
-        field(
-            &mut out,
-            'h',
-            self.host.map(|host| host.to_string()).as_deref(),
-        );
-        field(&mut out, 'a', self.parent.as_deref());
-        field(
-            &mut out,
-            'd',
-            self.directory.as_ref().map(|f| f.raw.as_str()),
-        );
-        field(&mut out, 't', self.title.as_ref().map(|f| f.raw.as_str()));
-        field(&mut out, 'p', self.profile.as_ref().map(|f| f.raw.as_str()));
-        field(&mut out, 's', self.status);
-        out
-    }
-
-    /// A fixed-size, PROCESS-LOCAL name for this filter — what a cursor is
-    /// BOUND to, and what a cached matching count is keyed by.
-    ///
-    /// ## Why a cursor carries this rather than the filter itself
-    ///
-    /// A resume point is only meaningful within the result set it was taken
-    /// from. Replayed against a different filter it names a position in a
-    /// sequence it never described, so the walk silently resumes mid-order
-    /// and every earlier match is skipped — no error, no gap a client can
-    /// see. Binding every cursor (an unfiltered one included) to its filter
-    /// is what turns that into a refusal.
-    ///
-    /// Fixed-size because the alternative is a cursor that grows with the
-    /// search box: a first page whose query string already sits near an HTTP
-    /// head limit would mint a follow-up cursor nobody could replay.
-    ///
-    /// ## Keyed, and exactly how much that is worth
-    ///
-    /// The key is a process-random [`std::collections::hash_map::RandomState`],
-    /// so the binding a cursor carries means something only within the process
-    /// that minted it: a token cannot be composed off-line, and one process's
-    /// cursors are not the next one's.
-    ///
-    /// It is NOT an authenticator, and calling it unforgeable — as an earlier
-    /// version of this comment did — would misdescribe what stands behind it.
-    /// `RandomState` is `SipHash-1-3` used as a hash-flooding defense, not as
-    /// a MAC; the output is 64 bits, so collisions are reachable by search;
-    /// and nothing here is constant-time. The threat this actually answers is
-    /// ACCIDENTAL reuse — a stale cursor from a previous walk, a token pasted
-    /// from another tab — plus casual tampering on an endpoint that listens on
-    /// loopback and serves one user. It buys a probabilistic, process-local
-    /// binding, which is proportionate to what a mismatch costs (a page walk
-    /// that resumes in the wrong result set, on data the caller may already
-    /// read in full). It deliberately remains outside the API's credential
-    /// boundary: an authenticated caller can still reuse a cursor accidentally
-    /// or edit it.
-    ///
-    /// The price is that cursors do not survive a helm restart: the new
-    /// process has a new key, every old token fails to match, and the answer
-    /// is a 400 that says to start a fresh walk. That is the right side of
-    /// the trade — a restart drops every host connection and every client
-    /// re-reads anyway — and it is the same reason the count cache this keys
-    /// is in memory rather than at rest.
-    pub fn digest(&self) -> String {
-        use std::hash::{BuildHasher, Hasher};
-
-        // ONE key for the process, minted on first use. A key per call would
-        // make a digest unreproducible even for the same filter; a constant
-        // key would make one process's tokens replayable in every other.
-        static KEY: std::sync::OnceLock<std::collections::hash_map::RandomState> =
-            std::sync::OnceLock::new();
-        let mut hasher = KEY
-            .get_or_init(std::collections::hash_map::RandomState::new)
-            .build_hasher();
-        // The canonical encoding is hashed as ONE byte string, so the
-        // length-prefixing that makes it unambiguous carries straight through
-        // to the digest.
-        hasher.write(self.fingerprint().as_bytes());
-        format!("{:016x}", hasher.finish())
+    /// Whether this filter narrows nothing — which is what decides whether
+    /// a listing reply carries a `matching` count at all
+    /// (`crate::aggregate::SessionListBody::matching`).
+    pub fn is_empty(&self) -> bool {
+        *self == SessionFilter::default().include_archived(true)
     }
 
     /// Whether one session, on `host`, satisfies every dimension set.
@@ -880,250 +628,7 @@ impl SessionFilter {
     }
 }
 
-/// The PERSISTED half of `GET /api/sessions`, coherent within itself: the
-/// page and both of its counts, all produced by [`HelmStore::merged_page`]'s
-/// single read.
-///
-/// Not the whole answer, and the distinction matters to anyone reading this
-/// as a contract. `crate::aggregate::session_page` merges the in-memory rows
-/// of every connected host that reports no identity — hosts this cache holds
-/// nothing for — into the page, adds their share to both counts, and only
-/// then has something to serve. What this struct guarantees is that helm.db's
-/// contribution is one moment's worth: the rows, `total`, `matching` and
-/// `generation` all come from one hold of one mutex.
-///
-/// Bundled rather than returned as a tuple of three separate calls because
-/// the bundling IS the contract — see that method for what taking them
-/// apart produces.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MergedRead {
-    pub page: CachePage,
-    /// Every cached row in the merged view, filter or no filter.
-    pub total: u64,
-    /// How many of them match the filter — present exactly when this read
-    /// COUNTED (see [`MatchingCount`]).
-    ///
-    /// `None` is never "zero" and never "unknown": it means this read was
-    /// told not to count, either because the caller wants no matching claim
-    /// at all or because the count it already holds is still true. Which of
-    /// the two it was is the caller's own question; [`MergedRead::generation`]
-    /// is what answers it.
-    pub matching: Option<u64>,
-    /// The store's mutation generation, read INSIDE this read's lock hold.
-    ///
-    /// The tie between a count and the data it describes. Everything in this
-    /// struct was produced under one hold of one mutex, so a count taken here
-    /// and this number are true of each other by construction; a later read
-    /// that finds the same generation is looking at the same rows. See
-    /// [`HelmStore::generation`] for why nothing sampled OUTSIDE the lock can
-    /// serve this purpose.
-    pub generation: u64,
-}
-
-/// What [`HelmStore::merged_page`] should do about the matching count.
-///
-/// ## Why a page read decides this at all
-///
-/// Counting matches means decoding every row in the scope: there is no index
-/// over a JSON payload, and "how many match" is exactly the question a
-/// stopping-early scan cannot answer. Done per page, a `limit=1` walk of the
-/// fleet is quadratic in it — under the one mutex every other request needs,
-/// which is what turns a cost into a stall for everybody.
-///
-/// So a walk counts ONCE and the caller remembers the number
-/// (`crate::aggregate`'s count cache). What it cannot do is decide on its own
-/// whether that number is still true: a write can commit between the caller
-/// sampling anything and this read starting. [`Self::ComputeUnless`] hands
-/// the decision to the only place that can make it safely — inside the lock
-/// hold that produces the page.
-///
-/// ## The count and the page are ONE pass
-///
-/// When this read does count, it counts in the same walk that collects the
-/// page rather than in a scan of its own. The shape this replaced decoded the
-/// whole scope twice for a zero-match request, both times under the mutex.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchingCount {
-    /// Count, unconditionally — a filtered read with nothing to reuse.
-    Compute,
-    /// Count only if the store has moved since this generation. The caller
-    /// holds a count taken at it and that count still stands otherwise, in
-    /// which case [`MergedRead::matching`] comes back `None`.
-    ComputeUnless(u64),
-    /// Do not count at all. An UNFILTERED listing makes no matching claim —
-    /// see [`HelmStore::merged_page`] — so there is nothing to compute.
-    Skip,
-}
-
-/// Decode one cached row's payload, or say why it cannot be trusted AS THAT
-/// ROW.
-///
-/// The single validation the page and the matching count are both decided
-/// by, and the sharing is load-bearing rather than tidy: they must agree
-/// exactly about which rows are usable, or "N matching" would count rows the
-/// page refuses to display and no page walk could ever reach N. Since
-/// [`HelmStore::scan_page`] answers both in one walk, that agreement is now
-/// structural rather than a discipline two functions have to keep.
-///
-/// Two ways a row fails, and the second is the subtle one. An undecodable
-/// payload is obvious. A payload that DECODES but whose own `id` or
-/// `created_at` disagrees with the columns it is filed under is poison too:
-/// the columns are what every order, cursor, and lookup here is built on, so
-/// showing such a row would list it under one identity and route it under
-/// another.
-///
-/// The two DERIVED ordering columns (`activity_at`, `title_sort`) are
-/// deliberately not in that check, and the difference is worth stating.
-/// `id`/`created_at` are IDENTITY — a row filed under the wrong one is routed
-/// and resumed as a session it is not — while the other two are computed from
-/// the payload by whoever wrote the row. A hand-edited disagreement there
-/// costs a row sorted by a stale key beside a title it no longer matches,
-/// which is cosmetic; poisoning the row instead would remove it from the list
-/// entirely over a cosmetic fault. Nothing this build writes can produce the
-/// disagreement: both columns are extracted in the same statement as the
-/// payload.
-///
-/// The `Err` carries a reason string for the caller to log. It is logged only
-/// where the PAGE would have shown the row: a counting walk covers the whole
-/// scope, and one warning per unreadable row per keystroke in a search box is
-/// a log the user writes by typing.
-fn usable_cached_session(key: &CacheKey, json: &str) -> Result<SessionInfo, String> {
-    let info: SessionInfo = serde_json::from_str(json)
-        .map_err(|error| format!("its info_json no longer decodes: {error}"))?;
-    if info.id != key.session_id || info.created_at != key.created_at {
-        return Err(format!(
-            "its payload names session {:?} at {}, but it is filed as {:?} at {}",
-            info.id, info.created_at, key.session_id, key.created_at
-        ));
-    }
-    Ok(info)
-}
-
-/// Whether `key` comes STRICTLY AFTER `after` under `sort`.
-///
-/// The Rust twin of the disjunction [`HelmStore::scan_page`] hands SQLite,
-/// and it exists because a COUNTING scan cannot use that predicate at all: it
-/// has to see the rows before the cursor in order to count them. The two
-/// spellings must agree exactly — a page whose resume test disagreed with its
-/// own ORDER BY would skip or repeat rows, which is the one thing a cursor
-/// may never do.
-fn follows(sort: ListSort, key: &CacheKey, after: &CacheKey) -> bool {
-    sort.position(key) > sort.position(after)
-}
-
-/// One row's place under one order, as a value Rust compares with `<`.
-///
-/// Every order this helm serves is expressed in this ONE tuple, with the
-/// components a given order does not use left absent — and `None` sorting
-/// before `Some` costs nothing, because a comparison only ever happens
-/// between two positions taken under the SAME sort, so an unused component is
-/// the same value on both sides. That uniformity is the point: the k-way
-/// merge, the resume test, and the cursor's own comparison all take positions
-/// rather than each spelling out a per-order tuple of its own.
-///
-/// `Reverse` on the descending components turns "descending time, ascending
-/// id" into one ordinary ascending comparison.
-///
-/// The components, in comparison order:
-///
-/// 1. the folded title, under [`ListSort::Title`] only — ascending;
-/// 2. effective activity, under [`ListSort::Activity`] only — descending;
-/// 3. `created_at`, descending — leading for [`ListSort::Created`] and the
-///    first tiebreak for the other two;
-/// 4. session id, ascending;
-/// 5. host id, ascending — the component that makes every order TOTAL.
-pub type OrderPosition<'a> = (
-    Option<&'a str>,
-    Option<std::cmp::Reverse<i64>>,
-    std::cmp::Reverse<i64>,
-    &'a str,
-    HostId,
-);
-
-impl ListSort {
-    /// Where `key` sits under this order.
-    ///
-    /// This must agree EXACTLY with [`HelmStore::scan_page`]'s `ORDER BY` for
-    /// the same variant. The page comes back sorted by SQL and
-    /// `crate::aggregate` merges in-memory rows into it by this comparison,
-    /// so a disagreement interleaves them into an order that is neither.
-    pub fn position<'a>(&self, key: &'a CacheKey) -> OrderPosition<'a> {
-        (
-            match self {
-                ListSort::Title => Some(key.title_sort.as_str()),
-                ListSort::Created | ListSort::Activity => None,
-            },
-            match self {
-                ListSort::Activity => Some(std::cmp::Reverse(key.activity_at)),
-                ListSort::Created | ListSort::Title => None,
-            },
-            std::cmp::Reverse(key.created_at),
-            key.session_id.as_str(),
-            key.host,
-        )
-    }
-
-    /// The word this order travels as, in a query string and in a cursor.
-    /// The exact inverse of [`parse_sort_key`].
-    pub fn key(&self) -> &'static str {
-        match self {
-            ListSort::Created => "created",
-            ListSort::Activity => "activity",
-            ListSort::Title => "title",
-        }
-    }
-}
-
-/// One row's position in the cross-host merged order — the resume point
-/// [`HelmStore::merged_page`] pages from.
-///
-/// Carries every component ANY order needs, not just the one in force: a key
-/// is minted where a row is (a cache row's columns, an in-memory session), and
-/// which of its components matter is [`ListSort`]'s decision at comparison
-/// time. Holding all of them means a key can be handed between the two
-/// without knowing what it will be compared under, and it is why
-/// [`ListSort::position`] can be a pure projection rather than a second
-/// construction.
-///
-/// The last three components — `created_at` DESCENDING, then `session_id`
-/// ascending, then `host_id` ascending — are the tail EVERY order ends in.
-/// The host id is what makes each of them TOTAL rather than merely
-/// usually-total (see [`apply_schema`]'s version 3), and a resume point over
-/// a non-total order can skip or repeat rows.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheKey {
-    pub created_at: i64,
-    pub session_id: String,
-    pub host: HostId,
-    /// The session's EFFECTIVE activity stamp
-    /// (`SessionInfo::effective_activity`) — read from the
-    /// `session_cache.activity_at` column for a cached row, computed for an
-    /// in-memory one. Only [`ListSort::Activity`] compares it.
-    pub activity_at: i64,
-    /// The session's collated title ([`title_sort_key`]) — the
-    /// `session_cache.title_sort` column for a cached row. Only
-    /// [`ListSort::Title`] compares it.
-    pub title_sort: String,
-}
-
-impl CacheKey {
-    /// The key one live [`SessionInfo`] occupies on `host`.
-    ///
-    /// The in-memory counterpart of reading a cached row's columns, and the
-    /// one place the two derived components are derived for a row that has no
-    /// stored copy of them. A second, subtly different derivation on the
-    /// merge side is exactly how an ordered page comes to interleave its two
-    /// sources wrongly.
-    pub fn of(info: &SessionInfo, host: HostId) -> CacheKey {
-        CacheKey {
-            created_at: info.created_at,
-            session_id: info.id.clone(),
-            host,
-            activity_at: info.effective_activity(),
-            title_sort: title_sort_key(&info.title),
-        }
-    }
-}
+impl ListSort {}
 
 /// One host to guarantee registered — the `--ensure-hosts` entry as
 /// [`HelmStore::ensure_ssh_hosts`] consumes it.
@@ -1361,41 +866,6 @@ pub enum FirstContactOutcome {
 #[derive(Clone, Debug)]
 pub struct HelmStore {
     conn: Arc<Mutex<Connection>>,
-    /// How many times a committed write actually CHANGED a cached row — the
-    /// token that says whether a count taken earlier still describes the data
-    /// (see [`MatchingCount`]).
-    ///
-    /// Advanced INSIDE the [`Self::conn`] lock hold that committed the
-    /// write, and read inside the lock hold that produced a page, which is
-    /// what makes `(generation, page, total, matching)` mutually coherent by
-    /// construction. Anything advanced after the lock is released — a fleet
-    /// revision published by a caller that has already committed, say —
-    /// cannot qualify a read, because a second write can land in the gap.
-    ///
-    /// "Changed" is decided by comparing STORED BYTES inside the writing
-    /// transaction, never by a caller's opinion that it wrote something. A
-    /// refresh writes back an identical row set every few seconds per host in
-    /// a settled fleet, and a counter that moved for those would make every
-    /// page of every walk recount — which is the cost this exists to avoid.
-    /// Rows that are byte-identical support exactly the same counts, so
-    /// standing still there is sound rather than merely convenient.
-    ///
-    /// Process-local and reset by a restart, deliberately: its only consumer
-    /// is an in-memory cache that a restart empties too, so there is nothing
-    /// a reused number could wrongly qualify. A durable counter would have to
-    /// be written on the same transaction as every mutation and read back on
-    /// every page, which is a row of contention bought for nothing.
-    generation: Arc<AtomicU64>,
-    /// How many times a read has actually walked the scope to COUNT matches
-    /// — instrumentation for the tests that pin "one count per walk, one
-    /// recount per invalidating write".
-    ///
-    /// A production counter rather than a test-only hook because the property
-    /// it measures is the design (see [`MatchingCount`]), and a hook compiled
-    /// only under `cfg(test)` would let the shape it guards drift in a build
-    /// nobody tests. One relaxed increment per filtered read costs nothing
-    /// against the scan it is counting.
-    counting_passes: Arc<AtomicU64>,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -1467,9 +937,8 @@ pub struct HelmStore {
 /// - 9: a supervisor-local creation sequence for provenance ordering. Older
 ///   cached supervisors omit it, so the timestamp/id ordering remains the
 ///   compatibility fallback until a sequenced observation arrives.
-/// - 10: `session_cache.archived`, so the served `total` can be "what the
-///   default view holds" (see [`HelmStore::count_rows`]) without decoding
-///   every payload to find out. Like version 4 this arrives with DATA that
+/// - 10: `session_cache.archived`, so the default view can skip archived
+///   rows before decoding them (see [`HelmStore::cached_rows`]). Like version 4 this arrives with DATA that
 ///   predates it — the flag has always lived inside `info_json` — so the
 ///   migration backfills the column by decoding each existing row once.
 /// - 11: `session_cache.activity_at` and `session_cache.title_sort`, plus a
@@ -1479,9 +948,9 @@ pub struct HelmStore {
 ///   decoding every payload — and the same DATA problem: both values have
 ///   only ever existed inside `info_json`, so the migration backfills them
 ///   from the rows that predate the columns. No GLOBAL index accompanies
-///   either, unlike the pre-existing creation order: `HelmStore::scan_page`
-///   already reads every order through the per-host `UNION ALL` merge, so a
-///   global index here would never be read by anything.
+///   either, unlike the pre-existing creation order: the per-host page query
+///   of the day already read every order through a `UNION ALL` merge, so a
+///   global index would never have been read by anything.
 /// - 12: `remembered_profiles.host_identity` goes. The remembered default is
 ///   a bare profile id per registry row (SPEC.md, Sessions / Creation): not
 ///   bound to the install behind the row, not revalidated on read, and no
@@ -1489,6 +958,20 @@ pub struct HelmStore {
 ///   forward — a same-id profile on a successor install being preselected is
 ///   exactly the accepted outcome — and the table is rebuilt rather than
 ///   `DROP COLUMN`ed so its stored DDL matches the fresh-create branch.
+/// - 13: the session list is served WHOLE (SPEC.md's Session list section:
+///   no pagination, no cursors, no per-order server-side indexing at any
+///   layer), so every ordering index and both derived ordering columns go:
+///   `session_cache_order`, `session_cache_by_host_order`,
+///   `session_cache_by_host_activity_order`,
+///   `session_cache_by_host_title_order`, `activity_at` and `title_sort`.
+///   The merge reads a host's whole slice and sorts it in Rust, so a column
+///   whose only reader was an `ORDER BY` has nothing left to serve. No DATA
+///   moves: `created_at` and `archived` stay, and every row's payload is
+///   untouched. Version 11's step is kept on the ladder but no longer
+///   backfills what it adds, since this step drops it again in the same
+///   transaction. The same step adds `hosts.cache_truncated`: whether a
+///   host's cached list was cut at the wire's cap, kept with the cache so
+///   the "could not read to the end" notice outlives the connection.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1525,6 +1008,16 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  remote_farhelm   TEXT,
                  remote_state_dir TEXT,
                  host_identity    TEXT,
+                 -- Whether the cached session list below was cut at the
+                 -- wire's cap when it was last written (schema version 13).
+                 -- A property of the CACHE, not of the connection: a cut
+                 -- list served stale after the host went down, or after a
+                 -- helm restart, must still carry the could-not-read-to-the-end
+                 -- notice (SPEC.md), and a flag held only in the actor's
+                 -- memory would forget it in both cases. Written in the
+                 -- same transaction as the rows it describes
+                 -- (HelmStore::replace_host_sessions).
+                 cache_truncated  INTEGER NOT NULL DEFAULT 0,
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -1567,7 +1060,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- and rewrite or drop the old rows); a purely additive
              -- `SessionInfo` field must instead stay serde-tolerant (e.g.
              -- `#[serde(default)]`) so an old row still decodes under the
-             -- new shape. HelmStore::cached_sessions/cached_sessions_all's
+             -- new shape. HelmStore::cached_sessions/cached_rows's
              -- skip-and-log read posture is the last line of defense for
              -- whatever this contract does not catch ahead of time — see
              -- those methods' own docs.
@@ -1575,10 +1068,12 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  host_id    INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
                  session_id TEXT NOT NULL,
                  -- Extracted from the stored SessionInfo JSON at write time
-                 -- (HelmStore::replace_host_sessions) rather than re-parsed
-                 -- from it on every read — see that method's and
-                 -- cached_sessions's own docs for why ordering must never
-                 -- depend on decoding every blob.
+                 -- (HelmStore::replace_host_sessions). Since schema version
+                 -- 12 nothing orders by this column -- the merge sorts in
+                 -- memory -- but it stays as the identity cross-check a read
+                 -- applies to a decoded payload (HelmStore::cached_rows) and
+                 -- as the half of a row the changed-only rule compares
+                 -- beside the payload.
                  created_at INTEGER NOT NULL,
                  -- The durable, potentially STALE serialized SessionInfo
                  -- itself — see this table's own comment above for the
@@ -1587,40 +1082,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- Whether the payload said this session was archived,
                  -- extracted at write time exactly as created_at is and for
                  -- the same reason (schema version 10): the default view
-                 -- EXCLUDES archived rows and reports how many rows it
-                 -- holds, so counting it must not mean decoding every blob
-                 -- in the fleet.
+                 -- EXCLUDES archived rows, and the column lets a read leave
+                 -- an archived row undecoded rather than decoding every
+                 -- payload to find out which view it belongs to.
                  --
-                 -- Written from the payload, never re-derived, and that is
-                 -- what decides where a row whose info_json has since gone
-                 -- undecodable belongs: it keeps the classification it was
-                 -- stored with, so it stays counted inside the ONE view its
-                 -- flag names, unshowable but never silently gone. Only a
-                 -- row this column never saw defaults to 0 -- version 10's
-                 -- backfill files a payload it cannot parse as active, on
-                 -- the same reasoning (see HelmStore::count_rows).
+                 -- Written from the payload, never re-derived. A row whose
+                 -- info_json has since gone undecodable is dropped from every
+                 -- read and every count (see HelmStore::cached_rows), so the
+                 -- column's value for such a row decides nothing any more;
+                 -- version 10's backfill files a payload it cannot parse as
+                 -- active for want of anything better to read.
                  archived   INTEGER NOT NULL DEFAULT 0,
-                 -- The EFFECTIVE activity stamp
-                 -- (SessionInfo::effective_activity), extracted at write
-                 -- time for created_at's reason (schema version 11): the
-                 -- activity order must be an index range scan, not a decode
-                 -- of every payload in the fleet.
-                 --
-                 -- EFFECTIVE, not the raw wire field: a payload whose sender
-                 -- predates last_activity_at carries 0, which means
-                 -- \"unknown\" rather than 1970, and the fallback to
-                 -- created_at is applied HERE so that exactly one rule
-                 -- decides where such a row sorts. The payload keeps the raw
-                 -- value untouched -- writing a synthesized one back would
-                 -- make a guess indistinguishable from an observation for
-                 -- every later merge (see manager::merge_cached_session).
-                 activity_at INTEGER NOT NULL DEFAULT 0,
-                 -- The collated title the title order compares
-                 -- (store::title_sort_key), extracted at write time for the
-                 -- same reason and folded in RUST rather than by a SQL
-                 -- collation, so the one definition of the collation also
-                 -- serves the in-memory rows an ordered page is merged with.
-                 title_sort TEXT NOT NULL DEFAULT '',
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;
              -- At most one HOST may cache a given session id (schema
@@ -1636,65 +1108,14 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- HelmStore::replace_host_sessions's conditional insert turns
              -- the refusal into a skipped row plus a warning (first claim
              -- holds) rather than a failed refresh.
+             --
+             -- The ONLY index on this table besides its primary key, by
+             -- contract (schema version 13): the session list is served
+             -- whole and sorted in memory, so an ordering index would have
+             -- no reader, and SPEC.md's Session list section says none is
+             -- wanted at any layer.
              CREATE UNIQUE INDEX session_cache_one_owner
                  ON session_cache (session_id);
-             -- The creation order as a GLOBAL key: the full ordering key, in
-             -- order, so a whole-cache scan of it needs no sort step.
-             -- host_id is in the key even though session_id is already
-             -- unique above, so the order stays TOTAL even against a
-             -- database whose one-owner index is absent (a downgrade, a
-             -- hand edit) -- a pagination cursor over a non-total order can
-             -- skip or repeat rows, which is precisely what a resume point
-             -- must never do.
-             --
-             -- Predates the per-host UNION ALL page query below and is no
-             -- longer on HelmStore::scan_page's path either -- the same
-             -- reason version 11 never gave the activity and title orders a
-             -- global index of their own (see their own comment below). A
-             -- future schema version is free to drop this one too, once
-             -- nothing else claims it.
-             CREATE INDEX session_cache_order
-                 ON session_cache (created_at DESC, session_id ASC, host_id ASC);
-             -- Serves HelmStore::cached_sessions's per-host read, and -- since
-             -- the page query became one branch per host
-             -- (HelmStore::scan_page) -- every creation-ordered page as well.
-             -- session_cache_order above has no host_id prefix, so \"WHERE
-             -- host_id = ? ORDER BY created_at DESC, session_id ASC\" against
-             -- it alone would still have to walk every row from every host to
-             -- filter, not just this host's. Leading with host_id here turns
-             -- that into an index range scan instead.
-             CREATE INDEX session_cache_by_host_order
-                 ON session_cache (host_id, created_at DESC, session_id ASC);
-             -- The other two orders GET /api/sessions serves (schema version
-             -- 11) get ONLY the per-host index, not the global/per-host pair
-             -- the creation order above has: HelmStore::scan_page spells its
-             -- host scope as one single-host SELECT per host merged by UNION
-             -- ALL, under every order and at every fleet size, precisely
-             -- because an IN-list of more than one host makes SQLite abandon
-             -- a global index and sort the whole cache into a temp b-tree.
-             -- Each branch is a range scan over one host's slice of these,
-             -- and the merge preserves the order. Since schema version 11
-             -- introduces this pair fresh -- unlike the creation order, which
-             -- carries a global index from before the per-host page query
-             -- existed -- there is no global reader left for one to serve,
-             -- so it is simply never created.
-             --
-             -- Each index carries the FULL ordering key of its order, tail
-             -- included, so the order SQLite produces is total without a
-             -- sort. The price is paid on the write side: a refresh rewrites
-             -- a host's whole slice, so every cached row now maintains four
-             -- ordering index entries (the pre-existing global and per-host
-             -- creation-order pair, plus one per-host index for each of the
-             -- two new orders) where it used to maintain two -- version 11
-             -- added two. That is the cost of serving an order without
-             -- decoding payloads, and the cache is bounded per host
-             -- (manager::REFRESH_SESSION_CAP).
-             CREATE INDEX session_cache_by_host_activity_order
-                 ON session_cache (host_id, activity_at DESC, created_at DESC,
-                                   session_id ASC);
-             CREATE INDEX session_cache_by_host_title_order
-                 ON session_cache (host_id, title_sort ASC, created_at DESC,
-                                   session_id ASC);
              -- The last profile a session was created from, per host
              -- (schema version 5). At most one row per host by
              -- construction: host_id IS the primary key, because
@@ -1742,7 +1163,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  cookie_hash BLOB PRIMARY KEY CHECK (length(cookie_hash) = 32),
                  created_at  INTEGER NOT NULL
              ) STRICT;
-             PRAGMA user_version = 12;",
+             PRAGMA user_version = 13;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1817,7 +1238,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         // This is exactly the case the `session_cache` DDL above warns
         // about, and the consequence is the one that makes it worth a
         // migration rather than a shrug: the read path
-        // (`cached_sessions`/`merged_page`) SKIPS an undecodable row and
+        // (`cached_sessions`/`cached_rows`) SKIPS an undecodable row and
         // logs it, so without this the sessions of every DOWN host would
         // quietly VANISH from the list on the first start after an upgrade
         // — the stale-list promise SPEC.md makes for an unreachable host,
@@ -1976,12 +1397,13 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         // row for a column the next statement fills in anyway.
         //
         // A payload SQLite cannot parse as JSON, or that carries no
-        // `archived` member at all, keeps the column's `0` default: such a
-        // row counts as active, which is the SAME divergence `count_rows`
-        // has always had for rows nothing can read (they are in the total
-        // even though no page can show them), and the alternative — dropping
-        // them out of the default view — would make an upgrade look like
-        // data loss.
+        // `archived` member at all, keeps the column's `0` default: the row
+        // stays CLASSIFIED as active in the database, recoverable by any
+        // future repair that can read it. Serving is a different story —
+        // today's reads (HelmStore::cached_rows) drop a row whose payload
+        // does not decode from both the rows and the counts, so this
+        // classification decides nothing on screen until the payload is
+        // readable again.
         tx.execute_batch(
             "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
         )
@@ -2015,15 +1437,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         version = 10;
     }
     if version == 10 {
-        // Two more denormalized ordering columns, on version 10's reasoning
-        // exactly: `GET /api/sessions?sort=` gained an activity order and a
-        // title order, and an ORDER BY that had to decode `info_json` would
-        // read and parse the whole fleet's cache to serve one page. Both
-        // values have only ever lived inside the payload, so — like version
-        // 10 — the backfill IS the migration: without it every pre-upgrade
-        // row would sort at the epoch and under the empty title until its
-        // host's next refresh rewrote it, and a host that never reconnects
-        // would stay there forever.
+        // Version 11 added two denormalized ordering columns so the paged
+        // list of the day could serve its activity and title orders as
+        // index range scans. Kept as a rung so the ladder still climbs from
+        // a version-10 file; see version 13 below for why the rung is now
+        // hollow.
         //
         // `ADD COLUMN` for version 10's reason too (SQLite splices each new
         // definition in after the last COLUMN, which is where the
@@ -2035,163 +1453,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              ALTER TABLE session_cache ADD COLUMN title_sort TEXT NOT NULL DEFAULT '';",
         )
         .context("adding the session_cache ordering columns")?;
-        // The activity backfill is two whole-table statements rather than one
-        // CASE, because the fallback is the DEFAULT and the stamp is the
-        // exception: every row starts at its own creation time, and only a
-        // row whose payload carries a usable stamp moves off it. That is the
-        // same "0 means unknown, fall back to created_at" rule
-        // `SessionInfo::effective_activity` states, applied once at upgrade.
-        //
-        // Asked of the payload TEXT rather than of a decoded `SessionInfo`,
-        // for version 10's reason: `json_extract` wants only the one member,
-        // so a payload this build's struct cannot decode is still classified
-        // correctly rather than silently filed at the default.
-        //
-        // Be precise about WHICH payloads those are, because the obvious
-        // reading is wrong: `SessionInfo` carries no `deny_unknown_fields`
-        // anywhere on its path, so a newer farhelm merely ADDING members
-        // decodes here perfectly well. What a decode cannot survive is an
-        // INCOMPLETE or INCOMPATIBLE payload — a member missing that has no
-        // `#[serde(default)]`, a member whose type changed, a blob that is
-        // not JSON at all, or a row a hand edit corrupted. Those are the rows
-        // this asks the text about; a valid future write is not one of them.
-        //
-        // BOTH type guards are load-bearing, and neither subsumes the other,
-        // because they constrain different things: `json_type` constrains the
-        // member as it appears in the JSON, `typeof` constrains the SQLite
-        // value `json_extract` renders it as.
-        //
-        // - `json_type` rejects a JSON `true`, which `json_extract` renders as
-        //   the integer 1 -- so `typeof` alone would silently file a boolean
-        //   as an activity stamp of one second past the epoch.
-        // - `typeof` rejects a JSON integer too large for i64, which
-        //   `json_extract` renders as a REAL -- so `json_type` alone would
-        //   hand a float to the STRICT table's INTEGER column and abort the
-        //   whole upgrade over one row. It rejects a JSON string for the same
-        //   reason the guard was written: SQLite orders every TEXT value above
-        //   every number, so a string `last_activity_at` passes `> 0`.
-        tx.execute_batch(
-            "UPDATE session_cache SET activity_at = created_at;
-             UPDATE session_cache \
-                SET activity_at = json_extract(info_json, '$.last_activity_at') \
-              WHERE json_valid(info_json) \
-                AND json_type(info_json, '$.last_activity_at') = 'integer' \
-                AND typeof(json_extract(info_json, '$.last_activity_at')) = 'integer' \
-                AND json_extract(info_json, '$.last_activity_at') > 0;",
-        )
-        .context("backfilling the session_cache activity stamps")?;
-        // The title backfill cannot be a SQL statement, and that is the one
-        // way this migration differs from version 10's. SQLite's `lower()`
-        // folds ASCII only, so a row backfilled by it would compare
-        // differently from the very same row rewritten by the next refresh
-        // (which folds in Rust — see [`title_sort_key`]), and two rows folded
-        // by different rules do not sort against each other at all.
-        //
-        // So the titles are read out here and folded by the same function
-        // every writer uses. The read still goes through `json_extract` for
-        // the newer-payload tolerance above.
-        //
-        // In BATCHES, and that is the point of the loop rather than an
-        // optimization: the shape this replaced collected every folded title
-        // in the fleet into one `Vec` before writing any of them, which makes
-        // an upgrade's peak memory proportional to the whole cache's titles —
-        // the very cost version 10's comment says a migration must not have.
-        // A batch holds at most [`TITLE_BACKFILL_BATCH`] of them.
-        //
-        // Paged by KEYSET over the primary key rather than by `OFFSET`: the
-        // rows are being updated as the walk proceeds, and an offset over a
-        // table under mutation is both quadratic and a way to skip rows. The
-        // successor test is spelled out rather than written as a row-value
-        // comparison, for [`HelmStore::scan_page`]'s reason — no reliance on a
-        // SQLite version's row-value support. `title_sort` is not part of the
-        // key, so writing it cannot move a row past the resume point.
-        //
-        // All of it inside the SAME transaction: a batched backfill that
-        // committed per batch could leave a database half-collated behind a
-        // crash, with `user_version` still naming the old schema and no way to
-        // tell which rows had been done.
-        let mut after: Option<(HostId, String)> = None;
-        loop {
-            // The title is read as RAW BYTES and validated here rather than
-            // through `r.get::<String>`, which is not pedantry: SQLite's JSON
-            // functions accept a lone surrogate escape (`"\ud800"`) as valid
-            // JSON and hand `json_extract` back its CESU-8 encoding, which is
-            // not UTF-8. Asking rusqlite for a `String` turns that one hostile
-            // title into a failed conversion that aborts the entire upgrade.
-            // Such a row falls to the empty key with everything else nothing
-            // can classify (see below).
-            let batch: Vec<(HostId, String, String)> = {
-                let mut stmt = tx
-                    .prepare(
-                        "SELECT host_id, session_id, json_extract(info_json, '$.title') \
-                         FROM session_cache \
-                         WHERE (?1 IS NULL \
-                                OR host_id > ?1 \
-                                OR (host_id = ?1 AND session_id > ?2)) \
-                           AND json_valid(info_json) \
-                           AND typeof(json_extract(info_json, '$.title')) = 'text' \
-                         ORDER BY host_id, session_id \
-                         LIMIT ?3",
-                    )
-                    .context("preparing the cached title read")?;
-                let rows = stmt
-                    .query_map(
-                        rusqlite::params![
-                            after.as_ref().map(|(host, _)| *host),
-                            after.as_ref().map(|(_, session_id)| session_id.as_str()),
-                            TITLE_BACKFILL_BATCH as i64,
-                        ],
-                        |r| {
-                            let folded = match r.get_ref(2)? {
-                                rusqlite::types::ValueRef::Text(bytes) => {
-                                    std::str::from_utf8(bytes)
-                                        .map(title_sort_key)
-                                        .unwrap_or_default()
-                                }
-                                _ => String::new(),
-                            };
-                            Ok((r.get(0)?, r.get(1)?, folded))
-                        },
-                    )
-                    .context("reading the cached titles to collate")?;
-                rows.collect::<Result<_, _>>()
-                    .context("collecting the cached titles to collate")?
-            };
-            let Some((host, session_id, _)) = batch.last() else {
-                break;
-            };
-            after = Some((*host, session_id.clone()));
-            // A row no batch writes — an undecodable payload, one whose title
-            // is not text, or one whose title is not UTF-8 — keeps the
-            // column's `''`, which sorts first under the title order. Same
-            // principle as version 10's unreadable-payload default: a row
-            // nothing can classify is placed rather than hidden.
-            for (host, session_id, title_sort) in &batch {
-                tx.execute(
-                    "UPDATE session_cache SET title_sort = ?3 \
-                     WHERE host_id = ?1 AND session_id = ?2",
-                    rusqlite::params![host, session_id, title_sort],
-                )
-                .context("backfilling a session_cache collated title")?;
-            }
-        }
-        // Created after the backfill rather than before it, so the upgrade
-        // builds each of these two once over final values instead of
-        // maintaining both across the whole-table updates above. Per-host
-        // only, on the fresh-create DDL's reasoning for the same two indexes:
-        // every reader of these orders (HelmStore::scan_page) already goes
-        // through the per-host UNION ALL merge, so a global counterpart would
-        // sit unread from the moment it was created.
-        tx.execute_batch(
-            "CREATE INDEX session_cache_by_host_activity_order
-                 ON session_cache (host_id, activity_at DESC, created_at DESC,
-                                   session_id ASC);
-             CREATE INDEX session_cache_by_host_title_order
-                 ON session_cache (host_id, title_sort ASC, created_at DESC,
-                                   session_id ASC);
-             PRAGMA user_version = 11;",
-        )
-        .context("migrating helm.db to schema version 11")?;
+        // Version 11 backfilled both columns here (a two-statement activity
+        // backfill and a batched, Rust-folded title backfill) and then built
+        // the two per-host ordering indexes. None of that survives: version
+        // 13, applied in this same transaction, drops both columns and every
+        // ordering index, so filling them would be work whose only result
+        // is thrown away a statement later. The columns are still added so
+        // the ladder's every rung leaves the schema a version-11 binary
+        // wrote, and the test that compares a migrated database against a
+        // fresh one keeps meaning what it says.
+        tx.execute_batch("PRAGMA user_version = 11;")
+            .context("migrating helm.db to schema version 11")?;
         version = 11;
     }
     if version == 11 {
@@ -2222,6 +1494,40 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 12")?;
         version = 12;
+    }
+    if version == 12 {
+        // The session list is served WHOLE (SPEC.md's Session list section):
+        // no layer paginates it, so no order is ever an index range scan and
+        // the two derived ordering columns have no reader left. Indexes go
+        // first because SQLite refuses to drop a column an index names.
+        // `session_cache_by_host_order` served the per-host stale read too,
+        // and that read now sorts the handful of rows it decodes in Rust
+        // (HelmStore::cached_sessions) — the primary key already makes the
+        // host's slice a range.
+        //
+        // The one thing version 13 ADDS is `hosts.cache_truncated`: the
+        // per-host record of whether the cached list was cut at the wire's
+        // cap, which has to live beside the rows it describes so the notice
+        // survives the host going down and the helm restarting (see the
+        // column's comment in the fresh-create branch). It starts false for
+        // every migrated host and is set by the next refresh.
+        //
+        // Nothing here touches a payload or a row's `created_at`/`archived`,
+        // so a version-13 binary rolling back to 12 loses nothing but the
+        // columns, and a version-12 binary would refuse the file at its
+        // version gate rather than misread it.
+        tx.execute_batch(
+            "DROP INDEX IF EXISTS session_cache_order;
+             DROP INDEX IF EXISTS session_cache_by_host_order;
+             DROP INDEX IF EXISTS session_cache_by_host_activity_order;
+             DROP INDEX IF EXISTS session_cache_by_host_title_order;
+             ALTER TABLE session_cache DROP COLUMN activity_at;
+             ALTER TABLE session_cache DROP COLUMN title_sort;
+             ALTER TABLE hosts ADD COLUMN cache_truncated INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 13;",
+        )
+        .context("migrating helm.db to schema version 13")?;
+        version = 13;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2376,16 +1682,7 @@ impl HelmStore {
         .context("helm store open task panicked")??;
         Ok(HelmStore {
             conn: Arc::new(Mutex::new(conn)),
-            generation: Arc::new(AtomicU64::new(0)),
-            counting_passes: Arc::new(AtomicU64::new(0)),
         })
-    }
-
-    /// How many times this store has walked a scope to count matches — see
-    /// [`Self::counting_passes`].
-    #[cfg(test)]
-    pub fn counting_passes(&self) -> u64 {
-        self.counting_passes.load(Ordering::Relaxed)
     }
 
     /// Return the recoverable web token, inserting `candidate` if this helm
@@ -2682,7 +1979,7 @@ impl HelmStore {
     ///
     /// A row whose `kind` fails [`HostKind::from_column`] FAILS this whole
     /// call rather than being skipped — the opposite posture from
-    /// [`Self::cached_sessions`]/[`Self::cached_sessions_all`]'s
+    /// [`Self::cached_sessions`]/[`Self::cached_rows`]'s
     /// skip-and-log reads (see those methods' own docs). `hosts` is the
     /// registry: it is authority for which hosts exist at all, not
     /// last-known display data a caller can afford to see a little short,
@@ -2695,7 +1992,7 @@ impl HelmStore {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, destination, remote_farhelm, remote_state_dir, \
-                     host_identity FROM hosts ORDER BY id ASC",
+                     host_identity, cache_truncated FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
             let raw: Vec<RawHostRow> = stmt
@@ -2707,6 +2004,7 @@ impl HelmStore {
                         r.get(3)?,
                         r.get(4)?,
                         r.get(5)?,
+                        r.get(6)?,
                     ))
                 })
                 .context("querying hosts")?
@@ -2714,7 +2012,15 @@ impl HelmStore {
                 .context("reading host rows")?;
             raw.into_iter()
                 .map(
-                    |(id, kind, destination, remote_farhelm, remote_state_dir, host_identity)| {
+                    |(
+                        id,
+                        kind,
+                        destination,
+                        remote_farhelm,
+                        remote_state_dir,
+                        host_identity,
+                        cache_truncated,
+                    )| {
                         Ok(HostRow {
                             id,
                             kind: HostKind::from_column(&kind)?,
@@ -2722,6 +2028,7 @@ impl HelmStore {
                             remote_farhelm,
                             remote_state_dir,
                             host_identity,
+                            cache_truncated,
                         })
                     },
                 )
@@ -3078,7 +2385,6 @@ impl HelmStore {
     /// id nothing currently holds.
     pub async fn remove_ssh_host(&self, host: HostId) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
-        let generation = Arc::clone(&self.generation);
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let conn = conn.lock().expect("helm db mutex poisoned");
             let kind: Option<String> = conn
@@ -3098,12 +2404,6 @@ impl HelmStore {
                 Some(HostKind::Ssh) => {
                     conn.execute("DELETE FROM hosts WHERE id = ?1", rusqlite::params![host])
                         .context("removing ssh host")?;
-                    // The `ON DELETE CASCADE` took this host's cached rows
-                    // with it, so every matching count taken before now
-                    // describes sessions that are gone. Bumped while the
-                    // connection lock is still held — see
-                    // [`Self::generation`].
-                    generation.fetch_add(1, Ordering::Release);
                     Ok(())
                 }
             }
@@ -3249,7 +2549,6 @@ impl HelmStore {
         new: &str,
     ) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
-        let generation = Arc::clone(&self.generation);
         let expected_old = expected_old.to_string();
         let new = new.to_string();
         let dialed = dialed.clone();
@@ -3278,8 +2577,13 @@ impl HelmStore {
                     owner,
                 }));
             }
+            // `cache_truncated` is reset with the cache it describes: the
+            // flag was the PREDECESSOR install's word about the rows being
+            // purged below, and an empty successor cache marked incomplete
+            // would show the notice indefinitely if the first refresh under
+            // the new identity failed.
             tx.execute(
-                "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
+                "UPDATE hosts SET host_identity = ?2, cache_truncated = 0 WHERE id = ?1",
                 rusqlite::params![host, new],
             )
             .context("adopting new host identity")?;
@@ -3289,7 +2593,6 @@ impl HelmStore {
             )
             .context("purging the superseded identity's cached sessions")?;
             tx.commit().context("committing identity adoption")?;
-            generation.fetch_add(1, Ordering::Release);
             Ok(())
         })
         .await
@@ -3322,13 +2625,16 @@ impl HelmStore {
     /// there is no such row to plant honestly; a genuine schema-level
     /// constraint violation is the cheaper, and more realistic, seam.)
     ///
-    /// Every ORDERING component is extracted from each `entry` and stored in
-    /// a column of its own rather than left for a reader to re-parse from
-    /// `info_json`: `created_at`, plus the effective activity stamp and the
-    /// collated title the other two orders walk ([`ListSort`]). See
-    /// [`Self::cached_sessions`]'s docs for why that split is load-bearing,
-    /// not merely tidy — it is the difference between an ORDER BY that reads
-    /// an index and one that decodes the fleet.
+    /// `created_at` and `archived` are extracted from each `entry` into
+    /// columns of their own beside the payload: `created_at` is the identity
+    /// cross-check every read applies to a decoded row, and `archived` lets
+    /// the default view skip a row before decoding it. Nothing orders by
+    /// either — the merge sorts in memory.
+    ///
+    /// `truncated` is written to the host's own row in the same transaction
+    /// (`hosts.cache_truncated`): whether this list was cut at the wire's
+    /// cap is a fact about the list, and it has to be kept with the list so
+    /// a cut cache served stale still says so (see [`HostRow::cache_truncated`]).
     ///
     /// Two checks run inside the SAME transaction as the delete-then-insert,
     /// against exactly the state a live refresh's caller cannot otherwise
@@ -3368,9 +2674,9 @@ impl HelmStore {
         host: HostId,
         identity: &str,
         entries: Vec<SessionInfo>,
+        truncated: bool,
     ) -> anyhow::Result<CacheReplacement> {
         let conn = Arc::clone(&self.conn);
-        let generation = Arc::clone(&self.generation);
         let identity = identity.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<CacheReplacement> {
             let mut conn = conn.lock().expect("helm db mutex poisoned");
@@ -3401,26 +2707,24 @@ impl HelmStore {
             // could be describing a different moment than the write.
             //
             // BOTH stored halves, not just the payload: `created_at` is a
-            // column of its own (the ordering key every page and cursor is
-            // built on), so a row whose payload is unchanged while its
+            // column of its own (the identity cross-check every read
+            // applies), so a row whose payload is unchanged while its
             // timestamp is repaired IS a change — and reporting otherwise
-            // would starve the feed of exactly the reordering a client needs
-            // to re-read for. The `archived`, `activity_at` and `title_sort`
-            // columns need no further comparison: every one of them is
-            // extracted from the payload on the way in, so none can move
+            // would starve the feed of exactly the re-read a client needs.
+            // The `archived` column needs no further comparison: it is
+            // extracted from the payload on the way in, so it cannot move
             // without `info_json` moving with it. A session that produced
-            // output, or was renamed, therefore already flips `changed` — and
-            // that is what makes the activity and title orders live surfaces
-            // rather than ones that only settle at the next full refresh.
+            // output, or was renamed, therefore already flips `changed` —
+            // which is what makes the activity and title orders live
+            // surfaces rather than ones that settle at the next refresh.
             //
             // ONE map, consumed as the rewrite goes: entries are removed as
             // they are matched, so this holds the host's cache once rather
             // than twice at the peak. What remains at the end is what
             // DISAPPEARED, which no per-row comparison of the new list could
             // notice on its own. The transient cost is one host's slice at
-            // the refresh ceiling (`crate::manager::REFRESH_SESSION_CAP`
-            // rows, `REFRESH_BYTE_CAP` bytes), which is the same data the
-            // caller already holds in `entries`.
+            // the listing cap (`farhelm_proto::LIST_SESSIONS_CAP` rows),
+            // which is the same data the caller already holds in `entries`.
             let mut previous: std::collections::HashMap<String, (i64, String)> = {
                 let mut stmt = tx
                     .prepare(
@@ -3460,19 +2764,10 @@ impl HelmStore {
                         // skipped row is announced below rather than
                         // swallowed.
                         "INSERT INTO session_cache \
-                             (host_id, session_id, created_at, info_json, archived, \
-                              activity_at, title_sort) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                             (host_id, session_id, created_at, info_json, archived) \
+                         VALUES (?1, ?2, ?3, ?4, ?5) \
                          ON CONFLICT (session_id) DO NOTHING",
-                        rusqlite::params![
-                            host,
-                            entry.id,
-                            entry.created_at,
-                            json,
-                            entry.archived,
-                            entry.effective_activity(),
-                            title_sort_key(&entry.title),
-                        ],
+                        rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
                     )
                     .context("inserting cached session")?;
                 if inserted == 0 {
@@ -3548,6 +2843,18 @@ impl HelmStore {
             // hosts. Folded in before the commit so the generation below and
             // the reported answer are the same judgement.
             let changed = changed || !previous.is_empty();
+            // The cap flag is part of what this list IS, so a flip in it is
+            // a change clients must re-read for: the notice it drives is on
+            // screen. Compared against the stored value rather than written
+            // blindly, for the same changed-only reason the rows are.
+            let truncated_changed = tx
+                .execute(
+                    "UPDATE hosts SET cache_truncated = ?2                      WHERE id = ?1 AND cache_truncated != ?2",
+                    rusqlite::params![host, truncated],
+                )
+                .context("recording whether the cached list was cut")?
+                != 0;
+            let changed = changed || truncated_changed;
             // A drain is the authoritative observation that a profile was
             // actually used. Carry its session ordering key beside the
             // preference so a delayed, older drain cannot roll the default
@@ -3563,10 +2870,18 @@ impl HelmStore {
                 )
                 .optional()
                 .context("reading remembered profile provenance")?;
-            let source_disappeared = remembered
-                .as_ref()
-                .and_then(|(_, _, _, session_id)| session_id.as_deref())
-                .is_some_and(|session_id| !present_session_ids.contains(session_id));
+            // Absence is only evidence in an UNTRUNCATED reply: a capped
+            // list omits every session past the cut, so a remembered source
+            // missing from it may simply be old rather than gone. Under
+            // truncation the absence is unknown — the stored provenance is
+            // neither cleared nor treated as vacated, and a replacement
+            // must prove itself newer through the ordinary provenance
+            // comparison below.
+            let source_disappeared = !truncated
+                && remembered
+                    .as_ref()
+                    .and_then(|(_, _, _, session_id)| session_id.as_deref())
+                    .is_some_and(|session_id| !present_session_ids.contains(session_id));
             // A remembered source that is no longer among this host's
             // sessions is the retarget/adopt/reinstall shape (or a plain
             // deletion of the establishing session). Under the bare-id
@@ -3646,9 +2961,6 @@ impl HelmStore {
                 }
             }
             tx.commit().context("committing cache replace")?;
-            if changed {
-                generation.fetch_add(1, Ordering::Release);
-            }
             // SORTED, so the set is compared by CONTENT rather than by the
             // order a peer happened to list its sessions in. The published
             // set is compared against the previous one to decide whether to
@@ -3690,14 +3002,21 @@ impl HelmStore {
     ///
     /// The id is bounded like every other peer-supplied one
     /// (`crate::manager::MAX_SESSION_ID_BYTES`): a create's reply is a peer
-    /// ingress point exactly as a drain's rows are, and an id this side
-    /// cannot build a replayable cursor over must not enter the cache
+    /// ingress point exactly as a drain's rows are, and an id no later
+    /// request could carry in its frame head must not enter the cache
     /// through either.
+    ///
+    /// The cap holds here by EVICTION: a seed that would leave the slice
+    /// past `farhelm_proto::LIST_SESSIONS_CAP` rows drops the oldest OTHER
+    /// row and sets the host's `cache_truncated` flag, because the new
+    /// session must be routable (the create already succeeded) while the
+    /// cache stays bounded — see the eviction comment in the body.
     ///
     /// Returns whether the stored row actually CHANGED — the same
     /// changed-only rule [`Self::replace_host_sessions`] answers, applied to
     /// one row. A retried create that re-records a byte-identical session is
-    /// a successful write that invalidates nothing.
+    /// a successful write that invalidates nothing. An eviction counts as
+    /// changed: a row disappeared from what clients can read.
     pub async fn remember_session(
         &self,
         host: HostId,
@@ -3711,7 +3030,6 @@ impl HelmStore {
             crate::manager::MAX_SESSION_ID_BYTES
         );
         let conn = Arc::clone(&self.conn);
-        let generation = Arc::clone(&self.generation);
         let identity = identity.to_string();
         let entry = entry.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
@@ -3779,24 +3097,44 @@ impl HelmStore {
             let json = serde_json::to_string(entry).context("serializing cached session")?;
             tx.execute(
                 "INSERT INTO session_cache \
-                     (host_id, session_id, created_at, info_json, archived, \
-                      activity_at, title_sort) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                     (host_id, session_id, created_at, info_json, archived) \
+                 VALUES (?1, ?2, ?3, ?4, ?5) \
                  ON CONFLICT (session_id) DO UPDATE SET \
                      created_at = excluded.created_at, info_json = excluded.info_json, \
-                     archived = excluded.archived, activity_at = excluded.activity_at, \
-                     title_sort = excluded.title_sort",
-                rusqlite::params![
-                    host,
-                    entry.id,
-                    entry.created_at,
-                    json,
-                    entry.archived,
-                    entry.effective_activity(),
-                    title_sort_key(&entry.title),
-                ],
+                     archived = excluded.archived",
+                rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
             )
             .context("seeding a cached session")?;
+            // The cap holds for the seed path too — but by EVICTION, never
+            // refusal: the create already succeeded on the supervisor, and
+            // a cache without its row would leave a session the caller was
+            // just told exists unroutable until the next refresh. The
+            // oldest OTHER row goes (largest under the creation order's
+            // sort: smallest created_at, tie-broken by the later id), and
+            // the host's flag records that the cache no longer holds
+            // everything known — which is exactly what the notice means.
+            let over_cap = {
+                let count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM session_cache WHERE host_id = ?1",
+                        rusqlite::params![host],
+                        |r| r.get(0),
+                    )
+                    .context("counting the seeded cache slice")?;
+                count as usize > farhelm_proto::LIST_SESSIONS_CAP
+            };
+            if over_cap {
+                tx.execute(
+                    "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = (                         SELECT session_id FROM session_cache                          WHERE host_id = ?1 AND session_id != ?2                          ORDER BY created_at ASC, session_id DESC LIMIT 1)",
+                    rusqlite::params![host, entry.id],
+                )
+                .context("evicting the oldest cached session past the cap")?;
+                tx.execute(
+                    "UPDATE hosts SET cache_truncated = 1 WHERE id = ?1",
+                    rusqlite::params![host],
+                )
+                .context("recording the seed eviction as a cut")?;
+            }
             tx.commit().context("committing cache seed")?;
             // Compared against BOTH stored halves this host already held,
             // AFTER the status merge above: the merge is what makes a
@@ -3805,15 +3143,13 @@ impl HelmStore {
             // does not actually show. The timestamp is in the comparison for
             // the same reason it is in the wholesale write's — it is the
             // ordering column, not a copy of something in the payload.
-            let changed = match &claimed {
-                Some((_, created_at, stored)) => {
-                    *created_at != entry.created_at || stored.as_str() != json.as_str()
-                }
+            let changed = over_cap
+                || match &claimed {
+                    Some((_, created_at, stored)) => {
+                        *created_at != entry.created_at || stored.as_str() != json.as_str()
+                    }
                 None => true,
             };
-            if changed {
-                generation.fetch_add(1, Ordering::Release);
-            }
             Ok(changed)
         })
         .await
@@ -3845,7 +3181,6 @@ impl HelmStore {
         session_id: &str,
     ) -> anyhow::Result<bool> {
         let conn = Arc::clone(&self.conn);
-        let generation = Arc::clone(&self.generation);
         let identity = identity.to_string();
         let session_id = session_id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
@@ -3880,31 +3215,28 @@ impl HelmStore {
             tx.commit().context("committing cache forget")?;
             // Removing a row that was not there is still success (see
             // above), but it is not a CHANGE: nothing any client could read
-            // says anything different than it did before — including the
-            // generation, which is why the bump is conditional too.
-            if removed > 0 {
-                generation.fetch_add(1, Ordering::Release);
-            }
+            // says anything different than it did before.
             Ok(removed > 0)
         })
         .await
         .context("forget session task panicked")?
     }
 
-    /// One host's cached sessions, in the wire order (`created_at`
-    /// descending, `id` ascending — the same total order PLAN_M6.md item 1
-    /// defines for the supervisor's own pagination) — the order a stale
-    /// list is served in when a host is unreachable.
+    /// One host's cached sessions, in creation order (`created_at`
+    /// descending, `id` ascending) — a deterministic order for THIS
+    /// helper's callers, not the order any client sees: the REST list is
+    /// served through [`Self::cached_rows`] and sorted per request into
+    /// whichever of the three orders was asked for, stale hosts included.
     ///
-    /// Reads the `created_at`/`session_id` COLUMNS for ordering, never the
-    /// parsed `info_json` — the whole reason [`Self::replace_host_sessions`]
-    /// extracts them at write time. Re-deriving order from a parsed blob on
-    /// every read would mean decoding every cached session just to sort
-    /// them, on a path this store cannot know is cold (a helm restart with
-    /// every host still down serves ONLY from this cache, per PLAN_M6.md's
-    /// testing decisions) — the columns make this a plain indexed
-    /// `ORDER BY` against `session_cache_by_host_order` instead (see
-    /// [`apply_schema`]).
+    /// Sorted in Rust after decoding, by the `created_at` COLUMN rather
+    /// than the payload's copy — the column is the identity the row was
+    /// filed under. (Unlike [`Self::cached_rows`] this read does not
+    /// cross-check the decoded payload against the column; it feeds
+    /// diagnostics and tests, not the served list.) There is no index
+    /// to order by (schema version 13 dropped every ordering index, per
+    /// SPEC.md's Session list section), and none is needed — a host's
+    /// slice is at most `farhelm_proto::LIST_SESSIONS_CAP` rows or a
+    /// seed's worth more (see [`Self::remember_session`]).
     ///
     /// SKIP-AND-LOG, not fail-the-whole-read: a row whose `info_json` no
     /// longer decodes (see `session_cache`'s schema comment in
@@ -3925,18 +3257,23 @@ impl HelmStore {
             let conn = conn.lock().expect("helm db mutex poisoned");
             let mut stmt = conn
                 .prepare(
-                    "SELECT session_id, info_json FROM session_cache \
-                     WHERE host_id = ?1 ORDER BY created_at DESC, session_id ASC",
+                    "SELECT session_id, created_at, info_json FROM session_cache \
+                     WHERE host_id = ?1",
                 )
                 .context("preparing cached session query")?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map(rusqlite::params![host], |r| Ok((r.get(0)?, r.get(1)?)))
+            let mut rows: Vec<(String, i64, String)> = stmt
+                .query_map(rusqlite::params![host], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
                 .context("querying cached sessions")?
                 .collect::<Result<_, _>>()
                 .context("reading cached session rows")?;
+            rows.sort_by(|a, b| {
+                (std::cmp::Reverse(a.1), a.0.as_str()).cmp(&(std::cmp::Reverse(b.1), b.0.as_str()))
+            });
             Ok(rows
                 .into_iter()
-                .filter_map(|(session_id, json)| match serde_json::from_str(&json) {
+                .filter_map(|(session_id, _, json)| match serde_json::from_str(&json) {
                     Ok(info) => Some(info),
                     Err(error) => {
                         // See this method's own docs for why a decode
@@ -3958,583 +3295,128 @@ impl HelmStore {
         .context("cached sessions task panicked")?
     }
 
-    /// ONE PAGE of the cross-host merged order under `sort`, resuming
-    /// strictly after `after` — the substrate of PLAN_M6.md item 5's served
-    /// session list.
+    /// Every cached row of the given hosts, decoded where possible — the
+    /// persisted half of the merged session list (`crate::aggregate`).
     ///
-    /// ## The order is a parameter, and every part of the scan follows it
+    /// One read, one lock hold, every row in scope: the list is served whole
+    /// (SPEC.md's Session list section), so this decodes each payload in
+    /// scope on every request and hands the merge a plain `Vec` to filter,
+    /// count and sort in memory. The work is bounded PER HOST — up to
+    /// `farhelm_proto::LIST_SESSIONS_CAP` rows each — so the decode cost
+    /// grows with the number of cache-serving hosts, and only the merged
+    /// OUTPUT is cut back to one cap. At the scale SPEC.md fixes (a few
+    /// hosts) that is still a few hundred small JSON blobs, and it is the
+    /// wanted shape — the paged, indexed read this replaced existed to
+    /// avoid exactly this decode, for fleets the product is not built for.
     ///
-    /// `sort` selects the `ORDER BY`, the index behind it, and the resume
-    /// disjunction together, because those three are one decision: a resume
-    /// predicate written for a different order than the scan walks skips or
-    /// repeats rows, silently. [`ListSort::position`] is the Rust spelling of
-    /// the same order and MUST agree with the SQL below — the merge in
-    /// `crate::aggregate` interleaves in-memory rows into this page by that
-    /// comparison, and the counting walk applies the resume test with it
-    /// (see [`follows`]).
+    /// A row is left OUT of the result in two cases, each a `warn!` naming
+    /// the host and session id: its payload no longer decodes, or it
+    /// decodes to a session whose `id` or `created_at` disagrees with the
+    /// columns it is filed under. The second is poison too — the columns
+    /// are what the one-owner index and every lookup here are built on, so
+    /// showing such a row would list it under one identity and route it
+    /// under another. Neither row reaches the served list or its counts
+    /// (see [`CachedRow`]); the warning, repeated on every read for as long
+    /// as the row exists, is what makes the corruption visible.
     ///
-    /// Every order ends in the same `created_at DESC, session_id ASC, host_id
-    /// ASC` tail, so equal ranks never jump between two page fetches.
-    ///
-    /// The whole point is that it is a PAGE: the resume predicate, the row
-    /// limit, and the byte bound all apply during ONE indexed scan, so a
-    /// poll reads and JSON-decodes only the rows it is about to return. The
-    /// shape this replaced loaded and deserialized every session on every
-    /// host on every poll, which made a full page walk quadratic in the
-    /// fleet's size.
-    ///
-    /// `hosts` scopes the read to the hosts that currently have actors,
-    /// which is what "the merged view" means everywhere else; a cache row
-    /// whose host has none is not served and must not be counted (see
-    /// [`Self::count_rows`], which takes the same scope for exactly that
-    /// reason). An empty `hosts` is an empty answer rather than "all",
-    /// deliberately: the degenerate reading is the dangerous one.
-    ///
-    /// ## Every scanned row comes back, decoded or not
-    ///
-    /// This is the fix for a real and permanent data-loss bug, so it is
-    /// worth stating as a contract rather than as an implementation note. A
-    /// row whose `info_json` no longer decodes is SKIPPED for display (the
-    /// skip-and-log posture [`Self::cached_sessions`] documents) but is
-    /// still reported here, as a [`ScannedRow`] with no payload — because
-    /// its ORDERING KEY is what the caller's cursor has to advance past.
-    /// Returning only decoded rows meant a poisoned row at a page boundary
-    /// left the cursor pointing before it forever: the next page re-scanned
-    /// the same poisoned row, skipped it again, and every row after it in
-    /// the whole fleet became permanently unreachable. A fully poisoned
-    /// page did the same thing more obviously — an empty page with no
-    /// continuation, in the middle of a list.
-    ///
-    /// ## Two bounds, both applied while scanning
-    ///
-    /// `limit` bounds rows RETURNED — which, with no filter, is the same as
-    /// rows scanned, poisoned ones included (otherwise a run of poisoned
-    /// rows would make one request walk the whole table); see the filtering
-    /// section below for what changes when a filter is set. `byte_budget`
-    /// bounds the stored bytes carried, measured on the raw
-    /// `info_json` this scan already holds rather than by re-serializing.
-    /// The byte bound is a WORK bound: it stops this scan from decoding
-    /// thousands of fat blobs the reply could never carry. The reply's own
-    /// budget is the caller's, applied to the merged page (see
-    /// `crate::aggregate::PAGE_BYTE_BUDGET`); the two use the same constant
-    /// but answer different questions, and this one is deliberately the
-    /// looser of the pair — it may over-deliver by a row, never under.
-    ///
-    /// At least one row is always scanned regardless of the byte bound: a
-    /// single blob larger than the budget must still make progress, or the
-    /// walk stalls on it forever.
-    ///
-    /// ## Filtering happens BEFORE the page cut
-    ///
-    /// A non-empty `filter` (PLAN_M6_75.md item 5) narrows what counts as a
-    /// row of this page: `limit` and `byte_budget` then bound MATCHING rows,
-    /// and non-matching ones are stepped over without consuming either. That
-    /// ordering is the whole reason filtering is server-side at all — a
-    /// client filtering the page it was handed would show "3 of 500" while
-    /// hiding matches that sit past the cut, and no amount of paging would
-    /// reconcile the two.
-    ///
-    /// The cost is stated rather than hidden: with a filter set, this scan
-    /// is no longer bounded by `limit` rows. It walks the order until it has
-    /// filled the page or run out of rows, so a filter that matches nothing
-    /// reads every row in scope. That is inherent to answering "which rows
-    /// match" over a payload SQLite is not indexing, and it is bounded in
-    /// practice by the cache itself (`crate::manager::REFRESH_SESSION_CAP`
-    /// per host). The unfiltered path keeps its `LIMIT` and is untouched.
-    ///
-    /// A row whose payload does not decode is TAKEN either way — the cursor
-    /// contract above outranks the filter, since a row nobody can judge must
-    /// still be a row the walk can get past — but it is never COUNTED as
-    /// matching, because claiming a match for a payload this build cannot
-    /// read would be inventing one.
-    ///
-    /// ## The archive switch is cut in SQL, and only it
-    ///
-    /// One dimension does not wait for [`SessionFilter::matches`]: the
-    /// default view's `AND archived = 0` is in the query, mirroring
-    /// [`Self::count_rows`] so the rows and the number describing them come
-    /// from one clause. `matches` re-applies it — the predicate is the
-    /// contract and this is what the SQL is allowed to know about it — but
-    /// nothing reaches `matches` to be re-judged.
-    ///
-    /// This is also the one place a row's stored flag outranks the paragraph
-    /// above. An archived row whose payload has since gone bad is not "a row
-    /// nobody can judge": the flag was extracted when the row was WRITTEN,
-    /// and it still says archived, so the row is outside the default view
-    /// altogether — which is where its own total has always put it.
-    ///
-    /// Cursors are unaffected. Rows the clause removes are never a frontier
-    /// and never have to be stepped past (the resume predicate is a strict
-    /// ordering test over the rows that remain), and a cursor cannot survive
-    /// the switch being flipped: the token carries the filter it was minted
-    /// under.
-    ///
-    /// ## Counting rides along, when it is wanted
-    ///
-    /// With `count` set this same walk also answers "how many rows in scope
-    /// match", and that fusion is the point rather than a convenience: the
-    /// shape it replaced ran a counting scan and then a paging scan, so a
-    /// zero-match `limit=1` request decoded the whole scope TWICE under the
-    /// one mutex. One decode per row per request is the floor for an exact
-    /// count, and this is it.
-    ///
-    /// Counting changes what the SQL may do, in one direction: a count has to
-    /// see the rows BEFORE the resume point too, so the resume predicate
-    /// moves out of the `WHERE` clause and into the loop. The page still
-    /// contains exactly the rows that follow the cursor.
-    ///
-    /// Poisoned rows are reported only where the PAGE would have shown them.
-    /// A count walks the whole scope, and one warning per unreadable row per
-    /// keystroke in a search box is a log the user writes by typing.
-    ///
-    /// ## One SELECT PER HOST, merged — not one `host_id IN (...)`
-    ///
-    /// The host scope is spelled as a `UNION ALL` of one single-host branch
-    /// each, and that is a query-plan decision rather than a stylistic one.
-    /// With an `IN`-list of more than one host SQLite abandons every ordering
-    /// index and answers the `ORDER BY` with `USE TEMP B-TREE FOR ORDER BY`:
-    /// an ordinary fleet page then sorts the entire cache — under this store's
-    /// one mutex — to hand back its first twenty rows, under every order
-    /// including `created`, which had the problem before the other two orders
-    /// existed. One host was never affected, which is exactly why it went
-    /// unnoticed.
-    ///
-    /// A single-host branch, by contrast, is a range scan over that host's
-    /// slice of `session_cache_by_host_order` (or its activity/title
-    /// counterpart), so each branch arrives already in the requested order and
-    /// SQLite merges them with `MERGE (UNION ALL)` — no sort step at any host
-    /// count. `a_fleet_page_is_index_ordered_under_every_sort` reads
-    /// `EXPLAIN QUERY PLAN` back and fails if a temp b-tree ever returns.
-    ///
-    /// The predicates are duplicated into every branch rather than wrapped
-    /// around the union, because a filter applied outside the compound would
-    /// leave each branch unrestricted and put the sort back. With one host in
-    /// scope this degenerates to exactly the single-branch query it always
-    /// was.
-    ///
-    /// Takes a borrowed connection rather than `&self` because it is half of
-    /// [`Self::merged_page`]'s single read and must run inside that read's
-    /// transaction: a page fetched under its own lock hold could describe a
-    /// different moment than the counts reported beside it.
-    ///
-    /// The parameter list is over clippy's threshold and stays a list rather
-    /// than becoming a request struct: every one of these is an independent
-    /// dimension of one read, and a struct would only move the same eight
-    /// values behind a name that adds nothing — while making the private
-    /// caller below construct one to call it.
-    #[allow(clippy::too_many_arguments)]
-    fn scan_page(
-        conn: &Connection,
-        hosts: &[HostId],
-        after: Option<CacheKey>,
-        limit: usize,
-        byte_budget: usize,
-        filter: &SessionFilter,
-        sort: ListSort,
-        count: bool,
-    ) -> anyhow::Result<(CachePage, Option<u64>)> {
-        if hosts.is_empty() {
-            return Ok((CachePage::default(), count.then_some(0)));
-        }
-        let sql = page_sql(hosts.len(), after.is_some(), limit, filter, sort, count);
-        let mut stmt = conn
-            .prepare(&sql)
-            .context("preparing the merged cache page query")?;
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        // Bound 1..=5 unconditionally so the placeholder numbering in
-        // `resume` is stable whether or not it is present and whichever order
-        // is in force; unused binds are harmless, an off-by-one in the host
-        // list is not.
-        let placeholder_key = CacheKey {
-            created_at: 0,
-            session_id: String::new(),
-            host: 0,
-            activity_at: 0,
-            title_sort: String::new(),
-        };
-        let bind_key = after.as_ref().unwrap_or(&placeholder_key);
-        params.push(Box::new(bind_key.created_at));
-        params.push(Box::new(bind_key.session_id.clone()));
-        params.push(Box::new(bind_key.host));
-        params.push(Box::new(bind_key.activity_at));
-        params.push(Box::new(bind_key.title_sort.clone()));
-        for host in hosts {
-            params.push(Box::new(*host));
-        }
-        let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let mut query = stmt
-            .query(bound.as_slice())
-            .context("querying the merged cache page")?;
-
-        let mut page = CachePage::default();
-        let mut matching = 0u64;
-        let mut bytes = 0usize;
-        // Set once the page has taken everything it will take. The walk goes
-        // on from there only while there is still counting to do.
-        let mut page_closed = false;
-        while let Some(row) = query.next().context("reading merged cache page rows")? {
-            let host: HostId = row.get(0).context("reading a cached row's host")?;
-            let session_id: String = row.get(1).context("reading a cached row's id")?;
-            let created_at: i64 = row.get(2).context("reading a cached row's time")?;
-            let json: String = row.get(3).context("reading a cached row's payload")?;
-            // The two derived ordering components come from their COLUMNS,
-            // never from the payload beside them, for the same reason
-            // `created_at` does: the columns are what the ORDER BY above
-            // sorted by, so a key built from anything else could name a
-            // position this scan's own order does not contain.
-            let activity_at: i64 = row.get(4).context("reading a cached row's activity")?;
-            let title_sort: String = row.get(5).context("reading a cached row's sort title")?;
-            let key = CacheKey {
-                created_at,
-                session_id,
-                host,
-                activity_at,
-                title_sort,
-            };
-            // ONE validation predicate for both answers (see
-            // [`usable_cached_session`]): a row this scan would refuse to
-            // show must not be a row the count claims as a match, or "N
-            // matching" would promise pages that can never display N rows.
-            let usable = usable_cached_session(&key, &json);
-            if count && usable.as_ref().is_ok_and(|info| filter.matches(host, info)) {
-                matching = matching.saturating_add(1);
-            }
-            // The resume test, for the counting walk whose SQL carries none.
-            if count
-                && after
-                    .as_ref()
-                    .is_some_and(|after| !follows(sort, &key, after))
-            {
-                continue;
-            }
-            if page_closed {
-                if count {
-                    continue;
-                }
-                break;
-            }
-            let info = match usable {
-                Ok(info) => Some(info),
-                Err(reason) => {
-                    tracing::warn!(
-                        host,
-                        session_id = key.session_id.as_str(),
-                        reason = reason.as_str(),
-                        "skipping a cached session that cannot be trusted as this row"
-                    );
-                    None
-                }
-            };
-            // Filtered out BEFORE the page's own cuts, so a non-matching row
-            // costs neither a row slot nor a byte of the budget — that is
-            // what "the predicate applies before the page cut" means
-            // concretely. A row that could not be decoded is never filtered
-            // out: nothing can judge it, and the cursor still has to get past
-            // it.
-            if let Some(info) = &info
-                && !filter.matches(host, info)
-            {
-                continue;
-            }
-            // Both cuts leave the same mark: `more`, plus the key of the
-            // first row a caller has NOT been shown. That key is the fence a
-            // merge needs — with a filter set it is the first MATCHING row
-            // withheld, which is the only fence that means anything to a
-            // merge that would not show the others either — and the row
-            // itself is not part of the page.
-            let over_rows = page.rows.len() == limit;
-            let over_bytes =
-                !page.rows.is_empty() && bytes.saturating_add(json.len()) > byte_budget;
-            if over_rows || over_bytes {
-                page.more = true;
-                page.frontier = Some(key);
-                page_closed = true;
-                if count {
-                    continue;
-                }
-                break;
-            }
-            bytes = bytes.saturating_add(json.len());
-            page.rows.push(ScannedRow { key, info });
-        }
-        Ok((page, count.then_some(matching)))
+    /// `hosts` is the SCOPE: a host that serves from memory (no identity to
+    /// bind a cache write to) is left out by the caller, from the same
+    /// snapshot its in-memory rows are merged from, so one host can never
+    /// contribute twice. The `IN`-list is bound by position; SQLite has no
+    /// array parameter.
+    pub async fn cached_rows(&self, hosts: &[HostId]) -> anyhow::Result<Vec<CachedRow>> {
+        Ok(self.cached_slice(hosts).await?.rows)
     }
 
-    /// How many sessions the merged view holds across `hosts` UNDER THE
-    /// REQUEST'S ARCHIVE SWITCH — the `total` a page reports.
+    /// [`Self::cached_rows`] plus, from the SAME lock hold, which of the
+    /// scoped hosts' caches were cut at the wire's cap
+    /// (`hosts.cache_truncated`).
     ///
-    /// A separate cheap query rather than a by-product of the page, because
-    /// the page deliberately stops at its limit and therefore cannot know.
-    /// `COUNT(*)` over an indexed IN-list touches no `info_json` at all,
-    /// which is what keeps "how many are there" from costing what "show me
-    /// all of them" used to — and it keeps that property with the archive
-    /// predicate in it only because the flag is a COLUMN
-    /// ([`apply_schema`]'s version 10) rather than a field inside the blob.
-    ///
-    /// ## Why the archive switch is in the denominator and no other filter is
-    ///
-    /// `include_archived` is not a user narrowing; it is the definition of
-    /// which view is being served. With it off — the public default — the
-    /// list shows non-archived sessions, so a `total` counting the archived
-    /// ones too made the banner's two numbers disagree out of the box: ten
-    /// rows above "of 12 sessions", with no filter typed and nothing on
-    /// screen to explain the gap (maintainer's verdict, 2026-08-22).
-    ///
-    /// Every OTHER dimension stays out of this count, and the old reasoning
-    /// for that is untouched: a filtered page holding fewer rows than the
-    /// view holds is not an incoherent list, it is a working filter, and the
-    /// matching count beside it is what says how many the filter found.
-    ///
-    /// The column and the payload agree by construction — every writer
-    /// extracts one from the other in the same statement, and the migration
-    /// backfilled the rows that predate it — which is what lets this count
-    /// and [`SessionFilter::matches`] (which reads the decoded payload) be
-    /// two spellings of one predicate. Nothing re-validates that at read
-    /// time: a hand-edited row where the two disagree can report a `matching`
-    /// larger than this total, which the client already renders as the
-    /// list-changed-underneath note rather than as a number it believes.
-    ///
-    /// ## What it still counts that no page can show
-    ///
-    /// Counts ROWS, including any whose payload no longer decodes. That is a
-    /// deliberate, documented divergence from the page and from the matching
-    /// count, both of which skip them: a total is an answer about what the
-    /// view holds, and quietly shrinking it to hide a corrupt row would make
-    /// "showing 4 of 5" read as data loss rather than as the one unshowable
-    /// entry it is.
-    ///
-    /// WHICH view holds it is decided by the column, which is exactly the
-    /// point of the column being stored rather than derived. The flag was
-    /// extracted when the row was written, so a row that decoded then and
-    /// does not now keeps the classification it was filed under: an
-    /// undecodable archived row counts inside the widened view and is absent
-    /// from the default one, an undecodable active row the other way around.
-    /// Neither is dropped from both — a row nothing can read is still a row.
-    ///
-    /// The one place an unreadable payload defaults to ACTIVE is version
-    /// 10's backfill, which had no stored flag to keep and could only ask the
-    /// text; a payload SQLite cannot parse as JSON lands at 0 there. Same
-    /// principle from the other side: the upgrade counts what it cannot
-    /// classify rather than hiding it.
-    ///
-    /// ## No index carries the archive predicate, and what that costs
-    ///
-    /// The host scope is still an index range (`session_cache_by_host_order`),
-    /// but testing a column that index does not carry means visiting the
-    /// table row for each candidate rather than counting index entries — so
-    /// the default view's count is a row visit per cached session, where the
-    /// widened one is not. That is bounded work on a cache that is itself
-    /// bounded per host (`crate::manager::REFRESH_SESSION_CAP`) and it still
-    /// decodes nothing, which is the property that mattered. An index on the
-    /// flag would be a write cost on every refresh bought against a read
-    /// nobody has measured as a problem; add one when there is a measurement,
-    /// not before.
-    ///
-    /// Borrows a connection rather than taking `&self`, so it runs inside
-    /// [`Self::merged_page`]'s read transaction. There is deliberately no
-    /// standalone async wrapper: production has exactly one reason to ask how
-    /// big the merged view is — to answer `GET /api/sessions` — and that
-    /// answer must come from the same moment as the page beside it.
-    fn count_rows(
-        conn: &Connection,
-        hosts: &[HostId],
-        include_archived: bool,
-    ) -> anyhow::Result<u64> {
+    /// One method rather than two calls because the pairing is a
+    /// correctness requirement, not convenience: a refresh replaces a
+    /// host's rows and its flag in one transaction, so a reader that took
+    /// the flag in one call and the rows in another could pair a newly
+    /// capped cache's rows with the pre-cap "complete" flag — and a reply
+    /// built from that pair presents a cut list as whole, exactly what
+    /// SPEC.md's Session list section forbids. Both queries run under one
+    /// hold of the store's connection mutex, which no writer can
+    /// interleave.
+    pub async fn cached_slice(&self, hosts: &[HostId]) -> anyhow::Result<CachedSlice> {
         if hosts.is_empty() {
-            return Ok(0);
+            return Ok(CachedSlice::default());
         }
-        let placeholders = host_placeholders(hosts.len());
-        let archive_clause = if include_archived {
-            ""
-        } else {
-            " AND archived = 0"
-        };
-        let sql = format!(
-            "SELECT COUNT(*) FROM session_cache WHERE host_id IN ({placeholders}){archive_clause}"
-        );
-        let params: Vec<Box<dyn rusqlite::ToSql>> = hosts
-            .iter()
-            .map(|host| Box::new(*host) as Box<dyn rusqlite::ToSql>)
-            .collect();
-        let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        // `COUNT(*)` is non-negative by definition, so the widening below is
-        // a widening rather than a clamp that could hide anything. rusqlite
-        // has no `u64` column type (SQLite integers are signed), so the cast
-        // is where the two type systems meet.
-        let count: i64 = conn
-            .query_row(&sql, bound.as_slice(), |r| r.get(0))
-            .context("counting the merged cache")?;
-        Ok(count as u64)
-    }
-
-    /// The page AND both of its counts, from ONE read — what
-    /// `GET /api/sessions` is answered out of (PLAN_M6_75.md item 5).
-    ///
-    /// ## Why one read rather than three
-    ///
-    /// The three answers are a single claim about the fleet — "here are
-    /// these rows, of N matching, of M sessions" — and taken separately they
-    /// stop being one: a refresh committing between the page and the counts
-    /// can produce `matching > total`, or counts describing rows the page
-    /// does not contain, or a page whose rows were already deleted by the
-    /// time the totals were taken. None of those is a crash; all of them
-    /// reach the user as a list that visibly does not add up. One
-    /// transaction, one lock hold, one moment.
-    ///
-    /// (This store has exactly one connection behind one mutex, so holding
-    /// the lock would already serialize these reads against every writer.
-    /// The transaction is still explicit, because that property is an
-    /// implementation detail of this struct and the coherence requirement is
-    /// not — a future connection pool must not silently reintroduce the
-    /// split.)
-    ///
-    /// ## The two scopes are different, deliberately
-    ///
-    /// `scope` is the merged view: every host with an actor, which is what
-    /// `total` counts. The PAGE and the MATCHING count are computed over
-    /// `scope` intersected with the filter's host, so a host-filtered
-    /// request never decodes another host's rows at all — while `total` goes
-    /// on describing every host, because "N matching of M sessions" is a
-    /// comparison against the whole view and not against the filter's own
-    /// scope.
-    ///
-    /// The one dimension `total` DOES honor is the archive switch, which
-    /// says which view this is rather than narrowing it — see
-    /// [`Self::count_rows`] for why that one is in the denominator and the
-    /// user's filters are not.
-    ///
-    /// ## The order changes the page and nothing else
-    ///
-    /// `sort` reaches [`Self::scan_page`] and stops there. Neither `total` nor
-    /// `matching` moves with it — both are counts of a SET, and re-ordering a
-    /// set does not resize it — which is also why the caller's matching-count
-    /// cache stays valid across a sort change (`crate::aggregate`).
-    ///
-    /// ## Whether it COUNTS is decided here, inside the lock
-    ///
-    /// See [`MatchingCount`]. A caller that already holds a matching count
-    /// names the generation it was taken at, and this read — holding the
-    /// mutex, so no write can be in flight — compares that against the
-    /// generation it actually finds. Only inside this hold is the comparison
-    /// sound: a caller sampling anything beforehand can have a write land in
-    /// the gap and pair an old count with new rows.
-    ///
-    /// A read that does count does so in the page's own scan
-    /// ([`Self::scan_page`]), not in a second one.
-    ///
-    /// ## An unfiltered read makes NO matching claim
-    ///
-    /// Callers pass [`MatchingCount::Skip`] for an empty filter and
-    /// [`MergedRead::matching`] comes back absent. The tempting shortcut —
-    /// "unfiltered means everything matches, so report `total`" — is not
-    /// true here: `total` counts rows including those whose payload cannot be
-    /// trusted as that row, and the matching count deliberately excludes
-    /// exactly those. Reporting `total` as a matching count would make an
-    /// unshowable row count as a match only when nobody filtered.
-    ///
-    /// Over clippy's argument threshold for [`Self::scan_page`]'s reason, and
-    /// declined for the same one: these are the independent dimensions of one
-    /// read, and every caller already names all of them.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn merged_page(
-        &self,
-        scope: Vec<HostId>,
-        after: Option<CacheKey>,
-        limit: usize,
-        byte_budget: usize,
-        filter: SessionFilter,
-        sort: ListSort,
-        matching: MatchingCount,
-    ) -> anyhow::Result<MergedRead> {
         let conn = Arc::clone(&self.conn);
-        let store_generation = Arc::clone(&self.generation);
-        let counting_passes = Arc::clone(&self.counting_passes);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<MergedRead> {
+        let hosts = hosts.to_vec();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<CachedSlice> {
             let conn = conn.lock().expect("helm db mutex poisoned");
-            // Read-only and never committed: dropping it rolls back, which
-            // is the correct end for a transaction that wrote nothing.
-            let tx = conn
-                .unchecked_transaction()
-                .context("beginning the merged read transaction")?;
-            // Sampled INSIDE the lock, with the rows below: that is the whole
-            // basis on which a count and the data it describes are true of
-            // each other. See [`HelmStore::generation`].
-            let generation = store_generation.load(Ordering::Acquire);
-            // `total` is the whole merged scope's, so it is taken FIRST and
-            // the scope is then consumed rather than cloned: the unfiltered
-            // case is the common one and its page scope is the same list.
-            // The archive switch travels with it because it selects the VIEW
-            // being counted rather than narrowing one (see
-            // [`Self::count_rows`]); no other dimension of `filter` does.
-            let total = Self::count_rows(&tx, &scope, filter.includes_archived())?;
-            // A host filter naming a host outside the merged view selects
-            // nothing — not everything, which is what an empty IN-list would
-            // silently mean if it reached the scan.
-            let page_scope: Vec<HostId> = match filter.host_scope() {
-                None => scope,
-                Some(host) if scope.contains(&host) => vec![host],
-                Some(_) => Vec::new(),
-            };
-            let count = match matching {
-                MatchingCount::Skip => false,
-                MatchingCount::Compute => true,
-                MatchingCount::ComputeUnless(held) => held != generation,
-            };
-            if count {
-                counting_passes.fetch_add(1, Ordering::Relaxed);
-            }
-            let (page, matching) = Self::scan_page(
-                &tx,
-                &page_scope,
-                after,
-                limit,
-                byte_budget,
-                &filter,
-                sort,
-                count,
-            )?;
-            Ok(MergedRead {
-                page,
-                total,
-                matching,
-                generation,
+            let placeholders = (1..=hosts.len())
+                .map(|index| format!("?{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT host_id, session_id, created_at, archived, info_json \
+                     FROM session_cache WHERE host_id IN ({placeholders})"
+                ))
+                .context("preparing the cached rows query")?;
+            let rows: Vec<(HostId, String, i64, bool, String)> = stmt
+                .query_map(rusqlite::params_from_iter(hosts.iter()), |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })
+                .context("querying cached rows")?
+                .collect::<Result<_, _>>()
+                .context("reading cached rows")?;
+            // Same lock hold as the rows, per this method's contract.
+            let mut flags = conn
+                .prepare(&format!(
+                    "SELECT id FROM hosts WHERE cache_truncated AND id IN ({placeholders})"
+                ))
+                .context("preparing the cache flag query")?;
+            let truncated_hosts: Vec<HostId> = flags
+                .query_map(rusqlite::params_from_iter(hosts.iter()), |r| r.get(0))
+                .context("querying cache flags")?
+                .collect::<Result<_, _>>()
+                .context("reading cache flags")?;
+            let rows = rows
+                .into_iter()
+                .filter_map(|(host, session_id, created_at, archived, json)| {
+                    let info = match serde_json::from_str::<SessionInfo>(&json) {
+                        Ok(info) if info.id == session_id && info.created_at == created_at => info,
+                        Ok(info) => {
+                            tracing::warn!(
+                                host,
+                                session_id = session_id.as_str(),
+                                payload_id = info.id.as_str(),
+                                payload_created_at = info.created_at,
+                                "skipping a cached session whose payload names a different \
+                                 session than the row it is filed under"
+                            );
+                            return None;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                host,
+                                session_id = session_id.as_str(),
+                                error = %error,
+                                "skipping a cached session whose info_json no longer decodes"
+                            );
+                            return None;
+                        }
+                    };
+                    Some(CachedRow {
+                        host,
+                        archived,
+                        info,
+                    })
+                })
+                .collect();
+            Ok(CachedSlice {
+                rows,
+                truncated_hosts,
             })
         })
         .await
-        .context("merged page task panicked")?
-    }
-
-    /// The PAGE alone, for the tests whose subject is the scan rather than
-    /// the counts served beside it.
-    ///
-    /// Test-only because production has exactly one reason to read this
-    /// table for a list — to answer `GET /api/sessions` — and that answer
-    /// needs the counts in the same breath ([`Self::merged_page`]). Offering
-    /// a page-only read to production code would be offering a way to
-    /// reintroduce the split those counts were pulled into one transaction
-    /// to close.
-    #[cfg(test)]
-    async fn cached_page(
-        &self,
-        hosts: Vec<HostId>,
-        after: Option<CacheKey>,
-        limit: usize,
-        byte_budget: usize,
-        filter: SessionFilter,
-        sort: ListSort,
-    ) -> anyhow::Result<CachePage> {
-        Ok(self
-            .merged_page(
-                hosts,
-                after,
-                limit,
-                byte_budget,
-                filter,
-                sort,
-                MatchingCount::Skip,
-            )
-            .await?
-            .page)
+        .context("cached slice task panicked")?
     }
 
     /// One host's cached entry for `session_id`, if it has one and it still
@@ -4836,137 +3718,6 @@ impl HelmStore {
     }
 }
 
-/// The SQL [`HelmStore::scan_page`] runs, built from the shape of one read.
-///
-/// Split out from the scan itself for two reasons. It is the whole of the
-/// order/resume/scope decision in one place, which is where a reader should
-/// be able to check that the `ORDER BY`, the resume disjunction and
-/// [`ListSort::position`] all spell one order; and it lets
-/// `a_fleet_page_is_index_ordered_under_every_sort` hand the exact production
-/// text to `EXPLAIN QUERY PLAN`, which is the only way to assert a query plan
-/// rather than assume one.
-///
-/// Parameters are numbered so that `?1..=?5` are the resume key's components
-/// and `?6` onward are the host ids, one per branch; [`HelmStore::scan_page`]
-/// binds them in that order.
-fn page_sql(
-    hosts: usize,
-    after: bool,
-    limit: usize,
-    filter: &SessionFilter,
-    sort: ListSort,
-    count: bool,
-) -> String {
-    // The disjunction IS the strict-successor test for a composite key,
-    // written out because SQLite has no row-value comparison this code can
-    // rely on across every bundled version. Each order's leading component
-    // is compared in ITS direction — descending stamps mean "after" is
-    // smaller, an ascending title means "after" is larger — and every one
-    // of them then falls through the shared `created_at`/id/host tail.
-    //
-    // A COUNTING scan carries no resume clause at all: it has to see the
-    // rows before the cursor in order to count them, and applies
-    // [`follows`] per row instead.
-    let resume = match (after, count) {
-        (false, _) | (true, true) => "",
-        (true, false) => match sort {
-            ListSort::Created => {
-                " AND (created_at < ?1 \
-                       OR (created_at = ?1 AND session_id > ?2) \
-                       OR (created_at = ?1 AND session_id = ?2 AND host_id > ?3))"
-            }
-            ListSort::Activity => {
-                " AND (activity_at < ?4 \
-                       OR (activity_at = ?4 AND created_at < ?1) \
-                       OR (activity_at = ?4 AND created_at = ?1 AND session_id > ?2) \
-                       OR (activity_at = ?4 AND created_at = ?1 AND session_id = ?2 \
-                           AND host_id > ?3))"
-            }
-            ListSort::Title => {
-                " AND (title_sort > ?5 \
-                       OR (title_sort = ?5 AND created_at < ?1) \
-                       OR (title_sort = ?5 AND created_at = ?1 AND session_id > ?2) \
-                       OR (title_sort = ?5 AND created_at = ?1 AND session_id = ?2 \
-                           AND host_id > ?3))"
-            }
-        },
-    };
-    // The exact spelling of [`ListSort::position`], for SQLite. Each is the
-    // full ordering key of one order, so each branch below is served by that
-    // order's host-leading index with no sort step.
-    let order_by = match sort {
-        ListSort::Created => "created_at DESC, session_id ASC, host_id ASC",
-        ListSort::Activity => "activity_at DESC, created_at DESC, session_id ASC, host_id ASC",
-        ListSort::Title => "title_sort ASC, created_at DESC, session_id ASC, host_id ASC",
-    };
-    // One row past the limit, so "is there more" is answered by the scan
-    // itself rather than by a second query that could disagree with it.
-    // Neither a FILTERED scan nor a COUNTING one can use that bound — how
-    // many rows either must read is exactly what it is trying to find out
-    // — so they walk the order and stop themselves in the scan's loop.
-    let fetch = limit.saturating_add(1);
-    let bound_rows = if filter.is_empty() && !count {
-        format!(" LIMIT {fetch}")
-    } else {
-        String::new()
-    };
-    // The archive switch is the ONE filter dimension this SQL applies,
-    // mirroring [`HelmStore::count_rows`] so the page and the total are cut by
-    // the same clause rather than by two spellings that could drift.
-    // [`SessionFilter::matches`] still applies it in the scan, and has to:
-    // that is the contract, and this is only the part SQLite can help with.
-    //
-    // Two things it buys. Archived rows are no longer read and decoded just
-    // to be discarded a few lines later — the default view is the common
-    // request, so that was most of a fleet's archive on every poll. And a row
-    // whose payload has gone bad is now judged by the flag STORED with it:
-    // undecodable-and-archived leaves the default view entirely, where before
-    // it slipped past `matches` (nothing can judge a payload it cannot read)
-    // and occupied a slot in a page whose total had already excluded it.
-    let archive_clause = if filter.includes_archived() {
-        ""
-    } else {
-        " AND archived = 0"
-    };
-    // One branch per host, each an index range over that host's slice, so the
-    // compound is a MERGE rather than a sort — see [`HelmStore::scan_page`]'s
-    // docs for what an `IN`-list did instead. The host ids are still BOUND
-    // (`?6`, `?7`, …) and never interpolated; only the branch count comes
-    // from Rust. Every predicate is repeated INTO each branch, because one
-    // wrapped around the union would leave each branch unrestricted and put
-    // the sort back.
-    let branches = (0..hosts)
-        .map(|index| {
-            let host = index + 6;
-            format!(
-                "SELECT host_id, session_id, created_at, info_json, activity_at, title_sort \
-                 FROM session_cache \
-                 WHERE host_id = ?{host}{archive_clause}{resume}"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ");
-    format!("{branches} ORDER BY {order_by}{bound_rows}")
-}
-
-/// `?1, ?2, ...` for an IN-list of `count` host ids.
-///
-/// The host scope is the one part of [`HelmStore::count_rows`]'s query whose
-/// arity is not known at compile time. Generating PLACEHOLDERS rather than
-/// values is what keeps that from becoming string interpolation of data:
-/// every id is still bound through rusqlite, and this function can only ever
-/// emit `?N`.
-///
-/// The PAGE query no longer uses it. An `IN`-list there cost the ordering
-/// index (see [`HelmStore::scan_page`]); a count has no `ORDER BY` to lose,
-/// so the `IN`-list remains the right shape for it.
-fn host_placeholders(count: usize) -> String {
-    (1..=count)
-        .map(|index| format!("?{index}"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5001,26 +3752,6 @@ mod tests {
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
-        }
-    }
-
-    /// A cached session with the two fields the non-default orders read.
-    ///
-    /// `last_activity_at` is a PARAMETER rather than a copy of `created_at`,
-    /// because the compatibility rule the activity order rests on is only
-    /// visible when the two differ — including at `0`, which is a sender that
-    /// predates the field and must sort by its creation time rather than at
-    /// the epoch.
-    fn ordered_session(
-        id: &str,
-        created_at: i64,
-        last_activity_at: i64,
-        title: &str,
-    ) -> SessionInfo {
-        SessionInfo {
-            last_activity_at,
-            title: title.to_string(),
-            ..session(id, created_at)
         }
     }
 
@@ -5112,82 +3843,8 @@ mod tests {
             .collect()
     }
 
-    /// Every cached session across `hosts`, walked page by page through the
-    /// production paging API.
-    ///
-    /// Deliberately a WALK rather than one big page: it is how the tests
-    /// below assert cross-host order and skip-and-log behavior, so making it
-    /// follow real cursors means those assertions also pin that the resume
-    /// predicate does not lose or repeat rows. A page size of two is small
-    /// enough that every fixture here spans several pages.
-    ///
-    /// The cursor advances past SKIPPED rows as well as served ones, which
-    /// is the contract [`ScannedRow`] exists for — a walker that resumed
-    /// from the last DECODED row would re-scan a poisoned one forever.
-    async fn walk_cached(store: &HelmStore, hosts: &[HostId]) -> Vec<CachedSession> {
-        let mut all = Vec::new();
-        let mut after: Option<CacheKey> = None;
-        loop {
-            let page = store
-                .cached_page(
-                    hosts.to_vec(),
-                    after.clone(),
-                    2,
-                    usize::MAX,
-                    SessionFilter::default(),
-                    ListSort::Created,
-                )
-                .await
-                .expect("paged read");
-            let Some(last) = page.rows.last() else { break };
-            after = Some(last.key.clone());
-            all.extend(page.rows.into_iter().filter_map(|row| {
-                row.info.map(|info| CachedSession {
-                    host: row.key.host,
-                    info,
-                })
-            }));
-            if !page.more {
-                break;
-            }
-        }
-        all
-    }
-
-    /// The cached session ids across `hosts` under `sort`, walked page by
-    /// page through the production paging API.
-    ///
-    /// A WALK with a deliberately tiny page, for [`walk_cached`]'s reason and
-    /// one more: an order is only served correctly if its resume predicate
-    /// agrees with its own `ORDER BY`, and the only way to see a disagreement
-    /// is to cross page boundaries. Ids rather than sessions because the
-    /// subject is the SEQUENCE.
-    async fn walk_sorted(store: &HelmStore, hosts: &[HostId], sort: ListSort) -> Vec<String> {
-        let mut all = Vec::new();
-        let mut after: Option<CacheKey> = None;
-        loop {
-            let page = store
-                .cached_page(
-                    hosts.to_vec(),
-                    after.clone(),
-                    2,
-                    usize::MAX,
-                    SessionFilter::default(),
-                    sort,
-                )
-                .await
-                .expect("paged read");
-            let Some(last) = page.rows.last() else { break };
-            after = Some(last.key.clone());
-            all.extend(page.rows.into_iter().map(|row| row.key.session_id));
-            if !page.more {
-                break;
-            }
-        }
-        all
-    }
-
-    /// Every host id in the registry — the scope the paged reads take.
+    /// Every host id in the registry — the scope [`HelmStore::cached_rows`]
+    /// takes when a test wants "the whole fleet" without naming each host.
     async fn all_host_ids(store: &HelmStore) -> Vec<HostId> {
         store
             .list_hosts()
@@ -5200,7 +3857,7 @@ mod tests {
 
     // ---- Tracing capture, for the skip-and-log tests -------------------
     //
-    // `cached_sessions`/`cached_sessions_all`'s skip-and-log posture (item
+    // `cached_sessions`/`cached_rows`'s skip-and-log posture (item
     // 2's split with `list_hosts`'s fail-loudly registry reads) logs a
     // dropped row via `tracing::warn!` rather than merely omitting it from
     // the returned `Vec` — and a silently-dropped row is observationally
@@ -5226,6 +3883,187 @@ mod tests {
         // are actually about — is say that a row was skipped, and name the
         // host and session it belonged to.
         crate::test_capture::matching(&crate::test_capture::install(), "skipping a cached session")
+    }
+
+    /// Whether a host's cached list was cut at the cap is kept WITH the
+    /// cache: written by the same replacement that writes the rows, read
+    /// back from the registry row, counted as a change when it flips, and
+    /// still there after the store is closed and reopened.
+    ///
+    /// The reopen leg is the one that matters: SPEC.md forbids presenting a
+    /// cut list as the whole one, and a helm restart serves every host's
+    /// stale cache before any host has been re-drained. A flag that lived
+    /// only in an actor's memory would be false for exactly that window.
+    #[tokio::test]
+    async fn a_cut_lists_flag_is_kept_with_the_cache_and_survives_a_reopen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        let host = {
+            let store = HelmStore::open(&db_path).await.expect("open");
+            let host = host_with_identity(&store, "capped@host", "capped-identity").await;
+            let first = store
+                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], true)
+                .await
+                .expect("first drain");
+            assert!(first.changed);
+            let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
+            assert!(
+                row(store.list_hosts().await.unwrap()).cache_truncated,
+                "the flag is read back from the host's own registry row"
+            );
+
+            let same = store
+                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], true)
+                .await
+                .expect("same drain again");
+            assert!(
+                !same.changed,
+                "the same rows under the same flag are not a change the feed should announce"
+            );
+            let cleared = store
+                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], false)
+                .await
+                .expect("uncut drain");
+            assert!(
+                cleared.changed,
+                "the flag flipping IS a change: the notice it drives is on screen"
+            );
+            assert!(!row(store.list_hosts().await.unwrap()).cache_truncated);
+            store
+                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], true)
+                .await
+                .expect("cut again");
+            host
+        };
+
+        let reopened = HelmStore::open(&db_path).await.expect("reopen");
+        let row = reopened
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == host)
+            .unwrap();
+        assert!(
+            row.cache_truncated,
+            "a helm restarting over this database must still know the cached list was cut"
+        );
+    }
+
+    /// A database migrated from before the cap flag existed reports every
+    /// host's cache as NOT cut, and keeps saying so across a reopen.
+    ///
+    /// The migration adds `hosts.cache_truncated` with a false default; a
+    /// defect that initialized existing hosts to true would pass the
+    /// schema-equivalence test while showing every upgraded, currently
+    /// unreachable host a "could not read to the end" notice no refresh
+    /// could clear. Read back through `HostRow`, which is the read the
+    /// merge actually uses.
+    #[tokio::test]
+    async fn migration_initializes_the_cap_flag_to_false_for_existing_hosts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        {
+            let conn = plant_v1_database(&db_path);
+            conn.execute_batch(
+                "INSERT INTO hosts (kind, destination) VALUES ('ssh', 'user@planted');
+                 INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                 VALUES (1, 'planted-1', 100, '{}');",
+            )
+            .expect("plant a host with a cached row");
+        }
+        let flag = |rows: Vec<HostRow>| {
+            rows.into_iter()
+                .find(|r| r.destination.as_deref() == Some("user@planted"))
+                .expect("planted row")
+                .cache_truncated
+        };
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        assert!(
+            !flag(store.list_hosts().await.expect("list")),
+            "an upgraded host starts with no cut on record"
+        );
+        drop(store);
+        let reopened = HelmStore::open(&db_path).await.expect("reopen");
+        assert!(!flag(reopened.list_hosts().await.expect("list")));
+    }
+
+    /// Identity adoption resets the cap flag along with the cache it purges.
+    ///
+    /// The flag is the predecessor install's word about rows the adoption
+    /// deletes; carried over, an empty successor cache would show "could
+    /// not read to the end" until a refresh succeeded — indefinitely, for a
+    /// host whose first post-adoption refresh fails.
+    #[tokio::test]
+    async fn adoption_clears_the_cap_flag_with_the_cache() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "adopt@host", "old-identity").await;
+        store
+            .replace_host_sessions(host, "old-identity", vec![session("old-1", 100)], true)
+            .await
+            .expect("capped drain under the old identity");
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
+        assert!(row(store.list_hosts().await.unwrap()).cache_truncated);
+
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "old-identity",
+                "new-identity",
+            )
+            .await
+            .expect("adopt");
+        let after = row(store.list_hosts().await.unwrap());
+        assert!(
+            !after.cache_truncated,
+            "the successor starts with no cut on record; the flag described purged rows"
+        );
+        assert!(
+            store.cached_rows(&[host]).await.unwrap().is_empty(),
+            "and the cache it described is gone"
+        );
+    }
+
+    /// The 501st seed evicts the OLDEST cached row rather than growing the
+    /// slice or refusing the new one, and records the cut on the host.
+    ///
+    /// The new row must land — the create already succeeded on the
+    /// supervisor, and a cache without it leaves a session the caller was
+    /// just told exists unroutable — so the cap holds by eviction, and the
+    /// flag is what tells every client the cache no longer carries
+    /// everything known.
+    #[tokio::test]
+    async fn a_seed_past_the_cap_evicts_the_oldest_row_and_records_the_cut() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "full@host", "full-identity").await;
+        let full: Vec<SessionInfo> = (0..farhelm_proto::LIST_SESSIONS_CAP)
+            .map(|n| session(&format!("s-{n:04}"), 1_000 + n as i64))
+            .collect();
+        store
+            .replace_host_sessions(host, "full-identity", full, false)
+            .await
+            .expect("fill the cache to the cap");
+
+        let changed = store
+            .remember_session(host, "full-identity", &session("fresh", 10_000))
+            .await
+            .expect("seed past the cap");
+        assert!(changed, "an eviction is a change clients must re-read for");
+        let rows = store.cached_rows(&[host]).await.expect("cached rows");
+        assert_eq!(rows.len(), farhelm_proto::LIST_SESSIONS_CAP);
+        let ids: Vec<&str> = rows.iter().map(|row| row.info.id.as_str()).collect();
+        assert!(ids.contains(&"fresh"), "the new session must be routable");
+        assert!(
+            !ids.contains(&"s-0000"),
+            "the oldest row is the one evicted"
+        );
+        let slice = store.cached_slice(&[host]).await.expect("slice");
+        assert_eq!(
+            slice.truncated_hosts,
+            vec![host],
+            "the eviction is recorded as a cut on the host"
+        );
     }
 
     // ---- Schema and the version mechanism ----------------------------
@@ -5516,8 +4354,8 @@ mod tests {
     /// user's file looks like, and the whole ladder runs over it. All THREE
     /// cache readers are exercised, because they decode independently and a
     /// migration that fixed one would leave the others just as broken —
-    /// `cached_sessions` (the per-host stale list), `merged_page` (the
-    /// merged, paginated list), and `cached_session` (the stale detail view
+    /// `cached_sessions` (the per-host stale list), `cached_rows` (the
+    /// merged-list backing read), and `cached_session` (the stale detail view
     /// behind an unreachable-host notice).
     #[tokio::test]
     async fn migrating_from_v3_rewrites_pre_split_cached_statuses() {
@@ -5573,21 +4411,11 @@ mod tests {
             "a row written before the field existed reads as raw-created"
         );
 
-        let page = store
-            .cached_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default(),
-                ListSort::Created,
-            )
-            .await
-            .expect("merged page");
-        assert_eq!(page.rows.len(), 1);
-        assert!(
-            page.rows[0].info.is_some(),
-            "the merged page must carry the row as DATA, not as a skipped hole"
+        let rows = store.cached_rows(&[host]).await.expect("cached rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].info.id, "old-1",
+            "the merged-list read must carry the row as DATA"
         );
 
         let detail = store
@@ -5622,9 +4450,9 @@ mod tests {
     /// - A well-formed payload is the ordinary case, in both flag positions.
     /// - A payload that is not JSON at all is the one case the backfill
     ///   cannot answer, and the direction it fails in is a decision rather
-    ///   than an accident: it stays ACTIVE, matching `count_rows`'s standing
-    ///   rule that a total is a count of what is there and never quietly
-    ///   shrinks to hide a row nothing can read.
+    ///   than an accident: it stays ACTIVE, matching [`HelmStore::cached_rows`]'s
+    ///   standing rule that a row's presence in the fleet is never quietly
+    ///   hidden just because nothing can read it.
     /// - A payload that is valid JSON this build's struct would reject —
     ///   what a NEWER farhelm's cache looks like to an older one — is still
     ///   classified from its `archived` member. That is the whole reason the
@@ -5720,39 +4548,27 @@ mod tests {
             "an unstamped migration replays the ADD COLUMN on the next open and fails there"
         );
 
-        // What each view HOLDS, as a pair, taken twice: once against the
+        // What each view SERVES, as a pair, taken twice: once against the
         // store that just migrated, and once against a fresh open of the
-        // same file.
+        // same file. `cached_rows` is the merged-list backing read now — it
+        // returns every row that decodes, regardless of view, and the
+        // `archived` column is what a caller filters the two views by. The
+        // two rows that do not decode are dropped from the read (and so
+        // from both totals), which is what keeps the served counts about
+        // rows a client can see; the column assertions above are what pin
+        // that the backfill still classified them.
         async fn both_totals(store: &HelmStore, host: HostId) -> (u64, u64) {
-            let mut totals = Vec::new();
-            for filter in [
-                SessionFilter::default(),
-                SessionFilter::default().include_archived(true),
-            ] {
-                totals.push(
-                    store
-                        .merged_page(
-                            vec![host],
-                            None,
-                            10,
-                            usize::MAX,
-                            filter,
-                            ListSort::Created,
-                            MatchingCount::Skip,
-                        )
-                        .await
-                        .expect("merged read")
-                        .total,
-                );
-            }
-            (totals[0], totals[1])
+            let rows = store.cached_rows(&[host]).await.expect("cached rows");
+            let default_view = rows.iter().filter(|row| !row.archived).count() as u64;
+            let widened_view = rows.len() as u64;
+            (default_view, widened_view)
         }
         assert_eq!(
             both_totals(&store, host).await,
-            (2, 4),
-            "the default view counts what it HOLDS, which is not the same as what it can show: \
-             the active row and the unreadable one, the latter counted but unshowable — and the \
-             inclusion switch brings both archived rows back into the denominator"
+            (1, 2),
+            "the default view serves the one active row that decodes; the inclusion switch \
+             brings the decodable archived row back into the denominator, and neither view \
+             counts the two rows nothing can show"
         );
 
         drop(store);
@@ -5761,292 +4577,9 @@ mod tests {
             .expect("reopen at the current version");
         assert_eq!(
             both_totals(&reopened, host).await,
-            (2, 4),
+            (1, 2),
             "the flag is stored, not recomputed: a reopen that skips the ladder must count the \
              same two views"
-        );
-    }
-
-    /// Version 11 fills both ordering columns from each row's own payload,
-    /// applying the same rules a live write would.
-    ///
-    /// Without the backfill every pre-upgrade row would sort at the epoch and
-    /// under the empty title until its host's next refresh rewrote it — and a
-    /// host that never reconnects would stay there for good, which is exactly
-    /// the stale list this cache exists to serve.
-    ///
-    /// The rows are chosen for the cases the SQL has to survive rather than
-    /// for coverage, and each one is a way an upgrade could abort or file a
-    /// row in the wrong place:
-    ///
-    /// - a payload this build's `SessionInfo` cannot decode (missing required
-    ///   members — NOT merely carrying unknown ones, which serde ignores);
-    /// - a payload that is not JSON at all;
-    /// - a sender that OMITS `last_activity_at` entirely, which is what a
-    ///   supervisor predating the field actually sends, and a legacy explicit
-    ///   `0`, which is what one that knows the field but has observed nothing
-    ///   sends — the missing-member path and the zero path are different SQL;
-    /// - members of the wrong JSON TYPE, which matters more than it looks:
-    ///   SQLite orders every text value above every number, so an unguarded
-    ///   `> 0` accepts a string and then fails the STRICT table's INTEGER
-    ///   column, taking the whole upgrade down over one row;
-    /// - a JSON `true` stamp, which `json_extract` renders as the integer 1 —
-    ///   so a `typeof` guard alone would silently file a boolean as one second
-    ///   past the epoch;
-    /// - an integer stamp too large for i64, which `json_extract` renders as a
-    ///   REAL — so a `json_type` guard alone would hand a float to the INTEGER
-    ///   column and abort;
-    /// - a title that is a LONE SURROGATE. SQLite accepts `"\ud800"` as valid
-    ///   JSON and hands back its CESU-8 encoding, which is not UTF-8, so
-    ///   asking rusqlite for a `String` turns one hostile title into a failed
-    ///   upgrade for the whole install.
-    #[tokio::test]
-    async fn migrating_to_v11_backfills_the_ordering_columns_from_each_payload() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("helm.db");
-        {
-            let conn = plant_v1_database(&db_path);
-            conn.execute_batch("INSERT INTO hosts (kind) VALUES ('local');")
-                .expect("plant the local row");
-            let stamped =
-                serde_json::to_string(&ordered_session("stamped", 300, 900, "Refactor the Drain"))
-                    .unwrap();
-            // The legacy shape: a sender that knows the field but has observed
-            // nothing serializes 0, which means "unknown" and must fall back
-            // to the creation time rather than sorting at the epoch.
-            let legacy =
-                serde_json::to_string(&ordered_session("legacy", 200, 0, "Ärger")).unwrap();
-            // The OLDER shape, and it has to be built by hand: a sender that
-            // predates the field does not write the member at all, so
-            // serializing a current `SessionInfo` with 0 exercises the clause
-            // above rather than the missing-member path. The rest of the
-            // payload is a valid `SessionInfo` so nothing else about the row
-            // is unusual.
-            let older = {
-                let mut value =
-                    serde_json::to_value(ordered_session("older", 150, 0, "Older")).unwrap();
-                value
-                    .as_object_mut()
-                    .expect("a session serializes as an object")
-                    .remove("last_activity_at")
-                    .expect("the field is there to remove");
-                serde_json::to_string(&value).unwrap()
-            };
-            for (id, created_at, json) in [
-                ("stamped", 300, stamped.as_str()),
-                ("legacy", 200, legacy.as_str()),
-                ("older", 150, older.as_str()),
-                ("undecodable", 100, "not valid json"),
-                (
-                    "from-the-future",
-                    50,
-                    r#"{"last_activity_at":777,"title":"Future","shape":"unknown"}"#,
-                ),
-                (
-                    "wrong-types",
-                    40,
-                    r#"{"last_activity_at":"soon","title":42}"#,
-                ),
-                (
-                    "boolean-stamp",
-                    35,
-                    r#"{"last_activity_at":true,"title":"Boolean"}"#,
-                ),
-                (
-                    "huge-stamp",
-                    30,
-                    r#"{"last_activity_at":123456789012345678901234567890,"title":"Huge"}"#,
-                ),
-                (
-                    "lone-surrogate",
-                    25,
-                    r#"{"last_activity_at":600,"title":"\ud800"}"#,
-                ),
-            ] {
-                conn.execute(
-                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
-                     VALUES (1, ?1, ?2, ?3)",
-                    rusqlite::params![id, created_at, json],
-                )
-                .expect("plant a pre-column cache row");
-            }
-        }
-
-        let store = HelmStore::open(&db_path).await.expect("migrate and open");
-        let (columns, user_version): (Vec<(String, i64, String)>, i64) = {
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap();
-                let columns = {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT session_id, activity_at, title_sort FROM session_cache \
-                             ORDER BY session_id",
-                        )
-                        .unwrap();
-                    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                        .unwrap()
-                        .collect::<Result<_, _>>()
-                        .unwrap()
-                };
-                let version: i64 = conn
-                    .query_row("PRAGMA user_version", [], |r| r.get(0))
-                    .unwrap();
-                (columns, version)
-            })
-            .await
-            .unwrap()
-        };
-        assert_eq!(
-            columns,
-            vec![
-                // A JSON `true` is not a stamp, however `json_extract`
-                // renders it, so this row keeps its creation time.
-                ("boolean-stamp".to_string(), 35, "boolean".to_string()),
-                ("from-the-future".to_string(), 777, "future".to_string()),
-                // Neither is an integer that does not fit i64.
-                ("huge-stamp".to_string(), 30, "huge".to_string()),
-                ("legacy".to_string(), 200, "ärger".to_string()),
-                // The stamp is perfectly good; only the title is unusable, so
-                // the row lands under the empty key with a real activity time.
-                ("lone-surrogate".to_string(), 600, String::new()),
-                // The member is ABSENT rather than zero, which is a different
-                // SQL path to the same answer.
-                ("older".to_string(), 150, "older".to_string()),
-                ("stamped".to_string(), 900, "refactor the drain".to_string()),
-                ("undecodable".to_string(), 100, String::new()),
-                ("wrong-types".to_string(), 40, String::new()),
-            ],
-            "each row's ordering columns must come from its own payload, with a missing, \
-             zero, unreadable or wrongly-typed value falling back exactly as a live write \
-             would — and the fold is Rust's Unicode one, not SQLite's ASCII-only lower()"
-        );
-        assert_eq!(
-            user_version, SCHEMA_VERSION,
-            "an unstamped migration replays the ADD COLUMN on the next open and fails there"
-        );
-
-        // And the columns actually drive the served orders, so the backfill is
-        // a working list rather than two populated columns.
-        let hosts = all_host_ids(&store).await;
-        assert_eq!(
-            walk_sorted(&store, &hosts, ListSort::Activity).await,
-            vec![
-                "stamped",
-                "from-the-future",
-                "lone-surrogate",
-                "legacy",
-                "older",
-                "undecodable",
-                "wrong-types",
-                "boolean-stamp",
-                "huge-stamp",
-            ],
-            "the migrated rows sort by the stamps the backfill derived"
-        );
-        assert_eq!(
-            walk_sorted(&store, &hosts, ListSort::Title).await,
-            vec![
-                // Everything the backfill could not collate shares the empty
-                // key and separates on the creation-order tail — including the
-                // row whose title was not UTF-8, which is placed rather than
-                // dropped and, critically, did not abort the upgrade.
-                "undecodable",
-                "wrong-types",
-                "lone-surrogate",
-                "boolean-stamp",
-                "from-the-future",
-                "huge-stamp",
-                "older",
-                "stamped",
-                // Ärger after every ASCII initial, which is the ordinal,
-                // locale-free collation this helm documents.
-                "legacy",
-            ],
-            "and by the titles it folded"
-        );
-    }
-
-    /// Version 11's title backfill collates EVERY row when the cache holds
-    /// more of them than one batch, across a host boundary.
-    ///
-    /// Spec: with `TITLE_BACKFILL_BATCH + 3` rows spread over two hosts, every
-    /// row comes out of the upgrade with the collated form of its own title —
-    /// none skipped, none written with another row's key.
-    ///
-    /// The batching exists for MEMORY: the shape it replaced read every folded
-    /// title in the fleet into one `Vec` before writing any of them, so an
-    /// upgrade's peak cost scaled with the whole cache. Batching is also the
-    /// easiest thing to get subtly wrong — an `OFFSET` walk over a table being
-    /// updated, or a resume key that ignores the host, silently drops or
-    /// repeats rows at the boundary and leaves the survivors looking perfectly
-    /// fine. Crossing the boundary is the only way to see that, so the fixture
-    /// is sized from the constant rather than from a round number: a smaller
-    /// batch later must not quietly stop testing the boundary.
-    #[tokio::test]
-    async fn the_v11_title_backfill_collates_every_row_across_batch_boundaries() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("helm.db");
-        let rows = TITLE_BACKFILL_BATCH + 3;
-        // Split so the boundary falls inside the SECOND host's slice, which is
-        // where a resume key that carried only the session id would resume in
-        // the wrong host's rows.
-        let on_first = TITLE_BACKFILL_BATCH / 2;
-        {
-            let conn = plant_v1_database(&db_path);
-            conn.execute_batch(
-                "INSERT INTO hosts (kind) VALUES ('local');
-                 INSERT INTO hosts (kind, destination) VALUES ('ssh', 'user@beta');",
-            )
-            .expect("plant two host rows");
-            // One transaction for the whole fixture: five hundred autocommit
-            // inserts are five hundred fsyncs, which is most of this test's
-            // wall clock and none of its subject.
-            conn.execute_batch("BEGIN").expect("begin the fixture");
-            for index in 0..rows {
-                let host = if index < on_first { 1 } else { 2 };
-                let id = format!("s-{index:04}");
-                let json = serde_json::to_string(&ordered_session(
-                    &id,
-                    index as i64,
-                    0,
-                    &format!("Title-{index:04}"),
-                ))
-                .unwrap();
-                conn.execute(
-                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![host, id, index as i64, json],
-                )
-                .expect("plant a pre-column cache row");
-            }
-            conn.execute_batch("COMMIT").expect("commit the fixture");
-        }
-
-        let store = HelmStore::open(&db_path).await.expect("migrate and open");
-        let collated: Vec<(String, String)> = {
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap();
-                let mut stmt = conn
-                    .prepare("SELECT session_id, title_sort FROM session_cache ORDER BY session_id")
-                    .unwrap();
-                stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-                    .unwrap()
-                    .collect::<Result<_, _>>()
-                    .unwrap()
-            })
-            .await
-            .unwrap()
-        };
-
-        let expected: Vec<(String, String)> = (0..rows)
-            .map(|index| (format!("s-{index:04}"), format!("title-{index:04}")))
-            .collect();
-        assert_eq!(
-            collated, expected,
-            "every planted row must carry the collated form of its OWN title, on both sides \
-             of the batch boundary and on both sides of the host boundary"
         );
     }
 
@@ -6116,18 +4649,16 @@ mod tests {
         // stamped `user_version = 5` while still carrying a later version's
         // `archived` or ordering columns would make the ladder replay the ADD
         // COLUMN over a column that is already there, which is the migration
-        // failing loudly at a state no real database can be in. The version-11
-        // indexes go first: SQLite refuses to drop a column an index carries.
+        // failing loudly at a state no real database can be in. (Version 12
+        // already dropped the version-11 ordering columns, so only the
+        // version-10 flag is left to remove.)
         {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "DROP TABLE device_sessions;
                  DROP TABLE web_token;
                  DROP TABLE remembered_profiles;
-                 DROP INDEX session_cache_by_host_activity_order;
-                 DROP INDEX session_cache_by_host_title_order;
-                 ALTER TABLE session_cache DROP COLUMN activity_at;
-                 ALTER TABLE session_cache DROP COLUMN title_sort;
+                 ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id    INTEGER PRIMARY KEY
@@ -6181,10 +4712,11 @@ mod tests {
             store.add_ssh_host("v11@host", None, None).await.unwrap()
         };
         {
-            // Down to the version-11 shape: the same columns plus the
-            // identity column version 12 removes. Only this table moves —
-            // the 11 -> 12 rung touches nothing else, so the rest of the
-            // database can stay at the current shape.
+            // Down to the version-11 shape everywhere a later rung looks:
+            // the identity column version 12 removes, the two ordering
+            // columns version 13 drops (they must EXIST for the drop to
+            // succeed), and the absence of what versions 13 and 14 add
+            // (`hosts.cache_truncated`, the `preferences` table).
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "DROP TABLE remembered_profiles;
@@ -6198,6 +4730,12 @@ mod tests {
                      source_creation_seq INTEGER,
                      CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
                  ) STRICT;
+                 ALTER TABLE session_cache ADD COLUMN activity_at INTEGER;
+                 ALTER TABLE session_cache ADD COLUMN title_sort TEXT;
+                 ALTER TABLE hosts DROP COLUMN cache_truncated;
+                 -- IF EXISTS: the preferences table only exists one stack
+                 -- level up; this fixture runs at both.
+                 DROP TABLE IF EXISTS preferences;
                  PRAGMA user_version = 11;",
             )
             .expect("downgrade the table");
@@ -6253,15 +4791,11 @@ mod tests {
             // The session cache goes back with it: a fixture stamped at
             // version 7 that still carried a later version's `archived` or
             // ordering columns would replay the ADD COLUMN over an existing
-            // one and fail the open, on a state no real database reaches. The
-            // indexes come off first — SQLite refuses to drop an indexed
-            // column.
+            // one and fail the open, on a state no real database reaches.
+            // (Version 12 already dropped the version-11 ordering columns.)
             conn.execute_batch(
                 "DROP TABLE remembered_profiles;
-                 DROP INDEX session_cache_by_host_activity_order;
-                 DROP INDEX session_cache_by_host_title_order;
-                 ALTER TABLE session_cache DROP COLUMN activity_at;
-                 ALTER TABLE session_cache DROP COLUMN title_sort;
+                 ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
@@ -6306,6 +4840,7 @@ mod tests {
                     1,
                     "older-surviving-profile",
                 )],
+                false,
             )
             .await
             .unwrap();
@@ -6949,7 +5484,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .replace_host_sessions(host, "identity-full", vec![session("s1", 100)])
+            .replace_host_sessions(host, "identity-full", vec![session("s1", 100)], false)
             .await
             .unwrap();
 
@@ -7077,7 +5612,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "cascade@host", "cascade-identity").await;
         store
-            .replace_host_sessions(host, "cascade-identity", vec![session("s1", 100)])
+            .replace_host_sessions(host, "cascade-identity", vec![session("s1", 100)], false)
             .await
             .expect("seed cache");
         assert_eq!(store.cached_sessions(host).await.unwrap().len(), 1);
@@ -7156,7 +5691,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stable@host", "identity-x").await;
         store
-            .replace_host_sessions(host, "identity-x", vec![session("s1", 100)])
+            .replace_host_sessions(host, "identity-x", vec![session("s1", 100)], false)
             .await
             .unwrap();
 
@@ -7185,7 +5720,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "mismatch@host", "identity-old").await;
         store
-            .replace_host_sessions(host, "identity-old", vec![session("s1", 100)])
+            .replace_host_sessions(host, "identity-old", vec![session("s1", 100)], false)
             .await
             .unwrap();
 
@@ -7294,7 +5829,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let mismatched = host_with_identity(&store, "mismatched@host", "identity-old").await;
         store
-            .replace_host_sessions(mismatched, "identity-old", vec![session("kept", 100)])
+            .replace_host_sessions(
+                mismatched,
+                "identity-old",
+                vec![session("kept", 100)],
+                false,
+            )
             .await
             .unwrap();
         let rival = host_with_identity(&store, "rival@host", "identity-reinstalled").await;
@@ -7423,11 +5963,11 @@ mod tests {
         let host = host_with_identity(&store, "adopt@host", "identity-old").await;
         let other = host_with_identity(&store, "other@host", "other-identity").await;
         store
-            .replace_host_sessions(host, "identity-old", vec![session("s1", 100)])
+            .replace_host_sessions(host, "identity-old", vec![session("s1", 100)], false)
             .await
             .unwrap();
         store
-            .replace_host_sessions(other, "other-identity", vec![session("s2", 200)])
+            .replace_host_sessions(other, "other-identity", vec![session("s2", 200)], false)
             .await
             .unwrap();
 
@@ -7475,7 +6015,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stale-adopt@host", "identity-x").await;
         store
-            .replace_host_sessions(host, "identity-x", vec![session("s1", 100)])
+            .replace_host_sessions(host, "identity-x", vec![session("s1", 100)], false)
             .await
             .unwrap();
 
@@ -7529,7 +6069,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let live = host_with_identity(&store, "live3@host", "live-identity").await;
         store
-            .replace_host_sessions(live, "live-identity", vec![session("s1", 100)])
+            .replace_host_sessions(live, "live-identity", vec![session("s1", 100)], false)
             .await
             .unwrap();
         let ghost = store.add_ssh_host("ghost3@host", None, None).await.unwrap();
@@ -7596,7 +6136,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "atomic@host", "identity-before").await;
         store
-            .replace_host_sessions(host, "identity-before", vec![session("s1", 100)])
+            .replace_host_sessions(host, "identity-before", vec![session("s1", 100)], false)
             .await
             .unwrap();
 
@@ -7663,6 +6203,7 @@ mod tests {
                 host,
                 "rollback-identity",
                 vec![session("old-1", 100), session("old-2", 200)],
+                false,
             )
             .await
             .expect("seed the cache");
@@ -7673,7 +6214,7 @@ mod tests {
             session("dup", 500), // collides with the row just inserted above
         ];
         store
-            .replace_host_sessions(host, "rollback-identity", poisoned)
+            .replace_host_sessions(host, "rollback-identity", poisoned, false)
             .await
             .expect_err("a duplicate id within one batch must fail the whole replace");
 
@@ -7706,7 +6247,7 @@ mod tests {
 
         for (label, entries) in [("empty", vec![]), ("non-empty", vec![session("s1", 100)])] {
             let err = store
-                .replace_host_sessions(ghost, "any-identity", entries)
+                .replace_host_sessions(ghost, "any-identity", entries, false)
                 .await
                 .unwrap_err();
             assert!(
@@ -7731,7 +6272,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stale-refresh@host", "identity-before").await;
         store
-            .replace_host_sessions(host, "identity-before", vec![session("pre-adopt", 100)])
+            .replace_host_sessions(
+                host,
+                "identity-before",
+                vec![session("pre-adopt", 100)],
+                false,
+            )
             .await
             .unwrap();
         store
@@ -7744,14 +6290,24 @@ mod tests {
             .await
             .expect("adopt");
         store
-            .replace_host_sessions(host, "identity-after", vec![session("post-adopt", 200)])
+            .replace_host_sessions(
+                host,
+                "identity-after",
+                vec![session("post-adopt", 200)],
+                false,
+            )
             .await
             .expect("a fresh refresh under the NEW identity must succeed");
 
         // The delayed refresh: still carrying the identity the connection
         // observed BEFORE the adoption, arriving after the fact.
         let err = store
-            .replace_host_sessions(host, "identity-before", vec![session("delayed", 300)])
+            .replace_host_sessions(
+                host,
+                "identity-before",
+                vec![session("delayed", 300)],
+                false,
+            )
             .await
             .expect_err("a refresh under a superseded identity must be refused");
         assert!(
@@ -7795,6 +6351,7 @@ mod tests {
                 host,
                 "order-identity",
                 vec![session("first", 100), session("second", 200)],
+                false,
             )
             .await
             .unwrap();
@@ -7836,14 +6393,14 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "overlap@host", "overlap-identity").await;
         store
-            .replace_host_sessions(host, "overlap-identity", vec![session("s1", 100)])
+            .replace_host_sessions(host, "overlap-identity", vec![session("s1", 100)], false)
             .await
             .unwrap();
 
         let mut newer = session("s1", 100);
         newer.title = "renamed".to_string();
         store
-            .replace_host_sessions(host, "overlap-identity", vec![newer])
+            .replace_host_sessions(host, "overlap-identity", vec![newer], false)
             .await
             .unwrap();
 
@@ -7871,6 +6428,7 @@ mod tests {
                 host,
                 "shrink-identity",
                 vec![session("a", 100), session("b", 200), session("c", 300)],
+                false,
             )
             .await
             .unwrap();
@@ -7883,7 +6441,7 @@ mod tests {
         );
 
         store
-            .replace_host_sessions(host, "shrink-identity", vec![session("b", 200)])
+            .replace_host_sessions(host, "shrink-identity", vec![session("b", 200)], false)
             .await
             .unwrap();
         assert_eq!(
@@ -7893,7 +6451,7 @@ mod tests {
         );
 
         store
-            .replace_host_sessions(host, "shrink-identity", vec![])
+            .replace_host_sessions(host, "shrink-identity", vec![], false)
             .await
             .unwrap();
         assert_eq!(
@@ -7909,30 +6467,28 @@ mod tests {
     /// must tie-break on `session_id` ASCENDING — pinned by inserting them
     /// in REVERSE id order so an implementation that accidentally preserved
     /// insertion order, instead of sorting on the id column, would be
-    /// caught. Checked for both the per-host read and the cross-host merge,
-    /// since each has its own index ([`apply_schema`]'s
-    /// `session_cache_by_host_order` and `session_cache_order`) and either
-    /// could independently get the tiebreak wrong.
+    /// caught.
+    ///
+    /// Scoped to the per-host read: cross-host merge order is
+    /// `crate::aggregate`'s concern now (the list is sorted in memory from
+    /// whatever [`HelmStore::cached_rows`] hands back), so it has its own
+    /// coverage there rather than pinned a second time against this store.
     #[tokio::test]
     async fn equal_created_at_ties_break_ascending_by_session_id() {
         let (_dir, store) = fresh_store().await;
         let a = host_with_identity(&store, "tie-a@host", "tie-a-identity").await;
-        let b = host_with_identity(&store, "tie-b@host", "tie-b-identity").await;
 
-        // Reverse-id insertion order on both hosts: if either read path
-        // fell back to insertion/rowid order instead of sorting by
-        // session_id, this would surface as "c", "b", "a" instead of the
-        // expected ascending order.
+        // Reverse-id insertion order: if the read path fell back to
+        // insertion/rowid order instead of sorting by session_id, this
+        // would surface as "c", "b", "a" instead of the expected ascending
+        // order.
         store
             .replace_host_sessions(
                 a,
                 "tie-a-identity",
                 vec![session("c", 100), session("b", 100), session("a", 100)],
+                false,
             )
-            .await
-            .unwrap();
-        store
-            .replace_host_sessions(b, "tie-b-identity", vec![session("z", 100)])
             .await
             .unwrap();
 
@@ -7940,566 +6496,6 @@ mod tests {
             cached_ids(&store, a).await,
             vec!["a", "b", "c"],
             "per-host read must tie-break equal created_at ascending by session_id"
-        );
-
-        let all = walk_cached(&store, &all_host_ids(&store).await).await;
-        let all_ids: Vec<&str> = all.iter().map(|c| c.info.id.as_str()).collect();
-        assert_eq!(
-            all_ids,
-            vec!["a", "b", "c", "z"],
-            "the cross-host merge must apply the same tiebreak GLOBALLY, not just \
-             within each host's own rows"
-        );
-    }
-
-    /// Each of the three orders walks the merged cache in exactly the
-    /// sequence [`ListSort::position`] defines, across hosts and across page
-    /// boundaries.
-    ///
-    /// This is the agreement the whole paging arrangement rests on. SQLite
-    /// sorts the persisted page and `crate::aggregate` merges in-memory rows
-    /// into it by the Rust comparison, so the two spellings of one order have
-    /// to be the same order — and the resume predicate is a THIRD spelling of
-    /// it, which a walk with a tiny page size is what exercises. A
-    /// disagreement between any of them produces a page that is silently
-    /// missing or repeating rows rather than an error.
-    ///
-    /// The fixture is built so the three orders are three DIFFERENT
-    /// sequences (an order that quietly fell back to `created` would
-    /// otherwise pass), and so every leading component TIES for at least one
-    /// pair — which is what puts the shared creation-order tail under test
-    /// rather than merely present.
-    #[tokio::test]
-    async fn every_order_walks_the_sequence_its_rust_key_defines() {
-        let (_dir, store) = fresh_store().await;
-        let alpha = host_with_identity(&store, "alpha@host", "alpha-identity").await;
-        let beta = host_with_identity(&store, "beta@host", "beta-identity").await;
-
-        // "Ärger" was created most recently and has been quiet since;
-        // "Alpha" and "alpha" tie on both activity and folded title, so only
-        // the tail separates them; "zeta" carries the legacy 0 stamp, so its
-        // effective activity is its own creation time.
-        let alpha_rows = vec![
-            ordered_session("a1", 400, 100, "Ärger"),
-            ordered_session("a2", 300, 900, "Alpha"),
-        ];
-        let beta_rows = vec![
-            ordered_session("b1", 200, 900, "alpha"),
-            ordered_session("b2", 100, 0, "zeta"),
-        ];
-        store
-            .replace_host_sessions(alpha, "alpha-identity", alpha_rows.clone())
-            .await
-            .unwrap();
-        store
-            .replace_host_sessions(beta, "beta-identity", beta_rows.clone())
-            .await
-            .unwrap();
-
-        let hosts = all_host_ids(&store).await;
-        for (sort, expected) in [
-            (ListSort::Created, vec!["a1", "a2", "b1", "b2"]),
-            // Equal activity falls through to creation time descending, and
-            // the two quiet sessions sort by the same tail even though one of
-            // them only has an effective stamp at all because of the 0-means-
-            // unknown rule.
-            (ListSort::Activity, vec!["a2", "b1", "a1", "b2"]),
-            // Case-insensitive, and "Ärger" lands LAST — after "zeta",
-            // because its first code point is above every ASCII letter.
-            // That is the ordinal, locale-free collation this helm
-            // documents, stated here as the sequence a user would see.
-            (ListSort::Title, vec!["a2", "b1", "b2", "a1"]),
-        ] {
-            assert_eq!(
-                walk_sorted(&store, &hosts, sort).await,
-                expected,
-                "{sort:?} must be served in the sequence it names, page boundaries included"
-            );
-
-            // The same sequence, derived from the Rust keys alone. SQL agrees
-            // with `position` or one of the two is wrong, and this is the
-            // assertion that says which.
-            let mut keys: Vec<CacheKey> = alpha_rows
-                .iter()
-                .map(|info| CacheKey::of(info, alpha))
-                .chain(beta_rows.iter().map(|info| CacheKey::of(info, beta)))
-                .collect();
-            keys.sort_by(|left, right| sort.position(left).cmp(&sort.position(right)));
-            let by_key: Vec<&str> = keys.iter().map(|key| key.session_id.as_str()).collect();
-            assert_eq!(
-                by_key, expected,
-                "{sort:?}'s Rust key must define the same sequence the SQL scan produced"
-            );
-        }
-    }
-
-    /// Every page query is answered from an ORDERING INDEX, with no sort
-    /// step, at every host count and under every order.
-    ///
-    /// Spec: `EXPLAIN QUERY PLAN` over the SQL [`page_sql`] builds contains no
-    /// `USE TEMP B-TREE FOR ORDER BY`, for one host, two hosts and the whole
-    /// fleet, under all three orders, with and without a resume clause, in
-    /// both archive modes, and for a counting scan as well as a paging one.
-    ///
-    /// This is a PLAN assertion rather than a behavioral one because the bug
-    /// it stands against is invisible in output. An `IN`-list of more than one
-    /// host made SQLite drop the ordering index and sort the entire cache into
-    /// a temp b-tree to answer one twenty-row page — under this store's single
-    /// mutex, so every other reader waited on it — and the rows it returned
-    /// were perfectly correct. Nothing but the plan can tell the two apart,
-    /// and nothing but a test that reads the plan can keep a later "simplify
-    /// the scope back to one query" from reintroducing it.
-    ///
-    /// It also fixes the history: `created` had this problem from the day the
-    /// merged list existed, long before the other two orders, and the
-    /// single-host case never did — which is exactly why nobody noticed.
-    #[tokio::test]
-    async fn a_fleet_page_is_index_ordered_under_every_sort() {
-        let (_dir, store) = fresh_store().await;
-        let alpha = host_with_identity(&store, "alpha@host", "alpha-identity").await;
-        let beta = host_with_identity(&store, "beta@host", "beta-identity").await;
-        for (host, identity, id) in [
-            (alpha, "alpha-identity", "a1"),
-            (beta, "beta-identity", "b1"),
-        ] {
-            store
-                .replace_host_sessions(
-                    host,
-                    identity,
-                    vec![ordered_session(id, 100, 200, "a title")],
-                )
-                .await
-                .unwrap();
-        }
-        // Three hosts including the reserved local row, so "the whole fleet"
-        // is a genuinely different arity from the two-host case.
-        let fleet = all_host_ids(&store).await.len();
-        assert_eq!(fleet, 3, "the fixture wants a fleet larger than two");
-
-        let conn = Arc::clone(&store.conn);
-        let offenders: Vec<String> = tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
-            let mut offenders = Vec::new();
-            for sort in [ListSort::Created, ListSort::Activity, ListSort::Title] {
-                for hosts in [1, 2, fleet] {
-                    for after in [false, true] {
-                        for count in [false, true] {
-                            for archived in [false, true] {
-                                let filter = SessionFilter::default().include_archived(archived);
-                                let sql = page_sql(hosts, after, 20, &filter, sort, count);
-                                // The plan is read back rather than
-                                // pattern-matched on the SQL: what is under
-                                // test is SQLite's decision, not this
-                                // module's text.
-                                let mut stmt = conn
-                                    .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-                                    .expect("the production SQL prepares");
-                                // Bound the way the scan binds them
-                                // (`?1..=?5` the resume key, `?6` onward the
-                                // hosts) rather than left unbound, so nothing
-                                // about the plan can hinge on a parameter
-                                // SQLite was never given.
-                                let binds: Vec<rusqlite::types::Value> =
-                                    [
-                                        rusqlite::types::Value::Integer(0),
-                                        rusqlite::types::Value::Text(String::new()),
-                                        rusqlite::types::Value::Integer(0),
-                                        rusqlite::types::Value::Integer(0),
-                                        rusqlite::types::Value::Text(String::new()),
-                                    ]
-                                    .into_iter()
-                                    .chain((0..hosts).map(|host| {
-                                        rusqlite::types::Value::Integer(host as i64 + 1)
-                                    }))
-                                    .collect();
-                                let plan: Vec<String> = stmt
-                                    .query_map(rusqlite::params_from_iter(binds), |r| {
-                                        r.get::<_, String>(3)
-                                    })
-                                    .expect("explaining the plan")
-                                    .collect::<Result<_, _>>()
-                                    .expect("reading the plan");
-                                if plan.iter().any(|step| step.contains("TEMP B-TREE")) {
-                                    offenders.push(format!(
-                                        "{sort:?} hosts={hosts} after={after} count={count} \
-                                         archived={archived}: {}",
-                                        plan.join(" | ")
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            offenders
-        })
-        .await
-        .unwrap();
-
-        assert!(
-            offenders.is_empty(),
-            "a page must never sort the cache to answer its ORDER BY:\n{}",
-            offenders.join("\n")
-        );
-    }
-
-    /// Every order's page walk resumes correctly when the LEADING key ties all
-    /// the way down to the session id.
-    ///
-    /// Spec: with rows sharing an activity stamp and a folded title, and two of
-    /// them sharing a creation time as well, a one-row-per-page walk visits
-    /// each row exactly once in the order the tail defines.
-    ///
-    /// The tail is the whole reason it is there, and a tie is the only thing
-    /// that exercises it. A resume predicate that stopped at the leading
-    /// component would compare "activity 500" against "activity 500" and
-    /// resolve neither `>` nor `<`, so a one-row page would either serve the
-    /// same row forever or skip every row it tied with — and both look like a
-    /// working list from any single page. Page size one is what puts the
-    /// predicate at every boundary rather than at one of them.
-    ///
-    /// The final component, the host id, is deliberately NOT exercised here:
-    /// `session_cache_one_owner` makes two hosts claiming one session id
-    /// impossible to store, so that tie only exists in memory and is pinned on
-    /// the Rust keys in `crate::aggregate`'s own tests.
-    #[tokio::test]
-    async fn a_one_row_walk_resumes_through_ties_under_every_order() {
-        let (_dir, store) = fresh_store().await;
-        let alpha = host_with_identity(&store, "alpha@host", "alpha-identity").await;
-        let beta = host_with_identity(&store, "beta@host", "beta-identity").await;
-        // One activity stamp and one folded title across all three, so the
-        // sequence is decided entirely by the tail — and two of them share a
-        // creation time, so the tail itself has to fall through to the id.
-        store
-            .replace_host_sessions(
-                alpha,
-                "alpha-identity",
-                vec![
-                    ordered_session("t3", 200, 500, "Same"),
-                    ordered_session("t1", 100, 500, "same"),
-                ],
-            )
-            .await
-            .unwrap();
-        store
-            .replace_host_sessions(
-                beta,
-                "beta-identity",
-                vec![ordered_session("t2", 100, 500, "SAME")],
-            )
-            .await
-            .unwrap();
-
-        let hosts = all_host_ids(&store).await;
-        for sort in [ListSort::Created, ListSort::Activity, ListSort::Title] {
-            let mut walked: Vec<String> = Vec::new();
-            let mut after: Option<CacheKey> = None;
-            let mut pages = 0;
-            loop {
-                let page = store
-                    .cached_page(
-                        hosts.clone(),
-                        after.clone(),
-                        1,
-                        usize::MAX,
-                        SessionFilter::default(),
-                        sort,
-                    )
-                    .await
-                    .expect("a one-row page");
-                pages += 1;
-                assert!(pages <= 8, "{sort:?} did not terminate; a tie is repeating");
-                let Some(last) = page.rows.last() else { break };
-                after = Some(last.key.clone());
-                walked.extend(page.rows.into_iter().map(|row| row.key.session_id));
-                if !page.more {
-                    break;
-                }
-            }
-            assert_eq!(
-                walked,
-                vec!["t3", "t1", "t2"],
-                "{sort:?} must break its tie on creation time, then on the session id"
-            );
-        }
-    }
-
-    /// A COUNTING page that also resumes reports the whole scope's matches
-    /// while returning only the rows after the cursor — under every order, with
-    /// the leading key tied.
-    ///
-    /// Spec: `MatchingCount::Compute` on every page of a filtered one-row walk
-    /// yields the same `matching` each time (the count is of the fleet, not of
-    /// the page) and a page holding exactly the next matching row.
-    ///
-    /// This is the one path where the resume test is Rust rather than SQL: a
-    /// counting scan cannot carry a `WHERE` resume clause, because it has to
-    /// see the rows BEFORE the cursor in order to count them, so it walks the
-    /// whole scope and applies [`follows`] per row. That makes [`follows`] a
-    /// third spelling of each order alongside the `ORDER BY` and the SQL
-    /// disjunction, and a tied leading key is exactly where a spelling that
-    /// compares one component too few stops agreeing with the other two.
-    #[tokio::test]
-    async fn a_counting_walk_resumes_by_the_rust_key_under_every_order() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "count@host", "count-identity").await;
-        let kept = |id: &str, created_at: i64, title: &str| SessionInfo {
-            cwd: "/keep".to_string(),
-            ..ordered_session(id, created_at, 900, title)
-        };
-        store
-            .replace_host_sessions(
-                host,
-                "count-identity",
-                vec![
-                    kept("k1", 400, "Alpha"),
-                    // Non-matching, and placed BETWEEN two matching rows under
-                    // both orders: a counting walk has to step over it without
-                    // counting it and without spending a page slot on it.
-                    SessionInfo {
-                        cwd: "/other".to_string(),
-                        ..ordered_session("skip", 350, 900, "alpha")
-                    },
-                    kept("k2", 300, "alpha"),
-                    kept("k3", 200, "beta"),
-                ],
-            )
-            .await
-            .unwrap();
-
-        let filter = SessionFilter::default().directory("/keep");
-        for sort in [ListSort::Activity, ListSort::Title] {
-            let mut walked: Vec<String> = Vec::new();
-            let mut after: Option<CacheKey> = None;
-            for _ in 0..8 {
-                let read = store
-                    .merged_page(
-                        vec![host],
-                        after.clone(),
-                        1,
-                        usize::MAX,
-                        filter.clone(),
-                        sort,
-                        MatchingCount::Compute,
-                    )
-                    .await
-                    .expect("a counting page");
-                assert_eq!(
-                    read.matching,
-                    Some(3),
-                    "{sort:?} must report the SCOPE's matches on every page, not the page's"
-                );
-                walked.extend(read.page.rows.iter().map(|row| row.key.session_id.clone()));
-                let Some(last) = read.page.rows.last() else {
-                    break;
-                };
-                after = Some(last.key.clone());
-                if !read.page.more {
-                    break;
-                }
-            }
-            assert_eq!(
-                walked,
-                vec!["k1", "k2", "k3"],
-                "{sort:?}'s counting walk must visit each matching row once, in its own order"
-            );
-        }
-    }
-
-    /// An ARCHIVED row sitting on a page boundary changes neither the sequence
-    /// nor the termination of a walk, and the archive switch moves it into both
-    /// together.
-    ///
-    /// Spec: at one row per page, under the activity and title orders, the
-    /// default view walks straight past an archived row that sorts between two
-    /// active ones, and the widened view walks through it — with `total`
-    /// following the switch and the walk terminating either way.
-    ///
-    /// The archive predicate is the ONE filter dimension applied in SQL, and it
-    /// is applied to the same scan that produces the resume key. A row the
-    /// clause removes must therefore never become a frontier or a cursor
-    /// position — if it did, the next page would resume from a row that view
-    /// cannot see and the rows after it would be unreachable. One row per page
-    /// is what forces the removed row to be exactly where the boundary falls.
-    #[tokio::test]
-    async fn an_archived_row_on_a_page_boundary_changes_neither_walk() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "arch@host", "arch-identity").await;
-        store
-            .replace_host_sessions(
-                host,
-                "arch-identity",
-                vec![
-                    ordered_session("first", 300, 900, "aaa"),
-                    // Between the other two under BOTH orders.
-                    SessionInfo {
-                        archived: true,
-                        ..ordered_session("middle", 200, 600, "mmm")
-                    },
-                    ordered_session("last", 100, 300, "zzz"),
-                ],
-            )
-            .await
-            .unwrap();
-
-        for (include_archived, expected, total) in [
-            (false, vec!["first", "last"], 2u64),
-            (true, vec!["first", "middle", "last"], 3),
-        ] {
-            for sort in [ListSort::Activity, ListSort::Title] {
-                let filter = SessionFilter::default().include_archived(include_archived);
-                let mut walked: Vec<String> = Vec::new();
-                let mut after: Option<CacheKey> = None;
-                let mut terminated = false;
-                for _ in 0..8 {
-                    let read = store
-                        .merged_page(
-                            vec![host],
-                            after.clone(),
-                            1,
-                            usize::MAX,
-                            filter.clone(),
-                            sort,
-                            MatchingCount::Skip,
-                        )
-                        .await
-                        .expect("a one-row page");
-                    assert_eq!(
-                        read.total, total,
-                        "{sort:?} archived={include_archived}: the total follows the switch"
-                    );
-                    walked.extend(read.page.rows.iter().map(|row| row.key.session_id.clone()));
-                    let Some(last) = read.page.rows.last() else {
-                        terminated = true;
-                        break;
-                    };
-                    after = Some(last.key.clone());
-                    if !read.page.more {
-                        terminated = true;
-                        break;
-                    }
-                }
-                assert!(
-                    terminated,
-                    "{sort:?} archived={include_archived}: the walk must end on its own"
-                );
-                assert_eq!(
-                    walked, expected,
-                    "{sort:?} archived={include_archived}: the archived row is skipped whole or \
-                     walked through, never half of either"
-                );
-            }
-        }
-    }
-
-    /// A create, rename or restart reply refreshes BOTH derived ordering
-    /// columns the moment it lands, on the insert and on the update alike.
-    ///
-    /// Spec: after [`HelmStore::remember_session`] seeds a row, that row is
-    /// already in its right place under the activity and title orders; after a
-    /// later reply renames it and carries a newer stamp, it has MOVED in both.
-    ///
-    /// Without this the two new orders would be surfaces that only settle at
-    /// the owning host's next refresh — a session renamed in the UI would keep
-    /// its old place in a title-sorted list for as long as the refresh interval,
-    /// which reads as the rename having failed. The wholesale refresh path has
-    /// its own coverage; this is the single-row writer, which is a separate
-    /// statement with its own column list and can drift from it.
-    #[tokio::test]
-    async fn remember_session_refreshes_both_ordering_columns_at_once() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "seed@host", "seed-identity").await;
-        // Two anchors straddling where the seeded row lands, so an unwritten
-        // column (activity 0, the empty title) would put it at an end of the
-        // order rather than in the middle — visible in the sequence rather
-        // than only in the column.
-        store
-            .replace_host_sessions(
-                host,
-                "seed-identity",
-                vec![
-                    ordered_session("busy", 250, 1_000, "m-busy"),
-                    ordered_session("quiet", 300, 200, "m-quiet"),
-                ],
-            )
-            .await
-            .unwrap();
-
-        let hosts = all_host_ids(&store).await;
-        assert!(
-            store
-                .remember_session(
-                    host,
-                    "seed-identity",
-                    &ordered_session("seeded", 100, 600, "zzz")
-                )
-                .await
-                .expect("seed the row"),
-            "a row that was not there is a change"
-        );
-        assert_eq!(
-            walk_sorted(&store, &hosts, ListSort::Activity).await,
-            vec!["busy", "seeded", "quiet"],
-            "the seeded row is placed by its own stamp immediately, not at the epoch"
-        );
-        assert_eq!(
-            walk_sorted(&store, &hosts, ListSort::Title).await,
-            vec!["busy", "quiet", "seeded"],
-            "and by its own collated title, not under the empty one"
-        );
-
-        // The UPDATE path: a rename plus a newer observation on the row that
-        // is already there. The stamp only ever moves forward
-        // (`manager::merge_cached_session`), so this pushes it past both
-        // anchors rather than trying to pull it back.
-        assert!(
-            store
-                .remember_session(
-                    host,
-                    "seed-identity",
-                    &ordered_session("seeded", 100, 1_500, "Aaa")
-                )
-                .await
-                .expect("update the row"),
-            "a rename with a newer stamp is a change"
-        );
-        assert_eq!(
-            walk_sorted(&store, &hosts, ListSort::Activity).await,
-            vec!["seeded", "busy", "quiet"],
-            "the update rewrote the activity column rather than leaving the seed's value"
-        );
-        assert_eq!(
-            walk_sorted(&store, &hosts, ListSort::Title).await,
-            vec!["seeded", "busy", "quiet"],
-            "and rewrote the collated title, so a rename reorders a title-sorted list at once"
-        );
-    }
-
-    /// `cached_sessions_all` merges across hosts in the same wire order —
-    /// the cross-host counterpart to
-    /// `read_order_follows_the_extracted_columns_not_the_json`, and the
-    /// first exercise of [`CachedSession`] tagging each row with its host.
-    #[tokio::test]
-    async fn cached_sessions_all_merges_hosts_in_wire_order() {
-        let (_dir, store) = fresh_store().await;
-        let a = host_with_identity(&store, "a@host", "a-identity").await;
-        let b = host_with_identity(&store, "b@host", "b-identity").await;
-        store
-            .replace_host_sessions(a, "a-identity", vec![session("older", 100)])
-            .await
-            .unwrap();
-        store
-            .replace_host_sessions(b, "b-identity", vec![session("newer", 200)])
-            .await
-            .unwrap();
-
-        let all = walk_cached(&store, &all_host_ids(&store).await).await;
-        let seen: Vec<(HostId, &str)> = all.iter().map(|c| (c.host, c.info.id.as_str())).collect();
-        assert_eq!(
-            seen,
-            vec![(b, "newer"), (a, "older")],
-            "cross-host order must be created_at descending regardless of which host \
-             each row belongs to"
         );
     }
 
@@ -8529,6 +6525,7 @@ mod tests {
                     session("good-1", 100),
                     session("cached-sessions-poisoned", 200),
                 ],
+                false,
             )
             .await
             .unwrap();
@@ -8577,11 +6574,11 @@ mod tests {
     /// The cross-host half of item 2's skip-and-log posture: the same
     /// poisoned-blob treatment as
     /// `cached_sessions_skips_a_poisoned_blob_and_serves_the_rest`, but
-    /// through `cached_sessions_all`'s merged read, with an entirely
+    /// through [`HelmStore::cached_rows`]'s multi-host read, with an entirely
     /// healthy second host present to prove one host's corruption cannot
-    /// take down another host's rows in the shared cross-host list either.
+    /// take down another host's rows in the shared merged-list read either.
     #[tokio::test]
-    async fn cached_sessions_all_skips_a_poisoned_blob_and_serves_the_rest() {
+    async fn cached_rows_skips_a_poisoned_blob_and_serves_the_rest() {
         // Installed before anything is logged; read back at the end.
         let _capture = crate::test_capture::install();
         let (_dir, store) = fresh_store().await;
@@ -8593,7 +6590,8 @@ mod tests {
             .replace_host_sessions(
                 poisoned_host,
                 "poison-all-identity",
-                vec![session("cached-sessions-all-poisoned", 100)],
+                vec![session("cached-rows-poisoned", 100)],
+                false,
             )
             .await
             .unwrap();
@@ -8602,6 +6600,7 @@ mod tests {
                 healthy_host,
                 "healthy-all-identity",
                 vec![session("healthy-1", 200)],
+                false,
             )
             .await
             .unwrap();
@@ -8612,7 +6611,7 @@ mod tests {
                     .unwrap()
                     .execute(
                         "UPDATE session_cache SET info_json = 'not valid json' \
-                         WHERE session_id = 'cached-sessions-all-poisoned'",
+                         WHERE session_id = 'cached-rows-poisoned'",
                         [],
                     )
                     .unwrap();
@@ -8621,198 +6620,30 @@ mod tests {
             .unwrap();
         }
 
-        let all = walk_cached(&store, &all_host_ids(&store).await).await;
-        let ids: Vec<&str> = all.iter().map(|c| c.info.id.as_str()).collect();
+        let rows = store
+            .cached_rows(&[poisoned_host, healthy_host])
+            .await
+            .expect("cached rows");
+        let decoded: Vec<&str> = rows.iter().map(|row| row.info.id.as_str()).collect();
         assert_eq!(
-            ids,
+            decoded,
             vec!["healthy-1"],
-            "the poisoned row must be skipped while the other host's row is still served"
+            "the poisoned row must be dropped while the other host's row is still served"
         );
 
         let events = skip_warnings();
         let hit = events
             .iter()
-            .find(|e| e.field("session_id") == Some("cached-sessions-all-poisoned"));
+            .find(|e| e.field("session_id") == Some("cached-rows-poisoned"));
         let hit = hit.expect(
             "the skipped row must be logged via tracing::warn! naming its session id, \
-             not just silently dropped from the returned Vec",
+             not just silently dropped from `info`",
         );
         assert_eq!(
             hit.field("host"),
             Some(poisoned_host.to_string().as_str()),
             "the warning must name the host the poisoned row belongs to"
         );
-    }
-
-    /// A page whose LAST scanned row is poisoned must still advance the
-    /// cursor past it — and a page where EVERY row is poisoned must too.
-    ///
-    /// This is the regression test for permanent, silent data loss, not a
-    /// tidiness check. When continuation was derived from decoded rows, a
-    /// poisoned row at a page boundary left the resume point before it
-    /// forever: the next page re-scanned the same row, skipped it again,
-    /// and every session after it in the whole fleet became unreachable
-    /// through the API. The fully-poisoned case is the same bug wearing a
-    /// more obvious costume — an empty page with no continuation, in the
-    /// middle of a list.
-    #[tokio::test]
-    async fn a_page_ending_in_a_poisoned_row_still_advances_past_it() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "poison@host", "poison-identity").await;
-        // Descending by created_at: newest first. The second and third are
-        // poisoned below, so a two-row page ends on a poisoned row and a
-        // later two-row page contains nothing BUT poisoned rows.
-        store
-            .replace_host_sessions(
-                host,
-                "poison-identity",
-                vec![
-                    session("good-1", 500),
-                    session("bad-1", 400),
-                    session("bad-2", 300),
-                    session("good-2", 200),
-                ],
-            )
-            .await
-            .expect("seed the cache");
-        for id in ["bad-1", "bad-2"] {
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || {
-                conn.lock()
-                    .unwrap()
-                    .execute(
-                        "UPDATE session_cache SET info_json = 'not valid json' \
-                         WHERE session_id = ?1",
-                        rusqlite::params![id],
-                    )
-                    .unwrap();
-            })
-            .await
-            .unwrap();
-        }
-
-        // Page one ends ON a poisoned row.
-        let first = store
-            .cached_page(
-                vec![host],
-                None,
-                2,
-                usize::MAX,
-                SessionFilter::default(),
-                ListSort::Created,
-            )
-            .await
-            .expect("first page");
-        assert_eq!(
-            first.rows.len(),
-            2,
-            "the limit counts rows SCANNED, so a skipped row still consumes one"
-        );
-        assert_eq!(first.rows[1].key.session_id, "bad-1");
-        assert!(
-            first.rows[1].info.is_none(),
-            "the poisoned row comes back with its key and no payload"
-        );
-        assert!(first.more, "two of four remain");
-
-        // Page two is ENTIRELY poisoned — it must still advance.
-        let second = store
-            .cached_page(
-                vec![host],
-                Some(first.rows[1].key.clone()),
-                1,
-                usize::MAX,
-                SessionFilter::default(),
-                ListSort::Created,
-            )
-            .await
-            .expect("second page");
-        assert_eq!(second.rows.len(), 1);
-        assert_eq!(second.rows[0].key.session_id, "bad-2");
-        assert!(second.rows[0].info.is_none());
-        assert!(second.more);
-
-        // And the walk reaches the far side, which is the whole point.
-        let third = store
-            .cached_page(
-                vec![host],
-                Some(second.rows[0].key.clone()),
-                2,
-                usize::MAX,
-                SessionFilter::default(),
-                ListSort::Created,
-            )
-            .await
-            .expect("third page");
-        assert_eq!(
-            third
-                .rows
-                .iter()
-                .filter_map(|row| row.info.as_ref())
-                .map(|info| info.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["good-2"],
-            "the row after the poisoned run must be reachable"
-        );
-        assert!(!third.more, "and the order ends there");
-    }
-
-    /// The byte bound must stop the SCAN, not merely trim its result.
-    ///
-    /// The point is the decoding that never happens: a limit of five
-    /// thousand against fat blobs meant five thousand JSON parses before any
-    /// budget was consulted. A bound that only trimmed afterwards would
-    /// leave that cost exactly where it was.
-    #[tokio::test]
-    async fn the_byte_bound_stops_the_scan_and_still_makes_progress() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "fat@host", "fat-identity").await;
-        let fat = |id: &str, created_at: i64| {
-            let mut info = session(id, created_at);
-            info.title = "x".repeat(4096);
-            info
-        };
-        store
-            .replace_host_sessions(
-                host,
-                "fat-identity",
-                vec![fat("f1", 300), fat("f2", 200), fat("f3", 100)],
-            )
-            .await
-            .expect("seed the cache");
-
-        let page = store
-            .cached_page(
-                vec![host],
-                None,
-                10,
-                4_000,
-                SessionFilter::default(),
-                ListSort::Created,
-            )
-            .await
-            .expect("bounded page");
-        assert_eq!(
-            page.rows.len(),
-            1,
-            "the scan stops at the byte bound rather than decoding all ten it was allowed"
-        );
-        assert!(page.more, "and says so, so the walk continues");
-
-        // A single row larger than the whole budget must still be served,
-        // or the walk stalls on it forever.
-        let tiny = store
-            .cached_page(
-                vec![host],
-                None,
-                10,
-                1,
-                SessionFilter::default(),
-                ListSort::Created,
-            )
-            .await
-            .expect("degenerate budget");
-        assert_eq!(tiny.rows.len(), 1, "at least one row always makes progress");
     }
 
     // ---- Persistence ------------------------------------------------
@@ -8845,11 +6676,21 @@ mod tests {
                 .await
                 .unwrap();
             store
-                .replace_host_sessions(local_id, "local-identity", vec![session("local-1", 100)])
+                .replace_host_sessions(
+                    local_id,
+                    "local-identity",
+                    vec![session("local-1", 100)],
+                    false,
+                )
                 .await
                 .unwrap();
             store
-                .replace_host_sessions(ssh_id, "remote-identity", vec![session("remote-1", 200)])
+                .replace_host_sessions(
+                    ssh_id,
+                    "remote-identity",
+                    vec![session("remote-1", 200)],
+                    false,
+                )
                 .await
                 .unwrap();
             (local_id, ssh_id)
@@ -8904,7 +6745,7 @@ mod tests {
         let host = host_with_identity(&store, "user@host", "identity-1").await;
 
         let first = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
         assert!(
@@ -8913,7 +6754,7 @@ mod tests {
         );
 
         let repeat = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
         assert!(
@@ -8930,7 +6771,7 @@ mod tests {
             ..session("s-1", 100)
         };
         let changed = store
-            .replace_host_sessions(host, "identity-1", vec![flipped])
+            .replace_host_sessions(host, "identity-1", vec![flipped], false)
             .await
             .unwrap();
         assert!(changed.changed, "a status flip is a change");
@@ -8938,29 +6779,30 @@ mod tests {
         // And so is losing a session, which no per-row comparison of the
         // NEW list against itself would ever notice.
         let emptied = store
-            .replace_host_sessions(host, "identity-1", Vec::new())
+            .replace_host_sessions(host, "identity-1", Vec::new(), false)
             .await
             .unwrap();
         assert!(emptied.changed, "a session disappearing is a change");
     }
 
-    /// A rewrite that repairs the ORDERING COLUMN is a change, even though
-    /// the payload beside it is untouched.
+    /// A rewrite that repairs a drifted `created_at` COLUMN is a change, even
+    /// though the payload beside it is untouched.
     ///
-    /// `created_at` is a column of its own — the key every page, cursor and
-    /// merge is built on — extracted from the payload at write time. The two
-    /// can therefore disagree in a database this build did not write (a hand
-    /// edit, a downgrade, an older writer), and the rewrite that repairs the
-    /// disagreement MOVES the row in the merged order while leaving every
-    /// byte of its payload alone. Comparing payloads only would report that
-    /// as "nothing changed", and the feed would starve: the row would sit in
-    /// its new position with no client ever told to look again.
+    /// `created_at` is a column of its own, extracted from the payload at
+    /// write time, and it can therefore disagree with the payload's own copy
+    /// in a database this build did not write (a hand edit, a downgrade, an
+    /// older writer). [`HelmStore::cached_rows`]'s identity cross-check
+    /// treats that disagreement as poison — the drifted row is dropped from
+    /// every read until something rewrites the column back into agreement —
+    /// so comparing payloads only would report the repair as "nothing
+    /// changed" and the feed would starve: the row would stay missing with
+    /// no client ever told to look again.
     #[tokio::test]
     async fn a_repaired_ordering_column_counts_as_a_change() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "user@host", "identity-1").await;
         store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
 
@@ -8983,18 +6825,18 @@ mod tests {
         }
 
         let repaired = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
         assert!(
             repaired.changed,
-            "the row moved in the merged order, so clients must be told to look again"
+            "the row went from dropped to served, so clients must be told to look again"
         );
         // And the write that follows it, with nothing left to repair, is a
         // no-op again — so this is a comparison rather than a permanent
         // "changed" latch.
         let settled = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
         assert!(!settled.changed);
@@ -9030,28 +6872,16 @@ mod tests {
             ..session("s-1", 100)
         };
         let cached_stamp = async |store: &HelmStore| {
-            let read = store
-                .merged_page(
-                    vec![host],
-                    None,
-                    10,
-                    usize::MAX,
-                    SessionFilter::default(),
-                    ListSort::Created,
-                    MatchingCount::Skip,
-                )
+            let rows = store
+                .cached_rows(&[host])
                 .await
                 .expect("read the cache back");
-            read.page.rows[0]
-                .info
-                .as_ref()
-                .expect("the cached row decodes")
-                .last_activity_at
+            rows[0].info.last_activity_at
         };
 
         // A drain commits a fresh observation.
         store
-            .replace_host_sessions(host, "identity-1", vec![stamped(900)])
+            .replace_host_sessions(host, "identity-1", vec![stamped(900)], false)
             .await
             .expect("drain");
         assert_eq!(cached_stamp(&store).await, 900);
@@ -9308,24 +7138,20 @@ mod tests {
         ));
     }
 
-    /// A row the page refuses to SHOW must not be a row the count claims as
-    /// a MATCH — the two share one validation predicate, and this is what
-    /// that sharing buys.
+    /// A cached row that cannot be shown is DROPPED from the read — not
+    /// carried as a placeholder, not counted — and the drop is logged.
     ///
-    /// Without it the counts promise pages that cannot exist: "3 matching"
-    /// against a walk that can only ever display 2, with the third
-    /// permanently invisible and nothing to explain the gap. The two ways a
-    /// row fails are both staged, because they took different code paths
-    /// before they were unified: an undecodable payload, and one that
-    /// decodes but disagrees with the columns it is filed under.
-    ///
-    /// The FLEET total still counts both, deliberately — see
-    /// [`HelmStore::count_rows`]. A count of what is there and a count of
-    /// what matches are different questions, and hiding a corrupt row from
-    /// the first would make "showing 2 of 3" read as data loss rather than
-    /// as the one unshowable entry it is.
+    /// The two ways a row fails to decode are both staged, because they
+    /// took different code paths before this method unified them: an
+    /// undecodable payload, and one that decodes but names a different
+    /// session than the row it is filed under (poison wearing valid JSON).
+    /// Dropping rather than counting is the contract the merged list's
+    /// counts rest on: `total` and `matching` describe rows a client can
+    /// see, and a corrupt row is a warning in the log, not an entry in the
+    /// denominator (SPEC.md's Session list section).
     #[tokio::test]
-    async fn an_unshowable_row_is_never_counted_as_a_match() {
+    async fn a_row_that_cannot_be_shown_is_dropped_from_the_read_and_logged() {
+        let _capture = crate::test_capture::install();
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "poison@host", "poison-identity").await;
         store
@@ -9346,6 +7172,7 @@ mod tests {
                         ..session("mislabelled", 300)
                     },
                 ],
+                false,
             )
             .await
             .expect("seed the cache");
@@ -9379,285 +7206,52 @@ mod tests {
             .unwrap();
         }
 
-        let read = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().title("keeper"),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .expect("filtered read");
+        let rows = store.cached_rows(&[host]).await.expect("cached rows");
+        let ids: Vec<&str> = rows.iter().map(|row| row.info.id.as_str()).collect();
         assert_eq!(
-            read.matching,
-            Some(1),
-            "only the row a page can actually show counts as a match"
+            ids,
+            vec!["good-1"],
+            "only the row that actually decodes to itself is served; the other two are gone \
+             from the read, not present as holes"
         );
-        assert_eq!(
-            read.page
-                .rows
-                .iter()
-                .filter(|row| row.info.is_some())
-                .count(),
-            1,
-            "and the page shows exactly that one"
-        );
-        assert_eq!(
-            read.total, 3,
-            "while the fleet total counts every row, unshowable or not"
-        );
-    }
 
-    /// `total` is a count of the VIEW the request asked for: archived rows
-    /// are outside the default one and inside the widened one.
-    ///
-    /// This is the denominator half of "N matching of M sessions", and the
-    /// reason it is worth its own test is that the two numbers used to
-    /// disagree by construction — the ordinary list hides archived sessions
-    /// while the total counted them, so a fleet with two archived sessions
-    /// showed ten rows above "of 12" with nothing typed into any filter
-    /// (maintainer's verdict, 2026-08-22).
-    ///
-    /// The undecodable row is asserted in the same breath because the two
-    /// rules meet here and pull opposite ways: the archive flag REMOVES a row
-    /// from the default count, while an unreadable payload never does. Its
-    /// column says active (nothing could read a flag out of it), so it counts
-    /// in both views — which is what keeps a corrupt row visible as an
-    /// unshowable entry rather than as a session that quietly ceased to
-    /// exist.
-    #[tokio::test]
-    async fn the_total_counts_the_view_the_archive_switch_selects() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "archive@host", "archive-identity").await;
-        store
-            .replace_host_sessions(
-                host,
-                "archive-identity",
-                vec![
-                    SessionInfo {
-                        archived: true,
-                        ..session("archived-1", 300)
-                    },
-                    session("active-1", 200),
-                    session("poisoned", 100),
-                ],
-            )
-            .await
-            .expect("seed the cache");
-        {
-            // Poisoned AFTER the write, so the row was stored as active and
-            // its column says so — the state a real corrupt row is in, since
-            // nothing rewrites a column it cannot read.
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || {
-                conn.lock()
-                    .unwrap()
-                    .execute(
-                        "UPDATE session_cache SET info_json = 'not valid json' \
-                         WHERE session_id = 'poisoned'",
-                        [],
-                    )
-                    .unwrap();
-            })
-            .await
-            .unwrap();
+        let events = skip_warnings();
+        for dropped in ["undecodable", "mislabelled"] {
+            let hit = events
+                .iter()
+                .find(|e| e.field("session_id") == Some(dropped))
+                .unwrap_or_else(|| panic!("a warning must name the dropped row {dropped}"));
+            assert_eq!(
+                hit.field("host"),
+                Some(host.to_string().as_str()),
+                "and the host it belongs to"
+            );
         }
-
-        let total_for = async |filter: SessionFilter| {
-            store
-                .merged_page(
-                    vec![host],
-                    None,
-                    10,
-                    usize::MAX,
-                    filter,
-                    ListSort::Created,
-                    MatchingCount::Skip,
-                )
-                .await
-                .expect("merged read")
-                .total
-        };
-        assert_eq!(
-            total_for(SessionFilter::default()).await,
-            2,
-            "the default view's total is what the default view holds"
-        );
-        assert_eq!(
-            total_for(SessionFilter::default().include_archived(true)).await,
-            3,
-            "and the switch widens the count with the view"
-        );
-        assert_eq!(
-            total_for(SessionFilter::default().title("active-1")).await,
-            2,
-            "a user's own filter narrows the rows and leaves the denominator alone"
-        );
     }
 
-    /// Archived rows are cut by the PAGE QUERY, so they cost the default
-    /// view neither a row slot nor a decode — including the one shape that
-    /// used to slip past the Rust-side predicate entirely.
-    ///
-    /// That shape is the reason this is worth a test of its own. A decodable
-    /// archived row was always stepped over before the page's cuts, but a row
-    /// whose payload has since gone bad cannot be judged by
-    /// [`SessionFilter::matches`] — nothing can read a flag out of it — so it
-    /// was taken into the page under the cursor contract, occupying a slot in
-    /// a view whose own total had already excluded it. The list then reported
-    /// "showing 1 of 2" with a continuation, over a fleet of two active
-    /// sessions and one corpse.
-    ///
-    /// The archived rows are planted NEWER than the active ones because
-    /// `created_at` descends: they sit at the front of the merged order,
-    /// which is exactly where a page cut that ran before the predicate would
-    /// spend its whole limit.
-    #[tokio::test]
-    async fn archived_rows_leave_the_default_page_before_its_cuts() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "page@host", "page-identity").await;
-        store
-            .replace_host_sessions(
-                host,
-                "page-identity",
-                vec![
-                    SessionInfo {
-                        archived: true,
-                        ..session("archived-poisoned", 500)
-                    },
-                    SessionInfo {
-                        archived: true,
-                        ..session("archived-readable", 400)
-                    },
-                    session("active-1", 200),
-                    session("active-2", 100),
-                ],
-            )
-            .await
-            .expect("seed the cache");
-        {
-            // Poisoned after the write, so the row carries the archive flag
-            // it was stored with while its payload no longer decodes — the
-            // state a real corrupt row reaches, since nothing rewrites a
-            // column it cannot read.
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || {
-                conn.lock()
-                    .unwrap()
-                    .execute(
-                        "UPDATE session_cache SET info_json = 'not valid json' \
-                         WHERE session_id = 'archived-poisoned'",
-                        [],
-                    )
-                    .unwrap();
-            })
-            .await
-            .unwrap();
-        }
-
-        // A limit of exactly the active rows: anything the archive predicate
-        // lets through takes one of these two slots.
-        let ordinary = store
-            .merged_page(
-                vec![host],
-                None,
-                2,
-                usize::MAX,
-                SessionFilter::default(),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .expect("default page");
-        assert_eq!(
-            ordinary
-                .page
-                .rows
-                .iter()
-                .map(|row| row.key.session_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["active-1", "active-2"],
-            "two archived rows sit ahead of these in the merged order and neither may cost a slot"
-        );
-        assert!(
-            !ordinary.page.more,
-            "the default view ends here; a continuation would send the client back for rows that \
-             do not belong to this view at all"
-        );
-        assert_eq!(
-            (ordinary.matching, ordinary.total),
-            (Some(2), 2),
-            "and the counts describe the same two rows the page holds"
-        );
-
-        // The widened view is where both archived rows live, corpse
-        // included: the cursor contract still applies there, so the
-        // undecodable one is carried as a payload-less row rather than
-        // skipped into unreachability.
-        let all = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().include_archived(true),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .expect("widened page");
-        assert_eq!(
-            all.page
-                .rows
-                .iter()
-                .map(|row| (row.key.session_id.as_str(), row.info.is_some()))
-                .collect::<Vec<_>>(),
-            vec![
-                ("archived-poisoned", false),
-                ("archived-readable", true),
-                ("active-1", true),
-                ("active-2", true),
-            ],
-        );
-        assert_eq!(
-            (all.matching, all.total),
-            (Some(3), 4),
-            "the unreadable row is counted as a row and never claimed as a match"
-        );
-    }
-
-    /// A session that comes back UNARCHIVED returns to the default view,
-    /// column and counts together.
+    /// A session that comes back UNARCHIVED rejoins the default view's
+    /// column, and therefore whatever count a caller derives from it.
     ///
     /// The single-row write's `ON CONFLICT` clause has to carry `archived`
     /// in both directions, and only one of them is exercised by ordinary
     /// use. Drop it from the update and an archived row's flag becomes
     /// permanent in the cache: the session would be invisible in the
-    /// ordinary list and absent from its count no matter what the supervisor
-    /// went on to say about it, with no way back short of deleting the cache
-    /// — a wrong answer that survives every refresh is the worst kind for a
-    /// denormalized column to give.
+    /// ordinary list no matter what the supervisor went on to say about it,
+    /// with no way back short of deleting the cache — a wrong answer that
+    /// survives every refresh is the worst kind for a denormalized column to
+    /// give.
     #[tokio::test]
     async fn a_session_that_comes_back_unarchived_rejoins_the_default_view() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "flip@host", "flip-identity").await;
         let default_view = async |store: &HelmStore| {
-            let read = store
-                .merged_page(
-                    vec![host],
-                    None,
-                    10,
-                    usize::MAX,
-                    SessionFilter::default(),
-                    ListSort::Created,
-                    MatchingCount::Compute,
-                )
+            store
+                .cached_rows(&[host])
                 .await
-                .expect("default view");
-            (read.page.rows.len(), read.matching, read.total)
+                .expect("cached rows")
+                .into_iter()
+                .filter(|row| !row.archived)
+                .count()
         };
 
         store
@@ -9673,8 +7267,8 @@ mod tests {
             .expect("remember an archived session");
         assert_eq!(
             default_view(&store).await,
-            (0, Some(0), 0),
-            "an archived session is outside the ordinary list and outside its count"
+            0,
+            "an archived session is outside the default view"
         );
 
         assert!(
@@ -9686,416 +7280,26 @@ mod tests {
         );
         assert_eq!(
             default_view(&store).await,
-            (1, Some(1), 1),
-            "and the row, the matching count and the denominator all come back together"
-        );
-    }
-
-    /// The page and both counts describe ONE moment.
-    ///
-    /// The property is about a read that cannot interleave with a write, so
-    /// what this can pin directly is the arithmetic that a torn read
-    /// violates: `matching` never exceeds `total`, and both agree with the
-    /// rows the same call returned. The structural half — one transaction,
-    /// one lock hold — is enforced by `merged_page` being the only way to
-    /// ask, which is why the page-only reader beside it is `#[cfg(test)]`.
-    #[tokio::test]
-    async fn one_read_answers_the_page_and_both_counts_coherently() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "user@host", "identity-1").await;
-        store
-            .replace_host_sessions(
-                host,
-                "identity-1",
-                vec![
-                    SessionInfo {
-                        cwd: "/keep/one".to_string(),
-                        ..session("s-1", 300)
-                    },
-                    SessionInfo {
-                        cwd: "/keep/two".to_string(),
-                        ..session("s-2", 200)
-                    },
-                    SessionInfo {
-                        cwd: "/other".to_string(),
-                        ..session("s-3", 100)
-                    },
-                ],
-            )
-            .await
-            .expect("seed the cache");
-
-        let read = store
-            .merged_page(
-                vec![host],
-                None,
-                1,
-                usize::MAX,
-                SessionFilter::default().directory("/keep"),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .expect("filtered read");
-        assert_eq!(read.total, 3);
-        assert_eq!(read.matching, Some(2));
-        assert!(read.matching.is_some_and(|matching| matching <= read.total));
-        assert_eq!(read.page.rows.len(), 1, "the page cut is over the matches");
-        assert!(read.page.more, "and there is another match beyond it");
-
-        // An UNFILTERED read makes no matching claim at all — see
-        // `merged_page`'s docs for why "no filter, so everything matches" is
-        // not a truth this list can state.
-        let unfiltered = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default(),
-                ListSort::Created,
-                MatchingCount::Skip,
-            )
-            .await
-            .expect("unfiltered read");
-        assert_eq!(unfiltered.total, 3);
-        assert_eq!(
-            unfiltered.matching, None,
-            "an unfiltered listing reports a fleet total and claims nothing about matching"
-        );
-    }
-
-    /// A count is qualified by the store's GENERATION, and the comparison
-    /// happens where no write can slip past it.
-    ///
-    /// Spec: `ComputeUnless(g)` answers `matching: None` — "the count you
-    /// hold still stands" — exactly while the store's generation is still
-    /// `g`, and recomputes otherwise. A committed change between the caller
-    /// sampling a generation and the read running must therefore produce a
-    /// FRESH count beside the new rows, never the old count beside them.
-    ///
-    /// This is the pairing the previous design could not make: the count rode
-    /// in the client's cursor qualified by the fleet revision, which is
-    /// published AFTER a write commits, so committed rows and an unmoved
-    /// revision routinely coexisted. The ordering here is staged explicitly
-    /// rather than raced — the write lands strictly between the sample and
-    /// the read — because a property about a window is only pinned by a test
-    /// that puts something in the window every time it runs.
-    #[tokio::test]
-    async fn a_count_cannot_be_paired_with_rows_committed_after_it() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "user@host", "identity-1").await;
-        let matching = |cwd: &str, id: &str, at: i64| SessionInfo {
-            cwd: cwd.to_string(),
-            ..session(id, at)
-        };
-        store
-            .replace_host_sessions(
-                host,
-                "identity-1",
-                vec![
-                    matching("/keep/one", "s-1", 300),
-                    matching("/other", "s-2", 200),
-                ],
-            )
-            .await
-            .expect("seed the cache");
-
-        // What a caller holds after a first page: a count, and the generation
-        // it was taken at.
-        let first = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().directory("/keep"),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .expect("first page");
-        assert_eq!(first.matching, Some(1));
-        let sampled = first.generation;
-
-        // Unchanged store: the held count is confirmed rather than recounted,
-        // which is what makes a walk linear.
-        let confirmed = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().directory("/keep"),
-                ListSort::Created,
-                MatchingCount::ComputeUnless(sampled),
-            )
-            .await
-            .expect("second page");
-        assert_eq!(
-            confirmed.matching, None,
-            "an unmoved generation means the caller's count still describes these rows"
-        );
-        assert_eq!(confirmed.generation, sampled);
-
-        // The write that lands in the window. It commits strictly after the
-        // generation above was sampled and strictly before the read below.
-        store
-            .replace_host_sessions(
-                host,
-                "identity-1",
-                vec![
-                    matching("/keep/one", "s-1", 300),
-                    matching("/other", "s-2", 200),
-                    matching("/keep/two", "s-3", 100),
-                ],
-            )
-            .await
-            .expect("commit a third session");
-
-        let after = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().directory("/keep"),
-                ListSort::Created,
-                MatchingCount::ComputeUnless(sampled),
-            )
-            .await
-            .expect("page after the write");
-        assert_ne!(
-            after.generation, sampled,
-            "a committed change must move the generation, or nothing else here can work"
-        );
-        assert_eq!(
-            after.matching,
-            Some(2),
-            "the stale generation must force a recount, so the count describes the rows beside it"
-        );
-        assert_eq!(after.page.rows.len(), 2, "and the page holds both of them");
-    }
-
-    /// A write that changed NOTHING must not move the generation.
-    ///
-    /// Spec: a refresh writing back a byte-identical row set leaves the
-    /// generation where it was, so a walk in progress goes on reusing its
-    /// count.
-    ///
-    /// This is what keeps the count cache useful at all rather than merely
-    /// correct. Every connected host rewrites its whole list every few
-    /// seconds, and in a settled fleet writes back exactly what was already
-    /// there; a generation that moved for those would make every page of
-    /// every walk recount, which is the cost the design exists to avoid.
-    /// Sameness is judged on the STORED BYTES inside the writing
-    /// transaction, so rows that support identical counts are recognized as
-    /// such.
-    #[tokio::test]
-    async fn a_no_op_write_leaves_the_generation_alone() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "user@host", "identity-1").await;
-        let entries = vec![session("s-1", 300), session("s-2", 200)];
-        store
-            .replace_host_sessions(host, "identity-1", entries.clone())
-            .await
-            .expect("seed the cache");
-        let before = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().title("s-1"),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .expect("first read")
-            .generation;
-
-        store
-            .replace_host_sessions(host, "identity-1", entries)
-            .await
-            .expect("write the same list back");
-        // And the same for the single-row paths, which have their own
-        // changed-only comparisons.
-        store
-            .remember_session(host, "identity-1", &session("s-1", 300))
-            .await
-            .expect("re-seed an unchanged row");
-        store
-            .forget_session(host, "identity-1", "never-existed")
-            .await
-            .expect("forget a row that is not there");
-
-        let after = store
-            .merged_page(
-                vec![host],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().title("s-1"),
-                ListSort::Created,
-                MatchingCount::ComputeUnless(before),
-            )
-            .await
-            .expect("second read");
-        assert_eq!(after.generation, before, "nothing observable changed");
-        assert_eq!(
-            after.matching, None,
-            "so a held count is confirmed rather than recomputed"
-        );
-    }
-
-    /// Counting and paging are ONE decode pass, and a walk pays for the count
-    /// once.
-    ///
-    /// Spec: a filtered read that must count walks the scope exactly once —
-    /// not once to count and again to page — and a walk whose later pages
-    /// hand back a still-valid generation performs no counting pass at all.
-    /// An invalidating write earns exactly one more.
-    ///
-    /// Instrumented rather than inferred from output, and that is the whole
-    /// point of the test: an implementation that recounted on every page
-    /// would produce identical numbers on every page, so nothing about the
-    /// answers can tell the two apart. The counter is what can.
-    #[tokio::test]
-    async fn a_filtered_walk_counts_once_and_recounts_only_after_a_change() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "user@host", "identity-1").await;
-        let entries: Vec<SessionInfo> = (0..6)
-            .map(|index| SessionInfo {
-                cwd: "/keep".to_string(),
-                ..session(&format!("s-{index}"), 600 - index)
-            })
-            .collect();
-        store
-            .replace_host_sessions(host, "identity-1", entries.clone())
-            .await
-            .expect("seed the cache");
-
-        let filter = SessionFilter::default().directory("/keep");
-        let baseline = store.counting_passes();
-        // Page one: nothing held, so this counts.
-        let mut read = store
-            .merged_page(
-                vec![host],
-                None,
-                2,
-                usize::MAX,
-                filter.clone(),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .expect("first page");
-        assert_eq!(read.matching, Some(6));
-        assert_eq!(
-            store.counting_passes() - baseline,
             1,
-            "one pass answers the page and the count together"
+            "and the row rejoins the default view the moment its column flips back"
         );
-
-        // The rest of the walk, each page resuming after the last and naming
-        // the generation the count was taken at.
-        let generation = read.generation;
-        let mut pages = 1;
-        while read.page.more {
-            let after = read
-                .page
-                .rows
-                .last()
-                .map(|row| row.key.clone())
-                .expect("a page that reports more has rows");
-            read = store
-                .merged_page(
-                    vec![host],
-                    Some(after),
-                    2,
-                    usize::MAX,
-                    filter.clone(),
-                    ListSort::Created,
-                    MatchingCount::ComputeUnless(generation),
-                )
-                .await
-                .expect("a later page");
-            assert_eq!(
-                read.matching, None,
-                "a later page of an unchanged walk must reuse the count, not recompute it"
-            );
-            pages += 1;
-        }
-        assert_eq!(pages, 3, "six matches at two per page is a three-page walk");
-        assert_eq!(
-            store.counting_passes() - baseline,
-            1,
-            "an unchanged walk counts exactly once, however many pages it takes"
-        );
-
-        // One invalidating write, then one recount — not one per page after
-        // it either, since the fresh read hands back a new generation.
-        store
-            .replace_host_sessions(
-                host,
-                "identity-1",
-                entries
-                    .iter()
-                    .cloned()
-                    .chain([SessionInfo {
-                        cwd: "/keep".to_string(),
-                        ..session("s-6", 100)
-                    }])
-                    .collect(),
-            )
-            .await
-            .expect("commit a seventh session");
-        let recounted = store
-            .merged_page(
-                vec![host],
-                None,
-                2,
-                usize::MAX,
-                filter.clone(),
-                ListSort::Created,
-                MatchingCount::ComputeUnless(generation),
-            )
-            .await
-            .expect("page after the write");
-        assert_eq!(recounted.matching, Some(7));
-        assert_eq!(
-            store.counting_passes() - baseline,
-            2,
-            "exactly one recount for the change"
-        );
-        let _ = store
-            .merged_page(
-                vec![host],
-                None,
-                2,
-                usize::MAX,
-                filter,
-                ListSort::Created,
-                MatchingCount::ComputeUnless(recounted.generation),
-            )
-            .await
-            .expect("and the walk is linear again");
-        assert_eq!(store.counting_passes() - baseline, 2);
     }
 
-    /// A host filter narrows the SQL scope, while the fleet total does not.
+    /// `hosts` is [`HelmStore::cached_rows`]'s SCOPE, not a predicate over a
+    /// wider read: a host left out of the slice contributes nothing, and a
+    /// host that never registered any sessions contributes nothing either.
     ///
-    /// Two properties in one read, and they pull in opposite directions:
-    /// the page and the matching count must describe one host, and `total`
-    /// must go on describing every host — otherwise "N matching of M" would
-    /// compare a number against itself and always read as "all of them".
+    /// Spec: scoping to one host returns exactly that host's rows, in a
+    /// fleet where a second host has rows too; scoping to a host with no
+    /// cached sessions returns an empty `Vec` rather than every host's rows
+    /// (what an unguarded empty `IN`-list would quietly mean).
     #[tokio::test]
-    async fn a_host_filter_narrows_the_page_but_not_the_fleet_total() {
+    async fn cached_rows_scopes_to_exactly_the_requested_hosts() {
         let (_dir, store) = fresh_store().await;
         let alpha = host_with_identity(&store, "user@alpha", "identity-alpha").await;
         let beta = host_with_identity(&store, "user@beta", "identity-beta").await;
         store
-            .replace_host_sessions(alpha, "identity-alpha", vec![session("a-1", 300)])
+            .replace_host_sessions(alpha, "identity-alpha", vec![session("a-1", 300)], false)
             .await
             .unwrap();
         store
@@ -10103,51 +7307,49 @@ mod tests {
                 beta,
                 "identity-beta",
                 vec![session("b-1", 200), session("b-2", 100)],
+                false,
             )
             .await
             .unwrap();
 
-        let read = store
-            .merged_page(
-                vec![alpha, beta],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().host(beta),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
+        let both: Vec<String> = store
+            .cached_rows(&[alpha, beta])
             .await
-            .expect("host-filtered read");
-        assert_eq!(read.total, 3, "the fleet is still three sessions");
-        assert_eq!(read.matching, Some(2));
+            .expect("both hosts")
+            .into_iter()
+            .map(|row| row.info.id)
+            .collect();
         assert_eq!(
-            read.page
-                .rows
-                .iter()
-                .map(|row| row.key.session_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["b-1", "b-2"]
+            both.len(),
+            3,
+            "scoping to both hosts returns every row either of them cached"
         );
 
-        // A host filter naming a host OUTSIDE the merged view selects
-        // nothing — not everything, which is what an unguarded empty
-        // IN-list would quietly mean.
-        let outside = store
-            .merged_page(
-                vec![alpha],
-                None,
-                10,
-                usize::MAX,
-                SessionFilter::default().host(beta),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
+        let mut beta_only: Vec<String> = store
+            .cached_rows(&[beta])
             .await
-            .expect("out-of-scope host filter");
-        assert_eq!(outside.matching, Some(0));
-        assert!(outside.page.rows.is_empty());
-        assert_eq!(outside.total, 1, "and the fleet total is unaffected by it");
+            .expect("beta only")
+            .into_iter()
+            .map(|row| row.info.id)
+            .collect();
+        beta_only.sort();
+        assert_eq!(
+            beta_only,
+            vec!["b-1".to_string(), "b-2".to_string()],
+            "scoping to beta returns only beta's rows, not alpha's"
+        );
+
+        // A host with cached sessions but left OUT of the slice — not a host
+        // that never registered any — is the sharper version of the same
+        // check: alpha genuinely has a row, and it must not leak in.
+        let alpha_only: Vec<String> = store
+            .cached_rows(&[alpha])
+            .await
+            .expect("alpha only")
+            .into_iter()
+            .map(|row| row.info.id)
+            .collect();
+        assert_eq!(alpha_only, vec!["a-1".to_string()]);
     }
 
     /// The filter's match semantics, pinned where they are defined.
@@ -10236,71 +7438,6 @@ mod tests {
         assert!(!SessionFilter::default().parent("parent-7").is_empty());
     }
 
-    /// Parent matching happens during the merged scan, so a nonmatching row
-    /// before or between children cannot consume the page limit or distort
-    /// the fleet-wide matching count.
-    #[tokio::test]
-    async fn parent_filter_precedes_pagination_and_participates_in_the_count() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "parent@host", "parent-identity").await;
-        let child = |id: &str, created_at| SessionInfo {
-            parent: Some("root-session".to_string()),
-            ..session(id, created_at)
-        };
-        store
-            .replace_host_sessions(
-                host,
-                "parent-identity",
-                vec![
-                    session("unrelated-newest", 400),
-                    child("child-a", 300),
-                    session("unrelated-middle", 200),
-                    child("child-b", 100),
-                ],
-            )
-            .await
-            .unwrap();
-        let filter = SessionFilter::default().parent("root-session");
-        let first = store
-            .merged_page(
-                vec![host],
-                None,
-                1,
-                usize::MAX,
-                filter.clone(),
-                ListSort::Created,
-                MatchingCount::Compute,
-            )
-            .await
-            .unwrap();
-        assert_eq!(first.total, 4);
-        assert_eq!(first.matching, Some(2));
-        assert_eq!(first.page.rows[0].key.session_id, "child-a");
-        assert!(first.page.more);
-        let second = store
-            .merged_page(
-                vec![host],
-                Some(first.page.rows[0].key.clone()),
-                1,
-                usize::MAX,
-                filter.clone(),
-                ListSort::Created,
-                MatchingCount::ComputeUnless(first.generation),
-            )
-            .await
-            .unwrap();
-        assert_eq!(second.page.rows[0].key.session_id, "child-b");
-        assert!(!second.page.more);
-        assert_eq!(second.matching, None, "the bound count is reused");
-        assert_ne!(
-            filter.fingerprint(),
-            SessionFilter::default()
-                .parent("another-root")
-                .fingerprint(),
-            "a cursor and count cannot cross parent filters"
-        );
-    }
-
     /// Completed drains converge the remembered default to their newest
     /// profile-backed source and never let an older snapshot roll it back.
     #[tokio::test]
@@ -10320,6 +7457,7 @@ mod tests {
                     session("raw-newer", 400),
                     sequenced_profiled_session("new-source", 300, 3, "profile-new"),
                 ],
+                false,
             )
             .await
             .unwrap();
@@ -10337,6 +7475,7 @@ mod tests {
                     sequenced_profiled_session("new-source", 300, 3, "profile-new"),
                     sequenced_profiled_session("older-source", 300, 1, "profile-older"),
                 ],
+                false,
             )
             .await
             .unwrap();
@@ -10357,6 +7496,7 @@ mod tests {
                     4,
                     "profile-new",
                 )],
+                false,
             )
             .await
             .unwrap();
@@ -10372,6 +7512,7 @@ mod tests {
                     sequenced_profiled_session("same-profile-new-source", 300, 4, "profile-new"),
                     sequenced_profiled_session("late-old", 300, 2, "profile-old"),
                 ],
+                false,
             )
             .await
             .unwrap();
@@ -10391,6 +7532,7 @@ mod tests {
                     1,
                     "profile-older",
                 )],
+                false,
             )
             .await
             .unwrap();
@@ -10406,7 +7548,7 @@ mod tests {
         );
 
         let cleared = store
-            .replace_host_sessions(host, "profile-identity", Vec::new())
+            .replace_host_sessions(host, "profile-identity", Vec::new(), false)
             .await
             .unwrap();
         assert!(!cleared.default_changed);
@@ -10447,7 +7589,7 @@ mod tests {
 
         // The successor install knows nothing of the establishing session.
         let survived = store
-            .replace_host_sessions(host, "moving-identity", Vec::new())
+            .replace_host_sessions(host, "moving-identity", Vec::new(), false)
             .await
             .unwrap();
         assert!(
@@ -10465,6 +7607,7 @@ mod tests {
                 host,
                 "moving-identity",
                 vec![sequenced_profiled_session("older", 300, 1, "profile-other")],
+                false,
             )
             .await
             .unwrap();
@@ -10504,6 +7647,7 @@ mod tests {
                     profiled_session("z-source", 100, "profile-z"),
                     profiled_session("a-source", 100, "profile-a"),
                 ],
+                false,
             )
             .await
             .unwrap();
@@ -10535,171 +7679,6 @@ mod tests {
             store.remembered_profile(host).await.unwrap().as_deref(),
             Some("new")
         );
-    }
-
-    /// A filter's canonical encoding distinguishes filters that select
-    /// differently, including the shapes a delimiter-joined encoding would
-    /// confuse.
-    ///
-    /// A collision here is not cosmetic. The encoding is what every derived
-    /// identity of a filter is built from — the digest a cursor is bound to,
-    /// and the key the matching count is cached under — so two different
-    /// filters sharing one would let a cursor replay across them and let one
-    /// filter's count be reported as another's. The field values are user
-    /// text, so the encoding has to survive a user writing the separator.
-    ///
-    /// Asserted on the encoding rather than on the digest because the digest
-    /// is keyed with a process-random key: it says nothing readable about WHY
-    /// two filters differ, and this is the property that has to be readable.
-    #[test]
-    fn a_filter_fingerprint_cannot_be_forged_by_field_content() {
-        let plain = SessionFilter::default().title("x").status("running");
-        // The same two dimensions, and a title that spells out what a
-        // delimiter-joined encoding would emit for the pair.
-        let forged = SessionFilter::default().title("x|s=running");
-        assert_ne!(plain.fingerprint(), forged.fingerprint());
-
-        // Adjacent fields must not be able to borrow each other's text.
-        assert_ne!(
-            SessionFilter::default()
-                .title("ab")
-                .profile("c")
-                .fingerprint(),
-            SessionFilter::default()
-                .title("a")
-                .profile("bc")
-                .fingerprint()
-        );
-
-        // Same filter, same fingerprint — a walk's later pages must be able
-        // to recognize their own.
-        assert_eq!(
-            SessionFilter::default().directory("/srv").fingerprint(),
-            SessionFilter::default().directory("/srv").fingerprint()
-        );
-        // And an absent dimension is distinguishable from an empty one.
-        assert_ne!(
-            SessionFilter::default().fingerprint(),
-            SessionFilter::default().title("").fingerprint()
-        );
-        assert_ne!(
-            SessionFilter::default().fingerprint(),
-            SessionFilter::default()
-                .include_archived(true)
-                .fingerprint(),
-            "a cursor minted with archived rows hidden must not replay after the toggle changes"
-        );
-
-        // The digest inherits both properties — it is what actually travels,
-        // so a distinction the encoding makes and the digest loses would be
-        // no distinction at all.
-        assert_ne!(plain.digest(), forged.digest());
-        assert_eq!(
-            SessionFilter::default().directory("/srv").digest(),
-            SessionFilter::default().directory("/srv").digest(),
-            "a walk's later pages must recognize their own cursors"
-        );
-        assert_eq!(
-            plain.digest().len(),
-            16,
-            "fixed-size, so a cursor cannot grow with the search box"
-        );
-    }
-
-    /// The filter both halves of the cross-process digest test speak about.
-    ///
-    /// Every dimension is set, and every value is a constant: the point of the
-    /// test is that two processes handed the SAME filter still disagree, so
-    /// nothing here may vary between them.
-    fn probe_filter() -> SessionFilter {
-        SessionFilter::default()
-            .host(7)
-            .directory("/srv/work")
-            .title("nightly")
-            .profile("starter-claude")
-            .status("running")
-    }
-
-    /// Print this process's digest for [`probe_filter`], one line, and exit.
-    ///
-    /// Not a test: it is the CHILD half of
-    /// [`a_filter_digest_belongs_to_the_process_that_minted_it`], which
-    /// re-executes this binary to obtain a digest minted under a genuinely
-    /// different process key. `#[ignore]` is what keeps an ordinary run from
-    /// executing it, and the parent passes `--ignored` to get it back.
-    ///
-    /// A subprocess rather than something cheaper because the key is a
-    /// `OnceLock` minted once per process (see [`SessionFilter::digest`]) —
-    /// there is no in-process way to obtain a second one, and a test that
-    /// reached for one would be testing a seam the product does not have.
-    #[test]
-    #[ignore = "the child half of a_filter_digest_belongs_to_the_process_that_minted_it"]
-    fn digest_probe() {
-        println!("FH-DIGEST {}", probe_filter().digest());
-    }
-
-    /// A filter digest belongs to the PROCESS that minted it: a fresh helm
-    /// computes a different one for the same filter, and therefore refuses
-    /// every cursor the previous one issued.
-    ///
-    /// Spec: two fresh processes digesting [`probe_filter`] produce three
-    /// distinct values between them and this one, none matching any other.
-    ///
-    /// The refusal is what this is really about. `crate::aggregate`'s page
-    /// walk compares a cursor's carried binding against the digest of the
-    /// filter the request actually names, and answers 400 when they differ —
-    /// so "the digests differ" IS "the cursor is rejected", in both directions
-    /// at once, since the comparison is symmetric. What would break it is a
-    /// constant key: cursors would then be minted by anyone, off-line, and a
-    /// helm would resume a walk under a binding it never issued. That failure
-    /// is invisible in-process, which is why this pays for two subprocesses.
-    ///
-    /// The counterpart property — that ONE process recognizes its own filters
-    /// — is pinned in `a_filter_fingerprint_cannot_be_forged_by_field_content`
-    /// above; without it, this test would pass on a digest that was simply
-    /// random per call and no walk could ever continue.
-    #[test]
-    fn a_filter_digest_belongs_to_the_process_that_minted_it() {
-        /// Run this test binary again, in a fresh process, and read the
-        /// digest it prints.
-        fn digest_from_a_fresh_process() -> String {
-            let exe = std::env::current_exe().expect("a test binary knows its own path");
-            let run = std::process::Command::new(&exe)
-                .args([
-                    "--exact",
-                    "store::tests::digest_probe",
-                    "--ignored",
-                    "--nocapture",
-                ])
-                .output()
-                .unwrap_or_else(|error| panic!("re-running {exe:?}: {error}"));
-            let text = String::from_utf8_lossy(&run.stdout).into_owned();
-            assert!(
-                run.status.success(),
-                "the digest probe must run cleanly: {text}{}",
-                String::from_utf8_lossy(&run.stderr)
-            );
-            text.lines()
-                .find_map(|line| line.strip_prefix("FH-DIGEST "))
-                .map(str::to_string)
-                .unwrap_or_else(|| panic!("the probe must print exactly one digest line: {text}"))
-        }
-
-        let mine = probe_filter().digest();
-        let first = digest_from_a_fresh_process();
-        let second = digest_from_a_fresh_process();
-
-        assert_ne!(
-            first, second,
-            "two fresh helms must not agree on a filter's digest, or a cursor minted by one would \
-             resume a walk in the other"
-        );
-        assert_ne!(
-            first, mine,
-            "and neither of them agrees with this process, which is what makes a restarted helm \
-             refuse the cursors it handed out before"
-        );
-        assert_ne!(second, mine);
     }
 
     /// Every status the wire can carry has a filter word, and nothing else
@@ -10749,11 +7728,15 @@ mod tests {
     /// entirely plausible.
     #[test]
     fn every_sort_key_round_trips_and_unknown_words_are_refused() {
-        for sort in [ListSort::Created, ListSort::Activity, ListSort::Title] {
+        for (word, sort) in [
+            ("created", ListSort::Created),
+            ("activity", ListSort::Activity),
+            ("title", ListSort::Title),
+        ] {
             assert_eq!(
-                parse_sort_key(sort.key()),
+                parse_sort_key(word),
                 Some(sort),
-                "{sort:?} must parse back to itself"
+                "{word:?} must parse to {sort:?}"
             );
         }
         assert_eq!(
@@ -10766,106 +7749,55 @@ mod tests {
         }
     }
 
-    /// The title collation is case-insensitive over the WHOLE of Unicode and
-    /// ordinal beyond that — the contract [`title_sort_key`] documents.
+    /// [`HelmStore::cached_rows`] reflects every write path that touches the
+    /// cache — [`HelmStore::replace_host_sessions`],
+    /// [`HelmStore::remember_session`], and [`HelmStore::forget_session`] —
+    /// the moment each commits, with no separate read-repair step.
     ///
-    /// Pinned as a property of its own because it is the part a future reader
-    /// is most likely to "fix" toward SQLite's `NOCASE` or toward a locale's
-    /// idea of alphabetical order. The first would silently stop folding
-    /// anything outside ASCII (the `Ärger`/`ärger` pair below is the case that
-    /// breaks); the second is a dependency and a per-user setting this
-    /// milestone does not have, and its absence is why `Ärger` sorts after
-    /// `zebra` rather than beside `Arger`.
-    #[test]
-    fn the_title_collation_folds_case_unicode_wide_and_is_otherwise_ordinal() {
-        assert_eq!(title_sort_key("Refactor the Drain"), "refactor the drain");
-        assert_eq!(
-            title_sort_key("ÄRGER"),
-            title_sort_key("ärger"),
-            "case folding must not stop at ASCII, or half a user's alphabet is case-sensitive"
-        );
-        assert_eq!(
-            title_sort_key("İ").chars().count(),
-            2,
-            "Rust's fold is the Unicode one, which can lengthen a string — a sort key is not a \
-             character-for-character transliteration"
-        );
-        assert!(
-            title_sort_key("apple") < title_sort_key("Banana"),
-            "folding is what makes the order case-insensitive rather than uppercase-first"
-        );
-        assert!(
-            title_sort_key("zebra") < title_sort_key("Ärger"),
-            "and beyond case the order is by code point, with no locale tailoring"
-        );
-    }
-
-    /// The collation key is CUT at [`TITLE_SORT_KEY_CHARS`] characters, on a
-    /// character boundary of the FOLDED string, and the cut value is what the
-    /// served order actually compares.
-    ///
-    /// Both halves matter. The bound exists because this key is an index entry
-    /// on every cached row and the leading component of a cursor the browser
-    /// replays in a query string, while the only cap on a title anywhere is
-    /// the supervisor's 64 KiB create-field limit — so without it one peer's
-    /// long title mints a cursor no client can send and strands that walk.
-    ///
-    /// And the cut has to reach the SQL, not just the Rust helper: the column,
-    /// the two indexes, the resume predicate and the cursor are all built from
-    /// this one function, so two titles sharing the first
-    /// [`TITLE_SORT_KEY_CHARS`] characters must TIE and fall through to the
-    /// creation-order tail exactly as two identical titles do. The walk below
-    /// is what says so — with the truncation removed it comes back in the
-    /// other order, because `…aaa` sorts before `…zzz`.
+    /// This is the load-bearing property behind the single-row and
+    /// wholesale-replacement tests elsewhere in this module, which mostly
+    /// read back through the narrower `cached_sessions`: since
+    /// `crate::aggregate` now serves the whole merged list from
+    /// `cached_rows` alone, a regression that updated `session_cache` in a
+    /// way `cached_sessions` still saw correctly but `cached_rows` did not
+    /// (a stale join, a forgotten column in its `SELECT`) would otherwise
+    /// have no test that could see it.
     #[tokio::test]
-    async fn a_title_key_is_cut_on_a_character_boundary_and_equal_prefixes_tie() {
-        // Multi-byte on purpose: a cut measured in BYTES would either panic on
-        // a code point boundary or silently produce a different key length.
-        let over = "ä".repeat(TITLE_SORT_KEY_CHARS + 40);
-        assert_eq!(
-            title_sort_key(&over).chars().count(),
-            TITLE_SORT_KEY_CHARS,
-            "an over-long title is cut to the bound, counted in characters"
-        );
-        assert_eq!(
-            title_sort_key(&"a".repeat(TITLE_SORT_KEY_CHARS))
-                .chars()
-                .count(),
-            TITLE_SORT_KEY_CHARS,
-            "a title exactly at the bound is not cut"
-        );
-        // Folding can LENGTHEN, so the bound has to be applied after it: `İ`
-        // becomes two characters, and half as many of them fill the key.
-        assert_eq!(
-            title_sort_key(&"İ".repeat(TITLE_SORT_KEY_CHARS))
-                .chars()
-                .count(),
-            TITLE_SORT_KEY_CHARS,
-            "the bound is measured on the folded string, not on the original"
-        );
-
+    async fn cached_rows_reflects_every_cache_write_path() {
         let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "long@host", "long-identity").await;
-        let prefix = "x".repeat(TITLE_SORT_KEY_CHARS);
+        let host = host_with_identity(&store, "reflect@host", "reflect-identity").await;
+
+        let ids = |rows: &[CachedRow]| -> Vec<String> {
+            let mut ids: Vec<String> = rows.iter().map(|row| row.info.id.clone()).collect();
+            ids.sort();
+            ids
+        };
+
         store
-            .replace_host_sessions(
-                host,
-                "long-identity",
-                vec![
-                    ordered_session("newer", 200, 100, &format!("{prefix}zzz")),
-                    ordered_session("older", 100, 100, &format!("{prefix}aaa")),
-                    ordered_session("short", 300, 100, "aardvark"),
-                ],
-            )
+            .replace_host_sessions(host, "reflect-identity", vec![session("a", 100)], false)
             .await
             .unwrap();
-
-        let hosts = all_host_ids(&store).await;
         assert_eq!(
-            walk_sorted(&store, &hosts, ListSort::Title).await,
-            vec!["short", "newer", "older"],
-            "two titles sharing the bound's worth of prefix tie, so the newer one leads on the \
-             shared creation-order tail rather than the alphabetically earlier one"
+            ids(&store.cached_rows(&[host]).await.unwrap()),
+            vec!["a".to_string()]
+        );
+
+        store
+            .remember_session(host, "reflect-identity", &session("b", 200))
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(&store.cached_rows(&[host]).await.unwrap()),
+            vec!["a".to_string(), "b".to_string()]
+        );
+
+        store
+            .forget_session(host, "reflect-identity", "a")
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(&store.cached_rows(&[host]).await.unwrap()),
+            vec!["b".to_string()]
         );
     }
 }

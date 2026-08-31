@@ -58,8 +58,9 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::warn;
 
-/// Query parameters for `GET /api/sessions` — the helm-level page walk
-/// (PLAN_M6.md item 5) and, as of PLAN_M6_75.md item 5, its filters.
+/// Query parameters for `GET /api/sessions`: the view switch, the filters,
+/// and the order. There is no cursor and no page size, by contract (SPEC.md's
+/// Session list section): the reply is the whole list.
 ///
 /// Everything except the archive inclusion switch is absent-by-default.
 /// A caller sending no query sees the ordinary, non-archived fleet view;
@@ -73,43 +74,19 @@ use tracing::warn;
 /// one per source. A parameter present but EMPTY is treated as absent
 /// (`?title=` is what a cleared search box sends, and refusing it would make
 /// clearing the box an error).
+///
+/// Unknown parameters are ignored rather than refused — deliberately, so a
+/// client one version behind that still sends the paged design's `limit=`
+/// and `cursor=` gets the whole list instead of an error. The cost is that
+/// such a client's paging is silently inert rather than loudly rejected.
 #[derive(Deserialize)]
 pub(crate) struct ListQuery {
-    /// An opaque resume key from a previous reply's `next_cursor`. Replay
-    /// it verbatim; never construct or interpret one. An undecodable value
-    /// is a 400 rather than a silent restart from the front, because a
-    /// restart would re-serve a page the caller already had while looking
-    /// exactly like progress.
-    ///
-    /// A cursor and a filter travel TOGETHER on every page of one walk, and
-    /// this is ENFORCED rather than asked for: every cursor is bound to the
-    /// filter it was minted under, and replaying one under a changed, added
-    /// or cleared parameter is a 400 saying to start a fresh walk. The cursor
-    /// names a position in the order, not in a result set, so a walk whose
-    /// later pages moved the filter would resume mid-order through a
-    /// different sequence and drop every earlier match without a trace.
-    cursor: Option<String>,
-    /// Maximum entries in this page.
-    ///
-    /// Bounded twice, and the second bound is newer than this field's
-    /// original "a page is local data, so ask for what you like" reasoning:
-    /// [`aggregate::MAX_PAGE_LIMIT`] caps every request, and a FILTERED
-    /// request is capped lower again ([`aggregate::MAX_FILTERED_PAGE_LIMIT`]).
-    /// The difference is real work rather than tidiness — an unfiltered page
-    /// reads exactly the rows it returns, while a filtered one walks the
-    /// order until it has filled the page, so a big limit paired with a
-    /// selective filter is a request to scan the whole cache and decode
-    /// every row of it.
-    ///
-    /// A limit of zero is refused too — it could never make progress through
-    /// the pages.
-    limit: Option<usize>,
     /// Include archived sessions.
     ///
     /// The one parameter that moves `total`: it selects which view is being
     /// served rather than narrowing one, so with it off the reply's rows and
     /// its total are both about the non-archived list, and with it on both
-    /// are about the whole fleet (see [`aggregate::SessionPageBody::total`]).
+    /// are about the whole fleet (see [`aggregate::SessionListBody::total`]).
     #[serde(default)]
     include_archived: bool,
     /// Only sessions on this registered host (a `HostView::id`).
@@ -130,7 +107,7 @@ pub(crate) struct ListQuery {
     status: Option<String>,
     /// Only sessions whose title CONTAINS this text, ignoring case.
     title: Option<String>,
-    /// Which order to serve the page in: `created` (the default when the
+    /// Which order to serve the list in: `created` (the default when the
     /// parameter is absent), `activity`, or `title`. See
     /// [`store::ListSort`] for what each one is and for the tie-break tail
     /// they share.
@@ -142,8 +119,7 @@ pub(crate) struct ListQuery {
     /// authoritative and has no way to question.
     ///
     /// It is not a filter. It changes the sequence, never the membership, so
-    /// neither count in the reply moves with it — but a cursor IS bound to
-    /// it, because a resume point names a place in one order only.
+    /// neither count in the reply moves with it.
     sort: Option<String>,
 }
 
@@ -233,8 +209,8 @@ fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
     })
 }
 
-/// `GET /api/sessions` — one page of the MERGED, multi-host session list
-/// (PLAN_M6.md item 5).
+/// `GET /api/sessions` — the whole MERGED, multi-host session list, as one
+/// array.
 ///
 /// The rows are every registered host's sessions in ONE order across the
 /// fleet — creation time by default, recent activity or title on request
@@ -243,39 +219,30 @@ fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
 /// unreachable host stay in the list, clearly marked" is this handler plus
 /// the cache behind it, and nothing else.
 ///
-/// The order is served out of the helm's own cache and its indexes; no host
-/// is asked to sort anything, and the wire order the drains depend on is
-/// untouched (see [`aggregate`]'s module docs).
+/// The order is produced in memory from the helm's own cache; no host is
+/// asked to sort anything (see [`aggregate`]'s module docs).
 ///
-/// The body keeps its M2 shape (`sessions`/`total`/`truncated`) with the
-/// host fields added to each row and `next_cursor` and `matching` added
-/// alongside, so the UI that predates multi-host keeps decoding it
-/// unchanged. `matching` is present whenever a predicate is active. That
-/// includes the ordinary request, whose implicit archive exclusion is a
-/// real predicate even though its false value is omitted from the query
-/// string. Only `include_archived=true` with no search dimensions is fully
-/// unfiltered and makes no matching claim (see
-/// [`aggregate::SessionPageBody::matching`] for why equating that claim with
-/// `total` would have been a small lie). `total` now counts the merged view
-/// rather than one supervisor's list — the view the request asked for,
-/// archived rows included only under `include_archived=true` — and
-/// `truncated` now means "there is a next page"
-/// rather than "entries were held back" — see [`aggregate::SessionPageBody`]
-/// for all of them, including why the filter's count is a SECOND number
-/// beside `total` rather than a redefinition of it.
+/// The body is `sessions`/`total`/`matching`/`truncated`
+/// ([`aggregate::SessionListBody`]). `matching` is present whenever a
+/// predicate is active — including the ordinary request, whose implicit
+/// archive exclusion is a real predicate even though its false value is
+/// omitted from the query string; only `include_archived=true` with no
+/// search dimensions is fully unfiltered and makes no matching claim.
+/// `total` counts the merged view the request asked for, archived rows
+/// included only under `include_archived=true`. `truncated` means the
+/// client is not looking at the whole view — some host's reply or the
+/// merge hit `farhelm_proto::LIST_SESSIONS_CAP` — and is the only thing
+/// behind SPEC.md's "could not read to the end" notice.
 ///
-/// The filter parameters narrow the list
-/// server-side, before the page cut, which is what makes "N matching of M"
-/// coherent with a paged list at all: the alternative — a client filtering
-/// the page it was handed — hides matches beyond the cut while reporting a
-/// count that includes them.
+/// The filter parameters narrow the list server-side, which is what makes
+/// "N matching of M" a claim about the whole view rather than about the
+/// rows a client happens to hold.
 ///
-/// Served from what the helm has already RECORDED, never by asking hosts
-/// (see [`aggregate`]'s module docs for why the two cursor layers are
-/// decoupled): helm.db for every host that caches, and the manager's
-/// in-memory list for a connected host that has no identity to bind a cache
-/// write to. Either way nothing here makes a network call, so a slow or
-/// flapping host cannot slow a list poll down.
+/// Served from what the helm has already RECORDED, never by asking hosts:
+/// helm.db for every host that caches, and the manager's in-memory list for
+/// a connected host that has no identity to bind a cache write to. Either
+/// way nothing here makes a network call, so a slow or flapping host cannot
+/// slow a list poll down.
 ///
 /// One consequence is worth stating rather than discovering: a session
 /// created on ANOTHER client appears here only after its host's next
@@ -287,28 +254,6 @@ pub(crate) async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
-    let limit = match q.limit {
-        None => aggregate::DEFAULT_PAGE_LIMIT,
-        Some(0) => {
-            return http_error(anyhow::Error::new(SupervisorError {
-                kind: ErrorKind::InvalidRequest,
-                message: "session list limit must be at least 1; a limit of 0 could never make \
-                          progress through the pages"
-                    .to_string(),
-            }));
-        }
-        Some(limit) if limit > crate::aggregate::MAX_PAGE_LIMIT => {
-            return http_error(anyhow::Error::new(SupervisorError {
-                kind: ErrorKind::InvalidRequest,
-                message: format!(
-                    "session list limit must be at most {}; a page is real work on this side, \
-                     and an unbounded one is a request to do all of it at once",
-                    crate::aggregate::MAX_PAGE_LIMIT
-                ),
-            }));
-        }
-        Some(limit) => limit,
-    };
     let filter = match list_filter(&q) {
         Ok(filter) => filter,
         Err(e) => return http_error(e),
@@ -317,37 +262,8 @@ pub(crate) async fn list_sessions(
         Ok(sort) => sort,
         Err(e) => return http_error(e),
     };
-    // The filtered cap, checked after the filter is known rather than
-    // guessed at from the query string: a filtered page does not read the
-    // rows it returns, it reads the order until it has filled itself, so the
-    // limit multiplies a scan rather than a slice. Refused rather than
-    // clamped, like the cap above and for the same reason — a caller that
-    // asked for 5,000 and got 500 with no way to tell has been answered
-    // dishonestly.
-    if !filter.is_empty() && limit > aggregate::MAX_FILTERED_PAGE_LIMIT {
-        return http_error(anyhow::Error::new(SupervisorError {
-            kind: ErrorKind::InvalidRequest,
-            message: format!(
-                "a filtered session list may ask for at most {} entries per page (an unfiltered \
-                 one may ask for {}); a filtered page scans the order rather than slicing it, so \
-                 the limit costs a walk rather than a copy",
-                aggregate::MAX_FILTERED_PAGE_LIMIT,
-                aggregate::MAX_PAGE_LIMIT
-            ),
-        }));
-    }
-    match aggregate::session_page(
-        &state.manager,
-        &state.store,
-        &state.counts,
-        q.cursor.as_deref(),
-        limit,
-        &filter,
-        sort,
-    )
-    .await
-    {
-        Ok(page) => axum::Json(page).into_response(),
+    match aggregate::session_list(&state.manager, &state.store, &filter, sort).await {
+        Ok(list) => axum::Json(list).into_response(),
         Err(e) => http_error(e),
     }
 }
@@ -429,6 +345,13 @@ pub(crate) async fn route_session(
 /// METADATA still decodes: routing asks where to send an operation, not
 /// what the session is, so a poisoned `info_json` must not make a live
 /// session unreachable.
+///
+/// The cache consulted here holds at most `farhelm_proto::LIST_SESSIONS_CAP`
+/// rows per host, so a session older than everything under a capped host's
+/// cut resolves as not-found even though it still exists on the machine.
+/// Accepted by decision: SPEC.md's Session list section places a fleet past
+/// the cap outside what this product is built for, and the listing's
+/// "could not read to the end" notice is the whole of the answer to one.
 ///
 /// FAILS CLOSED where two hosts claim one id, with the ambiguity named —
 /// including a collision a create discovered and recorded
@@ -1315,11 +1238,8 @@ pub(crate) async fn stop_session(
 /// they cannot disagree:
 ///
 /// - **Connected host: live, and the WHOLE list.** The owner's session list
-///   is drained to exhaustion following its own cursor (the same bounded
-///   walk the cache refresh uses), never one page. Asking for one page made
-///   a session that happened to sit past the supervisor's default page
-///   simply 404 — on a busy host, and only for the sessions a busy host has
-///   most of. PLAN_M6.md is also explicit that the cache is for the stale
+///   is read in one reply (the same `drain_sessions` the cache refresh
+///   uses), which is the only list the wire serves. PLAN_M6.md is explicit that the cache is for the stale
 ///   list and is not a general serving layer, so a reachable host's detail
 ///   must never come from it: a detail poll lagging the refresh cadence
 ///   would show a restart offer that no longer exists.
@@ -1405,7 +1325,7 @@ pub(crate) async fn get_session(
         };
     };
     match manager::drain_sessions(&client).await {
-        Ok(sessions) => match sessions.into_iter().find(|s| s.id == id) {
+        Ok(drained) => match drained.sessions.into_iter().find(|s| s.id == id) {
             Some(info) => axum::Json(aggregate::SessionRow {
                 info,
                 host,

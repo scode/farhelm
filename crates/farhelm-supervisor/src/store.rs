@@ -1176,8 +1176,8 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 /// `created_at` DOES appear here as of PLAN_M6.md item 1: it was write-only
 /// from this type's perspective before that (a human-inspection column and
 /// a future migration's foothold, per the note that used to live here),
-/// but M6's `SessionInfo::created_at` and its pagination cursor's ordering
-/// key both need the value a live session was actually inserted with, so
+/// but M6's `SessionInfo::created_at` — the creation order every listing
+/// sorts by — needs the value a live session was actually inserted with, so
 /// it is load-bearing now. The caller decides the value (`insert_session`
 /// no longer mints it internally) and `insert_session_row` simply persists
 /// what it is given — see that function's own docs for why the decision

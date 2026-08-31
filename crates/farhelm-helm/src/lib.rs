@@ -20,13 +20,13 @@
 //!
 //! Three consequences run through everything below:
 //!
-//! - **The session list is merged and paged.** [`aggregate::session_page`]
-//!   merges one indexed page of helm.db's cross-host cache with the rows a
-//!   connected host holds in the manager's memory when it has no identity
-//!   to bind a cache write to, tags each row with its host, marks rows of
-//!   non-connected hosts stale, and pages the result with a helm-level
-//!   cursor that is deliberately independent of the wire cursor underneath
-//!   it (see that module's docs).
+//! - **The session list is merged and served WHOLE.**
+//!   [`aggregate::session_list`] reads every host's cached rows from
+//!   helm.db plus the rows a connected host holds in the manager's memory
+//!   when it has no identity to bind a cache write to, tags each row with
+//!   its host, marks rows of non-connected hosts stale, and filters, sorts
+//!   and counts the union in memory, cut at one fixed cap (see that
+//!   module's docs and SPEC.md's Session list section).
 //! - **Session operations route by owner.** [`sessions::route_session`]
 //!   looks a session's host up in that same merged view and hands back the
 //!   host's LIVE connection — or refuses, naming the state the host is
@@ -54,14 +54,10 @@
 //! - **Narrowing happens here, not in the browser.** The merged list takes
 //!   SPEC.md's filter dimensions as query parameters and answers a
 //!   filtered request with two counts (matching, and the fleet's own),
-//!   because a client that filtered the page it was handed would hide
-//!   matches beyond the page cut while reporting a count that included them.
-//!   The CACHED half of that count is computed once per page WALK and kept on
-//!   this side ([`aggregate::MatchingCounts`]) rather than carried in the
-//!   client's cursor — a count a caller can edit is a count the server would
-//!   be repeating back to whoever asked. The half that lives only in memory is
-//!   recounted per page, from the same snapshot the rows come from, because
-//!   nothing qualifies it that a page could check. [`profiles`] is the other half of that
+//!   because a client that filtered a list the cap had cut would hide
+//!   matches beyond the cut while reporting a count that included them.
+//!   Both counts are taken from the same in-memory view the rows come
+//!   from, in the same request. [`profiles`] is the other half of that
 //!   surface: profile CRUD proxied to the owning supervisor, with the one
 //!   profile fact the helm owns — the remembered default per host — served
 //!   beside the catalog, and identity-bound so one install's preference can
@@ -98,12 +94,12 @@ use tracing::warn;
 
 mod client;
 pub use client::{
-    CreateExtras, PeerHello, SessionListing, SessionPage, SupervisorClient, SupervisorError,
+    CreateExtras, PeerHello, SessionListing, SupervisorClient, SupervisorError,
     SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
 };
 
-/// The merged multi-host session list and the helm-level cursor that pages
-/// it — what `GET /api/sessions` is built out of.
+/// The merged multi-host session list, served whole — what
+/// `GET /api/sessions` is built out of.
 mod aggregate;
 
 /// Answers to questions an agent asks from inside its own session, which
@@ -412,14 +408,6 @@ struct AppState {
     /// The browser security boundary: durable credentials plus the
     /// process-local channel that closes admitted sockets on rotation.
     auth: auth::AuthState,
-    /// Matching counts already computed, so a filtered page WALK pays for one
-    /// rather than one per page — see [`aggregate::MatchingCounts`], which
-    /// also carries why this must not live in the client's cursor.
-    ///
-    /// Per-helm rather than a process-wide static, like every other bound
-    /// here: an embedded second helm has its own store generations, and a
-    /// shared cache would qualify one helm's counts with another's data.
-    counts: aggregate::MatchingCounts,
     /// How many `/api/events` subscriptions this helm admits at once.
     ///
     /// Held here rather than read from a constant at the call site purely so
@@ -530,7 +518,6 @@ impl AppState {
             manager,
             store: store.clone(),
             auth: auth::AuthState::new(store),
-            counts: aggregate::MatchingCounts::default(),
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
             profile_edits: std::sync::Mutex::new(std::collections::HashMap::new()),
             profile_edit_queue: std::sync::atomic::AtomicUsize::new(0),

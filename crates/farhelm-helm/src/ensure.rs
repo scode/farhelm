@@ -360,6 +360,7 @@ mod tests {
                     tabs: Vec::new(),
                     source_profile: None,
                 }],
+                false,
             )
             .await
             .expect("cache a session");

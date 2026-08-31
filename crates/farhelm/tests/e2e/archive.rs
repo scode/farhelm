@@ -472,7 +472,7 @@ async fn reopening_an_archived_row_ignores_a_same_named_tmux_husk() {
     let replacement = handoff_to_new_supervisor(state.path(), sup, client).await;
     let client = connect_client(&replacement).await;
     let row = client
-        .list_sessions_page(None, None)
+        .list_sessions()
         .await
         .expect("list after reopen")
         .sessions

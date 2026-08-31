@@ -2511,11 +2511,7 @@ async fn supervisor_writer_failure_ends_a_half_broken_connection() {
     // the still-open request writer.
     fail_writes.store(true, Ordering::SeqCst);
     writer
-        .write_control(&ControlMsg::ListSessions {
-            req_id: 42,
-            cursor: None,
-            limit: None,
-        })
+        .write_control(&ControlMsg::ListSessions { req_id: 42 })
         .await
         .expect("request reaches supervisor");
 
@@ -2596,11 +2592,7 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
     // depend on the read loop keeping up.
     for req_id in 0..64u64 {
         writer
-            .write_control(&ControlMsg::ListSessions {
-                req_id,
-                cursor: None,
-                limit: None,
-            })
+            .write_control(&ControlMsg::ListSessions { req_id })
             .await
             .expect("request direction stays open; the supervisor keeps reading it");
     }
@@ -3111,13 +3103,9 @@ async fn stdio_proxy_half_close_delivers_in_flight_replies() {
     Frame::control(&ControlMsg::hello("helm"))
         .encode(&mut input)
         .unwrap();
-    Frame::control(&ControlMsg::ListSessions {
-        req_id: 1,
-        cursor: None,
-        limit: None,
-    })
-    .encode(&mut input)
-    .unwrap();
+    Frame::control(&ControlMsg::ListSessions { req_id: 1 })
+        .encode(&mut input)
+        .unwrap();
 
     let mut child = tokio::process::Command::new(farhelm_bin())
         .args(["internal", "stdio", "--state-dir"])

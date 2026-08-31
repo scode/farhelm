@@ -346,9 +346,10 @@ pub enum SupervisorTransportError {
 /// LISTING, applied to the one id that never travels through a listing.
 /// Nothing before this point checks a `SessionCreated` reply's id at all,
 /// and the value goes on to three places that each assume it is well
-/// formed: the helm's own cursors (an id near the frame limit produces a
-/// cursor no client could replay), a REST body, and — through the agent
-/// relay — a CLI that prints it on stdout as its machine-readable answer.
+/// formed: the helm's own cache and REST paths (an id near the frame
+/// limit produces a URL no client could send), a REST body, and — through
+/// the agent relay — a CLI that prints it on stdout as its machine-readable
+/// answer.
 /// That last one is why the control-character rule is here and not only the
 /// length one: an id carrying a newline forges a second line of output in
 /// whatever captured it, and an ESC reaches the terminal that captured it.
@@ -388,57 +389,26 @@ fn created_session(session: SessionInfo) -> anyhow::Result<SessionInfo> {
     Ok(session)
 }
 
-/// `list_sessions`'s return value: the sessions themselves plus the
-/// `SessionList` reply's count/truncation metadata (PLAN_M2.md's "Proto
-/// growth").
+/// `list_sessions`'s return value: one host's whole session list, and
+/// whether the supervisor's cap cut it.
 ///
-/// A struct rather than a bare `Vec<SessionInfo>` specifically so `total`
-/// and `truncated` survive this call — a caller needs both to say "showing
-/// N of M" instead of quietly presenting a cut list as a whole one.
+/// A struct rather than a bare `Vec<SessionInfo>` specifically so
+/// `truncated` survives this call — a caller needs it to say "could not
+/// read to the end" instead of quietly presenting a cut list as a whole
+/// one (SPEC.md's Session list section).
 ///
-/// This is ONE HOST's answer, and as of PLAN_M6.md item 5 it is no longer
-/// what `GET /api/sessions` serializes: that body is the merged, multi-host
-/// page `crate::aggregate::SessionPageBody` describes, built from the cache
+/// This is ONE HOST's answer, and it is not what `GET /api/sessions`
+/// serializes: that body is the merged, multi-host list
+/// `crate::aggregate::SessionListBody` describes, built from the cache
 /// rather than from a live call. What still reaches this type at serving
 /// time is the per-session detail route's live lookup, which asks the
 /// owning host directly (a reachable host's detail must never come from the
-/// cache — see `crate::get_session`). The names below are kept and
-/// `Serialize` is kept derived because the REST body's top-level field
-/// names were modelled on them and the two must not drift apart in
-/// spelling.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// cache — see `crate::get_session`), and the manager's own refresh drain.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionListing {
     pub sessions: Vec<SessionInfo>,
-    /// The supervisor's full session count before any truncation — see
-    /// `ControlMsg::SessionList`'s own docs for why this can differ from
-    /// `sessions.len()`.
-    pub total: u64,
-    /// Whether `sessions` is missing entries the supervisor held back
-    /// (PLAN_M2.md's list cap/byte-budget). `false` for a supervisor built
-    /// before this field existed, exactly like a fresh-default `total`.
-    ///
-    /// As of PLAN_M6.md item 1 this is a REST-facing field synthesized,
-    /// not a value read directly off the wire the way `total` still is —
-    /// the wire itself dropped its own `truncated` bool in the same bump
-    /// `next_cursor` arrived in (see that field's own docs). The
-    /// synthesis is `next_cursor.is_some() || sessions.len() < total`,
-    /// not a bare `next_cursor.is_some()`: PLAN_M6.md item 2's supervisor
-    /// issues a real `next_cursor` on every genuinely cut page, so the
-    /// first disjunct is the common case in practice, but the second
-    /// disjunct is not merely historical belt-and-suspenders — a
-    /// supervisor's `build_list_reply` still answers `next_cursor: None`
-    /// for the one degenerate case where a byte-budget cut leaves NOTHING
-    /// kept (a single session too large to fit even alone; see that
-    /// function's own docs), which the disjunction's second half is what
-    /// still catches.
-    ///
-    /// Note the two `truncated`s are now DIFFERENT claims, and neither is
-    /// derived from the other: this one means "the supervisor held entries
-    /// back from this reply", while the REST body's field of the same name
-    /// means "the merged list has a next page" (see
-    /// `crate::aggregate::SessionPageBody`). They share a name because the
-    /// REST one kept the name its M2 consumers already read, not because
-    /// one is the other one layer up.
+    /// Whether `sessions` is missing entries the supervisor held back at
+    /// its cap (`farhelm_proto::LIST_SESSIONS_CAP`), straight off the wire.
     pub truncated: bool,
 }
 
@@ -471,25 +441,6 @@ pub struct SessionListing {
 pub struct PeerHello {
     pub build_version: String,
     pub host_identity: Option<String>,
-}
-
-/// One page of a paginated session list, as
-/// [`SupervisorClient::list_sessions_page`] returns it.
-///
-/// Deliberately NOT [`SessionListing`]: that type is the helm's REST body
-/// shape, whose `truncated` bool is a rendering decision for a UI (see its
-/// own docs). This one is the wire's own page, `next_cursor` and all,
-/// because its consumer is a page WALK — PLAN_M6.md item 5's drain to
-/// exhaustion — which needs the resume point itself and has no use for a
-/// boolean summary of it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionPage {
-    pub sessions: Vec<SessionInfo>,
-    /// The supervisor's full session count before any cut, as reported.
-    pub total: u64,
-    /// `None` means this page reached the end of the order — the walk is
-    /// done. `Some` is the opaque resume point for the next request.
-    pub next_cursor: Option<String>,
 }
 
 /// What an attached terminal receives from the supervisor side.
@@ -2749,138 +2700,33 @@ impl SupervisorClient {
         }
     }
 
-    /// Every session this supervisor holds (subject to its list cap AND
-    /// byte budget — either one can drop entries, independently of the
-    /// other, see `build_list_reply`'s docs), in no defined order, plus
-    /// the full count and whether either cut actually truncated anything.
-    /// Always a live round trip: THIS call never consults a cache, and
-    /// answers only what the supervisor said just now. That is a claim
-    /// about this method, not about the helm — as of PLAN_M6.md item 5 the
-    /// helm does keep a durable last-known session cache per host, which is
-    /// what serves the stale list for a host that is down. Supervisors
-    /// remain the authority (SPEC.md); the cache is what "last we knew"
-    /// means once there is nobody to ask.
+    /// Every session this supervisor holds, in one reply, cut only at the
+    /// wire's cap (`farhelm_proto::LIST_SESSIONS_CAP`, flagged by
+    /// `truncated`). Always a live round trip: THIS call never consults a
+    /// cache, and answers only what the supervisor said just now. That is a
+    /// claim about this method, not about the helm — the helm keeps a
+    /// durable last-known session cache per host, which is what serves the
+    /// stale list for a host that is down. Supervisors remain the authority
+    /// (SPEC.md); the cache is what "last we knew" means once there is
+    /// nobody to ask.
     ///
-    /// `cursor`/`limit` are sent as `None` unconditionally: this is a
-    /// single full-page fetch, not a page-by-page walk. The walk exists
-    /// separately as `crate::manager::drain_sessions`, which is what a
-    /// host's cache refresh uses; this method is what a caller uses when it
-    /// wants one host's list RIGHT NOW and a page is enough — the
-    /// per-session detail lookup, in practice, which must reach a reachable
-    /// host live rather than read the cache.
+    /// The one wire read behind both the manager's refresh drain
+    /// (`crate::manager::drain_sessions`) and the per-session detail
+    /// lookup: there is no page-walk primitive beside it, because the wire
+    /// has no pages.
     pub async fn list_sessions(&self) -> anyhow::Result<SessionListing> {
         let req_id = self.req_id();
         match self
-            .request(
-                req_id,
-                ControlMsg::ListSessions {
-                    req_id,
-                    cursor: None,
-                    limit: None,
-                },
-            )
+            .request(req_id, ControlMsg::ListSessions { req_id })
             .await?
         {
             ControlMsg::SessionList {
                 sessions,
-                total,
-                next_cursor,
+                truncated,
                 ..
-            } => {
-                // Normalized against `sessions.len()`: an older
-                // `PROTOCOL_VERSION` 3 supervisor built before `total`
-                // existed omits the field entirely, which
-                // `#[serde(default)]` decodes as 0 (see
-                // `ControlMsg::SessionList`'s own docs) — even though its
-                // `sessions` vec is complete and non-empty. Reporting a
-                // raw `total: 0` alongside a populated list would be
-                // actively misleading to a caller displaying "showing N
-                // of M" (PLAN_M2.md's UI contract): `total` must never be
-                // smaller than the number of sessions actually in hand.
-                let total = total.max(sessions.len() as u64);
-                Ok(SessionListing {
-                    // PLAN_M6.md item 1 turned the wire's `truncated` bool
-                    // into `next_cursor` (absence means exhaustion); item 2
-                    // is what makes a supervisor's `next_cursor` a REAL
-                    // Some/None distinction (`build_list_reply`'s own
-                    // docs). `next_cursor.is_some()` is therefore the
-                    // common-case answer here, but not the WHOLE answer: a
-                    // pre-8 supervisor never sends `next_cursor` at all
-                    // (decodes to `None` via its absence), and even a
-                    // current one answers `None` for the one degenerate
-                    // byte-budget case where nothing fit at all (see
-                    // `build_list_reply`'s docs) despite sessions
-                    // genuinely remaining. `sessions.len() < total` IS that
-                    // cut, by `total`'s own definition (the full count
-                    // before any cut), so the disjunction keeps the REST
-                    // body faithful in both cases a bare
-                    // `next_cursor.is_some()` would miss.
-                    truncated: next_cursor.is_some() || (sessions.len() as u64) < total,
-                    total,
-                    sessions,
-                })
-            }
-            other => bail!("unexpected reply to list_sessions: {other:?}"),
-        }
-    }
-
-    /// One page of the supervisor's session list, wire-shaped: the entries,
-    /// the full count, and the opaque resume point (`None` = exhausted).
-    ///
-    /// The page-walk primitive PLAN_M6.md item 5's drain is built from,
-    /// deliberately separate from [`Self::list_sessions`] rather than a
-    /// generalization of it. The two have genuinely different jobs: that
-    /// one answers a single REST request and normalizes the reply into the
-    /// browser-facing [`SessionListing`] shape (including synthesizing
-    /// `truncated`), while this one is a step in a loop whose caller
-    /// reassembles the pages itself and must see the raw cursor. Folding
-    /// them together would mean the REST path either grew a cursor
-    /// parameter no REST caller supplies, or the walk had to reconstruct a
-    /// resume point from a boolean that deliberately discards it.
-    ///
-    /// `limit` is passed through verbatim, and every caller in this
-    /// codebase passes `None` on purpose: that lets the supervisor apply
-    /// its own default page cap (`LIST_SESSION_CAP`), which is sized so an
-    /// ordinary host's whole list fits in ONE page. That matters beyond
-    /// round-trip count — see [`crate::manager::drain_sessions`]'s docs for
-    /// the per-page cost a smaller limit would multiply.
-    ///
-    /// `total` is NOT normalized against `sessions.len()` the way
-    /// [`Self::list_sessions`] normalizes it, and that difference is
-    /// intentional. That normalization is defensive: it repairs a `total`
-    /// smaller than the page it accompanies, which no supervisor this side
-    /// can talk to should ever send — the version gate refuses anything
-    /// that predates the field — so it guards against a bug or a hostile
-    /// peer, not against a known older build. Here the same repair would be
-    /// actively wrong: `sessions.len() < total` is the ORDINARY case for
-    /// one page of a walk, and raising `total` to the page's length would
-    /// destroy the whole-host count a caller asked for.
-    pub async fn list_sessions_page(
-        &self,
-        cursor: Option<String>,
-        limit: Option<u32>,
-    ) -> anyhow::Result<SessionPage> {
-        let req_id = self.req_id();
-        match self
-            .request(
-                req_id,
-                ControlMsg::ListSessions {
-                    req_id,
-                    cursor,
-                    limit,
-                },
-            )
-            .await?
-        {
-            ControlMsg::SessionList {
+            } => Ok(SessionListing {
                 sessions,
-                total,
-                next_cursor,
-                ..
-            } => Ok(SessionPage {
-                sessions,
-                total,
-                next_cursor,
+                truncated,
             }),
             other => bail!("unexpected reply to list_sessions: {other:?}"),
         }
@@ -4002,8 +3848,7 @@ mod tests {
                 .write_control(&ControlMsg::SessionList {
                     req_id,
                     sessions: vec![session("s1")],
-                    total: 1,
-                    next_cursor: None,
+                    truncated: false,
                 })
                 .await
                 .unwrap();
@@ -4012,14 +3857,7 @@ mod tests {
         let client = SupervisorClient::start(r, w).await.unwrap();
 
         let reply = client
-            .request(
-                101,
-                ControlMsg::ListSessions {
-                    req_id: 101,
-                    cursor: None,
-                    limit: None,
-                },
-            )
+            .request(101, ControlMsg::ListSessions { req_id: 101 })
             .await
             .expect("the real reply must still complete the request");
         assert!(
@@ -4071,8 +3909,7 @@ mod tests {
                     .write_control(&ControlMsg::SessionList {
                         req_id,
                         sessions: vec![session(&req_id.to_string())],
-                        total: 1,
-                        next_cursor: None,
+                        truncated: false,
                     })
                     .await
                     .unwrap();
@@ -4081,22 +3918,8 @@ mod tests {
         let (r, w) = tokio::io::split(client_side);
         let client = SupervisorClient::start(r, w).await.unwrap();
 
-        let first = client.request(
-            101,
-            ControlMsg::ListSessions {
-                req_id: 101,
-                cursor: None,
-                limit: None,
-            },
-        );
-        let second = client.request(
-            202,
-            ControlMsg::ListSessions {
-                req_id: 202,
-                cursor: None,
-                limit: None,
-            },
-        );
+        let first = client.request(101, ControlMsg::ListSessions { req_id: 101 });
+        let second = client.request(202, ControlMsg::ListSessions { req_id: 202 });
         let (first, second) = tokio::join!(first, second);
 
         assert!(matches!(
@@ -4112,180 +3935,47 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// `truncated` synthesizes from a disjunction —
-    /// `next_cursor.is_some() || sessions.len() < total` (see that call
-    /// site's own docs) — and this case isolates the FIRST disjunct: a
-    /// `next_cursor: Some(_)` with `total == sessions.len()`, so the count
-    /// half of the disjunction is false and cannot be the one making
-    /// `truncated` true. A regression that dropped `next_cursor.is_some()`
-    /// from the synthesis, keeping only the count comparison, would
-    /// compute `false` here and go uncaught by a test that let both
-    /// conditions hold at once.
+    /// The wire's `truncated` reaches the caller as it was sent, in both
+    /// directions. Nothing is synthesized from counts any more (there is
+    /// no `total` to compare against), so this pins that a cut a
+    /// supervisor reports is neither dropped nor invented on the way to
+    /// the REST body that tells the user the list could not be read to the
+    /// end.
     #[tokio::test]
-    async fn list_sessions_reports_truncated_from_next_cursor_alone() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id, .. } = request else {
-                panic!("unexpected request: {request:?}");
-            };
-            writer
-                .write_control(&ControlMsg::SessionList {
-                    req_id,
-                    sessions: vec![session("only-one")],
-                    total: 1,
-                    next_cursor: Some("opaque-cursor-value".to_string()),
-                })
-                .await
-                .unwrap();
-        });
-        let (r, w) = tokio::io::split(client_side);
-        let client = SupervisorClient::start(r, w).await.unwrap();
-
-        let listing = client.list_sessions().await.unwrap();
-        assert_eq!(listing.sessions.len(), 1);
-        assert_eq!(listing.total, 1);
-        assert!(
-            listing.truncated,
-            "next_cursor alone must synthesize truncated: true even when total == sessions.len()"
-        );
-        peer.await.unwrap();
-    }
-
-    /// `truncated` synthesizes from a disjunction —
-    /// `next_cursor.is_some() || sessions.len() < total` (see that call
-    /// site's own docs) — and this case isolates the SECOND disjunct: a
-    /// `next_cursor: None` with a `total` (sentinel `42`, deliberately far
-    /// from `sessions.len()`) that proves an honest, larger `total` a
-    /// truncating supervisor sent on purpose survives untouched, rather
-    /// than being recomputed or dropped. A regression that dropped
-    /// `sessions.len() < total` from the synthesis, keeping only
-    /// `next_cursor.is_some()`, would compute `false` here and go
-    /// uncaught by a test that let both conditions hold at once.
-    ///
-    /// This is deliberately NOT a claim that every `total` value is
-    /// preserved verbatim: `total.max(sessions.len())` (see that call
-    /// site's own docs, for the case where an old supervisor's `total`
-    /// UNDER-reports by omitting the field) rewrites a `total` smaller
-    /// than the list actually in hand — a different test
-    /// (`list_sessions_reports_a_populated_legacy_reply_with_a_real_total`)
-    /// pins that rewrite specifically.
-    #[tokio::test]
-    async fn list_sessions_reports_truncated_from_a_larger_total_alone() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id, .. } = request else {
-                panic!("unexpected request: {request:?}");
-            };
-            writer
-                .write_control(&ControlMsg::SessionList {
-                    req_id,
-                    sessions: vec![session("only-one")],
-                    total: 42,
-                    next_cursor: None,
-                })
-                .await
-                .unwrap();
-        });
-        let (r, w) = tokio::io::split(client_side);
-        let client = SupervisorClient::start(r, w).await.unwrap();
-
-        let listing = client.list_sessions().await.unwrap();
-        assert_eq!(listing.sessions.len(), 1);
-        assert_eq!(
-            listing.total, 42,
-            "an honest, larger total than sessions.len() must survive unchanged"
-        );
-        assert!(
-            listing.truncated,
-            "a larger total alone must synthesize truncated: true even when next_cursor is None"
-        );
-        peer.await.unwrap();
-    }
-
-    /// The other half of the normalization at `list_sessions`'s call
-    /// site: an older `PROTOCOL_VERSION` 3 supervisor, built before
-    /// `total` existed, sends a `SessionList` with the field simply
-    /// ABSENT — `#[serde(default)]` decodes that as `total: 0` (see
-    /// `ControlMsg::SessionList`'s own docs) — even though its `sessions`
-    /// vec is complete and non-empty. Forwarding that raw `0` would be
-    /// actively misleading ("showing 0 of 0" next to a visibly populated
-    /// list), so `total.max(sessions.len())` must rewrite it up to the
-    /// real count. This is the scripted-peer complement to the pure
-    /// `total.max(...)` arithmetic itself: it pins that the client's
-    /// `list_sessions` call site actually applies the rewrite to a wire
-    /// reply shaped exactly like a real legacy sender's, not just to a
-    /// value constructed directly in a unit test.
-    ///
-    /// It doubles as the BOTH-FALSE case of `truncated`'s disjunction
-    /// (`next_cursor.is_some() || sessions.len() < total`): `next_cursor`
-    /// is absent (decodes to `None`) and, after the rewrite above,
-    /// `total == sessions.len()`. A regression that made either disjunct
-    /// unconditionally `true` — reporting a cut that never happened —
-    /// would flip `listing.truncated` here and be caught by the assertion
-    /// below.
-    #[tokio::test]
-    async fn list_sessions_reports_a_populated_legacy_reply_with_a_real_total() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id, .. } = request else {
-                panic!("unexpected request: {request:?}");
-            };
-            // Write the JSON by hand, WITHOUT `total`/`next_cursor` at all —
-            // constructing a `ControlMsg::SessionList` in Rust and just
-            // not setting them is not possible (the fields are required
-            // in this build's own type); omitting them from the wire is
-            // exactly what an actual older build's serializer would
-            // produce, which is the scenario under test.
-            let body = serde_json::json!({
-                "type": "session_list",
-                "req_id": req_id,
-                "sessions": [
-                    { "id": "a", "title": "a", "cwd": "/a", "invocation": "agent" },
-                    { "id": "b", "title": "b", "cwd": "/b", "invocation": "agent" },
-                ],
+    async fn list_sessions_passes_the_supervisors_truncated_flag_through() {
+        for sent in [true, false] {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::ListSessions { req_id } = request else {
+                    panic!("unexpected request: {request:?}");
+                };
+                writer
+                    .write_control(&ControlMsg::SessionList {
+                        req_id,
+                        sessions: vec![session("a")],
+                        truncated: sent,
+                    })
+                    .await
+                    .unwrap();
             });
-            writer
-                .write_frame(&Frame {
-                    kind: FrameKind::Control,
-                    channel: 0,
-                    body: serde_json::to_vec(&body).unwrap(),
-                })
-                .await
-                .unwrap();
-        });
-        let (r, w) = tokio::io::split(client_side);
-        let client = SupervisorClient::start(r, w).await.unwrap();
+            let (r, w) = tokio::io::split(client_side);
+            let client = SupervisorClient::start(r, w).await.unwrap();
 
-        let listing = client.list_sessions().await.unwrap();
-        assert_eq!(listing.sessions.len(), 2);
-        assert_eq!(
-            listing.total, 2,
-            "an absent (defaulted-to-0) total must be rewritten up to the real session \
-             count, not forwarded as a false '0 sessions' claim"
-        );
-        assert!(!listing.truncated);
-        peer.await.unwrap();
+            let listing = client.list_sessions().await.unwrap();
+            assert_eq!(listing.sessions.len(), 1);
+            assert_eq!(
+                listing.truncated, sent,
+                "the flag must pass through unchanged"
+            );
+            peer.await.unwrap();
+        }
     }
 
     /// A broken write half must fail pending requests and detach
@@ -4686,8 +4376,7 @@ mod tests {
                 .write_control(&ControlMsg::SessionList {
                     req_id,
                     sessions,
-                    total: 116,
-                    next_cursor: None,
+                    truncated: false,
                 })
                 .await
                 .expect("a near-limit listing is a legal frame");
@@ -7491,8 +7180,7 @@ mod tests {
             .write_control(&ControlMsg::SessionList {
                 req_id,
                 sessions: Vec::new(),
-                total: 0,
-                next_cursor: None,
+                truncated: false,
             })
             .await
             .expect("answer the ordinary request");
@@ -7543,8 +7231,7 @@ mod tests {
             .write_control(&ControlMsg::SessionList {
                 req_id,
                 sessions: vec![session("a")],
-                total: 1,
-                next_cursor: None,
+                truncated: false,
             })
             .await
             .expect("answer the ordinary request");
@@ -7623,8 +7310,7 @@ mod tests {
             .write_control(&ControlMsg::SessionList {
                 req_id,
                 sessions: Vec::new(),
-                total: 0,
-                next_cursor: None,
+                truncated: false,
             })
             .await
             .expect("answer the ordinary request");

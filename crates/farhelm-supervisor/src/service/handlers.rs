@@ -11,7 +11,7 @@
 //! [`ConnectionCtx`] and hands each arm only the fields its message may
 //! touch — the bundle stops here deliberately, so a handler's signature
 //! still says what it is allowed to reach. The heavier arms delegate
-//! their substance too: `ListSessions` to `listing::list_page` and
+//! their substance too: `ListSessions` to `listing::list_all` and
 //! `DeleteSession` to `Supervisor::teardown_session`, leaving the handler
 //! with validation on the way in and reply shaping on the way out.
 
@@ -27,9 +27,7 @@ use super::launch_artifacts::{
     cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
     wrapper_failure_detail,
 };
-use super::listing::{
-    LIST_BYTE_BUDGET, LIST_SESSION_CAP, ListQuery, build_list_reply, decode_list_cursor, list_page,
-};
+use super::listing::list_all;
 use super::status::{dead_pane_exit_code, entry_info, observe_entry};
 use super::sweep::{SweepTarget, reap_process_tree, stop_live_agent};
 use super::teardown::{ArchiveError, TeardownError};
@@ -512,7 +510,7 @@ async fn session_info_now(
     }
     // One session, so one catalog read — and only for a session that names
     // a profile at all. Failing the reply on a failed read rather than
-    // passing an empty catalog, for `list_page`'s reason: an absent id is
+    // passing an empty catalog, for `list_all`'s reason: an absent id is
     // how a DELETED profile reads, so an empty map would report this
     // session's profile as gone.
     let profiles = if entry.info.source_profile.is_some() {
@@ -553,162 +551,39 @@ async fn session_info_now(
 /// docs for why an unbounded, untracked spawn per slow request
 /// is not safe to leave unmanaged.
 ///
-/// ## Cursor/limit contract (PLAN_M6.md item 2, serving the item 1 vocabulary)
+/// ## The reply is the whole list
 ///
-/// Real pagination, per `ControlMsg::ListSessions`/`SessionList`'s own
-/// wire docs:
-///
-/// - `cursor: None` starts a walk at the front of `list_order_key`'s
-///   order; `Some` resumes strictly after the key it decodes to,
-///   regardless of whether a session bearing that exact key still exists
-///   (a since-deleted session's cursor resumes cleanly). A cursor that
-///   fails to decode — bad base64, malformed JSON, or valid JSON of the
-///   wrong shape (`decode_list_cursor`'s own docs) — is refused with
-///   `ErrorKind::InvalidRequest` before any list work is admitted: this
-///   handler never guesses at a caller's intent for a value it cannot
-///   honestly interpret, and never treats it as "start over" either
-///   (which would silently re-serve sessions the caller's earlier pages
-///   already returned).
-/// - `limit: None` takes `LIST_SESSION_CAP` as the DEFAULT page size;
-///   `Some(n)` for `n >= 1` is HONORED AS GIVEN, with no upper clamp —
-///   PLAN_M6.md keeps `LIST_SESSION_CAP` alive only as that default, never
-///   as a ceiling on an explicit request (an earlier build clamped `Some(n)`
-///   above the cap down to it, which the plan never sanctioned; Theme C of
-///   the M6.75 review-swarm batch removed that clamp). The byte budget
-///   (`LIST_BYTE_BUDGET`, enforced in `build_list_reply`) remains the real
-///   bound on what any one page can carry regardless of `n`: an
-///   over-large `limit` simply degrades to a budget cut with a resume
-///   cursor, same as any other page that does not fit whole.
-///   `Some(0)` is refused outright, DELIBERATELY not clamped up to 1: a
-///   page of zero can never make progress on its own, so a caller that
-///   sent it almost certainly has a bug, and refusing surfaces that
-///   immediately rather than silently substituting a value the caller
-///   never asked for and may not expect. The alternative (clamp to 1) was
-///   considered and rejected for exactly that silent-substitution reason;
-///   either choice avoids the one truly forbidden shape — an EMPTY page
-///   carrying a `next_cursor`, which would let a caller loop forever
-///   making no progress while believing it was paging correctly.
-/// - Every reply, cut or not, reflects the REAL state of the walk:
-///   `next_cursor` is `Some` exactly when sessions remain beyond the last
-///   entry actually returned (whether the count/cursor cut below left
-///   them, or `build_list_reply`'s own byte-budget cut did — see that
-///   function's docs for how the two compose), `None` only when the walk
-///   this reply produced genuinely reached the end of the order. The one
-///   exception is not a `next_cursor` shape at all: a single session too
-///   large to fit under the byte budget even alone is refused outright
-///   (`build_list_reply`'s own docs) rather than answered as a fake
-///   exhausted page.
+/// There is nothing to validate on the way in: `ListSessions` carries
+/// only its `req_id` (`PROTOCOL_VERSION` 14), and `list_all` answers with
+/// every session up to `LIST_SESSIONS_CAP`, flagging a cut. A reply too
+/// large for one frame is not budgeted for here — `reply_frame`'s
+/// oversize defusal turns it into an `Internal` error, and the helm keeps
+/// its previous cache; see the cap's own docs in `farhelm-proto` for why
+/// that is an accepted failure rather than a case worth a byte budget.
 async fn handle_list_sessions(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
     tasks: &mut tokio::task::JoinSet<()>,
     req_id: u64,
-    cursor: Option<String>,
-    limit: Option<u32>,
 ) {
-    // Limit and cursor are both validated BEFORE any list work is
-    // admitted (mirroring where PLAN_M6.md item 1's interim refusal sat,
-    // before item 2 replaced it with real pagination): neither check
-    // touches `sup.sessions` or tmux, so there is no reason to pay
-    // `spawn_admitted`'s cost for a request this handler is about to
-    // refuse outright.
-    let effective_limit = match limit {
-        Some(0) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "ListSessions limit must be at least 1; a limit of 0 could never \
-                              make progress through the pages"
-                        .to_string(),
-                    kind: ErrorKind::InvalidRequest,
-                },
-            )
-            .await;
-            return;
-        }
-        // No `.min(LIST_SESSION_CAP)` here (Theme C of the M6.75
-        // review-swarm batch): PLAN_M6.md keeps the cap alive only as the
-        // default page size, not as a ceiling on an explicit request. An
-        // over-large `n` is bounded by the byte budget instead, same as
-        // any other page that would not fit whole — see this function's
-        // own cursor/limit contract docs above.
-        Some(n) => n as usize,
-        None => LIST_SESSION_CAP,
-    };
-    let cursor_key = match cursor.as_deref().map(decode_list_cursor) {
-        Some(None) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "ListSessions cursor could not be decoded; cursors are opaque — \
-                              replay one exactly as a reply carried it, or start a fresh \
-                              walk with cursor: None"
-                        .to_string(),
-                    kind: ErrorKind::InvalidRequest,
-                },
-            )
-            .await;
-            return;
-        }
-        Some(Some(key)) => Some(key),
-        None => None,
-    };
     let sup2 = Arc::clone(sup);
     let tx = tx.clone();
     spawn_admitted(&sup.admission, tasks, async move {
         let sup = sup2;
-        let page = match list_page(
-            &sup,
-            ListQuery {
-                cursor: cursor_key,
-                limit: effective_limit,
+        let reply = match list_all(&sup).await {
+            Ok(list) => ControlMsg::SessionList {
+                req_id,
+                sessions: list.sessions,
+                truncated: list.truncated,
             },
-        )
-        .await
-        {
-            Ok(page) => page,
-            // Every failure the walk can hit — an unreadable launch
+            // Every failure the listing can hit — an unreadable launch
             // sentinel, an unclassified tmux failure — is an `Internal`
-            // carrying the original error verbatim: see `list_page`'s own
+            // carrying the original error verbatim: see `list_all`'s own
             // docs for why each of them fails the whole request rather
             // than degrading one entry.
-            Err(e) => {
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!("{e:#}"),
-                        kind: ErrorKind::Internal,
-                    },
-                )
-                .await;
-                return;
-            }
-        };
-        // `Err` is `build_list_reply`'s degenerate-budget case (Theme B of
-        // the M6.75 review-swarm batch): the byte budget kept ZERO
-        // entries while at least one candidate remained, so there is no
-        // honest page to send — reporting `next_cursor: None` here would
-        // lie that the walk was exhausted. Named by session id so the
-        // caller (a human, in practice — no client is expected to react
-        // programmatically to a page-shaped answer becoming impossible)
-        // can tell which record is the problem.
-        let reply = match build_list_reply(
-            req_id,
-            page.sessions,
-            page.total,
-            LIST_BYTE_BUDGET,
-            page.more_beyond_page,
-        ) {
-            Ok(reply) => reply,
-            Err(unfit_id) => ControlMsg::Error {
+            Err(e) => ControlMsg::Error {
                 req_id,
-                message: format!(
-                    "session {unfit_id} does not fit in a ListSessions reply even alone \
-                     ({LIST_BYTE_BUDGET}-byte budget); the page cannot be represented"
-                ),
+                message: format!("{e:#}"),
                 kind: ErrorKind::Internal,
             },
         };
@@ -2717,11 +2592,9 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             )
             .await
         }
-        ControlMsg::ListSessions {
-            req_id,
-            cursor,
-            limit,
-        } => handle_list_sessions(sup, ctx.tx, ctx.tasks, req_id, cursor, limit).await,
+        ControlMsg::ListSessions { req_id } => {
+            handle_list_sessions(sup, ctx.tx, ctx.tasks, req_id).await
+        }
         ControlMsg::StopSession { req_id, session_id } => {
             handle_stop_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
@@ -3482,7 +3355,6 @@ mod tests {
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
     use super::super::core::{ArchiveStage, SupervisorSeams};
-    use super::super::listing::encode_list_cursor;
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
@@ -6427,17 +6299,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
 
-        handle_restricted_control(
-            &sup,
-            ControlMsg::ListSessions {
-                req_id: 41,
-                cursor: None,
-                limit: None,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
+        handle_restricted_control(&sup, ControlMsg::ListSessions { req_id: 41 }, &tx, &auth).await;
         let unauthorized: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("authority refusal").body).unwrap();
         assert!(matches!(
@@ -7555,7 +7417,7 @@ mod tests {
     /// snapshotted name is current (SPEC.md's snapshot rule says it is
     /// not), and a wrongly-flagged PRESENT would mark every ordinary
     /// session as broken. All three ride one reply because that is also
-    /// what pins the BATCH: one catalog read answering a whole page, with
+    /// what pins the BATCH: one catalog read answering a whole reply, with
     /// each row resolved against its own id.
     ///
     /// The raw-created session in the mix is not filler either — it is the
@@ -7613,8 +7475,8 @@ mod tests {
                         archived: false,
                         id: id.clone(),
                         title: id.clone(),
-                        // Descending creation order is what `list_page`
-                        // walks, so a later index must sort later.
+                        // Descending creation order is the reply's own
+                        // order, so a later index must sort later.
                         created_at: 1_700_000_000 - index as i64,
                         last_activity_at: 1_700_000_000 - index as i64,
                         creation_seq: None,
@@ -7718,11 +7580,7 @@ mod tests {
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
-            ControlMsg::ListSessions {
-                req_id: 9,
-                cursor: None,
-                limit: None,
-            },
+            ControlMsg::ListSessions { req_id: 9 },
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -7888,11 +7746,7 @@ mod tests {
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
-            ControlMsg::ListSessions {
-                req_id: 1,
-                cursor: None,
-                limit: None,
-            },
+            ControlMsg::ListSessions { req_id: 1 },
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -7929,7 +7783,7 @@ mod tests {
         );
     }
 
-    /// What a list reply COSTS in catalog reads: exactly one for a page
+    /// What a list reply COSTS in catalog reads: exactly one for a reply
     /// that needs the catalog, and exactly zero for one that does not
     /// (PLAN_M6_75.md item 5).
     ///
@@ -7938,14 +7792,14 @@ mod tests {
     /// are identical — and turns one small query per reply into one per
     /// row, on the path a fleet's whole session list is served from. The
     /// zero case matters at least as much: every session predating this
-    /// feature is raw-created, so the overwhelmingly common page must not
+    /// feature is raw-created, so the overwhelmingly common reply must not
     /// pay for a catalog nothing on it references.
     ///
     /// The third case is the failure mode, and it is here rather than in
     /// its own test because it is the same seam: a catalog that cannot be
     /// read FAILS the reply instead of degrading to an empty map. An empty
     /// map is indistinguishable from "every profile was deleted", so
-    /// degrading would render a transient database error as a page of
+    /// degrading would render a transient database error as a reply of
     /// sessions whose profiles are all gone — a specific, alarming lie
     /// about durable state, in place of an error the next list retries.
     #[tokio::test]
@@ -7960,11 +7814,7 @@ mod tests {
         let mut list = async |req_id, rx: &mut mpsc::Receiver<Frame>| -> ControlMsg {
             handle_control(
                 &sup,
-                ControlMsg::ListSessions {
-                    req_id,
-                    cursor: None,
-                    limit: None,
-                },
+                ControlMsg::ListSessions { req_id },
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
@@ -8043,7 +7893,7 @@ mod tests {
             })
         };
 
-        // A page of raw-created sessions only: no catalog read at all.
+        // A reply of raw-created sessions only: no catalog read at all.
         for id in ["r1", "r2", "r3"] {
             sup.sessions
                 .lock()
@@ -8055,10 +7905,10 @@ mod tests {
         assert_eq!(
             sup.store.profile_name_reads(),
             before,
-            "a page where no session names a profile must not read the catalog at all"
+            "a reply where no session names a profile must not read the catalog at all"
         );
 
-        // Add the profile-created ones: one read for the whole page.
+        // Add the profile-created ones: one read for the whole reply.
         for id in ["p1", "p2", "p3"] {
             sup.sessions
                 .lock()
@@ -8078,7 +7928,7 @@ mod tests {
         assert_eq!(
             sessions.len(),
             6,
-            "premise: all six sessions are on the page"
+            "premise: all six sessions are in the reply"
         );
 
         // And with the catalog unreadable, the whole request fails rather
@@ -8513,30 +8363,20 @@ mod tests {
     }
 
     /// Call-site regression: drives `handle_control` itself, not
-    /// `build_list_reply`/`reply_frame` in isolation. Before M2's list
-    /// cap and byte budget existed, an oversized `ListSessions` reply
-    /// could only be caught by `reply_frame`'s backstop degrading it to
-    /// an `Error` — that scenario is still pinned directly against
-    /// `reply_frame` by `reply_frame_substitutes_error_for_oversized_reply`
-    /// in `connection`'s tests. Once `build_list_reply` sits in front of
-    /// it at this call site, the SAME oversized fixture (a single session
-    /// whose title alone exceeds `MAX_FRAME_LEN`) never reaches
-    /// `reply_frame` in an oversized state at all: the byte budget catches
-    /// it first, and — since Theme B of the M6.75 review-swarm batch — the
-    /// zero-kept-with-a-session-remaining case `build_list_reply` finds is
-    /// itself surfaced as `ErrorKind::Internal`, not the fake `total: 1`,
-    /// empty-`sessions`, `next_cursor: None` "success" an earlier build
-    /// answered (which the panel found indistinguishable from genuine
-    /// exhaustion, and which made the rest of the walk unreachable).
-    /// `build_list_reply`'s own unit tests in `listing` pin that outcome
-    /// in isolation; this test pins it through the REAL call site, so a
-    /// future change that quietly dropped `build_list_reply` from this
-    /// call site (reverting to plain, uncapped `Frame::control`) would
-    /// pass every `reply_frame`/`build_list_reply` unit test — they call
-    /// those helpers directly — and only this test would catch it. It also
-    /// proves the refusal is scoped to its own request: a second, ordinary
-    /// request on the same connection (same `tx`) must still get an
-    /// honest, untruncated reply.
+    /// `reply_frame` in isolation. There is no byte budget in
+    /// `listing::list_all` any more — the wire protocol dropped pagination
+    /// entirely (`LIST_SESSIONS_CAP` is a ROW cap, not a size one) — so an
+    /// oversized reply is caught only where it always could be: at
+    /// `reply_frame`'s own encode-and-check backstop, which
+    /// `reply_frame_substitutes_error_for_oversized_reply` in
+    /// `connection`'s tests pins directly. This test pins the same
+    /// defusal through the REAL call site (`handle_list_sessions` ->
+    /// `send_reply` -> `reply_frame`) with a fixture that is not
+    /// contrived to hit a cap that no longer exists — a single session
+    /// whose title alone exceeds `MAX_FRAME_LEN` is already enough. It
+    /// also proves the refusal is scoped to its own request: a second,
+    /// ordinary request on the same connection (same `tx`) must still get
+    /// an honest reply.
     #[tokio::test]
     async fn list_sessions_call_site_refuses_a_record_too_large_to_fit_alone() {
         let state = StateDir::new();
@@ -8596,11 +8436,7 @@ mod tests {
 
         handle_control(
             &sup,
-            ControlMsg::ListSessions {
-                req_id: 1,
-                cursor: None,
-                limit: None,
-            },
+            ControlMsg::ListSessions { req_id: 1 },
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -8632,9 +8468,13 @@ mod tests {
         };
         assert_eq!(req_id, 1);
         assert_eq!(kind, ErrorKind::Internal);
+        // The backstop speaks in frame terms, not session terms: it sees
+        // an encoded reply, not the row that made it too big. What matters
+        // is that the caller gets an explicit refusal rather than a
+        // silently dropped or truncated list.
         assert!(
-            message.contains("s1"),
-            "the refusal must name the session that could not fit: {message}"
+            message.contains("frame limit"),
+            "the refusal must say the reply exceeded the frame limit: {message}"
         );
 
         // Clear the oversized fixture and send a normal request through
@@ -8647,11 +8487,7 @@ mod tests {
         sup.sessions.lock().await.clear();
         handle_control(
             &sup,
-            ControlMsg::ListSessions {
-                req_id: 2,
-                cursor: None,
-                limit: None,
-            },
+            ControlMsg::ListSessions { req_id: 2 },
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -8669,33 +8505,27 @@ mod tests {
         let ControlMsg::SessionList {
             req_id,
             sessions,
-            total,
-            next_cursor,
+            truncated,
         } = decoded2
         else {
             panic!("expected a normal ControlMsg::SessionList, got {decoded2:?}");
         };
         assert_eq!(req_id, 2);
         assert!(sessions.is_empty());
-        assert_eq!(total, 0);
-        assert_eq!(next_cursor, None);
+        assert!(!truncated);
     }
 
-    /// Production call-site coverage for `LIST_SESSION_CAP` as the DEFAULT
-    /// page size (`limit: None`) — the cheapest honest way to exercise the
-    /// REAL wiring (`handle_list_sessions`'s own cursor/limit walk) rather
-    /// than only `build_list_reply`'s pure-function tests, which never
-    /// touch the handler at all. Creating `LIST_SESSION_CAP + 1` REAL tmux
-    /// sessions to exercise this would be slow and environment-dependent
-    /// for no added signal; `fake_entry` gives every entry a synthetic,
-    /// terminal-less (`terminal: None`) fixture instead, which is enough to
-    /// drive the cap/total wiring without needing a single real tmux round
-    /// trip to succeed for any of them (`session_status` returns `Exited`
-    /// for a terminal-less entry without ever consulting `pane_states`). An
-    /// explicit `limit` above this same cap being HONORED rather than
-    /// clamped back down to it is
-    /// `list_sessions_limit_above_cap_is_honored_until_the_byte_budget_cuts`'s
-    /// job, below (Theme C of the M6.75 review-swarm batch).
+    /// Production call-site coverage for `LIST_SESSIONS_CAP`: seeding one
+    /// session past it must come back as EXACTLY `LIST_SESSIONS_CAP` rows,
+    /// `truncated: true`, and — because the ordering contract
+    /// (`listing::list_order_key`) keeps the newest and drops the oldest —
+    /// missing precisely the session created first. `fake_entry` gives
+    /// every entry a synthetic, terminal-less (`terminal: None`) fixture,
+    /// which is enough to drive the cap wiring without a single real tmux
+    /// round trip (`session_status` returns `Exited` for a terminal-less
+    /// entry without ever consulting `pane_states`) — `LIST_SESSIONS_CAP +
+    /// 1` REAL tmux sessions would be slow and environment-dependent for
+    /// no added signal.
     #[tokio::test]
     async fn list_sessions_honors_the_session_cap_at_the_handler_level() {
         let state = StateDir::new();
@@ -8705,265 +8535,43 @@ mod tests {
 
         {
             let mut sessions = sup.sessions.lock().await;
-            for i in 0..LIST_SESSION_CAP + 1 {
+            // created_at ascending with the loop index: s0 is the OLDEST
+            // and therefore the one row the cap must drop.
+            for i in 0..farhelm_proto::LIST_SESSIONS_CAP + 1 {
                 let id = format!("s{i}");
-                sessions.insert(id.clone(), fake_entry(&id, 1_700_000_000));
+                sessions.insert(id.clone(), fake_entry(&id, 1_700_000_000 + i as i64));
             }
         }
 
-        let (sessions, total, next_cursor) = list_sessions_page(&sup, 1, None, None).await;
+        let (sessions, truncated) = list_sessions(&sup, 1).await;
         assert_eq!(
             sessions.len(),
-            LIST_SESSION_CAP,
+            farhelm_proto::LIST_SESSIONS_CAP,
             "the cap must win over the full count at the real handler call site"
         );
-        assert_eq!(
-            total,
-            (LIST_SESSION_CAP + 1) as u64,
-            "total is the count BEFORE the cap"
+        assert!(
+            truncated,
+            "one session past the cap must be reported as a cut"
         );
         assert!(
-            next_cursor.is_some(),
-            "one session remains beyond a cap-cut page, so a real resume cursor must be issued"
+            !sessions.iter().any(|s| s.id == "s0"),
+            "the OLDEST session must be the one the cap drops"
         );
     }
 
-    /// `limit: Some(n)` above `LIST_SESSION_CAP` is HONORED, not clamped
-    /// back down to it (Theme C of the M6.75 review-swarm batch:
-    /// PLAN_M6.md keeps `LIST_SESSION_CAP` alive only as the DEFAULT page
-    /// size — an earlier build's silent downward clamp to that same cap
-    /// for an explicit `Some(n)` was never sanctioned by the plan).
-    ///
-    /// Proven by constructing more sessions than the cap, with titles fat
-    /// enough that the BYTE BUDGET, not the count, decides where the first
-    /// page ends: a still-clamped implementation would stop at exactly
-    /// `LIST_SESSION_CAP` entries regardless of the budget; an honoring
-    /// one keeps going past the cap until the budget itself cuts, landing
-    /// somewhere between the cap and the full session count — so
-    /// `page1.len() > LIST_SESSION_CAP` is the one assertion that tells
-    /// the two implementations apart.
-    ///
-    /// The cursor the budget cut leaves is then FOLLOWED to a second page
-    /// — a panel reviewer flagged that this test's predecessor asserted
-    /// only page length and `total`, which proves nothing about whether
-    /// the cursor `build_list_reply` issues can actually resume the walk,
-    /// only that it left some cursor value.
-    #[tokio::test]
-    async fn list_sessions_limit_above_cap_is_honored_until_the_byte_budget_cuts() {
-        const TOTAL_SESSIONS: usize = LIST_SESSION_CAP + 300;
-        // Sized so the byte budget (`LIST_BYTE_BUDGET`, half of the 8 MiB
-        // `MAX_FRAME_LEN`) admits meaningfully more than `LIST_SESSION_CAP`
-        // entries but not all of `TOTAL_SESSIONS` — the gap between "the
-        // cap" and "everything" is where this test's signal lives.
-        const TITLE_LEN: usize = 6_500;
-
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-
-        {
-            let mut sessions = sup.sessions.lock().await;
-            for i in 0..TOTAL_SESSIONS {
-                // Zero-padded and strictly descending so every entry gets
-                // a distinct, stable `list_order_key` slot (matching the
-                // convention `list_sessions_full_walk_equals_unpaginated_
-                // truth` documents above).
-                let id = format!("s{i:04}");
-                let created_at = 1_700_000_000 - i as i64;
-                sessions.insert(
-                    id.clone(),
-                    fake_entry_with_title(&id, created_at, "x".repeat(TITLE_LEN)),
-                );
-            }
-        }
-
-        let (page1, total, next_cursor) =
-            list_sessions_page(&sup, 1, None, Some((LIST_SESSION_CAP * 2) as u32)).await;
-        assert_eq!(total, TOTAL_SESSIONS as u64);
-        assert!(
-            page1.len() > LIST_SESSION_CAP,
-            "an honored limit above the cap must be able to return more than \
-             LIST_SESSION_CAP entries in one page: got {}",
-            page1.len()
-        );
-        assert!(
-            page1.len() < TOTAL_SESSIONS,
-            "the byte budget, not the (now-unbounded) limit, must still be \
-             what ends this page: got {}",
-            page1.len()
-        );
-        let cursor = next_cursor.expect("sessions remain beyond the budget cut");
-
-        let (page2, _, next_cursor2) =
-            list_sessions_page(&sup, 2, Some(cursor), Some((LIST_SESSION_CAP * 2) as u32)).await;
-        assert_eq!(
-            page1.len() + page2.len(),
-            TOTAL_SESSIONS,
-            "the two pages together must account for every session exactly once, \
-             proving the budget cut's cursor genuinely resumes the walk"
-        );
-        assert_eq!(
-            next_cursor2, None,
-            "the second page exhausts the remaining sessions"
-        );
-    }
-
-    /// `limit: Some(0)` is refused outright rather than clamped up to 1 —
-    /// this handler's own documented decision (see its doc comment for the
-    /// reasoning: a caller sending 0 almost certainly has a bug, and
-    /// silently substituting a value it never asked for would hide that).
-    /// The refusal must land BEFORE any list work is admitted: `tasks` (the
-    /// `JoinSet` `spawn_admitted` work lands on) is asserted empty, and the
-    /// reply is drained with `try_recv` rather than an awaited `recv`, so a
-    /// handler that spawned list work first and refused asynchronously
-    /// afterward would fail this test even if the refusal eventually
-    /// arrived.
-    #[tokio::test]
-    async fn list_sessions_limit_zero_is_refused_as_invalid_request() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
-        let mut tasks = tokio::task::JoinSet::new();
-        handle_control(
-            &sup,
-            ControlMsg::ListSessions {
-                req_id: 1,
-                cursor: None,
-                limit: Some(0),
-            },
-            ConnectionCtx {
-                tx: &tx,
-                priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
-                tasks: &mut tasks,
-            },
-        )
-        .await;
-        assert_eq!(
-            tasks.len(),
-            0,
-            "a limit-zero refusal must happen before any list work is admitted onto tasks"
-        );
-        let reply = rx.try_recv().expect(
-            "the error reply must already be in the channel once handle_control's future \
-             returns — a handler that scheduled list work before refusing could only reply \
-             later, which try_recv (unlike an awaited recv) would not paper over",
-        );
-        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
-        let ControlMsg::Error { req_id, kind, .. } = decoded else {
-            panic!("expected ControlMsg::Error, got {decoded:?}");
-        };
-        assert_eq!(req_id, 1);
-        assert_eq!(kind, ErrorKind::InvalidRequest);
-    }
-
-    /// An UNDECODABLE cursor — bad base64, truncated base64, or base64 of
-    /// JSON with the wrong fields — is a clean `ErrorKind::InvalidRequest`,
-    /// never a panic and never a silently wrong page (PLAN_M6.md's own
-    /// pagination testing decision). Table-driven over several distinct
-    /// malformed shapes because `decode_list_cursor`'s contract is that
-    /// EVERY such shape collapses to the same refusal, not just the one a
-    /// hand-picked example happens to hit.
-    ///
-    /// This is coverage for DECODING failure only, not for "tamper-
-    /// proofing" — cursors carry no authority to tamper with in the first
-    /// place (single-user supervisor, every caller may read every session).
-    /// A value that decodes cleanly to a well-formed `ListCursor` — even
-    /// one hand-edited to name a key this supervisor never issued — is
-    /// ACCEPTED and simply resumes at that ordering position: see
-    /// `list_sessions_cursor_from_a_deleted_session_still_resumes`, which
-    /// pins exactly that as a feature, not a gap this test's fixtures
-    /// happen not to cover.
-    ///
-    /// The refusal must land BEFORE the request is even spawned onto its
-    /// own task, which this test pins directly rather than by inference:
-    /// `tasks` (the `JoinSet` `spawn_admitted` list work lands on) is
-    /// asserted empty, and the reply is drained with `try_recv` — not an
-    /// awaited `recv`, which would equally pass for a handler that
-    /// admitted list work first and refused only once that work finished.
-    #[tokio::test]
-    async fn list_sessions_malformed_cursor_is_refused_as_invalid_request() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-
-        // The third shape is built rather than hand-typed: valid base64 of
-        // valid JSON, but the WRONG shape (missing `ListCursor`'s required
-        // fields) — the case a naive "does it base64-decode" check would
-        // miss, and the one most worth generating rather than guessing at
-        // by hand.
-        use base64::Engine;
-        let wrong_shape = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(serde_json::to_vec(&serde_json::json!({"unrelated": true})).unwrap());
-        for (i, malformed) in ["not-base64-at-all!!", "YQ", wrong_shape.as_str()]
-            .into_iter()
-            .enumerate()
-        {
-            let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-            let mut input_routes = HashMap::new();
-            let mut tasks = tokio::task::JoinSet::new();
-            let req_id = i as u64 + 1;
-            handle_control(
-                &sup,
-                ControlMsg::ListSessions {
-                    req_id,
-                    cursor: Some(malformed.to_string()),
-                    limit: None,
-                },
-                ConnectionCtx {
-                    tx: &tx,
-                    priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
-                    tasks: &mut tasks,
-                },
-            )
-            .await;
-            assert_eq!(
-                tasks.len(),
-                0,
-                "a cursor refusal must happen before any list work is admitted onto tasks \
-                 (cursor {malformed:?})"
-            );
-            let reply = rx.try_recv().expect(
-                "the error reply must already be in the channel once handle_control's future \
-                 returns — a handler that scheduled list work before refusing could only reply \
-                 later, which try_recv (unlike an awaited recv) would not paper over",
-            );
-            let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
-            let ControlMsg::Error { kind, .. } = decoded else {
-                panic!("expected ControlMsg::Error for cursor {malformed:?}, got {decoded:?}");
-            };
-            assert_eq!(kind, ErrorKind::InvalidRequest);
-        }
-    }
-
-    /// A terminal-less, synthetic session entry for the pagination tests
-    /// below — real tmux/launch machinery is irrelevant to WALK ORDER, so
+    /// A terminal-less, synthetic session entry for the ordering tests
+    /// below — real tmux/launch machinery is irrelevant to REPLY ORDER, so
     /// every fixture here skips it the same way
     /// `list_sessions_honors_the_session_cap_at_the_handler_level`'s
     /// fixtures do (`terminal: None`, decided by `session_status` without
     /// any tmux round trip).
     fn fake_entry(id: &str, created_at: i64) -> Arc<SessionEntry> {
-        fake_entry_with_title(id, created_at, "t".to_string())
-    }
-
-    /// [`fake_entry`], with an explicit title — the byte-budget test below
-    /// needs fat ones to force a real cut.
-    fn fake_entry_with_title(id: &str, created_at: i64, title: String) -> Arc<SessionEntry> {
         Arc::new(SessionEntry {
             info: SessionInfo {
                 parent: None,
                 archived: false,
                 id: id.to_string(),
-                title,
+                title: "t".to_string(),
                 created_at,
                 last_activity_at: created_at,
                 creation_seq: None,
@@ -8997,25 +8605,19 @@ mod tests {
     }
 
     /// Send one `ListSessions` request through the real `handle_control`
-    /// dispatch and wait for its (spawned) reply — every pagination test
-    /// below walks several pages, so the request/spawn/timeout/decode
-    /// boilerplate lives here once rather than once per page per test.
-    async fn list_sessions_page(
-        sup: &Arc<Supervisor>,
-        req_id: u64,
-        cursor: Option<String>,
-        limit: Option<u32>,
-    ) -> (Vec<SessionInfo>, u64, Option<String>) {
+    /// dispatch and wait for its (spawned) reply — every ordering test
+    /// below sends at least one such request, so the
+    /// request/spawn/timeout/decode boilerplate lives here once rather
+    /// than once per test. There is no page walk any more: a `ListSessions`
+    /// reply is the WHOLE capped list in one shot, so this returns the
+    /// sessions it carried and whether the cap cut any of them.
+    async fn list_sessions(sup: &Arc<Supervisor>, req_id: u64) -> (Vec<SessionInfo>, bool) {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             sup,
-            ControlMsg::ListSessions {
-                req_id,
-                cursor,
-                limit,
-            },
+            ControlMsg::ListSessions { req_id },
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -9032,30 +8634,28 @@ mod tests {
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
         let ControlMsg::SessionList {
             sessions,
-            total,
-            next_cursor,
+            truncated,
             ..
         } = decoded
         else {
             panic!("expected ControlMsg::SessionList, got {decoded:?}");
         };
-        (sessions, total, next_cursor)
+        (sessions, truncated)
     }
 
-    /// The plan's headline pagination guarantee: walking a session set
-    /// page by page (a limit smaller than the total count) with each
-    /// page's `next_cursor` reproduces EXACTLY the unpaginated truth — in
-    /// order, no duplicates, no gaps — across a set spanning several
-    /// distinct `created_at` values (so the walk exercises both halves of
-    /// the ordering key, not just the tiebreak). Ids are zero-padded
-    /// (`s00`..`s11`) specifically so their STRING order matches their
-    /// NUMERIC order, which is what lets this test's expected sequence be
-    /// written out by hand without a second, independent sort to compare
-    /// against — `list_order_key`'s own tiebreak direction (ascending id)
-    /// is exercised, and separately pinned in isolation, by
+    /// The protocol's headline ordering guarantee, through a REAL
+    /// `ListSessions` reply rather than `listing::order_and_cut` in
+    /// isolation: newest-first by `created_at`, id ascending on ties,
+    /// across a set spanning several distinct `created_at` values (so both
+    /// halves of the ordering key are exercised, not just the tiebreak).
+    /// Ids are zero-padded (`s00`..`s11`) specifically so their STRING
+    /// order matches their NUMERIC order, which is what lets this test's
+    /// expected sequence be written out by hand without a second,
+    /// independent sort to compare against — the tiebreak direction itself
+    /// is exercised, and separately pinned, by
     /// `list_sessions_same_created_at_tiebreaks_ascending_by_id` below.
     #[tokio::test]
-    async fn list_sessions_full_walk_equals_unpaginated_truth() {
+    async fn list_sessions_replies_in_creation_order_newest_first() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -9076,37 +8676,17 @@ mod tests {
             "s09", "s10", "s11", "s06", "s07", "s08", "s03", "s04", "s05", "s00", "s01", "s02",
         ];
 
-        let mut walked: Vec<String> = Vec::new();
-        let mut cursor = None;
-        let mut req_id = 1;
-        loop {
-            let (page, total, next_cursor) =
-                list_sessions_page(&sup, req_id, cursor, Some(5)).await;
-            assert_eq!(total, 12, "total must stay the full count on every page");
-            walked.extend(page.into_iter().map(|s| s.id));
-            req_id += 1;
-            match next_cursor {
-                Some(c) => cursor = Some(c),
-                None => break,
-            }
-            // A defensive bound so a bug that never terminates the walk
-            // (an off-by-one that keeps re-serving the same page) fails
-            // this test instead of hanging the suite.
-            assert!(
-                req_id < 20,
-                "walk did not terminate within a sane page count"
-            );
-        }
-
+        let (sessions, truncated) = list_sessions(&sup, 1).await;
+        assert!(!truncated, "twelve sessions never approach the cap");
         assert_eq!(
-            walked, expected,
-            "the paginated walk must reproduce the unpaginated order exactly, with no \
-             duplicates and no gaps"
+            sessions.into_iter().map(|s| s.id).collect::<Vec<_>>(),
+            expected,
+            "the reply must be ordered newest-first exactly, with no duplicates and no gaps"
         );
     }
 
-    /// `list_order_key`'s tiebreak direction, pinned in isolation: three
-    /// sessions sharing one `created_at` must come back ascending by id.
+    /// The order's tiebreak direction, pinned in isolation: three sessions
+    /// sharing one `created_at` must come back ascending by id.
     #[tokio::test]
     async fn list_sessions_same_created_at_tiebreaks_ascending_by_id() {
         let state = StateDir::new();
@@ -9119,311 +8699,22 @@ mod tests {
                 sessions.insert(id.to_string(), fake_entry(id, 1_700_000_000));
             }
         }
-        let (page, total, next_cursor) = list_sessions_page(&sup, 1, None, None).await;
-        assert_eq!(total, 3);
-        assert_eq!(next_cursor, None, "one page covers the whole set");
+        let (sessions, truncated) = list_sessions(&sup, 1).await;
+        assert!(!truncated);
         assert_eq!(
-            page.into_iter().map(|s| s.id).collect::<Vec<_>>(),
+            sessions.into_iter().map(|s| s.id).collect::<Vec<_>>(),
             vec!["sA".to_string(), "sB".to_string(), "sC".to_string()],
             "sessions sharing one created_at must tiebreak ascending by id"
         );
     }
 
-    /// Page stability across interleaved create/delete, PLAN_M6.md's
-    /// pagination testing decision: a session created AFTER paging began
-    /// must not tear the walk (it may simply be missed by this walk — the
-    /// documented, accepted contract, since it sorts ahead of wherever the
-    /// walk already is), and deleting a session already returned by an
-    /// earlier page must not shift or duplicate what later pages return.
-    #[tokio::test]
-    async fn list_sessions_page_walk_survives_interleaved_create_and_delete() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-        {
-            let mut sessions = sup.sessions.lock().await;
-            for i in 0..5 {
-                let id = format!("s{i}");
-                sessions.insert(id.clone(), fake_entry(&id, 1_000 + i));
-            }
-        }
-
-        // Page 1: the two newest (s4, s3).
-        let (page1, total1, cursor1) = list_sessions_page(&sup, 1, None, Some(2)).await;
-        assert_eq!(
-            page1.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s4", "s3"]
-        );
-        assert_eq!(total1, 5);
-        let cursor1 = cursor1.expect("three sessions remain beyond page 1");
-
-        // Mid-walk mutation: delete an ALREADY-RETURNED session (s4, from
-        // page 1 — "behind the cursor"), and create a NEW one whose
-        // created_at is higher than everything else, so it sorts ahead of
-        // the cursor's resume point — squarely inside the region this walk
-        // already consumed.
-        {
-            let mut sessions = sup.sessions.lock().await;
-            sessions.remove("s4");
-            sessions.insert("s_new".to_string(), fake_entry("s_new", 1_000_000));
-        }
-
-        // Page 2 must resume exactly where page 1 left off — s2, s1 — never
-        // reintroducing the deleted s4, and never surfacing s_new (missed
-        // by this walk, per the documented contract).
-        let (page2, total2, cursor2) = list_sessions_page(&sup, 2, Some(cursor1), Some(2)).await;
-        assert_eq!(
-            page2.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s2", "s1"]
-        );
-        assert_eq!(
-            total2, 5,
-            "total reflects the CURRENT count: -1 (delete) +1 (create)"
-        );
-        let cursor2 = cursor2.expect("one session remains beyond page 2");
-
-        // Page 3: the last remaining session, and the walk's real end.
-        let (page3, _total3, cursor3) = list_sessions_page(&sup, 3, Some(cursor2), Some(2)).await;
-        assert_eq!(
-            page3.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s0"]
-        );
-        assert_eq!(cursor3, None, "the walk must reach a real end");
-    }
-
-    /// A cursor naming a session that has SINCE been deleted must still
-    /// resume cleanly — "strictly after this key", per `SessionList::
-    /// next_cursor`'s own docs, never "starting from this row", which is
-    /// exactly what makes this safe: nothing about resuming requires the
-    /// named session to still exist.
-    #[tokio::test]
-    async fn list_sessions_cursor_from_a_deleted_session_still_resumes() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-        {
-            let mut sessions = sup.sessions.lock().await;
-            for i in 0..5 {
-                let id = format!("s{i}");
-                sessions.insert(id.clone(), fake_entry(&id, 1_000 + i));
-            }
-        }
-
-        // Take exactly one page (s4, s3, s2) and hold onto the cursor
-        // resuming after s2 — the session about to be deleted.
-        let (page1, _, cursor) = list_sessions_page(&sup, 1, None, Some(3)).await;
-        assert_eq!(
-            page1.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s4", "s3", "s2"]
-        );
-        let cursor = cursor.expect("two sessions remain beyond page 1");
-
-        sup.sessions.lock().await.remove("s2");
-
-        let (page2, total2, next_cursor) = list_sessions_page(&sup, 2, Some(cursor), None).await;
-        assert_eq!(
-            page2.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s1", "s0"],
-            "a cursor from a since-deleted session must still resume after its key"
-        );
-        assert_eq!(total2, 4, "the deleted session must no longer be counted");
-        assert_eq!(next_cursor, None);
-    }
-
-    /// PR 3 follow-up round, item 8: the sibling test above deletes ONE
-    /// since-deleted session behind the cursor; this pins the far edge —
-    /// EVERY session the walk has not yet seen is gone by the time the
-    /// continuation runs. Resuming "strictly after this key"
-    /// (`SessionList::next_cursor`'s own docs) with nothing left to be
-    /// strictly after must land on a genuinely empty page, not an error
-    /// and not a stale echo of the sessions that used to be there — the
-    /// partition-point resume logic (`list_order_key`-sorted, sliced by
-    /// `partition_point`) has no special-cased "nothing resumes" branch,
-    /// so this is the case that would expose one if the slicing ever grew
-    /// an off-by-one at the far end of the order.
-    #[tokio::test]
-    async fn list_sessions_page_walk_survives_every_unseen_session_being_deleted() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-        {
-            let mut sessions = sup.sessions.lock().await;
-            for i in 0..5 {
-                let id = format!("s{i}");
-                sessions.insert(id.clone(), fake_entry(&id, 1_000 + i));
-            }
-        }
-
-        // Page 1: the two newest (s4, s3) — s2, s1, s0 are still unseen.
-        let (page1, total1, cursor1) = list_sessions_page(&sup, 1, None, Some(2)).await;
-        assert_eq!(
-            page1.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s4", "s3"]
-        );
-        assert_eq!(total1, 5);
-        let cursor1 = cursor1.expect("three sessions remain beyond page 1");
-
-        // Every still-unseen session is deleted before the walk resumes —
-        // nothing is left for the cursor to be "strictly after".
-        {
-            let mut sessions = sup.sessions.lock().await;
-            sessions.remove("s2");
-            sessions.remove("s1");
-            sessions.remove("s0");
-        }
-
-        let (page2, total2, cursor2) = list_sessions_page(&sup, 2, Some(cursor1), None).await;
-        assert!(
-            page2.is_empty(),
-            "a continuation with every unseen session deleted must return an empty page, \
-             never a stale ghost of them: got {page2:?}"
-        );
-        assert_eq!(
-            total2, 2,
-            "total must reflect the CURRENT count (s4, s3 only), not the count as of page 1"
-        );
-        assert_eq!(
-            cursor2, None,
-            "an empty continuation must still be a SUCCESSFUL end of the walk, not an error \
-             and not a cursor claiming more remains"
-        );
-    }
-
-    /// The byte budget's real end-to-end path, through the handler rather
-    /// than `build_list_reply` in isolation (`listing`'s own tests cover
-    /// the pure function): fat titles force a genuine mid-page cut, and the
-    /// resulting `next_cursor` must resume correctly into a second page —
-    /// the concatenation of every page still reproducing the full,
-    /// unpaginated set with no duplicates and no gaps.
-    #[tokio::test]
-    async fn list_sessions_byte_budget_cut_resumes_across_pages() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-        // Four ~2 MiB titles comfortably exceed `LIST_BYTE_BUDGET` (half of
-        // `MAX_FRAME_LEN`, itself 8 MiB) together, forcing a real cut well
-        // before the count cap (`LIST_SESSION_CAP`) would ever bind.
-        {
-            let mut sessions = sup.sessions.lock().await;
-            for i in 0..4 {
-                let id = format!("s{i}");
-                sessions.insert(
-                    id.clone(),
-                    fake_entry_with_title(&id, 1_000 + i, "x".repeat(2_000_000)),
-                );
-            }
-        }
-
-        let mut walked: Vec<String> = Vec::new();
-        let mut cursor = None;
-        let mut req_id = 1;
-        let mut saw_a_cut = false;
-        loop {
-            let (page, total, next_cursor) = list_sessions_page(&sup, req_id, cursor, None).await;
-            assert_eq!(total, 4);
-            if next_cursor.is_some() {
-                saw_a_cut = true;
-            }
-            walked.extend(page.into_iter().map(|s| s.id));
-            req_id += 1;
-            match next_cursor {
-                Some(c) => cursor = Some(c),
-                None => break,
-            }
-            assert!(
-                req_id < 20,
-                "walk did not terminate within a sane page count"
-            );
-        }
-
-        assert!(
-            saw_a_cut,
-            "the fat-title fixture must actually force a byte-budget cut — otherwise this \
-             test is not exercising the path it claims to"
-        );
-        assert_eq!(
-            walked,
-            vec!["s3", "s2", "s1", "s0"],
-            "the byte-budget-cut walk must still reproduce the full unpaginated order"
-        );
-    }
-
-    /// PR 3 follow-up round, item 7: the count/cursor cut
-    /// (`ListSessions::limit`) and `build_list_reply`'s own byte-budget
-    /// cut can both fire on the SAME page — the sibling test above only
-    /// ever exercises the byte budget alone, with `limit: None` letting
-    /// every candidate through the count cut untouched. Here `limit:
-    /// Some(3)` selects the newest THREE (s4, s3, s2) before
-    /// `build_list_reply` ever runs, and only the newest TWO of those
-    /// three (s4, s3) fit under `LIST_BYTE_BUDGET` — s2 is fat enough on
-    /// its own to overflow the ~400 KiB the first two fat titles leave
-    /// behind, so the byte cut trims the count-cut's own candidate set
-    /// further still.
-    ///
-    /// Two things must hold for the returned cursor to be trustworthy:
-    /// it must encode s3 (the last entry the BYTE cut actually kept), not
-    /// s2 (the count cut's boundary, which never made it into `kept` at
-    /// all) — and following it into a second page must land on s2 FIRST,
-    /// proving the byte-dropped entry was deferred to the next page
-    /// rather than silently skipped past.
-    #[tokio::test]
-    async fn list_sessions_count_limit_and_byte_budget_cut_the_same_page() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-        {
-            let mut sessions = sup.sessions.lock().await;
-            // s2, s3, s4: fat enough that any two together sit just under
-            // `LIST_BYTE_BUDGET` (4 MiB) but three together blow past it —
-            // see this test's own docs for the arithmetic. s0, s1: lean,
-            // so page two's own byte accounting stays uneventful and the
-            // test's only cut of interest is the one on page one.
-            for i in 2..5 {
-                let id = format!("s{i}");
-                sessions.insert(
-                    id.clone(),
-                    fake_entry_with_title(&id, 1_000 + i, "x".repeat(1_900_000)),
-                );
-            }
-            for i in 0..2 {
-                let id = format!("s{i}");
-                sessions.insert(id.clone(), fake_entry(&id, 1_000 + i));
-            }
-        }
-
-        // Page 1: `limit: Some(3)` selects s4, s3, s2 before the byte
-        // budget ever runs; only s4 and s3 survive it.
-        let (page1, total1, cursor1) = list_sessions_page(&sup, 1, None, Some(3)).await;
-        assert_eq!(
-            page1.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s4", "s3"],
-            "the byte budget must trim the count cut's own 3-entry candidate set to 2"
-        );
-        assert_eq!(total1, 5);
-        let cursor1 = cursor1.expect("both cuts left sessions unreturned beyond this page");
-        assert_eq!(
-            cursor1,
-            encode_list_cursor(1_003, "s3"),
-            "the cursor must encode s3 — the last entry the BYTE cut actually kept — not s2, \
-             the count cut's boundary that never survived into `kept` at all"
-        );
-
-        // Page 2: resuming after s3 must land on s2 FIRST — the entry the
-        // byte cut deferred, not skipped — before the lean s1/s0 tail.
-        let (page2, total2, cursor2) = list_sessions_page(&sup, 2, Some(cursor1), None).await;
-        assert_eq!(
-            page2.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["s2", "s1", "s0"],
-            "resuming after the byte cut must not skip s2, the entry it deferred"
-        );
-        assert_eq!(total2, 5);
-        assert_eq!(cursor2, None, "the walk must reach a real end");
-    }
+    // Interleaved create/delete mid-walk, a resume cursor from a deleted
+    // session, an all-unseen-deleted continuation, and the byte-budget
+    // cut/resume tests that used to live here all tested PAGE-WALK
+    // behavior — cursors, `limit`, a byte budget mid-list — that no longer
+    // exists: a `ListSessions` reply is now the whole capped list in one
+    // shot, so there is no walk to interleave a mutation into and no
+    // budget to force a mid-page cut. Deleted rather than adapted.
 
     /// PLAN_M2.md's list-status contract: a `ListSessions` reply whose
     /// (capped) subset contains NO entry with a terminal at all —
@@ -9502,11 +8793,7 @@ mod tests {
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
-            ControlMsg::ListSessions {
-                req_id: 1,
-                cursor: None,
-                limit: None,
-            },
+            ControlMsg::ListSessions { req_id: 1 },
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,

@@ -83,15 +83,13 @@ export interface SessionRow {
 }
 
 /**
- * One page of `GET /api/sessions`, narrowed on the same terms as
+ * The whole `GET /api/sessions` reply, narrowed on the same terms as
  * [`SessionRow`] — which here means the rows and nothing else.
  *
- * The reply also carries `total`, `matching`, `truncated` and `next_cursor`,
- * and they are deliberately absent: the specs read those NUMBERS off the
- * count banner the page renders, which is the claim worth pinning, and
- * re-declaring them here would suggest a wire-level assertion nothing makes.
- * A cursor page is identified by the URL that asked for it, not by this
- * shape.
+ * The reply also carries `total`, `matching` and `truncated`, and they are
+ * deliberately absent: the specs read those NUMBERS off the count banner the
+ * page renders, which is the claim worth pinning, and re-declaring them here
+ * would suggest a wire-level assertion nothing makes.
  */
 export interface SessionPage {
   sessions: SessionRow[];

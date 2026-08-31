@@ -282,8 +282,16 @@ The list always carries a count, and it counts the list you are looking at: arch
 view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That
 switch is which list you are looking at rather than a filter you applied, so it does not make the list call itself
 filtered. A filter someone typed or chose does, and the count then says how many matched alongside how big the view is.
-A list the client could not read to the end says that in the same place, rather than presenting a partial list as the
-whole one.
+
+The list is served and rendered WHOLE. The fleet this product is for is tens of sessions across a few hosts, not
+thousands, and the design assumes that scale outright: every supervisor answers a listing with its entire list in one
+reply, the helm holds every host's list in memory and sorts and filters the whole fleet there, and a client receives one
+array and renders all of it. Each of those replies is cut at a fixed cap of a few hundred rows, and a list the cap cut
+says so in the same place the count lives — "could not read to the end" means exactly that the cap was hit, never that
+something went wrong reading — rather than presenting a partial list as the whole one. No pagination, cursors, streaming
+or incremental listing, or per-order server-side indexing is wanted at any layer, and it is fine for the helm and every
+client to hold and sort the entire fleet in memory; a fleet that outgrows the cap is outside what this product is built
+for, and the notice is the whole of the answer to it.
 
 A row shows a session's title, its status (drawn as described under Status), how long ago it was last active, and its
 working directory. The host is named on its own line only for a session that is not on the helm's own machine — a fleet
@@ -362,15 +370,17 @@ whatever the agent renders is what you see. There is no composer, no message abs
   taken or stored.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session: with a non-empty fleet, a freshly
   loaded client selects and attaches the session the user most recently had selected there — including after a desktop
-  relaunch — falling back to the newest-created non-archived one, so launching the app is itself the deliberate act the
-  attach semantics below key off. Opening a second client therefore takes the terminal over exactly as clicking the same
-  session there would. The attached client owns input and terminal dimensions: the PTY resizes to that client, and the
-  last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would have had
-  the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and
-  replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected
-  session's row whenever that session is listed, so which session the main pane is interacting with is readable at a
-  glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the
-  titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
+  relaunch — falling back to the newest-created non-archived one (chosen from the rows the listing carries, so when the
+  list was cut at its cap under an order other than creation time the pick can be the newest the reply reached rather
+  than the fleet's true newest — the accepted edge of the whole-list cap), so launching the app is itself the deliberate
+  act the attach semantics below key off. Opening a second client therefore takes the terminal over exactly as clicking
+  the same session there would. The attached client owns input and terminal dimensions: the PTY resizes to that client,
+  and the last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would
+  have had the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal
+  retains, and replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the
+  selected session's row whenever that session is listed, so which session the main pane is interacting with is readable
+  at a glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark —
+  the titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
   deselecting).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.

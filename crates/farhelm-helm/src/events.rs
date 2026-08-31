@@ -4,7 +4,7 @@
 //! This is the channel that replaces the UI's four periodic loops. It
 //! carries REVISION NUMBERS ONLY — never a session, never a host, never a
 //! diff — and a client that receives one re-reads whatever its current
-//! surface needs through the readers it already has (the paginated list, the
+//! surface needs through the readers it already has (the session list, the
 //! detail fetch, the hosts read, the profiles read). Three things fall out
 //! of that choice, and they are the whole reason it is shaped this way:
 //!
@@ -18,7 +18,7 @@
 //!   once. A backlog is impossible by construction rather than by a bound
 //!   somebody has to tune.
 //! - **Every consistency rule stays where it already is.** The REST readers
-//!   enforce staleness marking, owner routing, cursor coherence and the
+//!   enforce staleness marking, owner routing, the listing cap and the
 //!   rest; a push channel carrying data would be a second serving path that
 //!   had to enforce all of it again, in a different shape, from a different
 //!   moment in time.

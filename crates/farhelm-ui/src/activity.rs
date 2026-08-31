@@ -127,11 +127,11 @@ pub(crate) fn ActivityClock() -> Element {
 /// Seconds since the Unix epoch on whatever machine this UI is rendering on,
 /// or `None` when that machine has no usable answer.
 ///
-/// A `cfg` pair for `api::WalkClock`'s reason: `std::time::SystemTime` is
-/// not usable on wasm32-unknown-unknown, and the browser's own answer is
-/// `Date.now()`. Unlike that clock this one is deliberately the WALL clock,
-/// not a monotonic one — the value it is compared against is an absolute
-/// epoch stamp, so a monotonic reading would have nothing to subtract from.
+/// A `cfg` pair because `std::time::SystemTime` is not usable on
+/// wasm32-unknown-unknown, and the browser's own answer is `Date.now()`.
+/// Deliberately the WALL clock, not a monotonic one — the value it is
+/// compared against is an absolute epoch stamp, so a monotonic reading
+/// would have nothing to subtract from.
 ///
 /// Anything at or below zero is `None`, not a number to subtract from. The
 /// platform failing to answer and a viewer clock sitting at or before the

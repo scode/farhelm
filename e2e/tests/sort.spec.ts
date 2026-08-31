@@ -53,7 +53,6 @@ import {
   forgetAutoSelect,
   openFilterBar,
   SESSION_LISTING,
-  SessionPage,
   stubFeed,
 } from "./helpers/fleet";
 
@@ -111,80 +110,30 @@ async function watchSortParameters(page: Page): Promise<string[]> {
   return asked;
 }
 
-/**
- * One listing read, as the PAGE asked for it and as the helm answered.
- *
- * The pair is what the parameter list alone cannot supply: the URL says
- * which order and filter were asked for, and the body says which rows came
- * back under them. Asserting the rendered list against the bodies is how the
- * "no client-side re-sort" claim is proved rather than assumed.
- */
-interface ListingRead {
-  /** What the page asked for, recorded BEFORE this fixture touches it. */
-  url: URL;
-  /** What came back — the same bytes the page then decoded. */
-  body: SessionPage;
-}
-
-/**
- * Record every listing read the page makes from now on, optionally forcing
- * the helm to cut its pages at `limit` rows.
- *
- * The same shape filters.spec.ts uses, and for the same two reasons. The
- * reply is fetched here and re-fulfilled from that same `APIResponse`, so a
- * recorded body is by construction the one the page received (and the helm's
- * own headers survive — without the build stamp the page latches skew and
- * stops reading altogether). And `limit` is the only way a page cut is
- * reachable at all: the helm's default page is 500 rows and this UI never
- * asks for fewer, so no honest fixture this suite can build would produce a
- * second page. The parameter is appended on the way past, leaving the page's
- * OWN parameters — the ones under test — untouched and recorded as they were.
- */
-async function watchListingReads(page: Page, limit?: number): Promise<ListingRead[]> {
-  const reads: ListingRead[] = [];
+async function watchListingReads(page: Page): Promise<URL[]> {
+  const reads: URL[] = [];
   await page.route(SESSION_LISTING, async (route: Route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
     }
-    const asked = new URL(route.request().url());
-    const sent = new URL(asked);
-    if (limit !== undefined) sent.searchParams.set("limit", String(limit));
-    const response = await route.fetch({ url: sent.toString() });
-    reads.push({ url: asked, body: (await response.json()) as SessionPage });
-    await route.fulfill({ response });
+    reads.push(new URL(route.request().url()));
+    await route.continue();
   });
   return reads;
 }
 
 /**
- * The reads belonging to the LAST walk in `reads`, first page first.
+ * The most recent listing request URL in `reads`.
  *
- * A walk is a cursor-less request followed by its continuations, and the
- * array holds every walk the page has made since the watcher went in — the
- * mount read and whatever the test provoked afterwards. Slicing at the last
- * cursor-less request is what makes an assertion about "the walk this test
- * caused" rather than about all of them mixed together.
+ * The array holds every read the page has made since the watcher went in —
+ * the mount read and whatever the test provoked afterwards — and the last
+ * one is what an assertion about "the read this test caused" is about.
  */
-function lastWalk(reads: ListingRead[]): ListingRead[] {
-  const starts = reads.map((read) => read.url.searchParams.has("cursor"));
-  return reads.slice(starts.lastIndexOf(false));
-}
-
-/**
- * The reads belonging to the FIRST walk in `reads`, first page first.
- *
- * The counterpart {@link lastWalk} cannot supply, and the difference matters
- * for a multipage assertion. A walk is only COMPLETE once its rows are on
- * screen, and by that moment another walk may already have opened with its
- * first page recorded and its continuations still to come — which is what
- * `lastWalk` would then hand back, a one-page slice of a walk in progress.
- * Taking the first walk instead pairs the assertion with the rows that
- * proved it finished.
- */
-function firstWalk(reads: ListingRead[]): ListingRead[] {
-  const next = reads.findIndex((read, index) => index > 0 && !read.url.searchParams.has("cursor"));
-  return next === -1 ? reads : reads.slice(0, next);
+function latestRead(reads: URL[]): URL {
+  const read = reads.at(-1);
+  if (read === undefined) throw new Error("no listing read has been recorded yet");
+  return read;
 }
 
 /** Every listed session id, in the order the sidebar renders them. */
@@ -541,66 +490,6 @@ test.describe("session list ordering", () => {
   });
 
   /**
-   * A multipage walk names its order on the first request and on every
-   * cursor continuation, and the rows land in the sequence they arrived in.
-   *
-   * The test the rest of this file's single-page fixtures cannot be: a page
-   * that sorted its own rows would satisfy every one of them, and would be
-   * wrong exactly here, where the rows are handed over a few at a time. Two
-   * failures are covered and they are different. A continuation that dropped
-   * `sort` would resume a position in a sequence it is no longer walking —
-   * the helm refuses that outright, so it surfaces as a broken list rather
-   * than a misordered one. A page that re-sorted what it collected would
-   * produce a list whose head is right and whose tail is silently wrong,
-   * which nothing on screen would ever admit to.
-   *
-   * `limit=1` is forced on the way past because no fixture this suite can
-   * build would otherwise paginate at all — the helm's default page is 500
-   * rows. The page's own parameters travel untouched and are recorded as the
-   * page wrote them.
-   *
-   * The watcher goes in AFTER the initial load and the walk under test is the
-   * one the re-sort provokes, so the recorded array starts at a walk boundary
-   * rather than in the middle of the mount read's pages.
-   */
-  test("every page of a multipage walk carries the order, and the rows keep it", async ({
-    page,
-    request,
-  }) => {
-    const stamp = Date.now();
-    const ids = await threeOrderedSessions(request, stamp);
-
-    await listWithStubbedFeed(page);
-    await expect(row(page, ids.z)).toBeVisible({ timeout: 20_000 });
-
-    const reads = await watchListingReads(page, 1);
-    await page.locator(".sort-select").selectOption("title");
-    // The fixture's rows being in title order proves the walk COMMITTED,
-    // which is what makes every page of it already recorded below.
-    await expect
-      .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
-      .toEqual([ids.a, ids.m, ids.z]);
-    const walk = firstWalk(reads);
-
-    expect(walk.length, "one row per page must take more than one request").toBeGreaterThan(1);
-    expect(
-      walk.slice(1).every((read) => read.url.searchParams.has("cursor")),
-      "everything after the first request must be a continuation of the same walk",
-    ).toBe(true);
-    for (const read of walk) {
-      expect(
-        read.url.searchParams.get("sort"),
-        "the order travels on the first page and on every cursor page after it",
-      ).toBe("title");
-    }
-
-    // The strongest form of "no client-side sort": the rendered list IS the
-    // pages concatenated, in the order the helm served them.
-    const served = walk.flatMap((read) => read.body.sessions.map((session) => session.id));
-    expect(await renderedOrder(page)).toEqual(served);
-  });
-
-  /**
    * Order and filter are independent dimensions of one request, and stay
    * that way across a whole session of using both.
    *
@@ -639,9 +528,9 @@ test.describe("session list ordering", () => {
     await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
     await expect(page.locator(".session-row")).toHaveCount(3);
     expect(await orderOf(page, [ids.a, ids.m, ids.z])).toEqual([ids.a, ids.m, ids.z]);
-    const filtered = lastWalk(reads);
-    expect(filtered[0].url.searchParams.get("sort")).toBe("title");
-    expect(filtered[0].url.searchParams.get("title")).toBe(search);
+    const filtered = latestRead(reads);
+    expect(filtered.searchParams.get("sort")).toBe("title");
+    expect(filtered.searchParams.get("title")).toBe(search);
 
     // Re-sorting WHILE filtered: the request has to carry both, and the
     // membership and the banner must not move — only the sequence does.
@@ -652,10 +541,10 @@ test.describe("session list ordering", () => {
     await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
     await expect(page.locator(".session-row")).toHaveCount(3);
     await expect(page.locator(".filter-active-note")).toHaveCount(1);
-    const resorted = lastWalk(reads);
-    expect(resorted[0].url.searchParams.get("sort")).toBe("created");
+    const resorted = latestRead(reads);
+    expect(resorted.searchParams.get("sort")).toBe("created");
     expect(
-      resorted[0].url.searchParams.get("title"),
+      resorted.searchParams.get("title"),
       "changing the order must not clear the filter the list is under",
     ).toBe(search);
 
@@ -666,9 +555,9 @@ test.describe("session list ordering", () => {
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.z, ids.m, ids.a]);
-    const cleared = lastWalk(reads);
-    expect(cleared[0].url.searchParams.get("sort")).toBe("created");
-    expect(cleared[0].url.searchParams.has("title")).toBe(false);
+    const cleared = latestRead(reads);
+    expect(cleared.searchParams.get("sort")).toBe("created");
+    expect(cleared.searchParams.has("title")).toBe(false);
   });
 
   /**
@@ -900,12 +789,13 @@ test.describe("session list ordering", () => {
   };
 
   /**
-   * Serve the whole listing surface synthetically: the sidebar's own walk
-   * (complete or cut short by one row, per `complete`), and the fallback's
-   * one-row creation-order read.
+   * Serve the listing synthetically, in title order, and record any
+   * creation-order request the page makes on the side.
    *
-   * Hands back the creation-order requests it saw, which is what both arms
-   * assert on — one that the request happened and one that it did not.
+   * The paged design's auto-select fallback used to ask the helm for the
+   * newest session with a one-row creation-order request when the listing
+   * was incomplete; that request is gone, and the recorded list is how the
+   * test below proves it stays gone.
    *
    * Also states the precondition the whole fallback rests on: NOTHING
    * remembered. SPEC.md's fallback is what a client with no remembered
@@ -914,17 +804,11 @@ test.describe("session list ordering", () => {
    * which is a real session rather than one of the rows below. The suite's
    * shared `storageState` is supposed to hold only the device secret, but it
    * is rewritten mid-run by auth.spec.ts and once carried a selection out of
-   * that rewrite, which failed the incomplete-walk test below on both engines
-   * in both full runs of the suite (the complete-walk one survived only
-   * because its listing is not truncated, which is the condition that arm
-   * needs). Cheap to state here, and it makes both tests say what they need
-   * rather than inherit it.
+   * that rewrite, which failed a test on this fixture on both engines in
+   * both full runs of the suite. Cheap to state here, and it makes the test
+   * say what it needs rather than inherit it.
    */
-  async function stubFallbackListing(
-    page: Page,
-    helm: string,
-    complete: boolean,
-  ): Promise<URL[]> {
+  async function stubFallbackListing(page: Page, helm: string, cut: boolean): Promise<URL[]> {
     await forgetAutoSelect(page);
     const { aaa, mmm, zzz } = FALLBACK_ROWS;
     const newestReads: URL[] = [];
@@ -947,9 +831,11 @@ test.describe("session list ordering", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(
-          complete
-            ? { sessions: [aaa, mmm, zzz], total: 3, matching: 3, truncated: false }
-            : { sessions: [aaa, mmm], total: 3, matching: 3, truncated: true },
+          cut
+            // The cap's shape: the title order put "zzz" past the cut, so
+            // the newest-created row is NOT in the reply.
+            ? { sessions: [aaa, mmm], total: 3, matching: 3, truncated: true }
+            : { sessions: [aaa, mmm, zzz], total: 3, matching: 3, truncated: false },
         ),
       });
     });
@@ -957,63 +843,22 @@ test.describe("session list ordering", () => {
   }
 
   /**
-   * A walk that stopped short under a non-creation order resolves the
-   * fallback session with the helm rather than guessing from its prefix.
+   * The auto-select fallback picks the newest-created session out of the
+   * rows in hand, under a non-creation order, with no extra request.
    *
-   * SPEC.md specifies that fallback as "the newest-created non-archived
-   * session" for a client with no remembered selection. Picking it out of
-   * the collected rows is sound only while those rows are the whole list, or
-   * while they arrived newest-created first — and under `activity` or
-   * `title` a walk that hit a ceiling can end without ever serving the
-   * newest session. The user then lands in whichever session the cut left at
-   * the top, which is neither their choice nor the spec's.
-   *
-   * The request's own shape is asserted alongside the outcome: creation
-   * order, one row, no filter. It has to be the cheapest question the list
-   * API takes, because it is paid on a path that already went wrong once.
+   * SPEC.md's fallback is "the newest-created non-archived session" for a
+   * client with no remembered selection. The rows arrive in title order, so
+   * the newest is not the first row — it has to be picked by `created_at`
+   * — and the whole-list reply is the whole list, so nothing needs asking
+   * twice. The negative half is what the recorded creation-order requests
+   * pin: the paged design's one-row fallback request must not come back.
    */
-  test("an incomplete non-created walk resolves the newest session with the helm", async ({
+  test("the fallback picks the newest session from the rows in hand without asking again", async ({
     page,
     request,
   }) => {
     const helm = await helmStamp(request);
     const newestReads = await stubFallbackListing(page, helm, false);
-
-    await listWithStubbedFeed(page);
-    await expect(page.locator(".titlebar .title")).toHaveText("sortfallback-zzz", {
-      timeout: 20_000,
-    });
-
-    expect(newestReads.length, "the incomplete walk must ask the helm").toBeGreaterThan(0);
-    expect(
-      newestReads[0].searchParams.get("limit"),
-      "and must ask for the smallest page there is",
-    ).toBe("1");
-    expect(
-      newestReads[0].searchParams.has("title"),
-      "under the default filter, since the fallback is about the fleet",
-    ).toBe(false);
-  });
-
-  /**
-   * The ordinary complete walk answers the same question locally, with no
-   * extra request at all.
-   *
-   * The other half of the remedy above, and the half that keeps it
-   * affordable: a listing that holds every row it says exist already
-   * contains the newest-created one, so paying a round trip per auto-select
-   * on every ordinary load would be a cost for nothing. The fixture is the
-   * same three rows in the same title order — only the walk's completeness
-   * differs — so a failure here is unambiguously about the gate rather than
-   * about the rows.
-   */
-  test("a complete walk picks the newest session without asking again", async ({
-    page,
-    request,
-  }) => {
-    const helm = await helmStamp(request);
-    const newestReads = await stubFallbackListing(page, helm, true);
-
     await listWithStubbedFeed(page);
     await expect(page.locator(".titlebar .title")).toHaveText("sortfallback-zzz", {
       timeout: 20_000,
@@ -1024,7 +869,37 @@ test.describe("session list ordering", () => {
     await page.waitForTimeout(1_500);
     expect(
       newestReads,
-      "a complete walk already contains the newest row; nothing extra may be asked",
+      "the rows in hand contain the newest row; nothing extra may be asked",
+    ).toEqual([]);
+  });
+
+  /**
+   * A CUT title-ordered listing still picks from the rows in hand and
+   * still asks nothing extra — the leg that actually distinguishes the new
+   * behavior from the paged design's.
+   *
+   * The old implementation only issued its one-row creation-order request
+   * when the listing was incomplete, so a complete-listing fixture would
+   * stay green with that gate and request still in place. Here the reply
+   * is truncated and the fleet's true newest ("zzz") is past the cut: the
+   * accepted behavior (SPEC.md's Session list section) is to open the
+   * newest row the reply DID reach ("mmm") rather than ask the helm — the
+   * recorded creation-order requests pin that nothing is asked.
+   */
+  test("a cut listing picks the newest row in hand and still asks nothing", async ({
+    page,
+    request,
+  }) => {
+    const helm = await helmStamp(request);
+    const newestReads = await stubFallbackListing(page, helm, true);
+    await listWithStubbedFeed(page);
+    await expect(page.locator(".titlebar .title")).toHaveText("sortfallback-mmm", {
+      timeout: 20_000,
+    });
+    await page.waitForTimeout(1_500);
+    expect(
+      newestReads,
+      "a cut list is not a reason to ask the helm; the pick is from the rows in hand",
     ).toEqual([]);
   });
 });

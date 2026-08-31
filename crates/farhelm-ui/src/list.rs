@@ -35,12 +35,11 @@
 //!
 //! ## The list is the WHOLE list
 //!
-//! `api::fetch_sessions` follows the helm's cursor to exhaustion and this
-//! view renders what comes back in the helm's own order, unsorted. Multi-host
-//! aggregation is what makes lists long enough for one page to be a lie —
-//! showing 500 of a fleet's sessions while `total` reports the real count is
-//! a partial list wearing a complete one's clothes — and re-sorting the
-//! pages here would scramble them into an order no cursor agrees with.
+//! `api::fetch_sessions` makes one request for the whole list and this view
+//! renders what comes back in the helm's own order, unsorted. The helm's cap
+//! is the only thing that can leave the list short, and it says so with
+//! `truncated`; a client-side sort would only ever rearrange an order the
+//! helm already produced for the sort control's own setting.
 
 mod create_form;
 mod row;

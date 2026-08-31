@@ -83,22 +83,15 @@ interface ListingRead {
 }
 
 /**
- * Record every listing read the page makes from now on, optionally forcing
- * the helm to cut its pages at `limit` rows.
+ * Record every listing read the page makes from now on.
  *
  * The read is fetched here and re-fulfilled from that same reply, so a
  * recorded body is by construction the one the page received rather than a
  * second look at a list that may have moved. Re-fulfilling from the
  * `APIResponse` also keeps the helm's headers — the build stamp above all,
  * without which the page latches skew and stops reading altogether.
- *
- * `limit` is what makes a page cut reachable at all: the helm's default page
- * is 500 rows and this UI never asks for fewer, so no honest fixture this
- * suite can build would ever produce a second page. Appending the parameter
- * on the way past leaves the page's OWN parameters — the ones under test —
- * untouched and recorded as they were.
  */
-async function watchListingReads(page: Page, limit?: number): Promise<ListingRead[]> {
+async function watchListingReads(page: Page): Promise<ListingRead[]> {
   const reads: ListingRead[] = [];
   await page.route(
     (url) => url.pathname === "/api/sessions",
@@ -108,9 +101,7 @@ async function watchListingReads(page: Page, limit?: number): Promise<ListingRea
         return;
       }
       const asked = new URL(route.request().url());
-      const sent = new URL(asked);
-      if (limit !== undefined) sent.searchParams.set("limit", String(limit));
-      const response = await route.fetch({ url: sent.toString() });
+      const response = await route.fetch();
       reads.push({ url: asked, body: (await response.json()) as SessionPage });
       await route.fulfill({ response });
     },
@@ -238,93 +229,6 @@ test.describe("session list filtering", () => {
       expect(read.url.searchParams.has("title"), `${read.url} must clear the title search`).toBe(
         false,
       );
-    }
-  });
-
-  /**
-   * The page cut: a filter that matches more sessions than fit on one page
-   * is applied by the HELM, before the cut, and travels on every cursor page
-   * of the walk.
-   *
-   * This is the case the single-page tests structurally cannot reach, and the
-   * one where a client-side filter stops being merely a different
-   * implementation and becomes wrong: it hides matches beyond the cut while
-   * the banner reports a count that includes them. Two rows per page against
-   * three matches is the smallest fixture that has a cut in it at all.
-   *
-   * The cursor half (`ListQuery::cursor` in the helm, `fetch_sessions` in the
-   * UI) is the other thing only a cut can show: a cursor names a position in
-   * the helm's ORDER rather than in a result set, so a second page requested
-   * without the filter would quietly start listing rows the first page had
-   * excluded. Unit tests cover the encoding of that query string; nothing but
-   * a walk in a browser covers it actually being sent on page two.
-   *
-   * Deliberately NOT exercised here: a banner whose `matching` exceeds the
-   * rows on screen. It takes a TRUNCATED walk, and this UI walks the cursor
-   * to exhaustion unless one of four ceilings stops it — pages, rows, bytes,
-   * and (since the surface gained a single reader) elapsed time. Only the
-   * first two need a fleet this suite could not build; the byte and time
-   * ceilings can cut a walk of very few rows, given fat rows or a slow helm,
-   * and a route fixture could produce either. That is a test worth having and
-   * a different one from this: its subject is the BANNER's honesty about a
-   * walk that stopped short, while this one's is the filter reaching the helm
-   * and travelling on the cursor.
-   */
-  test("a filter is applied before the page cut and travels on every cursor page", async ({
-    page,
-    request,
-  }) => {
-    const stamp = Date.now();
-    const needle = `cut-needle-${stamp}`;
-    const matches = [];
-    for (const nth of [0, 1, 2]) {
-      const session = await createSession(request, { title: `${needle}-${nth}` });
-      created.push(session.id);
-      matches.push(session);
-    }
-    const other = await createSession(request, { title: `cut-haystack-${stamp}` });
-    created.push(other.id);
-
-    await listWithStubbedFeed(page);
-    await expect(row(page, matches[0].id)).toBeVisible({ timeout: 20_000 });
-
-    const reads = await watchListingReads(page, 2);
-    await applyFilter(page, { title: needle });
-
-    // Every match is on screen, including the one that cannot be on the
-    // first page — the user-visible consequence of filtering before the cut.
-    await expect(page.locator(".session-row")).toHaveCount(3, { timeout: 20_000 });
-    for (const match of matches) await expect(row(page, match.id)).toBeVisible();
-    await expect(row(page, other.id)).toHaveCount(0);
-    await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
-
-    expect(
-      reads.length,
-      `three matches at two rows a page must take more than one request; saw ${
-        reads.map((read) => read.url.href).join(", ")
-      }`,
-    ).toBeGreaterThan(1);
-    for (const read of reads) {
-      expect(read.url.searchParams.get("title"), `${read.url} must carry the filter`).toBe(needle);
-      expect(
-        read.body.sessions.every((session) => session.title.startsWith(needle)),
-        `every page must come back already narrowed; ${read.url} carried ${
-          read.body.sessions.map((session) => session.title).join(", ")
-        }`,
-      ).toBe(true);
-      expect(
-        read.body.sessions.length,
-        "and no page may exceed the cut, or there was no cut to test",
-      ).toBeLessThanOrEqual(2);
-    }
-    const cursored = reads.filter((read) => read.url.searchParams.has("cursor"));
-    expect(cursored.length, "a cut list is walked by cursor").toBeGreaterThan(0);
-    for (const read of cursored) {
-      expect(
-        read.url.searchParams.get("title"),
-        "a cursor page that dropped the filter would resume listing rows the first page " +
-          `excluded; ${read.url}`,
-      ).toBe(needle);
     }
   });
 
