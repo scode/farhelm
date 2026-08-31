@@ -29,6 +29,20 @@ Within a bucket, no order.
   against. Until both are fixed, a red merge-gate run needs manual triage against this entry to tell a real regression
   from the known set.
 
+- Stop the create dialog's inert command field from impersonating the launch command after a clone. Cloning a
+  profile-backed row seeds the dialog with the row's RAW invocation, and while a profile is selected that field is
+  deliberately disabled-but-not-emptied (`CreatePrefill::invocation` documents why: switching the picker to "custom
+  command (below)" must offer the row's own command rather than whatever the form last held). What the user then sees
+  misleads: clone a Claude session, switch the agent picker to a Codex profile, and the disabled field still shows the
+  claude command line, reading as "this is what will run and you cannot change it". Nobody is actually stuck — in
+  profile mode the field's text is inert (the create names the profile id and the wire refuses a request naming both),
+  and the "custom command (below)" option re-enables editing — but nothing on screen says either of those things, and
+  the parenthetical label does not carry the weight. Not a model gap: sessions record `source_profile` as a snapshot
+  with existence states, and `prefill_from` already maps a custom-created source to the editable command mode. Fix
+  directions: in profile mode display the SELECTED profile's own command in the field (or empty it and keep the clone's
+  raw invocation off-screen as the seed for a later switch to custom), and make the label state the contract outright.
+  Observed 2026-08-31 in live use of the new clone action, immediately after its first release into the stable install.
+
 - Show the missing-or-too-old-tmux refusal in a native window, not just on stderr. `farhelm-desktop`'s tmux preflight
   now prints one plain message and exits (see `desktop.rs`'s `run_tmux_preflight_or_exit`), but a Finder launch has no
   terminal for stderr to land in, so that message currently reaches nobody there. Unverifiable without a Mac to try it
