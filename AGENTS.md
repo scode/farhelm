@@ -26,7 +26,13 @@ Rules:
 
 # Finishing work
 
-Before creating or updating a PR, or claiming work is done, run exactly what CI runs and make it pass:
+Before creating or updating a PR, or claiming work is done, run exactly what CI runs and make it pass. The default is to
+run the whole list below. Do not mechanically rerun a command that already passed during the current task when the
+intervening diff provably cannot affect what that command checks: a Markdown-only follow-up does not invalidate Rust,
+desktop, installer, or browser results, for example. Reuse is per command, not an excuse to waive the whole list. Check
+the diff from the tested revision to the current head, rerun anything whose inputs or exercised behavior may have
+changed, and rerun when there is any doubt. A failed, interrupted, stale, or poorly identified run is not reusable.
+Report which earlier results were reused and why.
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
@@ -108,7 +114,9 @@ needs `cargo build` and `cd crates/farhelm-ui && dx build --package farhelm-ui -
 drives the built web UI against a real helm and supervisor), plus a one-time
 `cd e2e && npm install && npx playwright install chromium webkit`. This split lets changes accumulate across a stack and
 surface bugs once, before merge, without each PR paying the suite's cost — but it also means NOTHING else runs it: CI
-green does not include e2e, so skipping it at merge time means shipping unexercised browser paths.
+green does not include e2e. The reuse rule above applies here too. A successful run covering the stack may stand when
+later changes are provably outside the browser suite's inputs and exercised behavior (documentation-only changes are the
+obvious case); compare the tested revision to the landing head and rerun for any relevant or uncertain change.
 
 # TODO.md
 
