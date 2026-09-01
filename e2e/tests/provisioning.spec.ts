@@ -14,8 +14,10 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { openHostMenu, openHostsPanel, stubFeed, type FeedStub } from "./helpers/fleet";
+import { requireHelmBuild } from "./helpers/helm-build";
 
-const BUILD = "0.0.3";
+/** Live helm identity copied onto every route response this suite fabricates. */
+let HELM_BUILD = "";
 
 type Behavior = {
   probe?: "absent" | "supervisor" | "error";
@@ -238,7 +240,10 @@ async function notifyFeed(feed: FeedStub, revision: number): Promise<void> {
 }
 
 test.beforeAll(async ({ request }) => {
-  baselineHostIds = new Set((await hosts(request)).map((host) => host.id));
+  const response = await request.get("/api/hosts");
+  expect(response.ok(), await responseBody(response)).toBe(true);
+  HELM_BUILD = requireHelmBuild(response, "provisioning fixtures");
+  baselineHostIds = new Set(((await response.json()).hosts as Host[]).map((host) => host.id));
 });
 
 test.beforeEach(async () => {
@@ -476,7 +481,7 @@ test("a malformed accepted ADD closes the form and warns without retrying", asyn
   await page.route("**/api/hosts/provision", async (route) => {
     await route.fulfill({
       status: 202,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
       body: "{not-json",
     });
   });
@@ -532,7 +537,7 @@ test("an unknown future progress-step status renders verbatim", async ({ page })
   await page.route("**/api/hosts/1/provisioning", async (route) => {
     await route.fulfill({
       status: 200,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
       body: JSON.stringify({
         host_id: 1,
         run_id: "future-step-status",
@@ -633,7 +638,7 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
   await page.route("**/api/hosts/*/provisioning", async (route) => {
     await route.fulfill({
       status: 200,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
       body: JSON.stringify({
         host_id: 1,
         run_id: "failed-local",
@@ -790,7 +795,7 @@ test("a refused UPDATE consumes its plan and leaves unrelated controls usable", 
   await page.route(`**/api/hosts/${accepted.host_id}/provisioning`, async (route) => {
     await route.fulfill({
       status: 200,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
       body: JSON.stringify({
         host_id: accepted.host_id,
         run_id: "stale-completed-run",
@@ -843,7 +848,7 @@ test("mismatched accepted identity routes progress to the returned host", async 
     if (!route.request().postData()) return route.continue();
     await route.fulfill({
       status: 202,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
       body: JSON.stringify({ host_id: to.host_id, run_id: "rerouted-run" }),
     });
   });
@@ -871,7 +876,7 @@ test("a malformed accepted UPDATE consumes the plan, warns, and releases page co
     if (!route.request().postData()) return route.continue();
     await route.fulfill({
       status: 202,
-      headers: { "content-type": "application/json", "x-farhelm-build": BUILD },
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
       body: "{not-json",
     });
   });
@@ -900,7 +905,7 @@ test("a progress read failure recovers on the next feed-driven real read", async
     if (fail) {
       await route.fulfill({
         status: 502,
-        headers: { "content-type": "text/plain", "x-farhelm-build": BUILD },
+        headers: { "content-type": "text/plain", "x-farhelm-build": HELM_BUILD },
         body: "injected progress read failure",
       });
     } else {

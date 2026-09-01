@@ -1092,7 +1092,7 @@ test("a terminal socket for an unknown session reports why", async ({
 // hands a whole clipboard paste over as ONE message), and lore records a
 // review fix that nearly shipped a 1 MiB cap — which would have dropped
 // the connection on exactly the paste chunking exists to support. Only a
-// direct socket send can produce a multi-megabyte message, hence the
+// direct socket send can produce a message over that boundary, hence the
 // __farhelmWs test hook.
 //
 // This flood pair lives in its own spec file because this payload's PTY
@@ -1101,14 +1101,15 @@ test("a terminal socket for an unknown session reports why", async ({
 // by canonical-mode input handling and was not pinned down; the containment
 // rule, not the mechanism, is the contract.) This file's per-file stack
 // reset contains that damage before another terminal area runs.
-test("a multi-megabyte message does not drop the terminal socket", async ({
+test("an over-one-megabyte message does not drop the terminal socket", async ({
   page,
 }) => {
+  const pasteOverOneMiB = 1024 * 1024 + 1;
   await openTerminal(page);
-  await page.evaluate(() => {
+  await page.evaluate((payloadBytes) => {
     const ws = (window as any).__farhelmWs as WebSocket;
-    ws.send(new Uint8Array(2 * 1024 * 1024).fill(0x61));
-  });
+    ws.send(new Uint8Array(payloadBytes).fill(0x61));
+  }, pasteOverOneMiB);
   // The send is async; poll until the socket has drained it, still open.
   await expect
     .poll(
@@ -1124,17 +1125,11 @@ test("a multi-megabyte message does not drop the terminal socket", async ({
   await page.keyboard.press("Enter");
   await page.keyboard.type("after-big-message");
   await page.keyboard.press("Enter");
-  // A generous timeout, not the suite's usual 10-15s: the supervisor's
-  // dedicated input control client (`InputClient::send`, tmux.rs) now
-  // waits for tmux's `%end` reply to each 256-byte `send-keys` chunk
-  // before sending the next, so tmux must fully process this 2 MiB
-  // payload — many thousands of chunk round trips — before it even
-  // reaches the "after-big-message" line queued behind it on the same
-  // connection. That synchronous-per-chunk design is deliberate (a
-  // fire-and-forget write could not distinguish "tmux accepted the bytes"
-  // from "tmux executed them"), so this test's budget reflects the real
-  // cost of validating a payload this large rather than papering over it.
-  await waitForTermText(page, "echo:after-big-message", 60_000);
+  // The oversized payload becomes 4,097 `send-keys` commands, but the
+  // supervisor writes those in bounded batches of 64 before reading tmux's
+  // replies. The marker stays behind the paste on that same ordered input
+  // path, so seeing it proves more than the browser socket merely draining.
+  await waitForTermText(page, "echo:after-big-message");
 });
 
 // Regression test for the tmux paste-buffer input-mangling bug at the

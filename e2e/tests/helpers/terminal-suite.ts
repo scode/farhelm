@@ -6,6 +6,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { requireHelmBuild } from "./helm-build";
 import { stackScratchDir } from "./scratch";
 import { waitForTermText } from "./term";
 
@@ -125,11 +126,7 @@ export async function fulfillAsHelm(
  */
 export async function resetStack(request: APIRequestContext) {
   const probe = await request.get("/api/sessions");
-  HELM_BUILD = probe.headers()["x-farhelm-build"] ?? "";
-  expect(
-    HELM_BUILD,
-    "the helm must stamp its replies: every fabricated terminal fixture borrows this value",
-  ).toBeTruthy();
+  HELM_BUILD = requireHelmBuild(probe, "terminal fixtures");
   const listing = await probe.json();
   const shared = listing.sessions.find(
     (s: { title: string }) => s.title === "e2e-session",
