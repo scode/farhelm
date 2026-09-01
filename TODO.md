@@ -139,6 +139,14 @@ Within a bucket, no order.
   a build order are in `lore/2026-08-30-fly-sprites-as-a-host-kind.md`. The same entry sizes the related "native app
   attaches to a remote helm" mode and the cheaper installed-web-app alternative.
 
+- Tensorlake sandboxes as a host kind: the same idea assessed 2026-09-01 against a real sandbox, in
+  `lore/2026-09-01-tensorlake-sandboxes-as-a-host-kind.md`. Fits better than sprites — a real SSH gateway makes the
+  transport farhelm's existing ssh path with zero code changes (binary stdio and sftp both verified), suspend/resume
+  preserves running processes under the same boot id, and platform-managed processes replace the missing systemd — at
+  the cost of resume needing an explicit `tl sbx resume` (plain ssh refuses a suspended sandbox) and, today, an sshd
+  session leak that defeats idle-suspend until the leaked sessions are reaped (evidence in the lore entry; worth
+  reporting upstream).
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
