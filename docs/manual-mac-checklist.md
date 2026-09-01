@@ -9,9 +9,19 @@ Run these eight steps against the same release candidate and record failures wit
 version, and remote Ubuntu version. A pass here is evidence about that exact candidate, not a substitute for the Linux
 and browser CI gates.
 
-The release is two bare binaries in `~/.local/bin` (D6), so every step below starts `farhelm-desktop` from a terminal.
-That is not a compromise for the sake of the checklist — it is how the binaries are installed and how the maintainer
-runs them — but it does mean this pass says nothing about a Finder double-click, which was never validated either.
+The release is two bare binaries in `~/.local/bin` (D6), and every step below starts `farhelm-desktop` from a terminal —
+stderr assertions need a terminal, and the terminal path must keep working regardless of the bundle. But the installer
+now also assembles `~/Applications/Farhelm.app`, so the launcher path needs its own close-out:
+
+- After `install.sh`, `Farhelm.app` exists, Spotlight and (if installed) Alfred find "Farhelm" by name, and launching
+  from there opens the window with the Farhelm icon in the Dock and "Farhelm" in Cmd-Tab.
+- With the app already running, launching it again from Spotlight ACTIVATES the running window; it does not start a
+  second instance (check with `pgrep -fl farhelm-desktop`).
+- Quit, re-run `install.sh`, and confirm the bundle's `Contents/Info.plist` version tracked the installed version.
+
+Know the failure shape a launcher launch cannot show: a preflight refusal (missing/old tmux, unusable state dir) prints
+one line to stderr and exits, which a Finder/Spotlight launch swallows entirely — "nothing happens" from the launcher
+means "run `~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop` in a terminal and read the line".
 
 1. Confirm the tmux preflight and floor (SPEC_impl.md's "Terminal substrate: private tmux server") in three controlled
    launches.

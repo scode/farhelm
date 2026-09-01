@@ -1477,15 +1477,26 @@ alongside `farhelm` and installed next to it. The two are one artifact pair, not
 farhelm-helm from the same workspace version and reaches supervisor code by finding its CLI sibling next to its own
 executable, discovering a local supervisor that already answers or spawning `farhelm supervisor run` when none does.
 
-The bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's `asset!()` files
-were the only thing that needed one. They are served instead from the UI tree compiled into `farhelm-helm`, through a
-`dioxus-desktop` asset handler registered on `/assets/*`, handed to the webview over the `dioxus://` scheme. By default
-— and in every release build — those are the same bytes the helm serves to a browser, since both read the compiled-in
-tree; `FARHELM_DESKTOP_UI_DIST` breaks that identity deliberately, pointing only the loopback helm at a directory on
-disk while the window keeps rendering from the embedded tree. Registering a handler for a path prefix takes precedence
-over dioxus's own filesystem resolver, so there is no bundle-directory fallback at all; the price is that the desktop
-build's asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on every
-change.
+On top of that pair, `install.sh` assembles `~/Applications/Farhelm.app` on macOS: an Info.plist (bundle identifier
+`org.scode.farhelm.desktop`), the icon shipped in the desktop archive, and COPIES of both committed binaries in
+`Contents/MacOS/` — where the executable keeps the name `farhelm-desktop`, because the default case-insensitive APFS
+would make an executable named `Farhelm` the same directory entry as its required `farhelm` sibling. The bundle exists
+for LAUNCHER IDENTITY only: Spotlight/Alfred launchability, a Dock icon, a Cmd-Tab name, and Launch Services'
+single-instance activation (relaunching activates the running app instead of racing it for the embedded helm's state).
+It is a derived artifact rebuilt wholesale by every install run — the flat pair stays the source of truth and the only
+state the installer's transaction journal covers — and nothing in the app reads it: asset serving stays the embedded
+tree below, and the sibling contract is satisfied inside `Contents/MacOS/` exactly as it is in `~/.local/bin`.
+`FARHELM_NO_APP_BUNDLE=1` skips it.
+
+The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
+`asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
+`farhelm-helm`, through a `dioxus-desktop` asset handler registered on `/assets/*`, handed to the webview over the
+`dioxus://` scheme. By default — and in every release build — those are the same bytes the helm serves to a browser,
+since both read the compiled-in tree; `FARHELM_DESKTOP_UI_DIST` breaks that identity deliberately, pointing only the
+loopback helm at a directory on disk while the window keeps rendering from the embedded tree. Registering a handler for
+a path prefix takes precedence over dioxus's own filesystem resolver, so there is no bundle-directory fallback at all;
+the price is that the desktop build's asset set and the web bundle's must be identical, which
+`scripts/check-desktop-assets.sh` enforces on every change.
 
 A releasable `farhelm-desktop` must be produced by `dx`, not by Cargo alone. The `asset!()` macro emits a placeholder
 into a `__ASSETS__` link section and dx rewrites those symbols with content-hashed names after linking; a plain

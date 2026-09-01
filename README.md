@@ -32,11 +32,13 @@ curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.
 The script detects your platform (Linux x86_64 or aarch64, macOS on Apple silicon), downloads the matching release from
 GitHub, verifies its SHA-256 against the release's `SHA256SUMS`, and puts `farhelm` — and on macOS also
 `farhelm-desktop` — into `~/.local/bin` (set `FARHELM_INSTALL_DIR` to choose another directory; set `FARHELM_VERSION` to
-`X.Y.Z`, `vX.Y.Z`, or a `-rc.N` prerelease of one, e.g. `v1.2.3-rc.1`, to pin a version). That is all it does. It does
-not touch systemd, launchd, or your shell configuration, and leaves nothing behind outside that directory (it stages
-downloads in a temporary directory inside it and deletes that); if `~/.local/bin` is not on your `PATH` it tells you and
-leaves the fix to you. Read it before you run it — it is short, and it is the same file for every platform. It needs
-`curl`, `tar`, and one of `sha256sum`, `shasum`, or `openssl`.
+`X.Y.Z`, `vX.Y.Z`, or a `-rc.N` prerelease of one, e.g. `v1.2.3-rc.1`, to pin a version). On macOS it then assembles
+`~/Applications/Farhelm.app` around copies of those binaries plus the icon from the release archive, so Spotlight,
+Alfred, the Dock, and Cmd-Tab know the app by name (set `FARHELM_NO_APP_BUNDLE=1` to skip that). That is all it does. It
+does not touch systemd, launchd, or your shell configuration, and outside `~/Applications/Farhelm.app` leaves nothing
+behind beyond the install directory (it stages downloads in a temporary directory inside it and deletes that); if
+`~/.local/bin` is not on your `PATH` it tells you and leaves the fix to you. Read it before you run it — it is short,
+and it is the same file for every platform. It needs `curl`, `tar`, and one of `sha256sum`, `shasum`, or `openssl`.
 
 `FARHELM_VERSION` and `FARHELM_INSTALL_DIR` need to be set for the `sh` at the far end of the pipe, not for `curl` —
 `FARHELM_VERSION=v1.2.3 curl ... | sh` sets it for `curl` and does nothing useful. Put the assignment after the pipe
@@ -61,10 +63,10 @@ replacing the second binary fails it puts the first one back, so you never end u
 is running:
 
 - Linux: `systemctl --user restart farhelm-supervisor farhelm-helm`.
-- macOS: quit and reopen `farhelm-desktop`. The app owns the embedded helm and the local supervisor it started — those
-  are its child processes and stop with it — so reopening it starts them from the new binaries. If the app found a
-  supervisor already running when it started (one you started by hand with `farhelm supervisor run`), it reuses it;
-  restart that one by hand.
+- macOS: quit and reopen Farhelm. The app owns the embedded helm and the local supervisor it started — those are its
+  child processes and stop with it — so reopening it starts them from the new binaries. If the app found a supervisor
+  already running when it started (one you started by hand with `farhelm supervisor run`), it reuses it; restart that
+  one by hand.
 
 Running sessions survive either way: they live in a tmux server that neither restart touches, and the new supervisor
 reattaches to them. Linux hosts you added from the hosts panel keep running their old supervisor until you update them
@@ -79,9 +81,9 @@ from that panel (its existing "update" action), which pushes the helm's own vers
   unit files setup wrote (each carries a marker line; it refuses to touch a unit it did not write). It refuses if no
   tmux ≥ 3.7c is installed, and tells you how to install one; it never installs tmux for you. On a helm machine, the
   hosts panel's local row never installs a supervisor by itself: it points you at `farhelm helm setup`.
-- **It runs the desktop app** (a Mac laptop): run `farhelm-desktop`. The app starts its own helm and a local supervisor
-  as child processes — the Mac is a host already — and remote machines are added as hosts from its hosts panel. Do not
-  run `farhelm helm setup` here; the app is the helm.
+- **It runs the desktop app** (a Mac laptop): launch Farhelm from Spotlight (or run `farhelm-desktop` in a terminal —
+  same binary). The app starts its own helm and a local supervisor as child processes — the Mac is a host already — and
+  remote machines are added as hosts from its hosts panel. Do not run `farhelm helm setup` here; the app is the helm.
 - **It is a Linux machine that only hosts sessions, added from another helm's hosts panel**: install nothing here by
   hand. The helm you add it from copies `farhelm` (and a tmux, if the host has none at or above the floor) over SSH and
   writes the supervisor unit itself. Hosts keep today's layout (`~/.local/lib/farhelm` on the host, written by the
@@ -104,12 +106,14 @@ yourself downloads nothing: "add host" tells you to pass `--payload-dir` (or ins
 ### What a release contains
 
 Each `vX.Y.Z` on the releases page carries one archive per platform (`farhelm-<target>.tar.gz`, plus
-`farhelm-desktop-aarch64-apple-darwin.tar.gz`, each holding exactly one bare binary), the two static `tmux` builds for
-Linux hosts, and `SHA256SUMS` with its `.minisig` signature, plus cargo-dist's own metadata (`dist-manifest.json`, a
-`.sha256` beside each archive, and a lowercase `sha256.sum`), none of which is signed or read by Farhelm. Do not mistake
-`sha256.sum` for `SHA256SUMS`: the uppercase one, covering the six payloads and signed as `SHA256SUMS.minisig`, is the
-only checksum file Farhelm and the install script verify against. The web UI is inside the `farhelm` binary; there is no
-separate `web/` directory, no unit files to copy, and no `.app` bundle.
+`farhelm-desktop-aarch64-apple-darwin.tar.gz`; each holds one bare binary and a LICENSE, and the desktop archive also
+carries the `Farhelm.icns` the installer builds `Farhelm.app` from), the two static `tmux` builds for Linux hosts, and
+`SHA256SUMS` with its `.minisig` signature, plus cargo-dist's own metadata (`dist-manifest.json`, a `.sha256` beside
+each archive, and a lowercase `sha256.sum`), none of which is signed or read by Farhelm. Do not mistake `sha256.sum` for
+`SHA256SUMS`: the uppercase one, covering the six payloads and signed as `SHA256SUMS.minisig`, is the only checksum file
+Farhelm and the install script verify against. The web UI is inside the `farhelm` binary; there is no separate `web/`
+directory, no unit files to copy, and no prebuilt `.app` on the release page — the bundle is assembled locally by
+`install.sh`.
 
 ## Quickstart: desktop app plus one remote host
 

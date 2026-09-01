@@ -198,6 +198,82 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     esac
   }
 
+  # How many members of the archive at $1 have $2 as their BASENAME. The
+  # basename match, not a full path comparison, is the deliberate contract
+  # with dist's layout: dist nests each member under <package>-<target>/, and
+  # locating by basename means this script never has to hardcode that prefix.
+  member_count_named() {
+    tar tzf "$1" | awk -F/ -v b="$2" '{n=split($0,p,"/"); if (p[n]==b) c++} END{print c+0}'
+  }
+
+  # Stream the ONE member of archive $1 whose basename is $3 to the path $4
+  # (a name THIS SCRIPT chose — no path from inside an archive ever touches
+  # the filesystem), with final mode $5 regardless of what the archive or the
+  # caller's umask would produce. $2 is the archive's release name, used only
+  # in messages. Refuses, with exit 1, an archive where the basename matches
+  # zero or several members — callers that treat a member as OPTIONAL must
+  # probe with member_count_named first and only call this on a hit.
+  #
+  # The refusals between selection and extraction are the point of this
+  # function existing at all, and they run in a fixed order:
+  #
+  # - a member whose full in-archive path starts with "-" could be misread as
+  #   a tar OPTION rather than an operand — some tar implementations keep
+  #   parsing options after the archive operand — so a crafted path could
+  #   redirect what gets listed or extracted;
+  # - control characters are refused for the same "do not trust this string
+  #   with a shell/tool boundary" reason;
+  # - the basename match only proves ONE entry has this basename SOMEWHERE in
+  #   the archive, not that IT is a regular file: a regular decoy entry named
+  #   "<member>.extra" sorting earlier in a naive substring search could
+  #   supply a false "-" type character for a symlink or hardlink actually AT
+  #   the selected path. So metadata is queried for the EXACT member only
+  #   (`--` first, so the name can never be misread as another option), must
+  #   yield exactly one record, and that record must be a regular file.
+  #
+  # This is the same shape the helm's own extractor and the release's
+  # sign-sums job require of these archives.
+  extract_sole_member() {
+    esm_archive=$1
+    esm_label=$2
+    esm_base=$3
+    esm_dest=$4
+    esm_mode=$5
+
+    esm_hits=$(member_count_named "$esm_archive" "$esm_base")
+    if [ "$esm_hits" -ne 1 ]; then
+      printf '%s has %s members named %s, expected exactly 1\n' "$esm_label" "$esm_hits" "$esm_base" >&2
+      exit 1
+    fi
+    esm_member=$(tar tzf "$esm_archive" | awk -F/ -v b="$esm_base" '{n=split($0,p,"/"); if (p[n]==b) print}')
+
+    case "$esm_member" in
+      -*)
+        printf '%s: member name %s looks like a tar option; refusing\n' "$esm_label" "$esm_member" >&2
+        exit 1
+        ;;
+    esac
+    if printf '%s' "$esm_member" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+      printf '%s: member name contains a control character; refusing\n' "$esm_label" >&2
+      exit 1
+    fi
+
+    esm_type_lines=$(tar tvzf "$esm_archive" -- "$esm_member" 2>/dev/null)
+    esm_type_count=$(printf '%s\n' "$esm_type_lines" | grep -c .)
+    if [ "$esm_type_count" -ne 1 ]; then
+      printf '%s: %s reports %s metadata records for %s, expected exactly 1\n' "$esm_label" "tar tv" "$esm_type_count" "$esm_member" >&2
+      exit 1
+    fi
+    esm_type_char=$(printf '%s' "$esm_type_lines" | cut -c1)
+    if [ "$esm_type_char" != "-" ]; then
+      printf '%s: %s is not a regular file (tar reports type '"'"'%s'"'"'); refusing to install it\n' "$esm_label" "$esm_member" "$esm_type_char" >&2
+      exit 1
+    fi
+
+    tar -xOzf "$esm_archive" -- "$esm_member" >"$esm_dest"
+    chmod "$esm_mode" "$esm_dest"
+  }
+
   # Refuses (exit 1) unless PATH is either absent or a plain regular file.
   # install.sh only ever creates and moves plain regular files at the paths
   # it owns, so anything else there — a directory, a device, a symlink
@@ -797,6 +873,12 @@ EOF
     # deliberate: a `command | while read` loop runs the loop body in a
     # subshell under POSIX sh, and every variable this loop sets needs to
     # outlive it.
+    #
+    # ICNS_STATE is one of those outliving variables: `staged` once the
+    # desktop archive yielded a Farhelm.icns, `absent` otherwise (Linux
+    # runs, and macOS installs of releases that predate the icon). The
+    # bundle step after the commit reads it.
+    ICNS_STATE=absent
     while IFS='|' read -r row_target row_archive row_binary; do
       [ "$row_target" = "$TARGET" ] || continue
 
@@ -822,63 +904,29 @@ EOF
         exit 1
       fi
 
-      # dist nests the member under <package>-<target>/; locate it by
-      # BASENAME rather than assuming that exact path, and refuse an
-      # archive that does not carry exactly one member with this name —
-      # the same shape the helm's own extractor and the sign-sums job
-      # require.
-      members=$(tar tzf "$archive_path")
-      member_hits=$(printf '%s\n' "$members" | awk -F/ -v b="$row_binary" '{n=split($0,p,"/"); if (p[n]==b) c++} END{print c+0}')
-      if [ "$member_hits" -ne 1 ]; then
-        printf '%s has %s members named %s, expected exactly 1\n' "$row_archive" "$member_hits" "$row_binary" >&2
-        exit 1
-      fi
-      member=$(printf '%s\n' "$members" | awk -F/ -v b="$row_binary" '{n=split($0,p,"/"); if (p[n]==b) print}')
+      # Selection, refusal rules, and -O streaming all live in
+      # extract_sole_member; see its own comment for why each refusal
+      # exists.
+      extract_sole_member "$archive_path" "$row_archive" "$row_binary" "$STAGING_DIR/$row_binary" 0755
 
-      # Reject a member whose full in-archive path could be misread as a
-      # tar OPTION (a leading "-") rather than as the exact operand just
-      # selected above -- some tar implementations keep parsing options
-      # after the archive operand, so a crafted path could redirect what
-      # gets listed or extracted. Control characters are refused for the
-      # same "do not trust this string with a shell/tool boundary" reason.
-      case "$member" in
-        -*)
-          printf '%s: member name %s looks like a tar option; refusing\n' "$row_archive" "$member" >&2
+      # The desktop archive also carries the app icon the bundle step below
+      # builds Farhelm.app around. Releases published before the icon
+      # existed do not have it, and this script installs pinned old
+      # versions too — so ABSENCE is a skip the closing report explains,
+      # not an error, while a PRESENT icon gets the same extraction
+      # discipline as a binary. More than one match is the one shape that
+      # is never legitimate.
+      if [ "$row_binary" = "farhelm-desktop" ]; then
+        icns_hits=$(member_count_named "$archive_path" "Farhelm.icns")
+        if [ "$icns_hits" -gt 1 ]; then
+          printf '%s has %s members named Farhelm.icns, expected at most 1\n' "$row_archive" "$icns_hits" >&2
           exit 1
-          ;;
-      esac
-      if printf '%s' "$member" | LC_ALL=C grep -q '[[:cntrl:]]'; then
-        printf '%s: member name contains a control character; refusing\n' "$row_archive" >&2
-        exit 1
+        fi
+        if [ "$icns_hits" -eq 1 ]; then
+          extract_sole_member "$archive_path" "$row_archive" "Farhelm.icns" "$STAGING_DIR/Farhelm.icns" 0644
+          ICNS_STATE=staged
+        fi
       fi
-
-      # The basename match above only proves ONE entry has this basename
-      # SOMEWHERE in the archive, not that IT is a regular file: a regular
-      # decoy entry named "<member>.extra" sorting earlier in a naive
-      # substring search could supply a false "-" type character for a
-      # symlink or hardlink actually AT the selected path. Query metadata
-      # for the EXACT member only (`--` first, so the name can never be
-      # misread as another option), require exactly one record, and
-      # require it to be a regular file.
-      type_lines=$(tar tvzf "$archive_path" -- "$member" 2>/dev/null)
-      type_count=$(printf '%s\n' "$type_lines" | grep -c .)
-      if [ "$type_count" -ne 1 ]; then
-        printf '%s: %s reports %s metadata records for %s, expected exactly 1\n' "$row_archive" "tar tv" "$type_count" "$member" >&2
-        exit 1
-      fi
-      type_char=$(printf '%s' "$type_lines" | cut -c1)
-      if [ "$type_char" != "-" ]; then
-        printf '%s: %s is not a regular file (tar reports type '"'"'%s'"'"'); refusing to install it\n' "$row_archive" "$member" "$type_char" >&2
-        exit 1
-      fi
-
-      # No path from inside the archive ever touches the filesystem: -O
-      # streams the one member we already validated straight to a name WE
-      # chose, with a fixed final mode regardless of what the archive or
-      # the caller's umask would otherwise produce. `--` again, for the
-      # same reason as the listing above.
-      tar -xOzf "$archive_path" -- "$member" >"$STAGING_DIR/$row_binary"
-      chmod 0755 "$STAGING_DIR/$row_binary"
     done <<EOF
 $ASSET_TABLE
 EOF
@@ -987,7 +1035,118 @@ EOF
     done
     remove_owned_lock
 
-    # 7. Report. PATH warning and restart reminder first (only when they
+    # 7. macOS launcher identity: assemble ~/Applications/Farhelm.app around
+    # COPIES of the binaries just committed, plus the icon staged from the
+    # desktop archive. The bundle is what makes the app reachable by name
+    # from Spotlight/Alfred, gives it a Dock icon and a Cmd-Tab name, and
+    # makes a second launch activate the running instance instead of racing
+    # it for the embedded helm's state.
+    #
+    # The bundle is a DERIVED artifact, deliberately outside the journaled
+    # transaction above: the journal's vocabulary is exactly the two flat
+    # binaries, and the bundle is reconstructible from any committed pair,
+    # so every run that gets this far simply rebuilds it wholesale — staged
+    # next to the binaries, then swapped in with rm -rf + mv rather than
+    # edited in place (in-place modification of an existing .app is what
+    # trips macOS's App Management privacy prompt). A failure here exits 1,
+    # but the messages say what is still true: the binaries in
+    # FARHELM_INSTALL_DIR are committed and usable.
+    #
+    # The executable KEEPS the name farhelm-desktop inside the bundle: the
+    # default APFS is case-insensitive, so an executable named "Farhelm"
+    # would be the same directory entry as the required CLI sibling
+    # "farhelm" and the second copy would clobber the first. The pretty
+    # name comes from CFBundleName. Set FARHELM_NO_APP_BUNDLE=1 to skip
+    # bundle assembly entirely and get the pre-bundle behavior.
+    BUNDLE_NOTE=""
+    if [ "$HAS_DESKTOP" -eq 1 ]; then
+      if [ -n "${FARHELM_NO_APP_BUNDLE:-}" ]; then
+        BUNDLE_NOTE="Skipped the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
+      elif [ "$ICNS_STATE" != staged ]; then
+        BUNDLE_NOTE="This release's desktop archive carries no Farhelm.icns (releases before the bundle existed); skipped assembling the Farhelm.app bundle."
+      elif [ -z "${HOME:-}" ]; then
+        BUNDLE_NOTE="HOME is not set; skipped assembling the Farhelm.app bundle."
+      else
+        app_parent="$HOME/Applications"
+        app_path="$app_parent/Farhelm.app"
+
+        # Replace only something that plausibly IS a farhelm bundle (this
+        # script's, or the hand-rolled trial bundle that preceded it, both
+        # of which say "farhelm" in their Info.plist). Anything else at
+        # this name belongs to the user and is not this script's to
+        # delete.
+        if [ -e "$app_path" ]; then
+          if [ ! -f "$app_path/Contents/Info.plist" ] || ! LC_ALL=C grep -qi farhelm "$app_path/Contents/Info.plist" 2>/dev/null; then
+            printf '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path" >&2
+            printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
+            exit 1
+          fi
+        fi
+
+        bundle_fail() {
+          printf 'assembling %s failed at: %s\n' "$app_path" "$1" >&2
+          printf 'The binaries in %s are installed and usable; re-run the installer to retry the bundle.\n' "$INSTALL_DIR" >&2
+          exit 1
+        }
+
+        bundle_stage="$STAGING_DIR/Farhelm.app"
+        mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources" || bundle_fail "creating the staging layout"
+        cp "$INSTALL_DIR/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm-desktop" || bundle_fail "copying farhelm-desktop"
+        cp "$INSTALL_DIR/farhelm" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "copying farhelm"
+        chmod 0755 "$bundle_stage/Contents/MacOS/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "setting binary modes"
+        cp "$STAGING_DIR/Farhelm.icns" "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "copying the icon"
+        chmod 0644 "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "setting the icon mode"
+
+        cat >"$bundle_stage/Contents/Info.plist" <<PLIST_EOF || bundle_fail "writing Info.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>farhelm-desktop</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.scode.farhelm.desktop</string>
+	<key>CFBundleName</key>
+	<string>Farhelm</string>
+	<key>CFBundleDisplayName</key>
+	<string>Farhelm</string>
+	<key>CFBundleIconFile</key>
+	<string>Farhelm</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$VERSION_NUM</string>
+	<key>CFBundleVersion</key>
+	<string>$VERSION_NUM</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+</dict>
+</plist>
+PLIST_EOF
+
+        mkdir -p "$app_parent" || bundle_fail "creating $app_parent"
+        rm -rf "$app_path" || bundle_fail "removing the previous bundle (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
+        mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
+
+        # Registration is best-effort tidiness: Launch Services discovers
+        # ~/Applications on its own, this just shortens the wait. The
+        # binary does not exist on the Linux CI host the installer tests
+        # run on, hence the -x guard.
+        LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        if [ -x "$LSREGISTER" ]; then
+          "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
+        fi
+        BUNDLE_NOTE="Assembled $app_path (Spotlight, Dock, and Cmd-Tab identity)."
+      fi
+    fi
+
+    # 8. Report. PATH warning and restart reminder first (only when they
     # apply), then the standing closing message every run prints.
     case "$INSTALL_DIR" in
       *:*)
@@ -1022,9 +1181,10 @@ EOF
       echo ""
       echo "Updated. Restart what is running:"
       echo "  Linux: systemctl --user restart farhelm-supervisor farhelm-helm"
-      echo "  macOS: quit and reopen farhelm-desktop (it owns the embedded helm and any"
-      echo "  supervisor it started as child processes; a supervisor you started by hand"
-      echo "  with 'farhelm supervisor run' is reused as-is and needs restarting yourself)."
+      echo "  macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
+      echo "  any supervisor it started as child processes; a supervisor you started by"
+      echo "  hand with 'farhelm supervisor run' is reused as-is and needs restarting"
+      echo "  yourself)."
       echo "  Running sessions survive either way — they live in tmux, which neither"
       echo "  restart touches."
     fi
@@ -1034,6 +1194,9 @@ EOF
       printf 'Installed farhelm %s (and farhelm-desktop) to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
     else
       printf 'Installed farhelm %s to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
+    fi
+    if [ -n "$BUNDLE_NOTE" ]; then
+      printf '%s\n' "$BUNDLE_NOTE"
     fi
     echo ""
     echo "If this machine should run your helm (the web UI on 127.0.0.1:7433) and host"
