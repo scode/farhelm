@@ -77,9 +77,11 @@ Report which earlier results were reused and why.
 - `bash scripts/test-install-sh.sh` — drives `install.sh` as a real child process against a fixture HTTP server: fresh
   install, update, a forced-failure rollback (macOS-shaped, via a `uname` shim), 404, checksum mismatch, two
   malformed-archive shapes, version normalization (including a `-rc.N` prerelease), invalid versions, missing
-  prerequisites (via an isolated `PATH`), the exact closing-message contract across five tmux fixtures, and that nothing
-  outside `FARHELM_INSTALL_DIR` — no `systemctl`/`launchctl` call, nothing else under `$HOME` — ever changes. Every
-  invocation goes through `env -i` with an explicit environment, never this process's own.
+  prerequisites (via an isolated `PATH`), the exact closing-message contract across five tmux fixtures, the
+  `Farhelm.app` bundle a macOS-shaped install assembles (layout, rebuild on update, the pre-icon/opt-out/foreign-bundle
+  edge shapes), and that nothing outside `FARHELM_INSTALL_DIR` and that bundle — no `systemctl`/`launchctl` call,
+  nothing else under `$HOME` — ever changes. Every invocation goes through `env -i` with an explicit environment, never
+  this process's own.
 - `scripts/test-provision-centos.sh` — boots a systemd CentOS Stream 9 container and makes the helm provision it over
   ssh, which is the only coverage of a helm installing onto a distribution other than its own. Needs docker and
   `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux, because the workspace's

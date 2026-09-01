@@ -1402,8 +1402,12 @@ fn desktop_state_dir() -> anyhow::Result<PathBuf> {
 /// Locate the `farhelm` CLI this app spawns its supervisor from.
 ///
 /// D6 ships two bare binaries that install side by side (`~/.local/bin`), so
-/// "next to me" is the whole contract — there is no bundle to look inside any
-/// more. `FARHELM_DESKTOP_FARHELM` overrides it for developers and for
+/// "next to me" is the whole contract — there is no bundle to look INSIDE.
+/// The installer-assembled `Farhelm.app` (SPEC_impl.md, "Native app
+/// packaging") satisfies the same contract from the other direction: it
+/// places a `farhelm` copy next to the executable in `Contents/MacOS/`,
+/// which is why this code needs no bundle awareness to run from either
+/// location. `FARHELM_DESKTOP_FARHELM` overrides it for developers and for
 /// `scripts/desktop-smoke.sh`, which runs a `dx` build tree where the sibling
 /// does not exist.
 ///
@@ -1463,7 +1467,8 @@ fn resolve_sibling_farhelm(
 /// webview and pulls its `/assets/*` from [`serve_asset`] instead — so an
 /// override here does NOT change what the window shows. The
 /// `Contents/Resources/web` lookup this used to perform is gone with the
-/// `.app` bundle it belonged to (D6).
+/// dx-produced `.app` bundle it belonged to (D6); the installer-assembled
+/// `Farhelm.app` carries no web tree either, so nothing brings it back.
 fn bundled_web_ui() -> Option<PathBuf> {
     std::env::var_os("FARHELM_DESKTOP_UI_DIST").map(PathBuf::from)
 }

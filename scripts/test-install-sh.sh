@@ -97,19 +97,32 @@ write_binary() {
   chmod 755 "$dir/$member"
 }
 
-# build_archive OUT_TAR PACKAGE TARGET CONTENT_LINE
+# build_archive OUT_TAR PACKAGE TARGET CONTENT_LINE [no-icns]
 # Builds one well-formed release archive: PACKAGE-TARGET/<binary>, holding a
 # shell script that prints CONTENT_LINE. <binary> is "farhelm-desktop" for
 # the farhelm-desktop package and "farhelm" for everything else, matching
 # RELEASE_ARCHIVES.
+#
+# A farhelm-desktop archive also carries PACKAGE-TARGET/Farhelm.icns, the way
+# real desktop archives have since the app icon shipped, with the
+# deterministic content "fake icns: CONTENT_LINE" so bundle assertions can
+# byte-compare it. Pass "no-icns" as the fifth argument to build the OLDER
+# desktop-archive shape (releases that predate the icon), which install.sh
+# must install without a bundle rather than refuse.
 build_archive() {
-  local out=$1 package=$2 target=$3 content=$4
+  local out=$1 package=$2 target=$3 content=$4 icns=${5:-icns}
   local binary=farhelm
   [ "$package" = farhelm-desktop ] && binary=farhelm-desktop
   local stage
   stage=$(mktemp -d "$WORKDIR/archive-stage.XXXXXX")
   write_binary "$stage/$package-$target" "$binary" "$content"
-  tar -czf "$out" -C "$stage" "$package-$target/$binary"
+  local members=("$package-$target/$binary")
+  if [ "$package" = farhelm-desktop ] && [ "$icns" != no-icns ]; then
+    printf 'fake icns: %s\n' "$content" >"$stage/$package-$target/Farhelm.icns"
+    chmod 644 "$stage/$package-$target/Farhelm.icns"
+    members+=("$package-$target/Farhelm.icns")
+  fi
+  tar -czf "$out" -C "$stage" "${members[@]}"
   rm -rf "$stage"
 }
 
@@ -405,6 +418,10 @@ make_toolchain "$TOOLCHAIN_FULL"
 # ---------------------------------------------------------------------------
 run_install() {
   local path_dir=$1 home=$2 install_dir=$3 base_url=$4 version=$5
+  # Anything after the five fixed arguments is extra VAR=VALUE assignments
+  # spliced into the child environment (still under `env -i`), for the few
+  # scenarios that exercise an opt-out knob like FARHELM_NO_APP_BUNDLE.
+  shift 5
   local out_file err_file
   out_file=$(mktemp "$WORKDIR/out.XXXXXX")
   err_file=$(mktemp "$WORKDIR/err.XXXXXX")
@@ -415,6 +432,7 @@ run_install() {
     FARHELM_INSTALL_DIR="$install_dir" \
     FARHELM_RELEASE_BASE_URL="$base_url" \
     FARHELM_VERSION="$version" \
+    "$@" \
     /bin/sh "$INSTALL_SH" >"$out_file" 2>"$err_file"
   RC=$?
   set -e
@@ -565,6 +583,30 @@ check "macOS-shaped fresh install reports the desktop binary" contains "$OUT" "I
 check "macOS-shaped fresh install: farhelm reports 1.2.3" \
   [ "$("$INSTALL_MAC/farhelm" --version)" = "farhelm 1.2.3" ]
 
+# The Farhelm.app bundle: assembled from the committed binaries plus the
+# archive's icon, executable KEPT as "farhelm-desktop" (case-insensitive
+# APFS would collide an executable named "Farhelm" with the required
+# "farhelm" CLI sibling in the same directory — asserting the exact name
+# here is what keeps that from regressing on this case-SENSITIVE test
+# host, where the collision itself cannot reproduce).
+MAC_APP="$HOME_MAC/Applications/Farhelm.app"
+check "macOS-shaped fresh install reports the bundle" \
+  contains "$OUT" "Assembled $MAC_APP (Spotlight, Dock, and Cmd-Tab identity)."
+check "bundle: Info.plist names the stable bundle identifier" \
+  contains "$(cat "$MAC_APP/Contents/Info.plist")" "<string>org.scode.farhelm.desktop</string>"
+check "bundle: Info.plist points CFBundleExecutable at farhelm-desktop" \
+  contains "$(cat "$MAC_APP/Contents/Info.plist")" "<string>farhelm-desktop</string>"
+check "bundle: Info.plist carries the installed version" \
+  contains "$(cat "$MAC_APP/Contents/Info.plist")" "<string>1.2.3</string>"
+check "bundle: executable is a byte-for-byte copy of the installed farhelm-desktop" \
+  [ "$(cat "$MAC_APP/Contents/MacOS/farhelm-desktop")" = "$(cat "$INSTALL_MAC/farhelm-desktop")" ]
+check "bundle: CLI sibling is a byte-for-byte copy of the installed farhelm" \
+  [ "$(cat "$MAC_APP/Contents/MacOS/farhelm")" = "$(cat "$INSTALL_MAC/farhelm")" ]
+check "bundle: executable carries the executable bit" [ -x "$MAC_APP/Contents/MacOS/farhelm-desktop" ]
+check "bundle: CLI sibling carries the executable bit" [ -x "$MAC_APP/Contents/MacOS/farhelm" ]
+check "bundle: icon is the archive's Farhelm.icns byte-for-byte" \
+  [ "$(cat "$MAC_APP/Contents/Resources/Farhelm.icns")" = "fake icns: farhelm-desktop 1.2.3" ]
+
 OLD_FARHELM_CONTENT=$(cat "$INSTALL_MAC/farhelm")
 OLD_DESKTOP_CONTENT=$(cat "$INSTALL_MAC/farhelm-desktop")
 
@@ -614,6 +656,10 @@ check "forced desktop-replace failure: farhelm still reports 1.2.3 (not 1.2.4)" 
   [ "$("$INSTALL_MAC/farhelm" --version)" = "farhelm 1.2.3" ]
 check "forced desktop-replace failure leaves no leftover staging/lock/backup dot-files" \
   [ -z "$(find "$INSTALL_MAC" -maxdepth 1 -name '.farhelm*')" ]
+# The failure hit step 6 (the journaled replace), so step 7 never ran: the
+# bundle must still be the intact 1.2.3 one, matching the restored binaries.
+check "forced desktop-replace failure leaves the 1.2.3 bundle untouched" \
+  contains "$(cat "$MAC_APP/Contents/Info.plist")" "<string>1.2.3</string>"
 
 # Retry the SAME 1.2.4 update, this time without the forced failure -- both
 # destinations must now contain the NEW (1.2.4) content, proving the
@@ -626,6 +672,81 @@ check "a real update to 1.2.4 after the forced failure succeeds" [ "$RC" -eq 0 ]
 check "real update: farhelm now reports 1.2.4" [ "$("$INSTALL_MAC/farhelm" --version)" = "farhelm 1.2.4" ]
 check "real update: farhelm-desktop content changed from the 1.2.3 original" \
   [ "$(cat "$INSTALL_MAC/farhelm-desktop")" != "$OLD_DESKTOP_CONTENT" ]
+check "real update: bundle rebuilt at the new version" \
+  contains "$(cat "$MAC_APP/Contents/Info.plist")" "<string>1.2.4</string>"
+check "real update: bundle executable tracks the new farhelm-desktop" \
+  [ "$(cat "$MAC_APP/Contents/MacOS/farhelm-desktop")" = "$(cat "$INSTALL_MAC/farhelm-desktop")" ]
+
+# ===========================================================================
+# Scenario: bundle edge shapes, all macOS-shaped. Each gets its own fresh
+# HOME so bundle presence/absence assertions cannot bleed between cases.
+# ===========================================================================
+echo
+echo "== Farhelm.app bundle edge shapes =="
+
+# A release whose desktop archive predates the icon: install succeeds, says
+# why there is no bundle, and creates none.
+build_good_release "$WWW/good-preicon" 1.2.3
+build_archive "$WWW/good-preicon/farhelm-desktop-aarch64-apple-darwin.tar.gz" \
+  farhelm-desktop aarch64-apple-darwin "farhelm-desktop 1.2.3" no-icns
+(cd "$WWW/good-preicon" && sha256sum -- *.tar.gz tmux-* >SHA256SUMS)
+HOME_PREICON="$WORKDIR/home-preicon"
+mkdir -p "$HOME_PREICON"
+run_install "$MAC_TOOLS" "$HOME_PREICON" "$HOME_PREICON/.local/bin" "$BASE/good-preicon" 1.2.3
+check "pre-icon release installs cleanly" [ "$RC" -eq 0 ]
+check "pre-icon release explains the missing bundle" \
+  contains "$OUT" "carries no Farhelm.icns"
+check "pre-icon release creates no bundle" [ ! -e "$HOME_PREICON/Applications/Farhelm.app" ]
+
+# FARHELM_NO_APP_BUNDLE opts out even when the icon is available.
+HOME_OPTOUT="$WORKDIR/home-optout"
+mkdir -p "$HOME_OPTOUT"
+run_install "$MAC_TOOLS" "$HOME_OPTOUT" "$HOME_OPTOUT/.local/bin" "$BASE/good" 1.2.3 \
+  FARHELM_NO_APP_BUNDLE=1
+check "FARHELM_NO_APP_BUNDLE install exits 0" [ "$RC" -eq 0 ]
+check "FARHELM_NO_APP_BUNDLE reports the opt-out" \
+  contains "$OUT" "Skipped the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
+check "FARHELM_NO_APP_BUNDLE creates no bundle" [ ! -e "$HOME_OPTOUT/Applications/Farhelm.app" ]
+
+# A Farhelm.app that is NOT a farhelm bundle belongs to the user: refuse to
+# replace it, but the binaries must still have been committed (the bundle
+# step runs after the transaction on purpose).
+HOME_FOREIGN="$WORKDIR/home-foreign"
+mkdir -p "$HOME_FOREIGN/Applications/Farhelm.app/Contents"
+cat >"$HOME_FOREIGN/Applications/Farhelm.app/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+	<key>CFBundleIdentifier</key><string>com.example.unrelated</string>
+</dict></plist>
+EOF
+run_install "$MAC_TOOLS" "$HOME_FOREIGN" "$HOME_FOREIGN/.local/bin" "$BASE/good" 1.2.3
+check "foreign Farhelm.app: install exits 1" [ "$RC" -ne 0 ]
+check "foreign Farhelm.app: refusal names the problem" \
+  contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
+check "foreign Farhelm.app: the binaries were still committed" \
+  [ "$("$HOME_FOREIGN/.local/bin/farhelm" --version)" = "farhelm 1.2.3" ]
+check "foreign Farhelm.app: the user's bundle is untouched" \
+  contains "$(cat "$HOME_FOREIGN/Applications/Farhelm.app/Contents/Info.plist")" "com.example.unrelated"
+
+# A farhelm-looking bundle (the hand-rolled trial's shape included: any
+# Info.plist that mentions farhelm) is replaced WHOLESALE — a file the old
+# bundle carried and the new one does not must be gone, because assembly is
+# rm -rf + mv of a staged tree, never an in-place edit.
+HOME_STALE="$WORKDIR/home-stale"
+mkdir -p "$HOME_STALE/Applications/Farhelm.app/Contents/MacOS"
+cat >"$HOME_STALE/Applications/Farhelm.app/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+	<key>CFBundleIdentifier</key><string>org.farhelm.desktop-trial</string>
+</dict></plist>
+EOF
+echo stale >"$HOME_STALE/Applications/Farhelm.app/Contents/MacOS/leftover"
+run_install "$MAC_TOOLS" "$HOME_STALE" "$HOME_STALE/.local/bin" "$BASE/good" 1.2.3
+check "trial-shaped bundle: install exits 0" [ "$RC" -eq 0 ]
+check "trial-shaped bundle: replaced with the assembled one" \
+  contains "$(cat "$HOME_STALE/Applications/Farhelm.app/Contents/Info.plist")" "org.scode.farhelm.desktop"
+check "trial-shaped bundle: no stale file survives the wholesale swap" \
+  [ ! -e "$HOME_STALE/Applications/Farhelm.app/Contents/MacOS/leftover" ]
 
 # ===========================================================================
 # Scenario: rollback when the FIRST replacement (farhelm itself) fails
@@ -1070,17 +1191,27 @@ UNAMEEOF
     check "F20 ($label): restart-reminder Linux line" \
       contains "$OUT" "Linux: systemctl --user restart farhelm-supervisor farhelm-helm"
     check "F20 ($label): restart-reminder macOS line 1" \
-      contains "$OUT" "macOS: quit and reopen farhelm-desktop (it owns the embedded helm and any"
+      contains "$OUT" "macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
     check "F20 ($label): restart-reminder macOS line 2" \
-      contains "$OUT" "supervisor it started as child processes; a supervisor you started by hand"
+      contains "$OUT" "any supervisor it started as child processes; a supervisor you started by"
     check "F20 ($label): restart-reminder macOS line 3" \
-      contains "$OUT" "with 'farhelm supervisor run' is reused as-is and needs restarting yourself)."
+      contains "$OUT" "hand with 'farhelm supervisor run' is reused as-is and needs restarting"
+    check "F20 ($label): restart-reminder macOS line 4" contains "$OUT" "yourself)."
     check "F20 ($label): restart-reminder sessions-survive line 1" \
       contains "$OUT" "Running sessions survive either way — they live in tmux, which neither"
     check "F20 ($label): restart-reminder sessions-survive line 2" contains "$OUT" "restart touches."
   else
     check "F20 ($label): no restart-reminder on a fresh install" \
       not_contains "$OUT" "Updated. Restart what is running:"
+  fi
+
+  # The bundle note is part of the standing macOS closing message now, and
+  # must never leak into a Linux run.
+  if [ "$has_desktop" = yes ]; then
+    check "F20 ($label): bundle note present" \
+      contains "$OUT" "Assembled $home/Applications/Farhelm.app (Spotlight, Dock, and Cmd-Tab identity)."
+  else
+    check "F20 ($label): no bundle note on Linux" not_contains "$OUT" "Farhelm.app"
   fi
 
   check "F20 ($label): no PATH warning (install dir is on PATH)" not_contains "$OUT" "is not on your PATH"

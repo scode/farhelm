@@ -5,9 +5,14 @@
 //!
 //! D6 ships the Mac GUI as two bare binaries — `farhelm` (CLI, helm,
 //! supervisor) and `farhelm-desktop` (this one) — installed side by side in
-//! `~/.local/bin`, with no `.app` bundle around either. There is no code here
-//! because there is nothing this binary does that the `farhelm-ui` bin does
-//! not also have to do: both call [`farhelm_ui::desktop::run`].
+//! `~/.local/bin`. `install.sh` additionally wraps COPIES of the pair in an
+//! assembled `~/Applications/Farhelm.app` for launcher identity
+//! (SPEC_impl.md, "Native app packaging"), but that bundle is packaging the
+//! installer does, not anything this binary knows about: the sibling
+//! contract is the same in both places, and no code here reads a bundle.
+//! There is no code here at all, in fact, because there is nothing this
+//! binary does that the `farhelm-ui` bin does not also have to do: both call
+//! [`farhelm_ui::desktop::run`].
 //!
 //! That shared body is what makes the Xvfb smoke worth running. It exercises
 //! the same desktop implementation, but not the same artifact: the smoke
