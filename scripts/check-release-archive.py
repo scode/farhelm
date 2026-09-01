@@ -24,8 +24,12 @@ For `<archive>` built from package/target `<prefix>`:
 
 - every member sits under `<prefix>/`, with no absolute path, no `..`
   component, and no control characters in its name;
-- the regular files are EXACTLY `<prefix>/<binary>` and `<prefix>/LICENSE`;
-- the binary carries an executable bit;
+- the regular files are EXACTLY `<prefix>/<binary>`, `<prefix>/LICENSE`, and
+  one `<prefix>/<name>` per `--extra-file` — an archive may not carry an
+  undeclared extra, and a declared one may not be missing;
+- the binary carries an executable bit (extras carry no mode requirement:
+  dist stages a generic package's collected files with the executable bit,
+  so asserting either way would pin a dist implementation detail);
 - the only directory entry, if any, is `<prefix>` itself;
 - nothing else exists — no symlink, hard link, device, fifo, or duplicate.
 
@@ -43,7 +47,7 @@ executable arm64`, and this runs on whichever the runner has.
 
 Usage:
   check-release-archive.py --archive PATH --prefix NAME --binary NAME
-                           [--extract-to PATH]
+                           [--extra-file NAME ...] [--extract-to PATH]
                            [--expect-file SUBSTR ...] [--reject-file SUBSTR ...]
   check-release-archive.py --self-test
 """
@@ -95,8 +99,15 @@ def validate(
     extract_to: str | None = None,
     expect_file: list[str] | None = None,
     reject_file: list[str] | None = None,
+    extra: list[str] | None = None,
 ) -> None:
-    """Raise `Rejected` unless `archive` is exactly the expected two files.
+    """Raise `Rejected` unless `archive` is exactly the expected files.
+
+    The expected set is the binary, the LICENSE, and each name in `extra`
+    (data files a specific archive legitimately carries — the desktop
+    archive's `Farhelm.icns` is the one that exists today). Declared extras
+    are REQUIRED, not merely tolerated: a build that silently stopped
+    producing one is exactly the kind of drift this gate is for.
 
     Extracts the binary to `extract_to` (and runs `file(1)` assertions over it)
     only after every structural check has passed, so the caller never gets a
@@ -104,6 +115,14 @@ def validate(
     """
     want_binary = posixpath.join(prefix, binary)
     want_license = posixpath.join(prefix, "LICENSE")
+    want = {want_binary, want_license}
+    for name in extra or []:
+        # An extra file is a bare member name, not a path: anything with a
+        # separator would silently bypass the flat-archive expectation the
+        # membership comparison below encodes.
+        if "/" in name or name in (binary, "LICENSE"):
+            raise Rejected(f"--extra-file {name!r} must be a bare, distinct member name")
+        want.add(posixpath.join(prefix, name))
 
     seen: set[str] = set()
     regular: dict[str, tarfile.TarInfo] = {}
@@ -129,10 +148,9 @@ def validate(
                 )
             regular[name] = member
 
-        if set(regular) != {want_binary, want_license}:
+        if set(regular) != want:
             raise Rejected(
-                f"{archive} holds {sorted(regular)!r}, "
-                f"expected exactly {sorted([want_binary, want_license])!r}"
+                f"{archive} holds {sorted(regular)!r}, expected exactly {sorted(want)!r}"
             )
         if not regular[want_binary].mode & 0o111:
             raise Rejected(f"{want_binary} is not executable (mode {regular[want_binary].mode:o})")
@@ -245,6 +263,16 @@ def _fixture(path: str, prefix: str, binary: str, *, kind: str, payload: bytes =
             tar.addfile(nested)
         elif kind == "not-executable":
             add_file(f"{prefix}/{binary}", payload, mode=0o644)
+        elif kind == "with-icns":
+            # The desktop archive's real shape: binary, LICENSE, and one data
+            # file that is only valid when the caller declares it.
+            add_file(f"{prefix}/{binary}", payload)
+            add_file(f"{prefix}/Farhelm.icns", b"icns", mode=0o644)
+        elif kind == "symlink-icns":
+            # A declared extra must still be a REGULAR file; membership alone
+            # must not launder a link wearing the declared name.
+            add_file(f"{prefix}/{binary}", payload)
+            add_special(f"{prefix}/Farhelm.icns", tarfile.SYMTYPE, "LICENSE")
         elif kind == "missing-license":
             add_file(f"{prefix}/{binary}", payload)
             return
@@ -294,6 +322,20 @@ def self_test() -> int:
         ):
             expect_reject(kind)
 
+        # The declared-extra contract, all four directions: a declared extra
+        # is accepted, an undeclared one keeps being rejected (the plain
+        # "with-icns" fixture without the declaration), a declared-but-absent
+        # one is rejected (the plain "good" fixture WITH the declaration),
+        # and a link wearing the declared name is rejected.
+        try:
+            validate(path("with-icns"), prefix, binary, extra=["Farhelm.icns"])
+            print("  ok: a declared extra file is accepted")
+        except Rejected as why:
+            failures.append(f"the declared-extra fixture was rejected: {why}")
+        expect_reject("with-icns")
+        expect_reject("good", extra=["Farhelm.icns"])
+        expect_reject("symlink-icns", extra=["Farhelm.icns"])
+
         # F17's negative case: the same structurally valid archive, holding an
         # x86_64 Mach-O under an arm64 asset name.
         wrong_arch = os.path.join(work, "wrong-arch.tar.gz")
@@ -341,6 +383,7 @@ def main() -> int:
     parser.add_argument("--extract-to")
     parser.add_argument("--expect-file", action="append", default=[])
     parser.add_argument("--reject-file", action="append", default=[])
+    parser.add_argument("--extra-file", action="append", default=[])
     args = parser.parse_args()
 
     if args.self_test:
@@ -356,11 +399,13 @@ def main() -> int:
             extract_to=args.extract_to,
             expect_file=args.expect_file,
             reject_file=args.reject_file,
+            extra=args.extra_file,
         )
     except (Rejected, tarfile.TarError, OSError) as why:
         print(f"{args.archive}: {why}", file=sys.stderr)
         return 1
-    print(f"ok: {args.archive} holds exactly {args.prefix}/{{{args.binary},LICENSE}}")
+    held = ",".join([args.binary, "LICENSE"] + args.extra_file)
+    print(f"ok: {args.archive} holds exactly {args.prefix}/{{{held}}}")
     return 0
 
 
