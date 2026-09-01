@@ -118,3 +118,11 @@ echo "== comparing requested assets against the embedded bundle"
 mkdir -p "$out_dir"
 install -m 0755 "$binary" "$out_dir/farhelm-desktop"
 echo "== wrote $out_dir/farhelm-desktop"
+
+# The app icon ships in the archive next to the binary so `install.sh` can
+# assemble `Farhelm.app` from checksummed release files. It is staged here and
+# declared in `binaries` because that is the one collection path dist 0.32
+# honors for a generic package — see the `binaries` comment in
+# `packaging/farhelm-desktop/dist.toml` for why `include` was not an option.
+install -m 0644 "$repo/packaging/farhelm-desktop/Farhelm.icns" "$out_dir/Farhelm.icns"
+echo "== wrote $out_dir/Farhelm.icns"

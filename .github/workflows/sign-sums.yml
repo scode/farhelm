@@ -232,9 +232,20 @@ jobs:
           for archive in assets/*.tar.gz; do
             name=$(basename "$archive")
             prefix=${name%.tar.gz}
+            # The desktop archive alone carries a declared data file beside
+            # its binary: the app icon `install.sh` builds `Farhelm.app`
+            # from. `--extra-file` REQUIRES it, so a build that stopped
+            # staging the icon fails here instead of shipping an archive the
+            # installer can no longer assemble a bundle from.
             case "$name" in
-              farhelm-desktop-*) binary=farhelm-desktop ;;
-              farhelm-*) binary=farhelm ;;
+              farhelm-desktop-*)
+                binary=farhelm-desktop
+                extra=(--extra-file Farhelm.icns)
+                ;;
+              farhelm-*)
+                binary=farhelm
+                extra=()
+                ;;
               *)
                 echo "no expected binary known for $name" >&2
                 exit 1
@@ -255,9 +266,12 @@ jobs:
                 exit 1
                 ;;
             esac
+            # `${a[@]+...}` because expanding an empty array under `set -u`
+            # is an error before bash 4.4, and this must not depend on the
+            # runner's bash.
             python3 scripts/check-release-archive.py \
               --archive "$archive" --prefix "$prefix" --binary "$binary" \
-              --extract-to "binaries/$prefix" "${expect[@]}"
+              --extract-to "binaries/$prefix" "${expect[@]}" ${extra[@]+"${extra[@]}"}
           done
 
       # The Linux payloads are pushed to hosts we do not control and run

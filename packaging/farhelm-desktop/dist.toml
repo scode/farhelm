@@ -39,13 +39,32 @@ license = "MIT"
 # directory), hence the climb to the repository root.
 build-command = ["../../scripts/build-desktop-binary.sh"]
 # What dist expects to find in `out-dir` once the command has run, and the
-# name of the single member inside
-# `farhelm-desktop-aarch64-apple-darwin.tar.gz`. `install.sh` puts it next to
-# `farhelm` in `~/.local/bin`, where the shell finds its CLI sibling by this
-# exact name (D6).
-binaries = ["farhelm-desktop"]
+# members inside `farhelm-desktop-aarch64-apple-darwin.tar.gz` beyond the
+# LICENSE. `install.sh` puts `farhelm-desktop` next to `farhelm` in
+# `~/.local/bin`, where the shell finds its CLI sibling by this exact name
+# (D6), and uses `Farhelm.icns` to assemble the `Farhelm.app` bundle.
+#
+# Yes, an icon listed under `binaries`: dist 0.32 silently ignores a
+# package-level `include` in a generic package's dist.toml (verified against
+# `dist plan` — a cargo package's `include` shows up in the plan's asset list,
+# this file's never does, whatever path shape it uses), and `binaries` is the
+# one collection path a generic package has. The cost is cosmetic — dist
+# stages it with the executable bit — and `build-desktop-binary.sh` is what
+# actually copies it into `out-dir`.
+binaries = ["farhelm-desktop", "Farhelm.icns"]
 # Under `target/` so the build leaves nothing untracked in the working tree.
 out-dir = "../../target/dist-desktop"
+
+# ## The icon files next to this manifest
+#
+# The app icon rides in the desktop archive so `install.sh` can assemble a
+# `Farhelm.app` bundle from files the SHA256SUMS verification already covered,
+# instead of embedding a binary blob in a `curl | sh` script someone should be
+# able to read. `Farhelm.icns` is generated from `icon.png` (placeholder
+# artwork, 1024x1024) as a single-`ic10` icns — the 8-byte icns header, then
+# one chunk whose payload is the PNG verbatim; modern macOS scales it for
+# every context. To regenerate after changing `icon.png`, wrap it the same way
+# (`iconutil` on a Mac also works and just produces a multi-size variant).
 
 [dist]
 dist = true

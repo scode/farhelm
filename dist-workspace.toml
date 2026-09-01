@@ -46,9 +46,15 @@
 #   assets, as if it were user documentation. It also makes each archive's
 #   member list depend on which files happen to exist where. These archives
 #   are read by machines (`install.sh` and the helm's extractor both locate
-#   the binary by basename), so a fixed two-member layout `sign-sums` can
-#   assert exactly is worth more than browsable extras. LICENSE stays because
-#   the binaries are MIT-licensed copies of this software.
+#   the binary by basename), so a fixed member layout `sign-sums` can assert
+#   exactly is worth more than browsable extras: binary plus LICENSE, and for
+#   the desktop archive also `Farhelm.icns` (declared under `binaries` in
+#   `packaging/farhelm-desktop/dist.toml`; the comment there says why).
+#   LICENSE stays because the binaries are MIT-licensed copies of this
+#   software. NOTE: if Homebrew publishing is ever flipped on (see
+#   `publish-jobs` below), the generated formula would install everything in
+#   `binaries` — the icon included — into `bin/`; that flip has to revisit
+#   the icon's `binaries` placement first.
 # - `precise-builds = true` (dist default: false) — NOT a preference. dist
 #   otherwise runs `cargo build --workspace`, and this workspace has a member
 #   that cannot be built for two of the three targets: `farhelm-desktop` pulls
