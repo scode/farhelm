@@ -158,19 +158,6 @@ Within a bucket, no order.
   timeouts on the hot list. The e2e harness already has `wait_for_agent_ready` (harness.rs), whose failure text shows
   the same pane text for a test's own diagnosis; that is the non-durable shape to start from.
 
-- Fix `terminal-keys.spec.ts`'s four Shift+Enter tests (lines 212, 243, 269, 381: "Shift+Enter sends ESC then CR",
-  "plain Enter sends bare CR", "Ctrl+Shift+Enter does not trigger this fix's own ESC injection", "a plain Enter after
-  the chord stays bare"). They fail deterministically — every run, Chromium and WebKit alike — with the same transcript:
-  the raw-mode fixture prints `RAWREADY` and the bytes the test types never reach the pane (`waiting for " 7a"` against
-  a transcript that ends at the marker). Observed 2026-08-23 on a four-core Ubuntu 26.04 box with Playwright's own
-  browsers, on the stack tip with tmux 3.7c, on a pre-floor tree with both 3.7b and 3.7c, and on a near-main tree (main
-  plus two test-only commits) with 3.7b, so neither the tmux floor stack nor the tmux version is the cause; the browser
-  end-to- end suite does not run in CI, so when this started is unrecorded. Every other test in the file passes,
-  including the ones that type into the same fixture, so the first step is to diff what these four do before typing (the
-  chord arming, the focus dance) against a passing sibling, and to check whether Playwright's keyboard delivers
-  Shift+Enter the way the fix expects in current browser builds — a changed key event shape would explain all four at
-  once.
-
 - Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
   client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
   returns the already-created session instead of double-launching an agent. The durability-era decision made these
