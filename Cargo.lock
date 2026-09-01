@@ -1718,7 +1718,7 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "farhelm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1739,7 +1739,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-desktop"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "farhelm-ui",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-helm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1787,7 +1787,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-proto"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1797,7 +1797,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-supervisor"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-teststate"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "libc",
  "tempfile",
@@ -1827,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-ui"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "dioxus",
