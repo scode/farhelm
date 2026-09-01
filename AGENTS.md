@@ -109,6 +109,57 @@ When a tag produces a public release that never got its `SHA256SUMS`, the recove
 `dist-workspace.toml`'s header ("RECOVERY: a release that exists but was never signed"). It is maintainer-run: delete
 the release, never the tag, then re-run the workflow.
 
+# Cutting an RC release
+
+An RC exists so the maintainer can `curl | sh` a candidate onto a real machine before anything merges. The TAG, not any
+merge, is what triggers the release workflow, so an RC can be cut from the tip of an unmerged PR stack — that is a
+normal move here, not a trick (v0.2.1-rc.1 and rc.2 shipped this way on 2026-09-01, trialing the Farhelm.app bundle and
+the clipboard fix before either landed).
+
+When asked for an RC, settle TWO choices first, and ASK about each unless the request states it explicitly — a bare "cut
+an rc" states neither, and guessing wrong publishes the wrong binaries, or the wrong version number, to a real, public
+prerelease:
+
+- The BASE: cut from main, or from the current in-flight PR stack's tip? "cut an rc with this stack" is explicit; "cut
+  an rc" is not.
+- The VERSION: is this the next attempt at the SAME candidate — a previous `X.Y.Z-rc.N` exists for the target version
+  and this continues it, so it is `X.Y.Z-rc.N+1` — or the FIRST rc of a new target version? If the latter, which
+  component bumps is the maintainer's semantic call, not something to infer from the diff: patch (`X.Y.Z+1-rc.1`), minor
+  (`X.Y+1.0-rc.1`), or major. Name the exact resulting version string when asking, so the answer is a version, not a
+  category.
+
+With both settled, the process is:
+
+- Bump the version to `X.Y.Z-rc.N` (N increments per attempt; never reuse a tag name) in the root `Cargo.toml`'s
+  `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, and refresh `Cargo.lock` (running `cargo metadata`
+  suffices). The release commit is exactly those three files with the message `chore: release X.Y.Z-rc.N` — the shape
+  every release commit here has (#304, #311, #314).
+- Before tagging, sanity-check the announce: the version-parity tests
+  (`cargo test -p farhelm-helm --lib provisioning::assets`) and `dist plan` naming the rc version with BOTH packages
+  under it — a version mismatch makes the desktop archive silently vanish from the release.
+- Give the bump its own PR like any other commit (stacked on the stack tip, or based on main), but do not merge anything
+  for the release's sake: push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
+  gate runs the full test suite on the tagged commit; that gate is the release's validation, so local slow-battery
+  reruns are not a prerequisite for tagging.
+- Watch the workflow run to completion rather than fire-and-forgetting it, then verify the published release: every
+  asset present including `SHA256SUMS` and `SHA256SUMS.minisig`, and the release marked prerelease (cargo-dist does that
+  for `-rc.N` versions on its own — `releases/latest` must still point at the last stable, so ordinary installs are
+  unaffected).
+- Finish by handing the maintainer the exact copy-paste command, with the installer fetched FROM THE TAG — when the rc
+  comes from a stack, main does not have the rc's installer — and the version pinned on the far side of the pipe:
+
+  ```
+  curl -fsSL https://raw.githubusercontent.com/scode/farhelm/vX.Y.Z-rc.N/scripts/install.sh | FARHELM_VERSION=vX.Y.Z-rc.N sh
+  ```
+
+  Remind the maintainer to quit the desktop app before updating and relaunch after.
+- A failed tag build publishes nothing; fix on the stack and cut `rc.N+1`. The stale tag stays (tags are never deleted;
+  the unsigned-release recovery above is the one exception's procedure, and even it keeps the tag).
+- One jj side effect to expect: once the rc tag is fetched, jj treats every commit under it as immutable, so a later
+  mid-stack rewrite of those commits (a fixup round after the trial, say) needs `--ignore-immutable`. That is safe —
+  rewriting creates new commits and the tag keeps pointing at what it tagged — but it will otherwise refuse with
+  "immutable commits are used to protect shared history" at exactly the moment a trial's feedback wants applying.
+
 The browser end-to-end suite is deliberately NOT in that per-change list, and its CI job is disabled (`if: false` in
 ci.yml): it is far too slow to pay on every PR. It gates MERGING instead — before landing a PR stack on main, run
 `cd e2e && npx playwright test` (Chromium and WebKit; WebKit stands in for the desktop app's actual engine family). It
