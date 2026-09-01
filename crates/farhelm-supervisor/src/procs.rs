@@ -106,9 +106,9 @@ pub(crate) type ProcessTable = HashMap<u32, (u32, u64)>;
 /// This is a plain sequential scan, not an atomic snapshot: a fork racing
 /// the walk may or may not appear, and (in principle) a pid may exit and
 /// be recycled while the walk is still running. That is not fixed here and
-/// cannot be; `sweep::kill_process_tree` compensates by re-walking between
-/// signal phases, and `sweep::signal_validated` re-checks identity at the
-/// moment of signaling.
+/// cannot be. The sweep compensates by re-reading both endpoints before
+/// following snapshot PPID edges, re-walking between signal phases, and
+/// re-checking each chosen process at the moment of signaling.
 pub(crate) fn snapshot() -> Result<(ProcessTable, Vec<String>), String> {
     imp::snapshot()
 }
@@ -121,10 +121,9 @@ pub(crate) fn snapshot() -> Result<(ProcessTable, Vec<String>), String> {
 /// permission error for a pid this supervisor is supposed to own, a
 /// malformed row, a syscall failure that is not "no such process" — comes
 /// back as `Err` rather than being folded into "gone". That direction is
-/// load-bearing in both of this function's callers: `signal_validated`
-/// would otherwise skip a process it could not read and call the sweep
-/// clean, and `confirm_gone` would count an unreadable survivor as
-/// confirmed dead.
+/// load-bearing throughout the sweep: ancestry expansion must report an
+/// unreadable candidate, `signal_validated` must not silently skip one, and
+/// `confirm_gone` must not count an unreadable survivor as confirmed dead.
 pub(crate) fn read_process(pid: u32) -> Result<Option<(u32, u64, ProcessState)>, String> {
     imp::read_process(pid)
 }

@@ -327,7 +327,10 @@ async fn archive_succeeds_after_the_working_directory_disappears() {
 ///
 /// Archive is not a second storage boundary: it keeps the ordinary session
 /// attachment directory in place, and a later delete must remove that
-/// directory along with the retained row.
+/// directory along with the retained row. The setup also keeps the real
+/// portable process-tree sweep in this end-to-end path; deterministic PID
+/// reuse coverage belongs beside the closure itself in `sweep.rs` rather than
+/// making this lifecycle test race the host allocator.
 #[tokio::test]
 async fn deleting_an_archived_session_removes_its_row_and_attachments() {
     let h = harness().await;
