@@ -368,6 +368,37 @@ impl ProvisioningService {
                     host_identity,
                 })
             }
+            // A supervisor that answered but speaks another protocol is
+            // still DISCOVERED: register it like any answering supervisor
+            // (identity unknown — the skew refusal happens before identity
+            // could be exchanged) so the host shows up with the manager's
+            // version-skew state and its row carries the update action that
+            // fixes it. Installing over it, or erroring out, would both be
+            // wrong: something live owns that state directory.
+            ProbeObservation::SkewedSupervisor {
+                peer_build,
+                dial_farhelm,
+                dial_state_dir,
+            } => {
+                let host_id = self
+                    .register(
+                        &registration,
+                        None,
+                        Some(DiscoveredDial {
+                            farhelm: dial_farhelm,
+                            state_dir: dial_state_dir,
+                            identity: None,
+                        }),
+                    )
+                    .await?;
+                self.resolve_failed_add_discovery(host_id, &peer_build)
+                    .await;
+                Ok(ProbeResponse::Discovered {
+                    host_id,
+                    build_version: peer_build,
+                    host_identity: None,
+                })
+            }
             ProbeObservation::Absent => {
                 // Nothing answered on the helm's OWN machine, so the next
                 // step would have been to install one — which is exactly
@@ -635,6 +666,31 @@ impl ProvisioningService {
                     probe_state_dir: dial_state_dir,
                 }
             }
+            // The skewed supervisor is UPDATE's home case: a host left
+            // behind by a protocol bump. Its identity cannot be verified —
+            // the refusal happens before identity exchange — so the
+            // recorded identity is carried forward unverified rather than
+            // treated as a mismatch: refusing here would make the one host
+            // update exists for permanently un-updatable, and the plan
+            // still targets the same registered ssh destination the user
+            // clicked. The dial coordinates resolve like the completed
+            // hello's.
+            ProbeObservation::SkewedSupervisor {
+                dial_farhelm,
+                dial_state_dir,
+                ..
+            } => {
+                if row.kind == HostKind::Ssh {
+                    effective_row.remote_farhelm = Some(path_text(&dial_farhelm)?);
+                    effective_row.remote_state_dir =
+                        dial_state_dir.as_deref().map(path_text).transpose()?;
+                }
+                ProbeTarget {
+                    transport: original_target.transport.clone(),
+                    probe_farhelm: dial_farhelm,
+                    probe_state_dir: dial_state_dir,
+                }
+            }
             ProbeObservation::Absent => original_target,
         };
         let reach = match self
@@ -838,34 +894,66 @@ impl ProvisioningService {
                 {
                     observation = self.backend.probe(&installed_target).await?;
                 }
-                if let ProbeObservation::Supervisor {
-                    build_version,
-                    host_identity,
-                    dial_farhelm,
-                    dial_state_dir,
-                } = observation
-                {
-                    self.register(
-                        registration,
-                        None,
-                        Some(DiscoveredDial {
-                            farhelm: dial_farhelm,
-                            state_dir: dial_state_dir,
-                            identity: host_identity,
-                        }),
-                    )
-                    .await
-                    .map_err(|error| {
-                        BackendFailure::new(
-                            "registering the supervisor found at confirmation",
-                            format!("{error:#}"),
+                match observation {
+                    ProbeObservation::Supervisor {
+                        build_version,
+                        host_identity,
+                        dial_farhelm,
+                        dial_state_dir,
+                    } => {
+                        self.register(
+                            registration,
+                            None,
+                            Some(DiscoveredDial {
+                                farhelm: dial_farhelm,
+                                state_dir: dial_state_dir,
+                                identity: host_identity,
+                            }),
                         )
-                    })?;
-                    return Ok(Revalidation::UseAsIs(format!(
-                        "a supervisor answered during confirmation (build {build_version}); ADD used it as-is"
-                    )));
+                        .await
+                        .map_err(|error| {
+                            BackendFailure::new(
+                                "registering the supervisor found at confirmation",
+                                format!("{error:#}"),
+                            )
+                        })?;
+                        Ok(Revalidation::UseAsIs(format!(
+                            "a supervisor answered during confirmation (build {build_version}); ADD used it as-is"
+                        )))
+                    }
+                    // Same rule for a skewed one: something live owns that
+                    // state directory, so executing the ADD install over it
+                    // is off the table. Register it (identity unknown) and
+                    // point at the action that actually fixes skew.
+                    ProbeObservation::SkewedSupervisor {
+                        peer_build,
+                        dial_farhelm,
+                        dial_state_dir,
+                    } => {
+                        self.register(
+                            registration,
+                            None,
+                            Some(DiscoveredDial {
+                                farhelm: dial_farhelm,
+                                state_dir: dial_state_dir,
+                                identity: None,
+                            }),
+                        )
+                        .await
+                        .map_err(|error| {
+                            BackendFailure::new(
+                                "registering the supervisor found at confirmation",
+                                format!("{error:#}"),
+                            )
+                        })?;
+                        Ok(Revalidation::UseAsIs(format!(
+                            "a supervisor answered during confirmation but speaks another protocol \
+                             (build {peer_build}); ADD registered it — use the host's update action \
+                             to bring it to this helm's version"
+                        )))
+                    }
+                    ProbeObservation::Absent => Ok(Revalidation::Execute),
                 }
-                Ok(Revalidation::Execute)
             }
             PendingConfirmation::Update {
                 target,
@@ -901,6 +989,26 @@ impl ProvisioningService {
                             }),
                         )
                     }
+                    // Still skewed at confirmation — the expected state for
+                    // the update that has not run yet. Identity stays
+                    // unverifiable for the same reason it was at planning
+                    // (the refusal precedes identity exchange), so the
+                    // recorded identity is neither confirmed nor cleared
+                    // (`register` only writes an identity when one is
+                    // reported), and the update proceeds: it is the only
+                    // path that ever makes this host verifiable again.
+                    ProbeObservation::SkewedSupervisor {
+                        dial_farhelm,
+                        dial_state_dir,
+                        ..
+                    } => (
+                        None,
+                        Some(DiscoveredDial {
+                            farhelm: dial_farhelm,
+                            state_dir: dial_state_dir,
+                            identity: None,
+                        }),
+                    ),
                     ProbeObservation::Absent => (Some(&pending.plan), None),
                 };
                 self.register(registration, plan, discovered)

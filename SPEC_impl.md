@@ -1557,6 +1557,23 @@ host-scoped run. Discovery records the resolved supervisor binary, state directo
 helm dials the same installation that answered the probe. UPDATE starts from those recorded coordinates rather than
 assuming the standard layout.
 
+A supervisor that answers the hello but speaks a DIFFERENT protocol version is a distinct discovery outcome, not a probe
+failure: presence is proven (only a live supervisor sends a hello) and the skew payload names its build, but nothing
+after the refusal — in particular no identity — was exchanged. ADD registers such a host as discovered (identity
+unknown) so it surfaces with the manager's version-skew state and the update action; UPDATE proceeds against it with the
+recorded identity carried forward unverified, because the alternative — demanding an identity the old peer can never
+transmit — would make exactly the host UPDATE exists for permanently un-updatable. The desktop's local discovery treats
+it as answering (an ownership boundary, whatever its version). This outcome was originally misclassified as a transport
+failure, which is how update-on-skew shipped broken until the first real cross-protocol update attempt (2026-09-01).
+
+Be honest about what the relaxation costs: nothing in a skewed hello proves the peer is OLD — any process at the ssh
+destination can send a wrong-protocol hello, and doing so exempts it from the identity checks a healthy peer faces at
+update planning and confirmation. What such a peer gains is bounded: the update pushes payloads TO it (it learns nothing
+from the helm beyond the binaries) at paths it named, ssh host-key verification is not weakened anywhere in this flow,
+and adoption after the update still runs the full hello — a wrong identity freezes the host as identity-mismatch and
+fails the run at attach rather than being taken over. The alternative — demanding identity proof an old peer cannot give
+— is not a mitigation, it is the bug this outcome exists to fix.
+
 Artifacts land under temporary names in their final flat directories and are atomically renamed into place. There are no
 version directories or `current` symlinks: a failed transfer leaves the installed file intact, while a running binary
 keeps its old inode until the explicit supervisor restart. Hash checks skip identical payloads and unit files are
