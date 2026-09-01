@@ -13,6 +13,13 @@ Within a bucket, no order.
 
 ## Near term
 
+- Show the running farhelm version in the top-right of the window. The version is already on hand — the UI compiles the
+  workspace version in as `skew.rs`'s `CLIENT_BUILD`, and every helm reply carries the helm's own stamp — so this is
+  presentation work, not plumbing: a small always-visible version readout in the window's top-right corner. Wanted
+  because the desktop app and a browser tab both outlive updates, and "which build am I actually looking at" should be
+  answerable at a glance; the skew banner already covers the mismatch case, this covers the question before anything
+  mismatches.
+
 - Fix clipboard copy in the macOS desktop app. Observed 2026-09-01 on the installed desktop app: an in-pane agent
   reports a successful copy ("copied 19 chars"), but the system pasteboard never changes, so a later paste yields the
   old contents. Pasting INTO the app works — content copied elsewhere arrives fine — so clipboard reads are healthy and
