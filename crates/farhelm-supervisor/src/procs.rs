@@ -113,12 +113,13 @@ pub(crate) fn snapshot() -> Result<(ProcessTable, Vec<String>), String> {
     imp::snapshot()
 }
 
-/// One process's `(ppid, start time, state)`, or `Ok(None)` when it is
-/// simply gone.
+/// One process's `(ppid, start time, state)`, or `Ok(None)` when it is gone
+/// or, on Linux, when a failed read finds that the pid now belongs to another
+/// uid.
 ///
-/// `Ok(None)` is the ordinary, expected outcome of racing a process's own
-/// exit and is never worth reporting. Everything else that goes wrong — a
-/// permission error for a pid this supervisor is supposed to own, a
+/// Both `Ok(None)` cases mean there is no process identity this sweep may act
+/// on, so neither is worth reporting. Everything else that goes wrong — a
+/// permission error for a pid this supervisor is still supposed to own, a
 /// malformed row, a syscall failure that is not "no such process" — comes
 /// back as `Err` rather than being folded into "gone". That direction is
 /// load-bearing throughout the sweep: ancestry expansion must report an
@@ -330,10 +331,11 @@ mod imp {
     /// directories stay visible to `readdir` — so the walk below still
     /// enumerates them — but their contents (`stat`, `environ`, ...)
     /// become `EACCES`. That is routine and expected, not a sweep failure,
-    /// so this check runs BEFORE any fail-closed stat parsing: a foreign-uid
-    /// pid is skipped outright, rather than letting an ordinary permission
-    /// restriction turn into a reported error for every unrelated process on
-    /// a shared or hidepid-hardened host. A pid that has already exited (or
+    /// so the host-wide snapshot calls this BEFORE reading any row. The
+    /// single-pid reader calls it only AFTER a row read fails: a readable row
+    /// still carries the start-time identity that callers should compare,
+    /// while a foreign replacement hidden by `hidepid` is an ordinary miss
+    /// rather than a teardown error. A pid that has already exited (or
     /// otherwise can't be stat'd at the directory level) is not this check's
     /// business to adjudicate — [`read_stat`]'s own `ENOENT` handling covers
     /// that — so failure to read the directory's metadata defaults to "ours",
@@ -350,13 +352,12 @@ mod imp {
     /// so [`snapshot`] can ignore it and [`read_process`] can classify it.
     ///
     /// `Ok(None)` means the process is simply gone (`ENOENT`/`ESRCH`).
-    /// Anything else that goes wrong — a permission error this process
-    /// should never see for a pid it is supposed to own (callers are
-    /// expected to have already screened out foreign-uid pids via
-    /// [`is_own_pid_dir`]), a malformed or unrecognized stat format — comes
-    /// back as `Err` rather than being folded into "gone": treating a real
-    /// failure as absence would let the sweep silently under-collect a live
-    /// descendant and report itself clean when it was not.
+    /// Anything else that goes wrong — a permission error, a malformed or
+    /// unrecognized stat format — comes back as `Err`. A caller may suppress
+    /// that failure only after [`is_own_pid_dir`] proves the pid now belongs
+    /// to another user; otherwise treating it as absence would let the sweep
+    /// silently under-collect a live descendant and report itself clean when
+    /// it was not.
     fn read_stat(pid: u32) -> Result<Option<(u32, u64, char)>, String> {
         match std::fs::read(format!("/proc/{pid}/stat")) {
             Ok(bytes) => parse_stat(&bytes).map(Some),
@@ -401,10 +402,23 @@ mod imp {
         Ok((stats, soft_errors))
     }
 
-    /// See [`super::read_process`]. `Z` is the kernel's zombie state
-    /// letter; every other state means the process can still run.
+    /// See [`super::read_process`]. When a row read fails, re-check its uid to
+    /// distinguish a genuine failure for an owned process from a pid that the
+    /// kernel recycled for another user. The latter is unreadable on a
+    /// `hidepid=1` procfs mount, but it is no longer a process this sweep is
+    /// responsible for reporting or signaling. Successful reads retain their
+    /// full identity for the caller's start-time comparison, even if the
+    /// process changed credentials after the earlier snapshot.
+    ///
+    /// `Z` is the kernel's zombie state letter; every other state means the
+    /// process can still run.
     pub(super) fn read_process(pid: u32) -> Result<Option<(u32, u64, ProcessState)>, String> {
-        Ok(read_stat(pid)?.map(|(ppid, starttime, state)| {
+        let stat = match read_stat(pid) {
+            Ok(stat) => stat,
+            Err(_) if !is_own_pid_dir(pid) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(stat.map(|(ppid, starttime, state)| {
             let state = if state == 'Z' {
                 ProcessState::Zombie
             } else {
@@ -822,10 +836,10 @@ mod imp {
     ///
     /// An empty answer means the pid is gone, and so does `ESRCH`: Darwin
     /// has answered both ways for a vanished pid across releases, and the
-    /// two mean the same thing to the sweep. No uid filter here, matching
-    /// Linux: callers name pids they already screened (or the pane process
-    /// they were handed), and a foreign pid simply fails the identity check
-    /// that follows.
+    /// two mean the same thing to the sweep. No uid filter is needed here: a
+    /// readable row for a foreign replacement still carries the start time
+    /// callers compare against the recorded identity, while a sysctl failure
+    /// remains an error rather than being mistaken for absence.
     pub(super) fn read_process(pid: u32) -> Result<Option<(u32, u64, ProcessState)>, String> {
         let rows = match kern_proc(libc::KERN_PROC_PID, pid as c_int) {
             Ok(rows) => rows,
