@@ -276,6 +276,19 @@ mod tests {
             backend
         }
 
+        /// A probe answer shaped like a live-but-older supervisor: present,
+        /// build known from the skew payload, identity unknowable. What the
+        /// UPDATE flow must accept — see the skewed-supervisor tests.
+        fn skewed(home: PathBuf) -> Arc<Self> {
+            let backend = Self::absent(home.clone());
+            *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+                peer_build: "0.1.1-old".to_string(),
+                dial_farhelm: home.join("farhelm"),
+                dial_state_dir: Some(home.join("state")),
+            }));
+            backend
+        }
+
         fn failing_probe(home: PathBuf, message: &str) -> Arc<Self> {
             let backend = Self::absent(home);
             *backend.probe.lock().unwrap() =
@@ -984,6 +997,195 @@ mod tests {
         assert_eq!(preview.plan.state_dir, state_dir);
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
         assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// UPDATE against a skewed supervisor — the host left behind by a
+    /// protocol bump — must plan and execute, with the recorded identity
+    /// carried forward unverified rather than treated as a mismatch: the
+    /// skew refusal happens before identity exchange, so demanding a match
+    /// would make the one host UPDATE exists for permanently un-updatable.
+    /// The plan targets the dial coordinates the skewed probe resolved, and
+    /// the run completes end to end (plan → confirm-time revalidation, which
+    /// sees the host STILL skewed → execution). Regression test for the
+    /// 2026-09-01 field failure where the skew refusal aborted planning as
+    /// a probe error.
+    #[tokio::test]
+    async fn update_plans_and_executes_against_a_skewed_supervisor() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "skewed.example",
+                HostScript {
+                    identity: Some("recorded-identity".to_string()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        // A recorded identity is the interesting precondition: it is what a
+        // naive "identity must match" rule would wrongly compare against
+        // the skewed probe's nothing.
+        harness
+            .await_refreshed_as(host, "recorded-identity", 0)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+
+        let preview = service.plan_update(host).await.unwrap();
+        assert_eq!(preview.plan.farhelm_path, root.path().join("farhelm"));
+        assert_eq!(preview.plan.state_dir, root.path().join("state"));
+        assert!(
+            backend.operations.lock().unwrap().is_empty(),
+            "planning must not mutate the host"
+        );
+
+        // Confirmation reprobes; the host is still skewed — the expected
+        // state for an update that has not run yet.
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            peer_build: "0.1.1-old".to_string(),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+        service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: preview.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            wait_finished(&service, host).await.status,
+            RunStatus::Completed
+        );
+        assert!(
+            !backend.operations.lock().unwrap().is_empty(),
+            "the update run must actually execute its plan"
+        );
+        let row = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(
+            row.host_identity.as_deref(),
+            Some("recorded-identity"),
+            "an unverifiable skewed probe must neither clear nor replace the recorded identity"
+        );
+    }
+
+    /// ADD discovery of a skewed supervisor registers the host instead of
+    /// erroring or installing over it: something live owns that state
+    /// directory, and once registered the host carries the manager's
+    /// version-skew state and the update action that fixes it. Identity is
+    /// recorded as unknown — the refusal precedes identity exchange.
+    #[tokio::test]
+    async fn probe_registers_a_skewed_supervisor_for_update() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().to_path_buf());
+        let provisioner = service(&harness, backend.clone(), root.path());
+        let response = provisioner
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: "user@skewed.example".to_string(),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            &response,
+            ProbeResponse::Discovered {
+                build_version,
+                host_identity: None,
+                ..
+            } if build_version == "0.1.1-old"
+        ));
+        let row = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.destination.as_deref() == Some("user@skewed.example"))
+            .expect("the skewed supervisor must be registered");
+        assert_eq!(
+            row.remote_farhelm.as_deref(),
+            Some(root.path().join("farhelm").to_str().unwrap())
+        );
+        assert_eq!(row.host_identity, None);
+        assert!(
+            backend.operations.lock().unwrap().is_empty(),
+            "discovery must not install over a live supervisor"
+        );
+    }
+
+    /// A supervisor that turns SKEWED between ADD confirmation and
+    /// execution — planned against absence, live-but-older by confirm time —
+    /// must be registered and adopted rather than installed over: something
+    /// live owns that state directory, and the finished run's message points
+    /// the operator at the update action, the one thing that fixes skew.
+    /// Covers the confirmation-revalidation arm the other skew tests do not
+    /// reach.
+    #[tokio::test]
+    async fn add_confirmation_registers_a_supervisor_that_turned_skewed() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: "turned-skewed.example".to_string(),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Provisionable { probe_id, .. } = response else {
+            panic!("an absent host must yield an install plan")
+        };
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            peer_build: "0.1.1-old".to_string(),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+        let accepted = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let finished = wait_finished(&service, accepted.host_id).await;
+        assert_eq!(finished.status, RunStatus::Completed);
+        assert!(
+            finished
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("speaks another protocol")
+                    && message.contains("update")),
+            "the outcome must say what was found and what fixes it: {:?}",
+            finished.message
+        );
+        assert!(
+            backend.operations.lock().unwrap().is_empty(),
+            "confirmation must not install over the live skewed supervisor"
+        );
+        let row = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.destination.as_deref() == Some("turned-skewed.example"))
+            .expect("the skewed supervisor must be registered");
+        assert_eq!(row.host_identity, None);
     }
 
     /// An accepted HOST tmux must survive a stale private one sitting in
@@ -1854,8 +2056,15 @@ mod tests {
     }
 
     /// The production classifier requires both the private marker and exit
-    /// 75; authentication failure, unmarked 75, malformed hello, and skew
-    /// remain errors even when process creation itself succeeds.
+    /// 75; authentication failure, unmarked 75, and malformed hello remain
+    /// errors even when process creation itself succeeds. The final skew
+    /// case stays an ERROR here only because its script prints no resolved
+    /// marker: skew per se is a positive observation now (see
+    /// `a_skewed_hello_is_a_positive_supervisor_observation`), but a remote
+    /// answer that never named its binary has nothing to dial. Which error
+    /// arm catches it can vary — the script exits without reading stdin, so
+    /// the helm's own hello write can EPIPE before the frame is read — and
+    /// the assertion is deliberately indifferent: both arms error.
     #[tokio::test]
     async fn production_probe_classifier_distinguishes_positive_absence() {
         let root = tempfile::tempdir().unwrap();
@@ -1936,6 +2145,129 @@ mod tests {
                 assert!(result.is_err());
             }
         }
+    }
+
+    /// A peer that answers the hello with a DIFFERENT protocol version is a
+    /// POSITIVE presence observation, not a probe failure: only a live
+    /// supervisor sends a hello at all, and the skew payload names its
+    /// build. This is the probe-level half of making UPDATE work on skewed
+    /// hosts — the exact hosts the update action exists for. Pinned because
+    /// the original implementation classified the skew refusal as a
+    /// transport failure ("the supervisor probe closed before hello
+    /// completion with exit status 0"), which made a skewed host
+    /// un-updatable; found 2026-09-01 on the first real cross-protocol
+    /// update attempt (protocol-12 host, protocol-14 helm).
+    ///
+    /// Both transports, because they resolve the dial binary differently:
+    /// local names it directly, remote reads the resolved marker the probe
+    /// script printed before exec — and a remote answer WITHOUT that marker
+    /// stays an error even under skew (the classifier test above keeps that
+    /// case), since presence alone names no binary to dial.
+    #[tokio::test]
+    async fn a_skewed_hello_is_a_positive_supervisor_observation() {
+        let root = tempfile::tempdir().unwrap();
+        let old_hello = || {
+            farhelm_proto::Frame::control(&ControlMsg::Hello {
+                protocol_version: farhelm_proto::PROTOCOL_VERSION - 1,
+                build_version: "0.1.1-old".to_string(),
+                role: "supervisor".to_string(),
+                host_identity: Some("identity-the-refusal-never-conveys".to_string()),
+                auth: None,
+            })
+        };
+
+        let local_target = ProbeTarget {
+            transport: ProvisioningTarget::Local,
+            probe_farhelm: PathBuf::from("scripted-local"),
+            probe_state_dir: Some(PathBuf::from("/probe/state")),
+        };
+        let mut local_backend = test_system_backend(root.path());
+        // `cat >/dev/null` keeps the scripted peer's stdin OPEN after it
+        // writes its hello (stop_probe kills it later): a peer that exits
+        // without reading races the helm's own hello write into an EPIPE
+        // before the buffered skew frame is ever read — a fixture-only
+        // shape (a real supervisor consumes the hello before refusing)
+        // that made this test flaky under full-suite load.
+        local_backend.launcher =
+            ScriptLauncher::new([format!("{}; cat >/dev/null", frame_script(old_hello()))]);
+        match local_backend.probe(&local_target).await {
+            Ok(ProbeObservation::SkewedSupervisor {
+                peer_build,
+                dial_farhelm,
+                dial_state_dir,
+            }) => {
+                assert_eq!(peer_build, "0.1.1-old");
+                assert_eq!(dial_farhelm, PathBuf::from("scripted-local"));
+                assert_eq!(dial_state_dir, Some(PathBuf::from("/probe/state")));
+            }
+            other => panic!("expected a skewed-supervisor observation, got {other:?}"),
+        }
+
+        let remote_target = ProbeTarget {
+            transport: ProvisioningTarget::Ssh {
+                destination: "scripted.example".to_string(),
+            },
+            probe_farhelm: PathBuf::from("farhelm"),
+            probe_state_dir: None,
+        };
+        let script = format!(
+            "printf '%s\\n' '{REMOTE_PROBE_MARKER}' >&2; \
+             printf '%s%s\\n' '{REMOTE_RESOLVED_PREFIX}' '/resolved/lib/farhelm' >&2; \
+             {}",
+            // Same stdin-open tail as the local case above, same reason.
+            format!("{}; cat >/dev/null", frame_script(old_hello()))
+        );
+        let remote_backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: ScriptLauncher::new([script]),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        match remote_backend.probe(&remote_target).await {
+            Ok(ProbeObservation::SkewedSupervisor {
+                peer_build,
+                dial_farhelm,
+                dial_state_dir,
+            }) => {
+                assert_eq!(peer_build, "0.1.1-old");
+                assert_eq!(dial_farhelm, PathBuf::from("/resolved/lib/farhelm"));
+                assert_eq!(dial_state_dir, None);
+            }
+            other => panic!("expected a skewed-supervisor observation, got {other:?}"),
+        }
+    }
+
+    /// The desktop-startup classifier must treat a skewed local supervisor
+    /// as ANSWERING: it owns the socket and the state directory, so
+    /// starting a rival because we cannot talk to it would be strictly
+    /// worse than reusing it and letting the manager's version-skew state
+    /// say what is wrong. Driven through the public entry point with a real
+    /// on-disk script, because this is the path `farhelm-desktop` calls at
+    /// startup.
+    #[tokio::test]
+    async fn discover_local_treats_a_skewed_supervisor_as_answering() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let hello = farhelm_proto::Frame::control(&ControlMsg::Hello {
+            protocol_version: farhelm_proto::PROTOCOL_VERSION + 1,
+            build_version: "9.9.9-future".to_string(),
+            role: "supervisor".to_string(),
+            host_identity: None,
+            auth: None,
+        });
+        let script_path = root.path().join("fake-farhelm");
+        std::fs::write(
+            &script_path,
+            // The stdin-open tail again — see the skewed-observation test.
+            format!("#!/bin/sh\n{}\ncat >/dev/null\n", frame_script(hello)),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let discovery = discover_local_supervisor(&script_path, root.path())
+            .await
+            .unwrap();
+        assert_eq!(discovery, LocalSupervisorDiscovery::Answering);
     }
 
     /// Child capture fails closed on either unbounded peer output or a

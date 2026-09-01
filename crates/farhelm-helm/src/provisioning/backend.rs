@@ -5,7 +5,7 @@ use super::plan::{DirectorySpec, PayloadArch, PayloadKind, ProvisioningTarget};
 use crate::manager::peer_text;
 use async_trait::async_trait;
 use farhelm_proto::ControlMsg;
-use farhelm_proto::io::{ClosedBeforeHello, FrameReader, FrameWriter, handshake};
+use farhelm_proto::io::{ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -19,7 +19,7 @@ const TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
 pub(super) const MAX_CHILD_STREAM_BYTES: usize = 64 * 1024;
 const POSITIVE_ABSENCE_EXIT: i32 = 75;
 pub(super) const REMOTE_PROBE_MARKER: &str = "farhelm-probe-command-started-v1";
-const REMOTE_RESOLVED_PREFIX: &str = "farhelm-probe-resolved-v1:";
+pub(super) const REMOTE_RESOLVED_PREFIX: &str = "farhelm-probe-resolved-v1:";
 pub(super) const REACH_RECORD_MARKER: &str = "farhelm-reach-v1";
 pub(super) const PAYLOAD_COPY_BUFFER: usize = 64 * 1024;
 
@@ -38,6 +38,29 @@ pub(super) enum ProbeObservation {
     Supervisor {
         build_version: String,
         host_identity: Option<String>,
+        dial_farhelm: PathBuf,
+        dial_state_dir: Option<PathBuf>,
+    },
+    /// A supervisor answered the hello but speaks a DIFFERENT protocol
+    /// version, so the exchange stopped at the version refusal. Presence is
+    /// PROVEN — only a live supervisor sends a hello at all — and the skew
+    /// payload carries its build, but nothing else a completed hello would
+    /// have: in particular no host identity, because the refusal happens
+    /// before any further exchange. Consumers that need identity must
+    /// decide explicitly what an unverifiable-but-present peer means for
+    /// them.
+    ///
+    /// This variant is what makes UPDATE work on the hosts it exists for:
+    /// a host left behind by a protocol bump is exactly the one the panel's
+    /// update action must reach, and before this variant existed the skew
+    /// refusal was misclassified as a transport failure ("the supervisor
+    /// probe closed before hello completion"), making a skewed host
+    /// un-updatable — found 2026-09-01 on the first real cross-protocol
+    /// update attempt (protocol 12 host, protocol 14 helm).
+    SkewedSupervisor {
+        /// The peer's own build version, from the skew payload — what the
+        /// hosts panel shows and what update logs name.
+        peer_build: String,
         dial_farhelm: PathBuf,
         dial_state_dir: Option<PathBuf>,
     },
@@ -70,6 +93,12 @@ pub async fn discover_local_supervisor(
     };
     match backend.probe(&target).await.map_err(anyhow::Error::new)? {
         ProbeObservation::Supervisor { .. } => Ok(LocalSupervisorDiscovery::Answering),
+        // A skewed supervisor is still a supervisor OWNING the socket and
+        // the state directory: starting a rival because we cannot talk to
+        // it would be strictly worse than reusing it and letting the
+        // connection manager surface the skew as the per-host state it
+        // already has for exactly this situation.
+        ProbeObservation::SkewedSupervisor { .. } => Ok(LocalSupervisorDiscovery::Answering),
         ProbeObservation::Absent => Ok(LocalSupervisorDiscovery::Absent),
     }
 }
@@ -1196,6 +1225,66 @@ impl ProvisioningBackend for SystemBackend {
                 Ok(ProbeObservation::Supervisor {
                     build_version,
                     host_identity,
+                    dial_farhelm,
+                    dial_state_dir: target.probe_state_dir.clone(),
+                })
+            }
+            // A version-skew refusal must be recognized BEFORE the
+            // transport-failure classification below: `handshake` returns
+            // it as an `io::Error` of kind `Other`, which
+            // `handshake_io_failure` would happily claim — and did, until
+            // 2026-09-01, when that misclassification surfaced as "closed
+            // before hello completion with exit status 0" on the first
+            // cross-protocol UPDATE attempt. The hello DID complete; the
+            // peer was refused for speaking another protocol, which is a
+            // positive presence observation, not a failure.
+            Ok(Err(error)) if VersionSkew::cause_of(&error).is_some() => {
+                let peer_build = VersionSkew::cause_of(&error)
+                    .expect("guard established the skew payload")
+                    .peer_build
+                    .clone();
+                let stderr = stop_probe(&mut child, stderr_task).await;
+                // Same post-stop drain-failure check as the completed-hello
+                // arm above, for the same reason: a stderr READ failure is a
+                // broken probe transport whichever hello came back, and the
+                // two sibling arms must not drift on it.
+                if let Ok(failure) = stderr_signal_rx.try_recv() {
+                    return Err(BackendFailure::new(
+                        format!(
+                            "reading supervisor probe {} ({})",
+                            failure.stream, failure.detail
+                        ),
+                        String::from_utf8_lossy(&failure.prefix),
+                    ));
+                }
+                // The dial coordinates resolve exactly as in the completed-
+                // hello arm above: the remote script printed its resolved
+                // binary to stderr before exec'ing it, and the local target
+                // named the binary directly.
+                let dial_farhelm = if remote {
+                    stderr
+                        .resolved_farhelm
+                        .as_deref()
+                        .map(bytes_path)
+                        .transpose()
+                        .map_err(|error| {
+                            BackendFailure::new(
+                                "the remote probe reported an unusable resolved binary",
+                                error.to_string(),
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            BackendFailure::new(
+                                "the remote probe answered without reporting its resolved binary",
+                                stderr.diagnostic(),
+                            )
+                        })?
+                } else {
+                    target.probe_farhelm.clone()
+                };
+                path_text(&dial_farhelm)?;
+                Ok(ProbeObservation::SkewedSupervisor {
+                    peer_build,
                     dial_farhelm,
                     dial_state_dir: target.probe_state_dir.clone(),
                 })
