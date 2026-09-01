@@ -20,20 +20,6 @@ Within a bucket, no order.
   answerable at a glance; the skew banner already covers the mismatch case, this covers the question before anything
   mismatches.
 
-- Fix clipboard copy in the macOS desktop app. Observed 2026-09-01 on the installed desktop app: an in-pane agent
-  reports a successful copy ("copied 19 chars"), but the system pasteboard never changes, so a later paste yields the
-  old contents. Pasting INTO the app works — content copied elsewhere arrives fine — so clipboard reads are healthy and
-  only writes die. The confirmation comes from the program in the pane, not farhelm — both of farhelm's copy paths are
-  deliberately silent — so the OSC 52 leg fired and the write died in the webview. Both select-to-copy and the vendored
-  OSC 52 addon funnel into `navigator.clipboard.writeText` with every failure swallowed by design (terminal.js's "Never
-  awaited" silent-failure contract), and WKWebView denies programmatic writes that carry no user activation (and omits
-  `navigator.clipboard` entirely outside secure contexts) — so the in-pane program cannot tell it copied nothing.
-  Whether mouse select-to-copy, which does carry a user gesture, also fails on macOS is unverified; the engine
-  comparison in `docs/desktop-web-triage.md` is the localization step before building anything. A real fix likely hands
-  clipboard writes to the native side over the desktop IPC seam instead of fighting the webview's permission model, and
-  has a decision attached: OSC 52 means any in-pane program can write the user's clipboard, which the silent-failure
-  contract currently sidesteps by never letting it work.
-
 - Stop the create dialog's inert command field from impersonating the launch command after a clone. Cloning a
   profile-backed row seeds the dialog with the row's RAW invocation, and while a profile is selected that field is
   deliberately disabled-but-not-emptied (`CreatePrefill::invocation` documents why: switching the picker to "custom

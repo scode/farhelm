@@ -41,6 +41,13 @@ gloo-timers.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
+# Native system-clipboard writes for the desktop shell (`desktop.rs`'s
+# `native_clipboard_sink`): the webview cannot write the clipboard itself —
+# WKWebView's custom-scheme pages have no `navigator.clipboard` — so writes
+# arrive over the embedded helm's `POST /api/clipboard` and land here.
+# Optional and desktop-feature-gated: the web build and the plain library
+# have no pasteboard to write.
+arboard = { workspace = true, optional = true }
 farhelm-helm.workspace = true
 farhelm-supervisor.workspace = true
 # Content types for the desktop asset handler (`desktop::serve_asset`, D6).
@@ -80,7 +87,7 @@ tracing-subscriber.workspace = true
 [features]
 default = []
 web = ["dioxus/web"]
-desktop = ["dioxus/desktop"]
+desktop = ["dioxus/desktop", "dep:arboard"]
 
 [dev-dependencies]
 tempfile.workspace = true

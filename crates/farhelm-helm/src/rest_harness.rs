@@ -992,6 +992,12 @@ pub(crate) struct FleetBuilder {
     /// Overrides `/api/events`'s subscriber bound, so a test can exhaust it
     /// with a handful of real sockets instead of sixty-four.
     event_subscriber_cap: Option<usize>,
+    /// A native clipboard writer for `POST /api/clipboard` to land on, as
+    /// [`crate::run_embedded`] would register one. `None` — the default, and
+    /// every production server helm's state — leaves the endpoint answering
+    /// 404; clipboard.rs's tests inject one to observe what the handler
+    /// forwards.
+    clipboard_sink: Option<crate::ClipboardSink>,
 }
 
 impl FleetBuilder {
@@ -1028,7 +1034,15 @@ impl FleetBuilder {
             port: 7433,
             refresh: None,
             event_subscriber_cap: None,
+            clipboard_sink: None,
         }
+    }
+
+    /// Register a clipboard sink the way the desktop's embedded helm does,
+    /// so `POST /api/clipboard` has something observable to land on.
+    pub(crate) fn clipboard_sink(mut self, sink: crate::ClipboardSink) -> FleetBuilder {
+        self.clipboard_sink = Some(sink);
+        self
     }
 
     /// Admit at most `cap` event subscriptions, so the endpoint's refusal is
@@ -1108,6 +1122,7 @@ impl FleetBuilder {
             event_subscriber_cap: self
                 .event_subscriber_cap
                 .unwrap_or(crate::events::MAX_SUBSCRIBERS),
+            clipboard_sink: self.clipboard_sink,
             ..AppState::new(
                 Arc::clone(&manager),
                 self.store,
@@ -1167,6 +1182,23 @@ pub(crate) async fn spliced_helm(peer: DuplexStream) -> Harness {
 /// router with no hosts would answer differently for the wrong reason.
 pub(crate) async fn idle_helm() -> Harness {
     helm_listing(vec![session("sess-1", 1_700_000_000)]).await
+}
+
+/// [`idle_helm`] on a helm that carries a clipboard sink, as the desktop's
+/// embedded one does — for clipboard.rs's tests, which need to observe what
+/// the endpoint actually forwards.
+pub(crate) async fn idle_helm_with_clipboard_sink(sink: crate::ClipboardSink) -> Harness {
+    FleetBuilder::new()
+        .await
+        .clipboard_sink(sink)
+        .local(HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions: vec![session("sess-1", 1_700_000_000)],
+            ..HostScript::default()
+        })
+        .await
+        .start()
+        .await
 }
 
 /// [`idle_helm`] with an explicit session list — for the tests where the

@@ -552,6 +552,7 @@ impl DesktopBootstrap {
                             payload_dir: None,
                             release_base_url: None,
                         },
+                        Some(native_clipboard_sink()),
                         ready_tx,
                         shutdown_rx,
                     ))
@@ -1473,6 +1474,47 @@ fn bundled_web_ui() -> Option<PathBuf> {
     std::env::var_os("FARHELM_DESKTOP_UI_DIST").map(PathBuf::from)
 }
 
+/// The native system-clipboard writer registered with the embedded helm —
+/// the receiving end of `POST /api/clipboard`.
+///
+/// This is what makes copying in the desktop app WORK at all: WKWebView
+/// gives the `dioxus://` page no `navigator.clipboard` (not a secure
+/// context), so the webview's copy paths POST the text to the embedded helm
+/// and this closure performs the real write (farhelm-helm's clipboard.rs
+/// carries the full diagnosis and endpoint contract).
+///
+/// One lazily created `arboard::Clipboard` behind a mutex rather than one
+/// per write: on X11 — the Linux substrate the Xvfb smoke drives this code
+/// on — the paste side of a selection is SERVED by the connection that set
+/// it, so dropping the handle after each write could drop the offer with
+/// it; macOS's NSPasteboard has no such lifetime, and the shared shape
+/// costs it nothing. A handle that fails a write is discarded so the next
+/// write reinitializes rather than failing forever, and a failed
+/// INITIALIZATION (headless test environments have no display server) is
+/// reported as the per-write `Err` the endpoint's best-effort contract
+/// logs and swallows.
+fn native_clipboard_sink() -> farhelm_helm::ClipboardSink {
+    let held: std::sync::Mutex<Option<arboard::Clipboard>> = std::sync::Mutex::new(None);
+    Arc::new(move |text: &str| {
+        let mut guard = held
+            .lock()
+            .map_err(|_| "clipboard handle mutex poisoned".to_string())?;
+        if guard.is_none() {
+            *guard = Some(
+                arboard::Clipboard::new().map_err(|error| format!("opening clipboard: {error}"))?,
+            );
+        }
+        let clipboard = guard.as_mut().expect("initialized just above");
+        match clipboard.set_text(text.to_string()) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                *guard = None;
+                Err(format!("writing clipboard: {error}"))
+            }
+        }
+    })
+}
+
 fn read_state(path: &Path) -> anyhow::Result<PersistedState> {
     match std::fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes)
@@ -1534,6 +1576,18 @@ mod tests {
 
     const PROXY_CHILD_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_CHILD";
     const PROXY_TARGET_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_TARGET";
+
+    /// Constructing the clipboard sink must be side-effect free: the
+    /// `arboard` handle is created lazily on the first WRITE, so building
+    /// the closure at embedded-helm startup can never fail and never touches
+    /// a clipboard. Deliberately construct-only — a test that actually wrote
+    /// would clobber the developer's real clipboard on any machine with a
+    /// display, and on a headless CI box would only ever prove that arboard
+    /// errors without one; the real write is the manual Mac checklist's job.
+    #[test]
+    fn native_clipboard_sink_constructs_without_touching_a_clipboard() {
+        let _sink = native_clipboard_sink();
+    }
 
     // ---- the desktop asset handler (D6) ----
     //
