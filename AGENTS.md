@@ -118,6 +118,15 @@ green does not include e2e. The reuse rule above applies here too. A successful 
 later changes are provably outside the browser suite's inputs and exercised behavior (documentation-only changes are the
 obvious case); compare the tested revision to the landing head and rerun for any relevant or uncertain change.
 
+# Reproducing failures: narrow tests first
+
+The finishing-work list above is a gate, not a debugging tool. When investigating a failing, flaky, or suspicious test —
+including one first seen in a full-battery run — reproduce it with the narrowest run that could show it, and widen only
+when the narrow run will not reproduce: the exact test in a repetition loop, then its module or spec file, then its test
+binary or engine, then the full battery. `.agents/narrow-tests.md` is the recipe, with exact commands and caveats for
+every suite. Running a many-minute battery to check a one-test hypothesis is the failure mode this rule exists to
+prevent.
+
 # TODO.md
 
 `TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
