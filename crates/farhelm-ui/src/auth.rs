@@ -178,6 +178,9 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                 &secret,
                 config.smoke_client_log_marker.as_deref(),
             );
+            // Same arming point, same reasoning, same re-arm on every
+            // reauthentication — see `arm_native_clipboard`'s docs.
+            arm_native_clipboard(&config.base, &secret);
             *TOKEN_REQUIRED.write() = false;
             ready.set(true);
         }
@@ -250,6 +253,60 @@ fn arm_client_log_script(base: &str, secret: &str, marker: Option<&str>) -> Stri
          if (window.__farhelmClientLog) {{ \
            window.__farhelmClientLog.arm(window.__farhelmClientLogPending); \
          }}"
+    )
+}
+
+/// Install `window.__farhelmNativeClipboardWrite`: the desktop webview's
+/// working route to the system clipboard.
+///
+/// The webview cannot write the clipboard itself — WKWebView does not treat
+/// the `dioxus://` page as a secure context, so `navigator.clipboard` is
+/// simply absent there (farhelm-helm's clipboard.rs module docs carry the
+/// full 2026-09 diagnosis) — so terminal.js's two copy paths prefer this
+/// global when it exists and POST the text to the embedded helm's
+/// `POST /api/clipboard`, where the native sink desktop.rs registered
+/// performs the real write. A browser build never has the global installed
+/// and keeps the web clipboard API path unchanged.
+///
+/// Armed at the same success point as the client-log shim, for the same
+/// reason: only a COMMITTED device session may be spent, including on every
+/// reauthentication. The installed function reads its base and secret from
+/// `window.__farhelmNativeClipboardConfig` at CALL time rather than by
+/// closure capture, so a re-arm after credential rotation refreshes even a
+/// function object something captured earlier.
+///
+/// The write is fire-and-forget with every failure swallowed — the same
+/// silent best-effort contract SPEC.md sets for every clipboard operation
+/// and terminal.js's own provider documents; a 401 during the
+/// reauthentication window is lost exactly like any other refused write.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+fn arm_native_clipboard(base: &str, secret: &str) {
+    document::eval(&arm_native_clipboard_script(base, secret));
+}
+
+/// Build `arm_native_clipboard`'s script. Split out for the same pinned
+/// property as [`arm_client_log_script`]: every value crosses through
+/// `serde_json`, never string interpolation, and the unit test below feeds
+/// it hostile punctuation so a regression cannot land quietly.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+fn arm_native_clipboard_script(base: &str, secret: &str) -> String {
+    let payload = serde_json::to_string(&serde_json::json!({ "base": base, "secret": secret }))
+        .expect("an object of strings is always serializable");
+    format!(
+        "window.__farhelmNativeClipboardConfig = {payload}; \
+         window.__farhelmNativeClipboardWrite = function (text) {{ \
+           try {{ \
+             var config = window.__farhelmNativeClipboardConfig; \
+             fetch(config.base + \"/api/clipboard\", {{ \
+               method: \"POST\", \
+               headers: {{ \
+                 \"content-type\": \"application/json\", \
+                 \"authorization\": \"Bearer \" + config.secret \
+               }}, \
+               body: JSON.stringify({{ text: String(text) }}) \
+             }}).catch(function () {{}}); \
+           }} catch (error) {{}} \
+         }};"
     )
 }
 
@@ -462,6 +519,40 @@ with `newline` and ${interpolation}"#,
         assert!(
             !script.contains("mark\"er\\with `newline`"),
             "the raw smoke marker text must not appear unescaped anywhere in the script"
+        );
+    }
+
+    /// The clipboard arming script carries the same two credentials over the
+    /// same eval boundary, and must hold the same property: hostile
+    /// punctuation in the base or secret stays JSON data, never script
+    /// syntax. A separate pin rather than trusting the sibling test because
+    /// the two builders are separate functions that can regress separately.
+    #[test]
+    fn hostile_punctuation_stays_json_data_in_the_clipboard_arming_script() {
+        let script = super::arm_native_clipboard_script(
+            r#"http://127.0.0.1:7433/"; window.pwned = 1; ""#,
+            r#"se"cr\et
+with `newline` and ${interpolation}"#,
+        );
+        assert!(
+            script.starts_with("window.__farhelmNativeClipboardConfig = {"),
+            "the config must be assigned as one JSON object literal: {script}"
+        );
+        assert!(
+            script.contains(r#"\"; window.pwned = 1; \""#),
+            "quotes in the base must arrive escaped, not as live syntax: {script}"
+        );
+        assert!(
+            script.contains(r#"se\"cr\\et\nwith"#),
+            "quotes, backslashes, and newlines in the secret must be JSON-escaped: {script}"
+        );
+        assert!(
+            !script.contains("se\"cr\\et\nwith"),
+            "the raw secret text must not appear unescaped anywhere in the script"
+        );
+        assert!(
+            script.contains("window.__farhelmNativeClipboardWrite = function"),
+            "the script must install the writer terminal.js prefers: {script}"
         );
     }
 }

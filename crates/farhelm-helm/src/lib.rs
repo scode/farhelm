@@ -115,6 +115,12 @@ mod auth;
 /// the `webview_console` target (PLAN_desktop_web_bug_triage.md).
 mod client_log;
 
+/// `POST /api/clipboard` — the desktop webview's route to a REAL system
+/// clipboard write, because WKWebView gives the `dioxus://` page no
+/// `navigator.clipboard` at all (not a secure context). Enabled only when
+/// an embedding shell registered a [`ClipboardSink`].
+mod clipboard;
+
 /// The web UI tree a release build compiles into this binary (D12/D13) —
 /// `build.rs`'s counterpart. Public so `farhelm-desktop` (Step 4) can reach
 /// the same compiled-in tree its embedded helm serves.
@@ -466,7 +472,26 @@ struct AppState {
     /// must not have its budget shared with — or starved by — another
     /// helm's.
     client_log_rate: std::sync::Mutex<client_log::RateWindow>,
+    /// Where `POST /api/clipboard` lands text, when this helm has anywhere
+    /// to land it. The desktop shell registers a native pasteboard writer
+    /// here when it embeds a helm ([`run_embedded`]'s `clipboard_sink`);
+    /// every other construction leaves `None`, which makes the endpoint
+    /// answer 404 on server helms — a helm without a desktop window around
+    /// it has no clipboard that is the requester's to write. See
+    /// `clipboard.rs` for why this channel exists at all (the webview's own
+    /// clipboard API does not).
+    clipboard_sink: Option<ClipboardSink>,
 }
+
+/// A native system-clipboard writer the embedding desktop shell provides.
+///
+/// Takes the full text to place on the system clipboard; an `Err` carries a
+/// human-readable reason that is LOGGED, never surfaced to the requester —
+/// SPEC.md's terminal-experience section makes clipboard operations
+/// best-effort and silent on failure by contract. Must be callable from any
+/// tokio worker thread; implementations own whatever platform threading
+/// their pasteboard requires.
+pub type ClipboardSink = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 /// Decrements [`AppState::profile_edit_queue`] however its waiter leaves —
 /// acquired, cancelled, or unwound.
@@ -528,6 +553,7 @@ impl AppState {
             client_log_rate: std::sync::Mutex::new(client_log::RateWindow::new(
                 std::time::Instant::now(),
             )),
+            clipboard_sink: None,
         }
     }
 
@@ -779,10 +805,33 @@ fn api_router(state: Arc<AppState>) -> Router {
             client_log::MAX_BODY_BYTES,
         ));
 
+    // Auth and CORS layered identically to client-log above, and for the
+    // same reason: the desktop webview must be able to READ a structured
+    // 401 from its own fetch. The body limit is this route's own — sized
+    // for one clipboard payload, not a log batch (see clipboard.rs).
+    let desktop_clipboard = Router::new()
+        .route(
+            "/api/clipboard",
+            axum::routing::post(clipboard::post_clipboard),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::require_device_session,
+        ))
+        .route(
+            "/api/clipboard",
+            axum::routing::options(middleware::desktop_webview_preflight),
+        )
+        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors))
+        .layer(axum::extract::DefaultBodyLimit::max(
+            clipboard::MAX_BODY_BYTES,
+        ));
+
     protected
         .merge(desktop_device)
         .merge(desktop_attachment)
         .merge(desktop_client_log)
+        .merge(desktop_clipboard)
         .route(
             "/api/auth/token",
             axum::routing::post(auth::exchange_token)
@@ -1485,7 +1534,7 @@ mod embedded_ui_tests {
 /// none is needed: SPEC.md's whole durability promise is that killing the
 /// helm does nothing to any session.
 pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
-    run_with_ready(args, None, None).await
+    run_with_ready(args, None, None, None).await
 }
 
 /// Run an embedded helm and report its bound address once every serving
@@ -1500,17 +1549,25 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
 /// disappeared meaning as sending the signal.
 pub async fn run_embedded(
     args: HelmArgs,
+    clipboard_sink: Option<ClipboardSink>,
     ready: std::sync::mpsc::Sender<SocketAddr>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    run_with_ready(args, Some(ready), Some(shutdown)).await
+    run_with_ready(args, clipboard_sink, Some(ready), Some(shutdown)).await
 }
 
 /// Shared process and embedded-app serving path. There is deliberately one
 /// startup sequence so the desktop cannot acquire a weaker auth or transport
 /// boundary than `farhelm helm run`.
+///
+/// `clipboard_sink` is the one capability that differs BY DESIGN between the
+/// two callers rather than by configuration: only the embedded caller has a
+/// desktop window whose user's clipboard a webview write could legitimately
+/// mean, so only [`run_embedded`] can pass `Some` and the CLI path hardcodes
+/// `None` — there is deliberately no flag to enable it on a server helm.
 async fn run_with_ready(
     args: HelmArgs,
+    clipboard_sink: Option<ClipboardSink>,
     ready: Option<std::sync::mpsc::Sender<SocketAddr>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> anyhow::Result<()> {
@@ -1548,7 +1605,7 @@ async fn run_with_ready(
     )
     .await?;
 
-    let state = Arc::new(AppState::new(
+    let mut app = AppState::new(
         manager,
         store,
         state_dir.clone(),
@@ -1557,7 +1614,9 @@ async fn run_with_ready(
         // Read here, not at `HelmArgs::payload_selection`, because it is a
         // fact about THIS BINARY, not about the argv the operator passed.
         cfg!(farhelm_release_build),
-    )?);
+    )?;
+    app.clipboard_sink = clipboard_sink;
+    let state = Arc::new(app);
     // The manager was started before this state existed — it is one of the
     // state's own fields — so the handler that answers an agent's questions
     // can only be published now. Every connection reads the slot per

@@ -94,7 +94,11 @@ means "run `~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop` in a term
 3. In an existing `jj` workspace where Git reports detached HEAD, create an official Claude Code session in one action.
 4. Create a local Mac session the same way. Confirm the local and remote sessions appear together in one list.
 5. Paste a Mac screenshot into the remote terminal. Confirm the path appears at the active cursor and Claude can read
-   the file; also complete the clipboard-facts and latency records below.
+   the file; also complete the clipboard-facts and latency records below. Then check the COPY direction, which rides the
+   native clipboard route (`POST /api/clipboard` → arboard; the webview itself has no clipboard API): mouse-select text
+   in a terminal pane and paste it into TextEdit, and have the agent in the pane do an OSC 52 copy (Claude's own copy
+   action, which prints "copied N chars") and paste that too. Both must yield the copied text, not the clipboard's prior
+   contents — the exact failure shipped until 2026-09.
 6. Choose a non-newest session and a non-default list order, then quit and relaunch the app. Before clicking anything,
    confirm that same session is selected and attached and that the chosen order is still applied. Also confirm both
    sessions and their terminal state remain. Reboot the Mac and confirm the remote session is untouched while the local

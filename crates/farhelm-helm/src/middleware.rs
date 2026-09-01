@@ -11,7 +11,7 @@
 //! The scopes differ, and deliberately. The origin guard and the build
 //! stamp wrap the whole router, because both answer questions that have
 //! nothing to do with which route was asked for. The CORS headers wrap the
-//! four desktop-webview fetch edges, because widening them is widening what
+//! five desktop-webview fetch edges, because widening them is widening what
 //! a cross-origin page may read.
 //!
 //! ## The loopback guard is a real security boundary
@@ -28,9 +28,9 @@
 //!
 //! The web build is served BY the helm, so nothing it does is
 //! cross-origin. The desktop build's page comes from a custom webview
-//! scheme, so its credential validation, token exchange, uploads, and
-//! client-log reports are. `desktop_webview_cors` closes that gap on
-//! exactly those four routes, for exactly the origins
+//! scheme, so its credential validation, token exchange, uploads,
+//! client-log reports, and clipboard writes are. `desktop_webview_cors`
+//! closes that gap on exactly those five routes, for exactly the origins
 //! `is_desktop_webview_origin` recognizes.
 //!
 //! ## The build stamp is how a stale tab finds out
@@ -168,14 +168,15 @@ fn is_desktop_webview_origin(origin: &str) -> bool {
     origin.starts_with("dioxus://") || origin.starts_with("wry://")
 }
 
-/// The CORS headers for the desktop webview's four cross-origin fetch edges.
+/// The CORS headers for the desktop webview's five cross-origin fetch edges.
 ///
 /// The web build has no CORS problem: the helm serves the page, so its
 /// uploads are same-origin. The desktop build does. Its page is served by
 /// wry from a custom scheme while the helm answers on
 /// `http://127.0.0.1:<port>`, so every JavaScript `fetch` from it is
 /// cross-origin. Today those fetches are credential validation, the
-/// bootstrap-token exchange, attachment upload, and client-log reporting.
+/// bootstrap-token exchange, attachment upload, client-log reporting, and
+/// native clipboard writes (`clipboard.rs`).
 /// The terminal and invalidation WebSockets are governed
 /// by the origin guard and explicit subprotocol credential instead: WebSocket
 /// upgrades are not CORS-gated.
@@ -186,12 +187,13 @@ fn is_desktop_webview_origin(origin: &str) -> bool {
 ///   same origins the loopback guard already lets through, echoed back
 ///   rather than answered with `*`, with `Vary: Origin` so nothing caches
 ///   one origin's answer for another.
-/// - Only the credential-validation, token-exchange, attachment, and
-///   client-log routes carry it (see `build_router`). The ordinary REST
-///   client is native, so the other routes have no cross-origin caller and
-///   get no cross-origin readability.
+/// - Only the credential-validation, token-exchange, attachment,
+///   client-log, and clipboard routes carry it (see `build_router`). The
+///   ordinary REST client is native, so the other routes have no
+///   cross-origin caller and get no cross-origin readability.
 /// - Only the methods and headers those routes need: `GET` for credential
-///   validation, `POST` for exchange/upload/client-log (plus the `OPTIONS`
+///   validation, `POST` for exchange/upload/client-log/clipboard (plus the
+///   `OPTIONS`
 ///   preflight itself), `authorization` for the explicit device secret, and
 ///   `content-type`, which `fetch(url, {body: file})` sets from the blob and
 ///   may itself make non-simple (the client-log body sends the same header

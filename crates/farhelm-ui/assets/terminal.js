@@ -795,9 +795,24 @@
      * a promise to wait on — see this constant's own header. Only the `c`
      * (system clipboard) selection is honored, matching the addon's own
      * default provider; `p`/`q` (primary/secondary X selections) are
-     * silently ignored, exactly as upstream does. */
+     * silently ignored, exactly as upstream does.
+     *
+     * The native route comes first because on the desktop it is the ONLY
+     * route: WKWebView gives this page no `navigator.clipboard` at all
+     * (`dioxus://` is not a secure context — farhelm-helm's clipboard.rs
+     * has the diagnosis), so the `?.` below made every OSC 52 write a
+     * silent no-op while the program in the pane reported success.
+     * `__farhelmNativeClipboardWrite` exists only after desktop
+     * authentication armed it (auth.rs's `arm_native_clipboard`); a browser
+     * tab never has it and keeps the web API path, working where the engine
+     * allows (Chromium) and silently refused where it does not (WebKit),
+     * per SPEC.md's best-effort clipboard contract. */
     writeText(selection, text) {
       if (selection !== "c") return;
+      if (typeof window.__farhelmNativeClipboardWrite === "function") {
+        window.__farhelmNativeClipboardWrite(text);
+        return;
+      }
       navigator.clipboard?.writeText?.(text)?.catch(() => {});
     },
   };
@@ -4204,6 +4219,19 @@
             if (
               !window.farhelmCopyOnSelect.copySelectionOnMouseUp({ hasSelection, selectionText })
             ) {
+              return;
+            }
+            // The native route first, same preference as the OSC 52
+            // provider's `writeText` (see `clipboardProvider`): on the
+            // desktop this global — installed by auth.rs after
+            // authentication — is the only path that reaches a clipboard,
+            // because WKWebView's `dioxus://` page has no
+            // `navigator.clipboard` at all. It also sidesteps the OTHER
+            // WebKit trap this deferred callback would hit even with the
+            // API present: running in a `setTimeout` after mouseup, it has
+            // no transient user activation left to spend.
+            if (typeof window.__farhelmNativeClipboardWrite === "function") {
+              window.__farhelmNativeClipboardWrite(selectionText);
               return;
             }
             // Never awaited, and every way it can fail is swallowed rather

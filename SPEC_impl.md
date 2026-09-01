@@ -300,14 +300,20 @@ Known risks, accepted deliberately:
 - Clipboard and drag-drop are where WKWebView diverges from Chromium, and paste interception is a headline feature. The
   default is the same DOM paste/drop event path on both targets — WebKit does deliver file/image data on those events,
   but with documented engine-specific restrictions (pasted-HTML sanitization, gesture gating on the async clipboard
-  API), so the honest framing is "same event model, engine differences expected", not "same as Chromium". No special
-  desktop solution is built until a real deficiency shows up in our actual flows; native-side wry hooks are the known
-  fallback. One concrete thing to check early rather than debug late: wry's own file-drop handling swallows DOM drop
-  events unless configured not to. (The browser path is a secure context on loopback, so web clipboard APIs are fully
-  available there.) Also established the hard way during M2 dogfooding: wry implements NO native JS dialogs on macOS —
-  `window.confirm()` silently does nothing — so any confirmation or prompt the UI needs must be in-page DOM, never a
-  browser dialog. SPEC.md's confirmation language is deliberately mechanism-agnostic; this is the constraint that picks
-  the mechanism.
+  API), so the honest framing is "same event model, engine differences expected", not "same as Chromium". The predicted
+  real deficiency arrived (2026-09, dogfooding): clipboard WRITES never worked in the desktop app at all, because
+  WKWebView does not treat the `dioxus://` page as a secure context and `navigator.clipboard` is simply absent there
+  (wry registers custom schemes as secure on webkit2gtk, and has no way to on WKWebView — which is why Linux never
+  showed it). The built solution is the native-side fallback this entry reserved: the webview POSTs copy text to the
+  embedded helm's `POST /api/clipboard` (device-session authenticated, enabled only when the desktop registered a
+  `ClipboardSink` — farhelm-helm's clipboard.rs) and the shell writes the real pasteboard via arboard. One correction to
+  the parenthetical this entry used to carry: loopback HTTP is a secure context in Chromium but NOT in WebKit — Safari
+  against `http://127.0.0.1` has no `navigator.clipboard` either, so browser-tab copies work in Chromium-family browsers
+  and stay silently refused in Safari, within SPEC.md's best-effort clipboard contract. One concrete thing to check
+  early rather than debug late: wry's own file-drop handling swallows DOM drop events unless configured not to. Also
+  established the hard way during M2 dogfooding: wry implements NO native JS dialogs on macOS — `window.confirm()`
+  silently does nothing — so any confirmation or prompt the UI needs must be in-page DOM, never a browser dialog.
+  SPEC.md's confirmation language is deliberately mechanism-agnostic; this is the constraint that picks the mechanism.
 - Blitz (Dioxus's native renderer) is not production-ready. The plan assumes webview desktop indefinitely; nothing may
   depend on Blitz landing.
 
