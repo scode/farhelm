@@ -81,6 +81,21 @@ Within a bucket, no order.
 
 ## Maybe later
 
+- Automate end-to-end testing of the host UPDATE path, including across releases. Nothing in CI updates a host: the
+  CentOS provisioning test only ever installs onto a fresh container, and the update flow's own tests drive fake
+  backends. The gap shipped a real field failure (2026-09-01), which is the worked example any design here should be
+  checked against: the first cross-protocol update ever attempted — a protocol-12 farhelm 0.1.1 host under a protocol-14
+  0.2.1 helm — failed at the PROBE, whose classifier treated the version-skew refusal as a transport failure ("the
+  supervisor probe closed before hello completion with exit status 0"), making exactly the host the update action exists
+  for un-updatable; the operator recovered by stopping the remote supervisor by hand so the probe would see clean
+  absence and take the fresh-install path. The eventual fix (`ProbeObservation::SkewedSupervisor`) added unit and
+  service-level regression tests, but the CLASS of bug wants end-to-end coverage: something like a CentOS-leg variant
+  that provisions a PREVIOUS RELEASE's binary (the harness builds its payloads from this tree today; the helm's own
+  verified release-download path — D13, `release_payloads.rs` — is the existing machinery that can fetch a pinned
+  released one), lets it register and run, then drives the panel's update action to the workspace build and asserts the
+  supervisor comes back at the new version with its tmux sessions intact. The old half must be a real released artifact,
+  not this tree's build — same-version update tests are exactly what could never see this bug.
+
 - Guard provisioning against pushing payloads older than the helm's own protocol. A release-shaped helm built from a
   commit newer than the latest release (the local stable-binary flow does exactly this) provisions remote hosts with
   DOWNLOADED released payloads by default (D13), so the freshly provisioned supervisor can speak an older protocol than
