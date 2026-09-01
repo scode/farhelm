@@ -414,6 +414,24 @@ keystroke. The arm's lifetime is that one synchronous dispatch (expired in a mic
 chord leaves no stale arm behind and the ESC is never flushed alone: a stray lone ESC is the byte shape the merge exists
 to never emit.
 
+Clipboard writes — SPEC.md's terminal contract is that select-to-copy and a program's OSC 52 WRITE land on the system
+clipboard while an OSC 52 READ is never answered — are implemented per surface, because the web platform only delivers
+that contract on some engines. Both of terminal.js's write paths (the copy-on-select mouseup callback and the OSC 52
+`ClipboardAddon` provider) prefer `window.__farhelmNativeClipboardWrite` whenever it exists and fall back to
+`navigator.clipboard.writeText` otherwise, with every failure swallowed per the contract's best-effort clause. The
+global exists ONLY in the desktop app, installed by desktop authentication's success path (auth.rs's
+`arm_native_clipboard`, re-armed with fresh credentials on every reauthentication): it POSTs the text to the embedded
+helm's `POST /api/clipboard`, and the desktop shell — the only construction able to register a `ClipboardSink`
+(`run_embedded`'s parameter; `farhelm helm run` hardcodes none, deliberately without a flag) — writes the real
+pasteboard via arboard. The reason the desktop cannot use the web API at all: WKWebView does not treat the `dioxus://`
+page as a secure context, so `navigator.clipboard` is absent there — not denied, absent — which shipped as
+copy-never-works until 2026-09 (the Dioxus-risks bullet above records the diagnosis; farhelm-helm's clipboard.rs owns
+the endpoint's contract: device-session auth with the desktop-webview CORS layering, one bounded text field, 404 on any
+helm without a sink so a remote browser can never write a server machine's clipboard, and a silent 204 whether the
+native write succeeded or not). A browser tab keeps the web API path and inherits its engine's policy: Chromium-family
+engines treat loopback HTTP as a secure context and work; Safari does not, and stays silently refused. OSC 52 reads are
+refused identically on every surface — the native route is write-only by construction, not by policy that could drift.
+
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
