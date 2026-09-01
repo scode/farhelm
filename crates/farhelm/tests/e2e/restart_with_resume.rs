@@ -634,11 +634,11 @@ async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attach
 /// was captured before the reboot, so the relaunched agent picks up the
 /// same conversation.
 ///
-/// Both halves are asserted from the fixture's own output rather than
-/// inferred: it echoes the argv it was launched with (so the substituted id
-/// is visible as a fact about what RAN), and it reports adopting the
-/// existing record rather than starting a new one — which is what "resumes
-/// exactly that conversation" means on disk.
+/// Both halves are asserted from the fixture's own behavior rather than an
+/// argv line rendered through tmux: it reports adopting the existing record
+/// and then appends to that same record on disk. Those are the observable
+/// facts that distinguish a resume from a fresh launch; the template's
+/// wrapper consumes the substituted id before the fixture's argv is formed.
 ///
 /// Shared by both agent kinds ([`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`]
 /// and [`an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal`]):
@@ -665,6 +665,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
     };
 
     let work = farhelm_teststate::tempdir().expect("workdir");
+    let resume_template = fixture_resume_template(&bin.path().join(kind), kind, home.path());
     let conversation = {
         let sup = Supervisor::new_with_seams(
             state.path(),
@@ -690,11 +691,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
                 80,
                 24,
                 farhelm_helm::CreateExtras {
-                    resume_template: Some(fixture_resume_template(
-                        &bin.path().join(kind),
-                        kind,
-                        home.path(),
-                    )),
+                    resume_template: Some(resume_template.clone()),
                     ..farhelm_helm::CreateExtras::default()
                 },
             )
@@ -708,9 +705,12 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
         let conversation = marker_value(&seen, "RECORD-WRITTEN:");
 
-        // Let the claim become durable before the reboot: an identity that
-        // only ever existed in memory would prove nothing about a session
-        // whose supervisor is about to be replaced.
+        // The successor supervisor can only resume an identity committed to
+        // SQLite; seeing the fixture write its record does not establish that
+        // capture has crossed that durability boundary. The template itself
+        // was stored at creation and is asserted here as setup, not treated as
+        // a later lifecycle barrier: `resume_argv` is derived synchronously
+        // from these same two columns whenever a snapshot is constructed.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
             client.list_sessions().await.expect("list drives capture");
@@ -719,12 +719,18 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
                 .await
                 .expect("snapshot")
                 .expect("present");
-            if snapshot.captured_conversation.is_some() {
+            if snapshot.captured_conversation.as_deref() == Some(conversation.as_str()) {
+                assert_eq!(
+                    snapshot.resume_template.as_deref(),
+                    Some(resume_template.as_slice()),
+                    "the resume template stored at creation must survive until capture"
+                );
                 break;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "the fixture's identity was never captured"
+                "the captured conversation never became durable; expected={conversation:?}, \
+                 snapshot={snapshot:?}"
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
@@ -784,25 +790,11 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         30,
     )
     .await;
-    let argv_line = String::from_utf8_lossy(&seen);
-    let argv_line = argv_line
-        .split("FAKE-AGENT ARGV:")
-        .nth(1)
-        .expect("the fixture echoes its own argv")
-        .lines()
-        .next()
-        .expect("a line");
-    assert!(
-        argv_line.contains("--record-home"),
-        "the resume ran the TEMPLATE, not the launch invocation: {argv_line}"
-    );
-    // The substituted id itself is not visible in this argv, and that is a
-    // property of the FIXTURE, not of the product: the template's
-    // `{conversation}` element is consumed by the `sh -c` wrapper that
-    // moves it into the environment variable the fixture reads (see
-    // `fixture_resume_template`). What proves the id reached the relaunched
-    // process is the `RECORD-RESUMED:<id>` marker waited on above, which
-    // the fixture only prints for the exact id it was handed.
+    // Do not infer launch-versus-resume from the echoed argv. Both commands
+    // carry `--record-home`, and tmux replay represents a visual wrap as a
+    // real newline because `capture-pane` intentionally runs without `-J`.
+    // `RECORD-RESUMED:<id>` is the discriminating fact: the fixture prints it
+    // only after the template-supplied id locates an existing record.
 
     // The resumed conversation genuinely continues: the fixture's
     // `append` command is its stand-in for a real agent writing more of

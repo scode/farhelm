@@ -72,6 +72,79 @@ fn assert_records_consecutive(records: &[u64], what: &str, allowed_seams: usize)
     }
 }
 
+/// A quiet period that rearms on data without moving its hard outer bound.
+///
+/// This state is separate from the receive loop so the load-bearing timing
+/// rule has deterministic coverage: late data rearms the quiet deadline, but
+/// the effective wait is clipped by the fixed overall bound.
+struct QuietDeadline {
+    quiet_window: Duration,
+    quiet_deadline: tokio::time::Instant,
+    overall_deadline: tokio::time::Instant,
+}
+
+impl QuietDeadline {
+    /// Start a quiet window inside a strictly longer overall wait budget.
+    ///
+    /// Panics when the quiet window is not shorter than the outer bound:
+    /// that shape cannot demonstrate rearming before the hard stop clips it.
+    fn new(now: tokio::time::Instant, quiet_window: Duration, overall_bound: Duration) -> Self {
+        assert!(quiet_window < overall_bound);
+        Self {
+            quiet_window,
+            quiet_deadline: now + quiet_window,
+            overall_deadline: now + overall_bound,
+        }
+    }
+
+    /// Rearm the nominal quiet deadline without moving the hard outer bound.
+    fn observe_data(&mut self, now: tokio::time::Instant) {
+        self.quiet_deadline = now + self.quiet_window;
+    }
+
+    /// Return the rearmed quiet deadline clipped to the hard outer bound.
+    fn next_deadline(&self) -> tokio::time::Instant {
+        self.quiet_deadline.min(self.overall_deadline)
+    }
+}
+
+/// Numbered flood progress and its no-progress deadline.
+///
+/// Duplicate, old, and unrelated bytes must not keep a stalled producer
+/// alive forever. Only a record newer than every one already observed earns
+/// another complete stall window.
+struct FloodProgress {
+    latest: Option<u64>,
+    records_seen: u64,
+    deadline: tokio::time::Instant,
+    stall_timeout: Duration,
+}
+
+impl FloodProgress {
+    /// Start a no-progress window with no numbered record observed yet.
+    fn new(now: tokio::time::Instant, stall_timeout: Duration) -> Self {
+        Self {
+            latest: None,
+            records_seen: 0,
+            deadline: now + stall_timeout,
+            stall_timeout,
+        }
+    }
+
+    /// Record strictly newer progress and rearm its stall deadline.
+    ///
+    /// Duplicate or older records change nothing: replayed bytes must not
+    /// keep a genuinely stalled producer alive forever.
+    fn observe(&mut self, record: u64, now: tokio::time::Instant) {
+        if self.latest.is_some_and(|previous| record <= previous) {
+            return;
+        }
+        self.latest = Some(record);
+        self.records_seen += 1;
+        self.deadline = now + self.stall_timeout;
+    }
+}
+
 /// Create a session running the `flood` script — the fast producer every
 /// backpressure test needs. Returns the workdir for the caller to hold,
 /// exactly like [`basic_session`].
@@ -125,6 +198,56 @@ pub(crate) async fn drain_for(
     }
 }
 
+/// Drain output left in flight by a pause until delivery stays quiet.
+///
+/// A fixed sleep is not a pause barrier: on a loaded runner the supervisor
+/// may still be emptying frames already queued toward this attachment when
+/// that sleep ends. RSS sampled there measures the transition into a stall,
+/// not the bounded stalled state. The quiet window rearms on every data
+/// frame, while the overall bound makes a backlog that never settles fail
+/// instead of waiting forever. Silence here does not acknowledge tmux's
+/// internal pause state; the producer is idle during this drain.
+async fn drain_until_quiet(
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    quiet_window: Duration,
+    overall_bound: Duration,
+) {
+    let mut deadline = QuietDeadline::new(tokio::time::Instant::now(), quiet_window, overall_bound);
+
+    loop {
+        let now = tokio::time::Instant::now();
+        assert!(
+            now < deadline.overall_deadline,
+            "paused delivery never stayed quiet for {quiet_window:?} within {overall_bound:?}; \
+             {} bytes seen, recent records: {:?}",
+            seen.len(),
+            flood_records(&seen[seen.len().saturating_sub(4096)..])
+                .into_iter()
+                .rev()
+                .take(5)
+                .collect::<Vec<_>>()
+        );
+        let next_deadline = deadline.next_deadline();
+        match tokio::time::timeout(next_deadline.saturating_duration_since(now), rx.recv()).await {
+            Ok(Some(TermEvent::Data(bytes))) => {
+                seen.extend_from_slice(&bytes);
+                deadline.observe_data(tokio::time::Instant::now());
+            }
+            Ok(Some(TermEvent::ReplayComplete)) => {}
+            Ok(Some(TermEvent::Detached(reason))) => {
+                panic!("stream detached ({reason}) while paused output was settling")
+            }
+            Ok(None) => panic!("stream closed while paused output was settling"),
+            Err(_) if tokio::time::Instant::now() >= deadline.quiet_deadline => return,
+            Err(_) => panic!(
+                "paused delivery did not settle within {overall_bound:?}; {} bytes seen",
+                seen.len()
+            ),
+        }
+    }
+}
+
 /// Read until `needle` appears in the transcript, scanning only what is
 /// newly arrived.
 ///
@@ -174,6 +297,117 @@ async fn wait_for_bytes(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &[u8], 
             ),
         }
     }
+}
+
+/// Wait for a flood phase marker while numbered delivery keeps advancing.
+///
+/// A loaded runner may spend longer than one flat deadline draining the
+/// phase's megabytes while record numbers visibly advance. Every new number
+/// therefore rearms a no-progress deadline; bytes that arrive without record
+/// progress do not. This is a bounded stall detector, not a larger timeout.
+///
+/// Like [`wait_for_bytes`], this scans only newly arrived bytes plus one
+/// record's overlap. Re-scanning the full flood would make the test itself
+/// the slow consumer whose memory behavior it is trying to measure.
+async fn wait_for_flood_marker_with_progress(
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    marker: &[u8],
+) {
+    const RECORD_BYTES: usize = b"FLOOD-00000000".len();
+    const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+    assert!(!marker.is_empty(), "an empty marker is always present");
+    let mut scanned = 0;
+    let mut progress = FloodProgress::new(tokio::time::Instant::now(), STALL_TIMEOUT);
+
+    loop {
+        let new_bytes = &seen[scanned..];
+        if new_bytes
+            .windows(marker.len())
+            .any(|window| window == marker)
+        {
+            return;
+        }
+        for record in flood_records(new_bytes) {
+            progress.observe(record, tokio::time::Instant::now());
+        }
+
+        scanned = seen
+            .len()
+            .saturating_sub(RECORD_BYTES.max(marker.len()) - 1);
+        let remaining = progress
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            Ok(Some(TermEvent::ReplayComplete)) => {}
+            Ok(Some(TermEvent::Detached(reason))) => {
+                panic!(
+                    "stream detached ({reason}) before flood marker {marker:?}; {} bytes, \
+                     latest={:?}, records_seen={}",
+                    seen.len(),
+                    progress.latest,
+                    progress.records_seen
+                )
+            }
+            Ok(None) => panic!(
+                "stream closed before flood marker {marker:?}; {} bytes, latest={:?}, \
+                 records_seen={}",
+                seen.len(),
+                progress.latest,
+                progress.records_seen
+            ),
+            Err(_) => panic!(
+                "flood delivery made no record progress for {STALL_TIMEOUT:?} while waiting \
+                 for {marker:?}; {} bytes, latest={:?}, records_seen={}, \
+                 recent={:?}",
+                seen.len(),
+                progress.latest,
+                progress.records_seen,
+                flood_records(&seen[seen.len().saturating_sub(4096)..])
+                    .into_iter()
+                    .rev()
+                    .take(5)
+                    .collect::<Vec<_>>()
+            ),
+        }
+    }
+}
+
+/// Late data rearms the quiet deadline, subject to the fixed hard bound.
+#[test]
+fn quiet_deadline_rearms_but_keeps_its_overall_bound() {
+    let base = tokio::time::Instant::now();
+    let mut deadline = QuietDeadline::new(base, Duration::from_secs(1), Duration::from_secs(2));
+
+    deadline.observe_data(base + Duration::from_millis(900));
+    assert_eq!(deadline.quiet_deadline, base + Duration::from_millis(1900));
+    assert_eq!(deadline.next_deadline(), deadline.quiet_deadline);
+
+    deadline.observe_data(base + Duration::from_millis(1500));
+    assert_eq!(deadline.quiet_deadline, base + Duration::from_millis(2500));
+    assert_eq!(deadline.next_deadline(), deadline.overall_deadline);
+}
+
+/// Only a newer numbered record may rearm the flood's stall detector.
+#[test]
+fn flood_progress_deadline_ignores_duplicate_old_and_unrelated_bytes() {
+    let base = tokio::time::Instant::now();
+    let stall = Duration::from_secs(1);
+    let mut progress = FloodProgress::new(base, stall);
+
+    progress.observe(10, base + Duration::from_millis(100));
+    let first_deadline = progress.deadline;
+    progress.observe(10, base + Duration::from_millis(500));
+    progress.observe(9, base + Duration::from_millis(700));
+    assert_eq!(progress.deadline, first_deadline);
+    assert!(flood_records(b"noise without a numbered record").is_empty());
+    assert_eq!(progress.deadline, first_deadline);
+
+    progress.observe(11, base + Duration::from_millis(900));
+    assert_eq!(progress.deadline, base + Duration::from_millis(1900));
+    assert_eq!(progress.records_seen, 2);
 }
 
 /// How many records the `flood` fake-agent script emits. Duplicated from
@@ -541,7 +775,7 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
 }
 
 /// Resident memory of the tmux server and the supervisor must stay FLAT
-/// while a viewer is stalled against an unbounded producer.
+/// while a viewer is stalled against a producer larger than every queue.
 ///
 /// This is the milestone's headline promise and the one nothing else
 /// measures: every other test asserts the CONSEQUENCES of bounded queues
@@ -563,7 +797,12 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
 ///
 /// Sampled across several windows rather than as a before/after pair:
 /// a single pair cannot tell a leak from an allocator that grabbed one
-/// chunk early, while a trend across a stall can.
+/// chunk early, while a trend across a stall can. A first gated burst fills
+/// tmux's fixed history, then a second producer runs past the five-second
+/// `pause-after` window. The baseline follows a seven-second allowance for
+/// that five-second policy, and an out-of-band acknowledgement plus a final
+/// test-controlled gate prove the producer spans the full sample; stable
+/// memory cannot be explained by a producer that finished during setup.
 #[tokio::test]
 async fn memory_stays_flat_while_a_viewer_is_stalled() {
     /// Resident bytes of a process, from `/proc/<pid>/statm` (field 2 is
@@ -575,7 +814,18 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
     }
 
     let h = harness().await;
-    let (session, _work) = flood_session(&h).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script flood-memory"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
     let sock = h.state.path().join("tmux.sock");
 
     let tmux_pid: u32 = {
@@ -589,12 +839,36 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
 
     let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
     let mut seen = Vec::new();
-    wait_for_bytes(&mut rx, &mut seen, b"FLOOD-000000", 30).await;
+    wait_for_bytes(&mut rx, &mut seen, b"FAKE-AGENT READY", 30).await;
+    h.client.send_input(chan, vec![b'w']).await;
+    wait_for_flood_marker_with_progress(&mut rx, &mut seen, b"FLOOD-WARMED").await;
 
     h.client.pause_output(chan).await;
-    // Let whatever was in flight settle before the baseline, so the
-    // samples describe the STALL rather than the transition into it.
-    drain_for(&mut rx, &mut seen, Duration::from_secs(2)).await;
+    // Drain residual frames from the completed warm-up burst before opening
+    // the second gate. Silence here does not prove tmux's internal pause
+    // state; ordering PauseOutput before the next producer is the barrier.
+    drain_until_quiet(
+        &mut rx,
+        &mut seen,
+        Duration::from_secs(1),
+        Duration::from_secs(30),
+    )
+    .await;
+    h.client.send_input(chan, vec![b'm']).await;
+    let started = work.path().join("flood-memory-started");
+    let progress = work.path().join("flood-memory-progress");
+    wait_for_file(&started, 30).await;
+    wait_for_file(&progress, 30).await;
+    // `pause-after` is an age limit, not a byte limit. Bytes queued during
+    // its five-second allowance are legitimate. The out-of-band files above
+    // distinguish producer startup from a completed output batch; this wait
+    // gives the stalled output path time to settle before its growth is
+    // sampled.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let progress_before_sampling: u64 = std::fs::read_to_string(&progress)
+        .expect("read flood progress before RSS sampling")
+        .parse()
+        .expect("flood progress must be a record count");
     let tmux_baseline = rss_bytes(tmux_pid).expect("tmux rss");
     let own_baseline = rss_bytes(own_pid).expect("own rss");
 
@@ -605,6 +879,16 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
         tmux_peak = tmux_peak.max(rss_bytes(tmux_pid).expect("tmux rss"));
         own_peak = own_peak.max(rss_bytes(own_pid).expect("own rss"));
     }
+    let progress_after_sampling: u64 = std::fs::read_to_string(&progress)
+        .expect("read flood progress after RSS sampling")
+        .parse()
+        .expect("flood progress must be a record count");
+    assert!(
+        progress_after_sampling > progress_before_sampling,
+        "the producer completed no output batch during RSS sampling — flat memory without \
+         sustained terminal pressure proves nothing (progress stayed at \
+         {progress_before_sampling})"
+    );
 
     // Six seconds of stall. Unbounded, the audited growth rate would put
     // tmux ~21 MB over baseline; 8 MB is comfortably above ordinary
@@ -627,11 +911,27 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
 
     // The stall must not have been "flat" merely because everything died.
     h.client.resume_output(chan).await;
-    let before = seen.len();
-    drain_for(&mut rx, &mut seen, Duration::from_secs(5)).await;
-    assert!(
-        seen.len() > before,
-        "no output resumed after the stall — the flat memory above proves nothing"
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match rx.recv().await {
+                Some(TermEvent::Data(bytes)) if !bytes.is_empty() => break,
+                Some(TermEvent::Data(_)) | Some(TermEvent::ReplayComplete) => {}
+                Some(TermEvent::Detached(reason)) => {
+                    panic!("the stalled viewer detached before output resumed: {reason}")
+                }
+                None => panic!("the stalled viewer closed before output resumed"),
+            }
+        }
+    })
+    .await
+    .expect("no output resumed within five seconds of releasing the stalled viewer");
+    h.client.send_input(chan, vec![b'd']).await;
+    let stopped = work.path().join("flood-memory-stopped");
+    wait_for_file(&stopped, 10).await;
+    assert_eq!(
+        std::fs::read_to_string(&stopped).expect("read the producer stop acknowledgement"),
+        "released",
+        "the flood producer reached its self-expiry instead of the test-controlled stop gate"
     );
 }
 
