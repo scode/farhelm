@@ -129,6 +129,7 @@ use serde::Deserialize;
 
 mod activity;
 mod api;
+mod app_bar;
 mod archive;
 mod attachments;
 mod auth;
@@ -1264,6 +1265,7 @@ fn AppBody() -> Element {
                         // web-only affordance despite `ResizeObserver` sounding
                         // browser-specific.
                         onresize: move |_| layout_epoch += 1,
+                        app_bar::AppBar {}
                         ListView {
                             // Selection memory lives in `ListView` (it knows
                             // which selections were user-initiated, and writes

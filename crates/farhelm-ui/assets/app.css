@@ -391,6 +391,39 @@ samp {
 
 /* ===== Sidebar chrome ============================================= */
 
+/* The app-level identity readout stays in the sidebar's existing chrome
+   surface. Its empty leading space is intentional: a later profiles trigger
+   will own that side, while the current version remains right-aligned without
+   adding placeholder content. Sticky, because `.app-sidebar` is the scroll
+   container for the whole session list and an ordinary first child would
+   scroll away with the rows — the point of the readout is that it is always
+   there. Sticky content paints over what scrolls under it, so the bar carries
+   the sidebar's own background explicitly (same token, so the two still read
+   as one surface) and sits above the rows in stacking order. */
+.app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-row);
+}
+
+/* A reported helm stamp can be up to 64 characters (skew.rs's display cap),
+   wider than the sidebar; an ellipsis keeps the bar one line high and the
+   skew banner still shows the full stamp when it matters. */
+.app-version {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-1);
+  font-size: 12px;
+}
+
 /* The sidebar's resting chrome (BUGS_BURNDOWN.md issue 5): two on-demand
    toggles for the hosts panel and the filter bar, so the column's
    permanent contents stay rows-plus-create. The "filtered" note beside

@@ -41,6 +41,7 @@ import {
   cleanupSession,
   createProfile,
   createSession,
+  forceBuildSkew,
   localHostId,
   openFilterBar,
   openHostMenu,
@@ -56,6 +57,68 @@ import {
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
+
+/**
+ * The sidebar's first bar identifies the build answering the page before a
+ * user has to interpret the separate mismatch notice. The fixture helm and
+ * the bundle are the same build, so an agreeing reply cannot tell whether the
+ * readout is wired to the helm's stamp at all: the first half forces every
+ * API reply to carry a different stamp and expects THAT in the bar while the
+ * tooltip keeps naming the real client build; the second half is the healthy
+ * case, where the two are the same string.
+ */
+test("the sidebar app bar shows the helm build and client tooltip", async ({ page, request }) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  const forced = "9.9.9-forced-helm";
+  expect(forced).not.toBe(stamp);
+
+  await forceBuildSkew(page, forced);
+  await page.goto("/");
+  const version = page.locator(".app-version");
+  await expect(version).toHaveText(forced);
+  await expect(version).toHaveAttribute("title", `this client was built as farhelm ${stamp}`);
+
+  await page.unroute("**/api/**");
+  await page.goto("/");
+  await expect(version).toHaveText(stamp);
+  await expect(version).toHaveAttribute("title", `this client was built as farhelm ${stamp}`);
+});
+
+/**
+ * The readout only earns "always visible" if it survives the sidebar
+ * scrolling: `.app-sidebar` is the scroll container for the whole session
+ * list, so an ordinary first child would leave with the rows. Fills the
+ * sidebar past one screen, scrolls it to the bottom, and expects the bar to
+ * still sit at the sidebar's visible top edge.
+ */
+test("the sidebar app bar stays pinned while the session list scrolls", async ({ page, request }) => {
+  const marker = `appbar-scroll-${Date.now()}`;
+  const created = await fillSidebarPastOneScreen(request, marker);
+  try {
+    await page.setViewportSize({ width: 900, height: 500 });
+    await page.goto("/");
+    await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
+    const sidebar = page.locator(".app-sidebar");
+    await expect
+      .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight), { timeout: 20_000 })
+      .toBe(true);
+    await sidebar.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect.poll(() => sidebar.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+
+    const bar = page.locator(".app-bar");
+    await expect(bar).toBeVisible();
+    const barBox = await bar.boundingBox();
+    const sidebarBox = await sidebar.boundingBox();
+    expect(barBox, "the app bar must have a box").not.toBeNull();
+    expect(sidebarBox, "the sidebar must have a box").not.toBeNull();
+    expect(Math.abs(barBox!.y - sidebarBox!.y)).toBeLessThanOrEqual(1);
+  } finally {
+    await cleanupAll(request, created);
+  }
+});
 
 /**
  * Clean up every session in `sessions`, even when some cleanups fail.
