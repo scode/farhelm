@@ -2,7 +2,7 @@
 
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::harness::*;
-use farhelm_proto::{AgentKind, RestartMode, STOP_ANNOTATION};
+use farhelm_proto::{AgentKind, Profile, ProfileSnapshot, RestartMode, STOP_ANNOTATION};
 use farhelm_supervisor::service::{ArchiveGate, ArchiveStage};
 
 /// Create the archive fixture with both provenance dimensions populated;
@@ -10,7 +10,7 @@ use farhelm_supervisor::service::{ArchiveGate, ArchiveStage};
 async fn create_profile_child(
     h: &Harness,
     parent: &str,
-    profile_id: &str,
+    profile: &Profile,
     cwd: &str,
 ) -> SessionInfo {
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
@@ -29,15 +29,18 @@ async fn create_profile_child(
             req_id: 1,
             parent: Some(parent.to_string()),
             cwd: cwd.to_string(),
-            invocation: None,
-            profile_id: Some(profile_id.to_string()),
+            invocation: Some(profile.invocation.clone()),
             profile_name: None,
             title: Some("archive contract".to_string()),
             cols: 80,
             rows: 24,
             intent_key: None,
-            agent_kind: None,
-            resume_template: None,
+            agent_kind: Some(profile.agent_kind),
+            resume_template: profile.resume_template.clone(),
+            source_profile: Some(ProfileSnapshot {
+                id: profile.id.clone(),
+                name: profile.name.clone(),
+            }),
         })
         .await
         .expect("send child create");
@@ -81,11 +84,13 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
     )
     .expect("write first launch script");
     let invocation = format!("/bin/sh {}", shell_words::quote(&script.to_string_lossy()));
-    let profile = h
-        .client
-        .create_profile("Archive Fixture", &invocation, AgentKind::Generic, None)
-        .await
-        .expect("create non-default source profile");
+    let profile = Profile {
+        id: "archive-fixture".to_string(),
+        name: "Archive Fixture".to_string(),
+        invocation: invocation.clone(),
+        agent_kind: AgentKind::Generic,
+        resume_template: None,
+    };
     let parent = h
         .client
         .create_session(
@@ -98,7 +103,7 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
         .await
         .expect("create parent");
     let session =
-        create_profile_child(&h, &parent.id, &profile.id, &work.path().to_string_lossy()).await;
+        create_profile_child(&h, &parent.id, &profile, &work.path().to_string_lossy()).await;
     assert_eq!(session.parent.as_deref(), Some(parent.id.as_str()));
     assert!(session.source_profile.is_some());
     wait_for_file(&first_pid, 10).await;

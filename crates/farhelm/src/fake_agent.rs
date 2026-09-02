@@ -251,10 +251,10 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
 ///
 /// Keeping this fixture on the real executable is the point: the browser
 /// acceptance leg crosses launch-time credential injection, the private
-/// supervisor admission path, profile derivation, and the public session
-/// list before it observes success. The line protocol avoids a test-only
-/// environment knob and lets one long-lived terminal choose an isolated
-/// temporary directory at runtime.
+/// supervisor admission path, selectorless parent-bundle reuse, and the
+/// public session list before it observes success. The line protocol avoids
+/// a test-only environment knob and lets one long-lived terminal choose an
+/// isolated temporary directory at runtime.
 fn spawn_session() -> anyhow::Result<()> {
     let parent = std::env::var("FARHELM_SESSION_ID")
         .context("the spawn fake agent must run inside a supervised session")?;

@@ -14,15 +14,12 @@
 //!
 //! A create names its host by REGISTRY ID, and a registry id outlives the
 //! install it points at — a retarget or an adoption in another tab replaces
-//! what answers on the id without the id changing. That would be merely stale
-//! if the request then failed. It does not fail: profile ids are minted per
-//! supervisor and every fresh supervisor seeds the same STARTER profiles, so a
-//! profile-mode create aimed at `starter-claude` RESOLVES on the successor
-//! install and launches a profile the user never chose, then records it as
-//! their remembered default. The client checks before it sends; the window it
-//! cannot close is between its own check and the helm's routing, so the check
-//! travels WITH the request. The still-open TODO entry on the HostId-reuse
-//! create-default window relies on this check by name.
+//! what answers on the id without the id changing. The selected profile is
+//! helm-wide now, but the action can still succeed on the WRONG installation.
+//! The client checks before it sends; the window it cannot close is between
+//! its own check and the helm's routing, so the check travels WITH the
+//! request. The still-open TODO entry on the HostId-reuse create-default
+//! window relies on this check by name.
 //!
 //! ## Optional, always
 //!

@@ -30,7 +30,6 @@ use super::launch_artifacts::{
     read_launch_sentinel, remove_fail_closed, sentinel_could_still_apply, sweep_launch_dir,
     wrapper_failure_detail,
 };
-use super::status::source_profile_existence;
 use super::sweep::{
     StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit, reap_process_tree, stop_live_agent,
 };
@@ -1110,29 +1109,24 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 ///
 /// ## What is in it, and what is deliberately not
 ///
-/// Every SESSION-shaping field: `cwd`, `invocation`, `title` (as SENT —
+/// Every SESSION-shaping field: `cwd`, the resolved launch bundle, `title` (as SENT —
 /// `None` means "auto-generate", which is a different request from an
-/// explicit title that happens to equal the derived one), item 7's
-/// `agent_kind`/`resume_template` overrides, the chosen launch selector and
-/// its value, and — as of PLAN_M7.md item 2 — `parent`.
+/// explicit title that happens to equal the derived one), and — as of
+/// PLAN_M7.md item 2 — `parent`. The bundle includes the invocation,
+/// `agent_kind`, resume template, and optional source-profile snapshot.
 /// `cols`/`rows` are excluded by
 /// design: they shape the ATTACHMENT, not the session, so the same intent
 /// retried from a differently-sized client is still the same intent — a
 /// point the plan makes explicitly, and the reason this function takes no
 /// dimensions at all rather than taking and ignoring them.
 ///
-/// ## The launch selector is encoded explicitly
+/// ## Resolved profiles are encoded explicitly
 ///
-/// [`CreateMode`] exists only after `handlers::create_mode` has proved that
-/// exactly one of `invocation`, `profile_id`, or `profile_name` was present.
-/// Its variant therefore records the selector as well as the value. A retry
-/// under the same key that changes either produces a different fingerprint
-/// and is refused rather than launching something else.
-///
-/// A retry MUST NOT be able to flip modes, and that is worth stating as a
-/// safety property rather than a consistency one: the selectors can resolve
-/// to entirely different agents in the same directory, and a create is not
-/// undoable.
+/// The helm resolves a selected profile before the supervisor fingerprints
+/// it. A profile edit between retries therefore changes the bundle and is
+/// refused as a changed request under the same key. The profile snapshot is
+/// included too, because changing only a profile's name still changes what
+/// the resulting session records and shows.
 ///
 /// ## The RAW encoding is frozen, byte for byte
 ///
@@ -1153,19 +1147,10 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// now, but `Some("x")` and `"x"` serialize to the same JSON, so the bytes
 /// are identical rather than merely equivalent.
 ///
-/// The PROFILE-ID mode gets its own, structurally distinct encoding instead: a
-/// leading `"profile"` discriminant and a shorter tuple. Distinctness is
-/// what makes the mode unflippable, and it is stronger here than an
-/// appended element would have been — the two encodings differ in LENGTH as
-/// well as in content, so no raw request can collide with a profile one
-/// whatever any field happens to contain (a `cwd` literally named
-/// `profile`, say). The raw tuple carries no discriminant of its own
-/// precisely because it cannot: adding one would change the frozen bytes.
-///
-/// Version 11's parented and profile-name creates get new discriminated
-/// tuples rather than extending either frozen encoding. That preserves
-/// every existing row byte for byte while making parent, selector, and
-/// selector value independently collision-proof.
+/// Version 11's parented creates received a discriminated tuple rather than
+/// extending the frozen raw encoding. Version 15 follows the same rule for a
+/// resolved profile bundle. The supervisor no longer fingerprints profile ids
+/// or names as selectors because it never receives unresolved selectors.
 ///
 /// ## Representation
 ///
@@ -1207,10 +1192,10 @@ pub(crate) fn create_fingerprint(
     // documents that rather than inviting a caller to handle an error that
     // cannot occur.
     //
-    // The raw-only fields cannot accompany a profile selection because
-    // [`CreateMode`] cannot represent that at all — an earlier shape passed
-    // both halves as separate `Option`s and needed a `debug_assert` to say
-    // so, which is a comment with a runtime cost rather than a guarantee.
+    // Raw creates keep their historical encoding. Profile-backed creates
+    // need a distinct shape that binds the resolved bundle, including the
+    // immutable source identity, so an edit between retries is visible as
+    // a changed request.
     match (parent, mode) {
         // FROZEN — see this function's own docs. Five elements, in this
         // order, exactly as every pre-M6.75 supervisor wrote them.
@@ -1220,6 +1205,7 @@ pub(crate) fn create_fingerprint(
                 invocation,
                 agent_kind,
                 resume_template,
+                source_profile: None,
             },
         ) => serde_json::to_string(&(
             cwd,
@@ -1228,11 +1214,6 @@ pub(crate) fn create_fingerprint(
             agent_kind.map(crate::store::agent_kind_column),
             resume_template.as_deref(),
         )),
-        // The profile mode's own encoding, discriminated and shorter, so it
-        // cannot collide with the frozen tuple above under any input.
-        (None, CreateMode::Profile { profile_id }) => {
-            serde_json::to_string(&("profile", cwd, title, profile_id))
-        }
         // A parent cannot be appended to either frozen encoding: doing so
         // would change every pre-v11 fingerprint. New discriminants give
         // parented creates their own collision-proof shapes instead.
@@ -1242,6 +1223,7 @@ pub(crate) fn create_fingerprint(
                 invocation,
                 agent_kind,
                 resume_template,
+                source_profile: None,
             },
         ) => serde_json::to_string(&(
             "parented_raw",
@@ -1252,18 +1234,25 @@ pub(crate) fn create_fingerprint(
             agent_kind.map(crate::store::agent_kind_column),
             resume_template.as_deref(),
         )),
-        (Some(parent), CreateMode::Profile { profile_id }) => {
-            serde_json::to_string(&("parented_profile", parent, cwd, title, profile_id))
-        }
-        // Profile names have no pre-v11 encoding to preserve. Keeping the
-        // selector name in the tuple prevents a name equal to a profile id
-        // from colliding with the id-backed mode.
-        (parent, CreateMode::ProfileName { profile_name }) => {
-            serde_json::to_string(&("profile_name", parent, cwd, title, profile_name))
-        }
-        (parent, CreateMode::DerivedProfile) => {
-            serde_json::to_string(&("derived_profile", parent, cwd, title))
-        }
+        (
+            parent,
+            CreateMode::Raw {
+                invocation,
+                agent_kind,
+                resume_template,
+                source_profile: Some(source_profile),
+            },
+        ) => serde_json::to_string(&(
+            "resolved_profile",
+            parent,
+            cwd,
+            invocation,
+            title,
+            agent_kind.map(crate::store::agent_kind_column),
+            resume_template.as_deref(),
+            source_profile.id.as_str(),
+            source_profile.name.as_str(),
+        )),
     }
     .expect("a fingerprint of strings and options always serializes")
 }
@@ -1656,26 +1645,21 @@ pub(crate) struct CreateInputs<'a> {
     pub(crate) rows: u16,
 }
 
-/// Which launch selector a `CreateSession` chose, once it has been shown
-/// to select exactly one (PLAN_M7.md item 2).
+/// The resolved launch bundle a `CreateSession` carries after its wire
+/// shape has been validated.
 ///
-/// A resolved value rather than a pair of `Option`s, so that everything
-/// downstream of `handlers::create_mode` is working from a request whose
-/// meaning is settled: there is deliberately no way to construct a
-/// `CreateMode` that names multiple selectors, no selector, or a profile
-/// alongside the raw-mode overrides. The overrides live INSIDE the raw variant for
-/// that last reason — an earlier shape carried them beside the mode as
-/// their own fields, which made "a profile-backed create must not carry
-/// these" an invariant maintained by comment and `debug_assert` rather than
-/// by the type.
+/// Profile selectors are resolved by the helm before this value is built.
+/// A selectorless spawn is resolved from the authenticated parent session
+/// before fingerprinting. The supervisor therefore needs only one variant:
+/// every launch is an invocation plus its optional integration and profile
+/// provenance.
 ///
 /// Lives here rather than in `handlers` because the create path is what
 /// consumes it: [`create_fingerprint`] encodes it, and
-/// [`Supervisor::validate_create`] resolves it. `handlers::create_mode` is
-/// only where a wire request is proven to name one.
+/// [`Supervisor::validate_create`] validates it.
 pub(crate) enum CreateMode {
-    /// The caller gave a command line, and may have overridden what would
-    /// be derived from it.
+    /// A complete launch bundle, raw when `source_profile` is absent and
+    /// profile-backed when it is present.
     Raw {
         invocation: String,
         /// `None` means "derive the kind from the invocation's basename",
@@ -1683,20 +1667,8 @@ pub(crate) enum CreateMode {
         /// guess (see `farhelm_proto::Profile::agent_kind`).
         agent_kind: Option<AgentKind>,
         resume_template: Option<Vec<String>>,
+        source_profile: Option<ProfileSnapshot>,
     },
-    /// The caller named one of this supervisor's profiles, which supplies
-    /// every launch-shaping value. Resolved against the catalog during
-    /// validation, so a profile deleted between a client's picker read and
-    /// its submit fails the create visibly, before any launch, with no
-    /// session left behind.
-    Profile { profile_id: String },
-    /// The caller named a profile by its human-facing name. Validation
-    /// resolves the exact name atomically inside create and refuses zero or
-    /// multiple matches with the candidates named.
-    ProfileName { profile_name: String },
-    /// A restricted spawn omitted `--agent`; resolve the host's last-used
-    /// profile during validation without granting catalog-read authority.
-    DerivedProfile,
 }
 
 /// Everything durable a session knows about resuming itself: its
@@ -4974,6 +4946,7 @@ impl Supervisor {
                     invocation: invocation.to_string(),
                     agent_kind: None,
                     resume_template: None,
+                    source_profile: None,
                 },
                 title,
                 cols,
@@ -5016,34 +4989,10 @@ impl Supervisor {
     /// that reaches tmux without a profile in front of it, so it needs the
     /// identical refusal the profile editor applies.
     ///
-    /// ## Profile resolution (PLAN_M6_75.md item 4)
-    ///
-    /// A profile-backed create resolves its profile FIRST, whether the caller
-    /// selected its stable id, selected its human-facing name, or omitted a
-    /// selector on an authenticated spawn and asked for the host's last-used
-    /// profile. Everything after that point is identical to a raw create: the profile's
-    /// invocation, kind, and template feed the very same
-    /// [`IntegrationSnapshot::resolve`] seam a raw create's overrides do,
-    /// so a session created from a profile carries an ordinary immutable
-    /// snapshot with no second code path behind it. What the profile adds
-    /// is the source-profile identity recorded beside that snapshot.
-    ///
-    /// An unknown id is `NotFound`: the profile can be deleted between a
-    /// picker read and submit, so the caller must refresh and pick again. A
-    /// name with zero or multiple exact matches is `InvalidRequest` and names
-    /// the available or matching candidates, so `--agent` can be made
-    /// unambiguous. A selectorless spawn also returns `InvalidRequest` when
-    /// there is no last-used source, or when that source profile has since
-    /// been deleted; its remedy is an explicit `--agent <profile-name>`.
-    /// None of these paths silently chooses another profile, since that would
-    /// launch an agent the user never asked for.
-    ///
-    /// Each refusal is recorded against a keyed create like every other
-    /// precondition, so a retry replays the same answer instead of resolving
-    /// against a catalog or host default that may have changed again.
-    ///
-    /// A method rather than an associated function since PLAN_M6_75.md item
-    /// 4: resolving a profile needs the store.
+    /// Profile resolution is complete before this method runs. That keeps
+    /// the supervisor independent of the helm catalog while preserving one
+    /// validation and snapshot path for raw, profile-backed, and derived
+    /// spawn bundles.
     async fn validate_create(&self, inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest> {
         let CreateInputs {
             cwd,
@@ -5053,150 +5002,13 @@ impl Supervisor {
             cols,
             rows,
         } = inputs;
-        // The profile lookup precedes the cwd check for one reason: it is
-        // the only precondition here that reads state this supervisor OWNS,
-        // and reporting "no such profile" for a request that also names a
-        // vanished directory is the more actionable of the two answers —
-        // the client's catalog is stale and every retry against that
-        // profile will fail, directory or no directory.
         let (invocation, agent_kind, resume_template, source_profile) = match mode {
             CreateMode::Raw {
                 invocation,
                 agent_kind,
                 resume_template,
-            } => (invocation, agent_kind, resume_template, None),
-            CreateMode::Profile { profile_id } => {
-                let profile_id = profile_id.as_str();
-                let profile = self
-                    .store
-                    .profile(profile_id)
-                    .await
-                    .context("reading the profile this create names")?
-                    .ok_or_else(|| {
-                        RequestError::new(
-                            ErrorKind::NotFound,
-                            format!(
-                                "no profile {} exists on this host; it may have been deleted \
-                                 since the profile list was read — pick another and try again",
-                                truncate_for_error(profile_id)
-                            ),
-                        )
-                    })?;
-                (
-                    profile.invocation,
-                    // A profile's kind is never a guess (it is
-                    // `AgentKind::Generic` when the user picked none), so it
-                    // is passed as an explicit OVERRIDE rather than left for
-                    // basename derivation — a `Generic` profile whose
-                    // invocation happens to start with `claude` must stay
-                    // generic, because that is what the user chose.
-                    Some(profile.agent_kind),
-                    // `None` here keeps `Profile::resume_template`'s own
-                    // meaning: for an integrated kind the snapshot resolver
-                    // derives that kind's default (from THIS invocation's
-                    // argv0, so an edited invocation carries its resume with
-                    // it), and for a generic profile there is simply no
-                    // resume template.
-                    profile.resume_template,
-                    Some(ProfileSnapshot {
-                        id: profile.id,
-                        name: profile.name,
-                    }),
-                )
-            }
-            CreateMode::ProfileName { profile_name } => {
-                let profiles = self
-                    .store
-                    .profiles()
-                    .await
-                    .context("reading the profile catalog to resolve this create's name")?;
-                let candidates = profiles
-                    .iter()
-                    .map(|profile| format!("{} ({})", profile.name, profile.id))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut matches = profiles
-                    .into_iter()
-                    .filter(|profile| profile.name == profile_name)
-                    .collect::<Vec<_>>();
-                let profile =
-                    match matches.len() {
-                        1 => matches.pop().expect("one profile match was counted"),
-                        0 => {
-                            return Err(RequestError::new(
-                            ErrorKind::InvalidRequest,
-                            format!(
-                                "no profile named {} exists on this host; available profiles: {}",
-                                truncate_for_error(&profile_name),
-                                if candidates.is_empty() { "none" } else { &candidates }
-                            ),
-                        )
-                        .into());
-                        }
-                        _ => {
-                            let matches = matches
-                                .iter()
-                                .map(|profile| format!("{} ({})", profile.name, profile.id))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            return Err(RequestError::new(
-                                ErrorKind::InvalidRequest,
-                                format!(
-                                    "profile name {} is ambiguous; matching candidates: {matches}",
-                                    truncate_for_error(&profile_name)
-                                ),
-                            )
-                            .into());
-                        }
-                    };
-                (
-                    profile.invocation,
-                    Some(profile.agent_kind),
-                    profile.resume_template,
-                    Some(ProfileSnapshot {
-                        id: profile.id,
-                        name: profile.name,
-                    }),
-                )
-            }
-            CreateMode::DerivedProfile => {
-                let source = self
-                    .store
-                    .latest_source_profile()
-                    .await
-                    .context("deriving this host's last-used profile")?
-                    .ok_or_else(|| {
-                        RequestError::new(
-                            ErrorKind::InvalidRequest,
-                            "no profile has been used on this host; pass --agent <profile-name>",
-                        )
-                    })?;
-                let profile = self
-                    .store
-                    .profile(&source.id)
-                    .await
-                    .context("reading this host's last-used profile")?
-                    .ok_or_else(|| {
-                        RequestError::new(
-                            ErrorKind::InvalidRequest,
-                            format!(
-                                "the last-used profile {} ({}) no longer exists; pass --agent \
-                                 <profile-name> instead of guessing an older default",
-                                truncate_for_error(&source.name),
-                                truncate_for_error(&source.id)
-                            ),
-                        )
-                    })?;
-                (
-                    profile.invocation,
-                    Some(profile.agent_kind),
-                    profile.resume_template,
-                    Some(ProfileSnapshot {
-                        id: profile.id,
-                        name: profile.name,
-                    }),
-                )
-            }
+                source_profile,
+            } => (invocation, agent_kind, resume_template, source_profile),
         };
         // `~` expansion happens here, as the first half of the cwd check,
         // in the one function every NEW create flows through — unkeyed,
@@ -6673,16 +6485,8 @@ impl Supervisor {
         let Some(snapshotted) = info.source_profile else {
             return Ok(info);
         };
-        let current = self
-            .store
-            .profile(&snapshotted.id)
-            .await
-            .context("reading the profile this session was created from")?;
         info.source_profile = Some(SourceProfile {
-            existence: source_profile_existence(
-                &snapshotted.name,
-                current.map(|profile| profile.name).as_deref(),
-            ),
+            existence: ProfileExistence::Unresolved,
             ..snapshotted
         });
         Ok(info)
@@ -11814,7 +11618,7 @@ pub(crate) mod tests {
                 profile_name: None,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
-                profile_id: None,
+                source_profile: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -11917,12 +11721,18 @@ pub(crate) mod tests {
                 create_fingerprint(
                     None,
                     "/work",
-                    &CreateMode::Profile {
-                        profile_id: "prof-1".to_string(),
+                    &CreateMode::Raw {
+                        invocation: "agent --flag".to_string(),
+                        agent_kind: None,
+                        resume_template: None,
+                        source_profile: Some(ProfileSnapshot {
+                            id: "prof-1".to_string(),
+                            name: "Profile One".to_string(),
+                        }),
                     },
                     Some("t"),
                 ),
-                "the create MODE",
+                "the source profile",
             ),
             (
                 create_fingerprint(
@@ -11932,21 +11742,11 @@ pub(crate) mod tests {
                         invocation: "agent --flag".to_string(),
                         agent_kind: None,
                         resume_template: None,
+                        source_profile: None,
                     },
                     Some("t"),
                 ),
                 "the parent",
-            ),
-            (
-                create_fingerprint(
-                    None,
-                    "/work",
-                    &CreateMode::ProfileName {
-                        profile_name: "Claude Code".to_string(),
-                    },
-                    Some("t"),
-                ),
-                "the profile-name selector",
             ),
         ];
         for (fingerprint, what) in cases {
@@ -11978,8 +11778,13 @@ pub(crate) mod tests {
         // two different requests: same key, different profile, refused —
         // never a replay of whichever one happened to run first.
         assert_ne!(
-            profile_fingerprint("/work", "prof-1", None),
-            profile_fingerprint("/work", "prof-2", None),
+            profile_fingerprint("/work", "prof-1", "Profile", "claude", None),
+            profile_fingerprint("/work", "prof-2", "Profile", "claude", None),
+        );
+        assert_ne!(
+            profile_fingerprint("/work", "prof-1", "Profile", "claude", None),
+            profile_fingerprint("/work", "prof-1", "Profile", "claude --new", None),
+            "editing a resolved profile between retries must conflict under the same key"
         );
         assert_ne!(
             create_fingerprint(
@@ -11989,6 +11794,7 @@ pub(crate) mod tests {
                     invocation: "agent".to_string(),
                     agent_kind: None,
                     resume_template: None,
+                    source_profile: None,
                 },
                 None,
             ),
@@ -11999,6 +11805,7 @@ pub(crate) mod tests {
                     invocation: "agent".to_string(),
                     agent_kind: None,
                     resume_template: None,
+                    source_profile: None,
                 },
                 None,
             ),
@@ -12008,39 +11815,32 @@ pub(crate) mod tests {
             create_fingerprint(
                 Some("parent-1"),
                 "/work",
-                &CreateMode::Profile {
-                    profile_id: "prof-1".to_string(),
+                &CreateMode::Raw {
+                    invocation: "claude".to_string(),
+                    agent_kind: Some(AgentKind::Claude),
+                    resume_template: None,
+                    source_profile: Some(ProfileSnapshot {
+                        id: "prof-1".to_string(),
+                        name: "Profile".to_string(),
+                    }),
                 },
                 None,
             ),
             create_fingerprint(
                 Some("parent-2"),
                 "/work",
-                &CreateMode::Profile {
-                    profile_id: "prof-1".to_string(),
+                &CreateMode::Raw {
+                    invocation: "claude".to_string(),
+                    agent_kind: Some(AgentKind::Claude),
+                    resume_template: None,
+                    source_profile: Some(ProfileSnapshot {
+                        id: "prof-1".to_string(),
+                        name: "Profile".to_string(),
+                    }),
                 },
                 None,
             ),
-            "a profile-id create's parent must change its fingerprint"
-        );
-        assert_ne!(
-            create_fingerprint(
-                Some("parent-1"),
-                "/work",
-                &CreateMode::ProfileName {
-                    profile_name: "Claude Code".to_string(),
-                },
-                None,
-            ),
-            create_fingerprint(
-                Some("parent-2"),
-                "/work",
-                &CreateMode::ProfileName {
-                    profile_name: "Claude Code".to_string(),
-                },
-                None,
-            ),
-            "a profile-name create's parent must change its fingerprint"
+            "a resolved profile create's parent must change its fingerprint"
         );
     }
 
@@ -12066,19 +11866,34 @@ pub(crate) mod tests {
                 agent_kind,
                 resume_template: resume_template
                     .map(|template| template.iter().map(ToString::to_string).collect()),
+                source_profile: None,
             },
             title,
         )
     }
 
-    /// [`create_fingerprint`] of a PROFILE-mode request. See
-    /// [`raw_fingerprint`].
-    fn profile_fingerprint(cwd: &str, profile_id: &str, title: Option<&str>) -> String {
+    /// Fingerprint a resolved profile bundle for the encoding tests.
+    ///
+    /// Keeping every resolved field explicit makes it easy for a test to pin
+    /// that an edit under the same profile id still changes the request.
+    fn profile_fingerprint(
+        cwd: &str,
+        profile_id: &str,
+        profile_name: &str,
+        invocation: &str,
+        title: Option<&str>,
+    ) -> String {
         create_fingerprint(
             None,
             cwd,
-            &CreateMode::Profile {
-                profile_id: profile_id.to_string(),
+            &CreateMode::Raw {
+                invocation: invocation.to_string(),
+                agent_kind: Some(AgentKind::Claude),
+                resume_template: None,
+                source_profile: Some(ProfileSnapshot {
+                    id: profile_id.to_string(),
+                    name: profile_name.to_string(),
+                }),
             },
             title,
         )
@@ -12119,12 +11934,11 @@ pub(crate) mod tests {
             raw_fingerprint("/work", "agent", None, None, None),
             r#"["/work","agent",null,null,null]"#
         );
-        // The profile mode's own encoding: discriminated and SHORTER, so it
-        // is distinguishable from a raw fingerprint by shape alone — no
-        // `cwd`, title or profile id can make the two collide.
+        // Resolved bundles have their own discriminant and include profile
+        // provenance as well as every launch-shaping field.
         assert_eq!(
-            profile_fingerprint("/work", "prof-7", Some("title")),
-            r#"["profile","/work","title","prof-7"]"#
+            profile_fingerprint("/work", "prof-7", "Claude", "claude", Some("title")),
+            r#"["resolved_profile",null,"/work","claude","title","claude",null,"prof-7","Claude"]"#
         );
         assert_eq!(
             create_fingerprint(
@@ -12134,21 +11948,11 @@ pub(crate) mod tests {
                     invocation: "agent".to_string(),
                     agent_kind: None,
                     resume_template: None,
+                    source_profile: None,
                 },
                 None,
             ),
             r#"["parented_raw","parent-1","/work","agent",null,null,null]"#
-        );
-        assert_eq!(
-            create_fingerprint(
-                None,
-                "/work",
-                &CreateMode::ProfileName {
-                    profile_name: "Claude Code".to_string(),
-                },
-                None,
-            ),
-            r#"["profile_name",null,"/work",null,"Claude Code"]"#
         );
     }
 
@@ -12482,6 +12286,7 @@ pub(crate) mod tests {
                         invocation: "/opt/bin/claude --dangerously-skip-permissions".to_string(),
                         agent_kind: None,
                         resume_template: None,
+                        source_profile: None,
                     },
                     title: Some("t".to_string()),
                     cols: 80,
@@ -12529,6 +12334,7 @@ pub(crate) mod tests {
                         invocation: "claude".to_string(),
                         agent_kind: None,
                         resume_template: Some(vec!["claude".to_string(), "--continue".to_string()]),
+                        source_profile: None,
                     },
                     title: None,
                     cols: 80,
@@ -12543,81 +12349,6 @@ pub(crate) mod tests {
             sup.store.load_all().await.expect("load").len(),
             before,
             "a refused create must not leave a row behind"
-        );
-    }
-
-    /// Name resolution chooses the whole matching profile from one catalog
-    /// snapshot and returns useful candidates for both exact-match failures.
-    #[tokio::test]
-    async fn profile_name_resolution_is_exact_and_refuses_missing_or_ambiguous_names() {
-        let state = StateDir::new();
-        let work = tempfile::tempdir().expect("workdir");
-        let cwd = work.path().to_string_lossy().to_string();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let profiles = sup.store.profiles().await.expect("starter catalog");
-        assert_eq!(
-            profiles.len(),
-            4,
-            "the fresh catalog supplies four candidates"
-        );
-        let chosen = profiles
-            .iter()
-            .find(|profile| profile.id == "starter-codex")
-            .expect("Codex starter");
-        let inputs = |name: &str| CreateInputs {
-            cwd: &cwd,
-            parent: Some("parent-1".to_string()),
-            mode: CreateMode::ProfileName {
-                profile_name: name.to_string(),
-            },
-            title: None,
-            cols: 80,
-            rows: 24,
-        };
-
-        let resolved = sup
-            .validate_create(inputs(&chosen.name))
-            .await
-            .expect("an exact unique name resolves");
-        let source = resolved
-            .source_profile
-            .expect("profile resolution records its source");
-        assert_eq!(source.id, chosen.id);
-        assert_eq!(source.name, chosen.name);
-        assert_eq!(resolved.invocation, chosen.invocation);
-
-        for (id, name) in [("exact-a", "Exact Name"), ("exact-b", "Exact Name")] {
-            sup.store
-                .insert_profile_with_id(farhelm_proto::Profile {
-                    id: id.to_string(),
-                    name: name.to_string(),
-                    invocation: "agent".to_string(),
-                    agent_kind: AgentKind::Generic,
-                    resume_template: None,
-                })
-                .await
-                .expect("insert duplicate-name fixture");
-        }
-
-        let ambiguous = match sup.validate_create(inputs("Exact Name")).await {
-            Err(error) => error,
-            Ok(_) => panic!("two exact matches are ambiguous"),
-        };
-        assert_eq!(error_kind(&ambiguous), ErrorKind::InvalidRequest);
-        let ambiguous = format!("{ambiguous:#}");
-        assert!(ambiguous.contains("exact-a") && ambiguous.contains("exact-b"));
-
-        let missing = match sup.validate_create(inputs("exact name")).await {
-            Err(error) => error,
-            Ok(_) => panic!("name matching is exact, including case"),
-        };
-        assert_eq!(error_kind(&missing), ErrorKind::InvalidRequest);
-        let missing = format!("{missing:#}");
-        assert!(
-            missing.contains("available profiles") && missing.contains("starter-claude"),
-            "a missing exact name lists candidates the caller can send: {missing}"
         );
     }
 
@@ -12646,6 +12377,7 @@ pub(crate) mod tests {
                     invocation: format!("{} claude", crate::agent_kind::CWD_PLACEHOLDER),
                     agent_kind: None,
                     resume_template: None,
+                    source_profile: None,
                 },
                 title: None,
                 cols: 80,
@@ -12697,6 +12429,7 @@ pub(crate) mod tests {
                     invocation: format!("wrapper {} claude", crate::agent_kind::CWD_PLACEHOLDER),
                     agent_kind: None,
                     resume_template: None,
+                    source_profile: None,
                 },
                 title: None,
                 cols: 80,
@@ -12709,147 +12442,6 @@ pub(crate) mod tests {
             ["wrapper", crate::agent_kind::CWD_PLACEHOLDER, "claude"],
             "validation must not substitute the placeholder itself"
         );
-    }
-
-    /// Default derivation names the newest profile-backed session and never
-    /// walks backward when that profile has since been removed.
-    #[tokio::test]
-    async fn derived_profile_refuses_a_gone_newest_profile_without_walkback() {
-        let state = StateDir::new();
-        let work = tempfile::tempdir().expect("workdir");
-        let cwd = work.path().to_string_lossy().to_string();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let starter = sup
-            .store
-            .profile("starter-claude")
-            .await
-            .unwrap()
-            .expect("starter profile");
-        let gone = match sup
-            .store
-            .create_profile(
-                "Gone Agent".to_string(),
-                "agent".to_string(),
-                AgentKind::Generic,
-                None,
-            )
-            .await
-            .expect("create profile")
-        {
-            crate::store::ProfileCreation::Created(profile) => profile,
-            other => panic!("profile creation must succeed: {other:?}"),
-        };
-        const SEEDED_CREATED_AT: i64 = 1_700_000_000;
-        let source =
-            |id: &str, title: &str, profile: crate::store::ProfileSnapshot| StoredSession {
-                conversation_source: None,
-                id: id.to_string(),
-                parent: None,
-                archived: false,
-                title: title.to_string(),
-                created_at: SEEDED_CREATED_AT,
-                last_activity_at: SEEDED_CREATED_AT,
-                creation_seq: 0,
-                cwd: cwd.clone(),
-                invocation: "agent".to_string(),
-                tmux_name: format!("fh-{id}"),
-                pane: "%0".to_string(),
-                outcome: LastOutcome::Running,
-                agent_kind: AgentKind::Generic,
-                resume_template: None,
-                canonical_cwd: None,
-                captured_conversation: None,
-                captured_record: None,
-                capture_ambiguous: false,
-                first_input_at: None,
-                generation: 0,
-                launch_scoped: false,
-                source_profile: Some(profile),
-            };
-        sup.store
-            .insert_session(
-                source(
-                    "older",
-                    "older",
-                    crate::store::ProfileSnapshot {
-                        id: starter.id,
-                        name: starter.name,
-                    },
-                ),
-                None,
-            )
-            .await
-            .expect("seed older source");
-        sup.store
-            .insert_session(
-                source(
-                    "newest",
-                    "newest",
-                    crate::store::ProfileSnapshot {
-                        id: gone.id.clone(),
-                        name: gone.name.clone(),
-                    },
-                ),
-                None,
-            )
-            .await
-            .expect("seed same-second newer source");
-        sup.store
-            .delete_profile(&gone.id)
-            .await
-            .expect("delete profile");
-
-        let refusal = match sup
-            .validate_create(CreateInputs {
-                cwd: &cwd,
-                parent: None,
-                mode: CreateMode::DerivedProfile,
-                title: None,
-                cols: 80,
-                rows: 24,
-            })
-            .await
-        {
-            Err(error) => error,
-            Ok(_) => panic!("a gone newest profile is a precondition failure"),
-        };
-        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
-        let refusal = format!("{refusal:#}");
-        assert!(
-            refusal.contains("Gone Agent") && refusal.contains("--agent"),
-            "the refusal names the lost choice and the explicit remedy: {refusal}"
-        );
-    }
-
-    /// A host with no profile-backed history cannot guess what spawn should
-    /// run, and the refusal leaves no session behind.
-    #[tokio::test]
-    async fn derived_profile_without_source_history_is_a_clean_precondition_failure() {
-        let state = StateDir::new();
-        let work = tempfile::tempdir().expect("workdir");
-        let cwd = work.path().to_string_lossy().to_string();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let refusal = match sup
-            .validate_create(CreateInputs {
-                cwd: &cwd,
-                parent: None,
-                mode: CreateMode::DerivedProfile,
-                title: None,
-                cols: 80,
-                rows: 24,
-            })
-            .await
-        {
-            Err(error) => error,
-            Ok(_) => panic!("a profile cannot be derived from no profile-backed sessions"),
-        };
-        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
-        assert!(format!("{refusal:#}").contains("--agent"));
-        assert!(sup.store.load_all().await.unwrap().is_empty());
     }
 
     /// Drive `handle_control`'s create arm three times against one intent
@@ -12881,7 +12473,7 @@ pub(crate) mod tests {
             profile_name: None,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
-            profile_id: None,
+            source_profile: None,
             title: None,
             cols: 80,
             rows: 24,
@@ -13482,7 +13074,7 @@ pub(crate) mod tests {
                     profile_name: None,
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
-                    profile_id: None,
+                    source_profile: None,
                     title: Some(title.clone()),
                     cols: 80,
                     rows: 24,
@@ -13530,7 +13122,7 @@ pub(crate) mod tests {
                 profile_name: None,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
-                profile_id: None,
+                source_profile: None,
                 title: Some("🚀 デモ project — a normal title".to_string()),
                 cols: 80,
                 rows: 24,
@@ -13589,7 +13181,7 @@ pub(crate) mod tests {
                 profile_name: None,
                 cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
                 invocation: Some("agent".to_string()),
-                profile_id: None,
+                source_profile: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -13664,7 +13256,7 @@ pub(crate) mod tests {
             profile_name: None,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
-            profile_id: None,
+            source_profile: None,
             title: Some(title.to_string()),
             cols: 80,
             rows: 24,
@@ -14236,405 +13828,6 @@ pub(crate) mod tests {
         assert_ne!(io.kind(), std::io::ErrorKind::ConnectionRefused);
     }
 
-    /// A profile-backed create whose profile is RENAMED while the launch is
-    /// in flight reports the rename (PLAN_M6_75.md item 5).
-    ///
-    /// `SourceProfile`'s contract is that existence describes the catalog
-    /// AT REPLY TIME, and a create is the one path where that is easy to
-    /// get wrong: the profile was looked up before the launch, so copying
-    /// `Present` from that lookup costs nothing and looks right. The gap it
-    /// ignores is real — a launch is a tmux round trip plus two durable
-    /// writes — and the reply would then assert something about the catalog
-    /// that stopped being true while it worked.
-    ///
-    /// Forced deterministically through the create-lifecycle seam rather
-    /// than by racing a spawned task: the rename is performed from inside
-    /// the `DuringLaunch` stage, which is exactly the window between the
-    /// pre-launch resolution and the reply.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_profile_renamed_during_the_launch_is_reported_by_the_create_reply() {
-        let state = StateDir::new();
-        let db = state.path().join("supervisor.db");
-        let sup = {
-            let db = db.clone();
-            Supervisor::new_with_seams(
-                state.path(),
-                dummy_exe(),
-                SupervisorTimeouts::default(),
-                SupervisorSeams {
-                    create_crash: Some(Arc::new(move |stage| {
-                        if stage != CreateStage::DuringLaunch {
-                            return Ok(());
-                        }
-                        // A second connection to the same database, which
-                        // is what a concurrent profile edit would have.
-                        let db = db.clone();
-                        tokio::task::block_in_place(move || {
-                            tokio::runtime::Handle::current().block_on(async move {
-                                let store = SessionStore::open(&db, false).await?;
-                                let profile = store
-                                    .profile("starter-claude")
-                                    .await?
-                                    .expect("the starter is what the create named");
-                                store
-                                    .update_profile(farhelm_proto::Profile {
-                                        name: "Renamed mid-launch".to_string(),
-                                        ..profile
-                                    })
-                                    .await?;
-                                anyhow::Ok(())
-                            })
-                        })?;
-                        Ok(())
-                    })),
-                    ..SupervisorSeams::default()
-                },
-            )
-            .await
-            .expect("supervisor")
-        };
-
-        let session = sup
-            .create_session(
-                CreateInputs {
-                    cwd: "/",
-                    parent: None,
-                    mode: CreateMode::Profile {
-                        profile_id: "starter-claude".to_string(),
-                    },
-                    title: None,
-                    cols: 80,
-                    rows: 24,
-                },
-                None,
-            )
-            .await
-            .expect("the create itself succeeds; only the catalog moved under it");
-        let source = session
-            .source_profile
-            .expect("a profile-backed create records what it came from");
-        assert_eq!(
-            source.name, "claude",
-            "the SNAPSHOT is what the user picked, and no later edit rewrites it"
-        );
-        assert_eq!(
-            source.existence,
-            ProfileExistence::Renamed,
-            "existence describes the catalog when the reply was built, not when the profile was \
-             resolved"
-        );
-    }
-
-    /// A pending retry launches what the FIRST attempt resolved, even after
-    /// its profile has been edited out from under it (PLAN_M6_75.md item
-    /// 4).
-    ///
-    /// A profile is mutable and an accepted intent is not. Re-resolving the
-    /// request on the retry would mean that editing a profile between a
-    /// crash and its retry silently changes what an unchanged intent
-    /// launches — the same key, the same request, a different agent — and
-    /// there is no moment at which the client could have asked for that.
-    /// The row the crashed attempt committed is the record of what was
-    /// resolved, so the row is what the retry runs.
-    ///
-    /// The stranded row is planted directly, which is what a crash between
-    /// the claim and the launch leaves behind: a reservation, a `Launching`
-    /// row with no pane, and no tmux session anywhere.
-    #[tokio::test]
-    async fn a_pending_retry_runs_the_original_profile_resolution_not_the_edited_one() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let fingerprint = create_fingerprint(
-            None,
-            "/",
-            &CreateMode::Profile {
-                profile_id: "starter-claude".to_string(),
-            },
-            None,
-        );
-        sup.store
-            .insert_session(
-                StoredSession {
-                    conversation_source: None,
-                    id: "stranded".to_string(),
-                    parent: None,
-                    archived: false,
-                    title: "stranded".to_string(),
-                    created_at: now_unix(),
-                    last_activity_at: now_unix(),
-                    creation_seq: 0,
-                    cwd: "/".to_string(),
-                    invocation: "claude --original".to_string(),
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
-                    outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: Some(vec![
-                        "claude".to_string(),
-                        "--resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
-                    canonical_cwd: Some("/".to_string()),
-                    captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
-                    generation: 0,
-                    launch_scoped: false,
-                    source_profile: Some(ProfileSnapshot {
-                        id: "starter-claude".to_string(),
-                        name: "claude".to_string(),
-                    }),
-                },
-                Some(IntentClaim {
-                    intent_key: "key".to_string(),
-                    fingerprint: fingerprint.clone(),
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
-            .await
-            .expect("seed the crashed attempt");
-
-        // The catalog moves between the two attempts: a rename AND a
-        // changed invocation, so re-resolution would be visible in the
-        // launched command line rather than only in a label.
-        sup.store
-            .update_profile(farhelm_proto::Profile {
-                id: "starter-claude".to_string(),
-                name: "Edited".to_string(),
-                invocation: "claude --edited".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Claude,
-                resume_template: None,
-            })
-            .await
-            .expect("edit")
-            .expect("the profile is there to edit");
-
-        let session = sup
-            .create_session(
-                CreateInputs {
-                    cwd: "/",
-                    parent: None,
-                    mode: CreateMode::Profile {
-                        profile_id: "starter-claude".to_string(),
-                    },
-                    title: None,
-                    cols: 80,
-                    rows: 24,
-                },
-                Some(IntentClaim {
-                    intent_key: "key".to_string(),
-                    fingerprint,
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
-            .await
-            .expect("the retry performs the create under the reserved identity");
-        assert_eq!(session.id, "stranded");
-        assert_eq!(
-            session.invocation, "claude --original",
-            "the retry runs what the first attempt resolved, not what the catalog says now"
-        );
-        let source = session.source_profile.expect("the snapshot rides the row");
-        assert_eq!(source.name, "claude", "and so does the name it recorded");
-        assert_eq!(
-            source.existence,
-            ProfileExistence::Renamed,
-            "while existence is still derived fresh, as on every other reply"
-        );
-    }
-
-    /// The same retry, with its profile DELETED between the attempts.
-    ///
-    /// The failure this excludes is worse than the edited case: deleting a
-    /// profile would turn an already-accepted create — one the supervisor
-    /// had committed a row for and told nobody about — into a permanent
-    /// `NotFound` for its own intent key. The unknown-profile precondition
-    /// is about a create that has not happened yet; this one already has.
-    #[tokio::test]
-    async fn a_pending_retry_survives_its_profile_being_deleted_between_attempts() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let fingerprint = create_fingerprint(
-            None,
-            "/",
-            &CreateMode::Profile {
-                profile_id: "starter-codex".to_string(),
-            },
-            None,
-        );
-        sup.store
-            .insert_session(
-                StoredSession {
-                    conversation_source: None,
-                    id: "stranded".to_string(),
-                    parent: None,
-                    archived: false,
-                    title: "stranded".to_string(),
-                    created_at: now_unix(),
-                    last_activity_at: now_unix(),
-                    creation_seq: 0,
-                    cwd: "/".to_string(),
-                    invocation: "codex".to_string(),
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
-                    outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Codex,
-                    resume_template: Some(vec![
-                        "codex".to_string(),
-                        "resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
-                    canonical_cwd: Some("/".to_string()),
-                    captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
-                    generation: 0,
-                    launch_scoped: false,
-                    source_profile: Some(ProfileSnapshot {
-                        id: "starter-codex".to_string(),
-                        name: "codex".to_string(),
-                    }),
-                },
-                Some(IntentClaim {
-                    intent_key: "key".to_string(),
-                    fingerprint: fingerprint.clone(),
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
-            .await
-            .expect("seed the crashed attempt");
-        assert!(
-            sup.store
-                .delete_profile("starter-codex")
-                .await
-                .expect("delete")
-        );
-
-        let session = sup
-            .create_session(
-                CreateInputs {
-                    cwd: "/",
-                    parent: None,
-                    mode: CreateMode::Profile {
-                        profile_id: "starter-codex".to_string(),
-                    },
-                    title: None,
-                    cols: 80,
-                    rows: 24,
-                },
-                Some(IntentClaim {
-                    intent_key: "key".to_string(),
-                    fingerprint,
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
-            .await
-            .expect("a create the supervisor already accepted must not become NotFound");
-        assert_eq!(session.id, "stranded");
-        assert_eq!(session.invocation, "codex");
-        let source = session.source_profile.expect("the snapshot rides the row");
-        assert_eq!(source.name, "codex");
-        assert_eq!(
-            source.existence,
-            ProfileExistence::Deleted,
-            "the session still says what it came from, and the reply says that profile is gone"
-        );
-    }
-
-    /// A RESTART keeps the session's source profile, and re-derives its
-    /// existence (PLAN_M6_75.md item 4).
-    ///
-    /// A restart is a new launch generation of the same session, so what it
-    /// was created from does not change — but the restart publishes a NEW
-    /// entry, and an entry built without the snapshot loses it for every
-    /// reply until the next supervisor reload puts it back. That is a
-    /// SPEC.md violation with a long fuse: a profile-created session would
-    /// simply look raw-created, and nothing would ever fail.
-    ///
-    /// The rename is applied between the create and the restart, so the
-    /// reply cannot be passing by echoing a placeholder: the snapshotted
-    /// name and the derived existence disagree with each other, and both
-    /// have to be right.
-    #[tokio::test]
-    async fn a_restart_keeps_the_source_profile_and_re_derives_its_existence() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let cwd = state.path().to_string_lossy().to_string();
-        let created = sup
-            .create_session(
-                CreateInputs {
-                    cwd: &cwd,
-                    parent: None,
-                    mode: CreateMode::Profile {
-                        profile_id: "starter-claude".to_string(),
-                    },
-                    title: None,
-                    cols: 80,
-                    rows: 24,
-                },
-                None,
-            )
-            .await
-            .expect("create from the starter profile");
-
-        sup.store
-            .update_profile(farhelm_proto::Profile {
-                id: "starter-claude".to_string(),
-                name: "Claude, renamed".to_string(),
-                invocation: "claude".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Claude,
-                resume_template: None,
-            })
-            .await
-            .expect("rename")
-            .expect("the profile is there to rename");
-
-        let restarted = sup
-            .restart_session(&created.id, RestartMode::Fresh, true)
-            .await
-            .expect("restart");
-        let source = restarted
-            .source_profile
-            .expect("a restart never changes what a session was created from");
-        assert_eq!(source.id, "starter-claude");
-        assert_eq!(
-            source.name, "claude",
-            "the snapshot is what the session recorded at creation"
-        );
-        assert_eq!(
-            source.existence,
-            ProfileExistence::Renamed,
-            "and the existence beside it is derived for THIS reply"
-        );
-
-        // The republished ENTRY carries it too, which is what every later
-        // reply is built from — a restart that returned the right reply
-        // while dropping the entry's copy would look correct exactly once.
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("the restarted session is back on the map");
-        assert_eq!(
-            entry
-                .info
-                .source_profile
-                .as_ref()
-                .map(|profile| profile.id.as_str()),
-            Some("starter-claude")
-        );
-    }
-
     /// A sampler still holding the PRE-restart entry advances the value
     /// every later reply reads — because the activity cell is one per
     /// session, not one per launch.
@@ -14674,6 +13867,7 @@ pub(crate) mod tests {
                         invocation: "agent".to_string(),
                         agent_kind: Some(AgentKind::Generic),
                         resume_template: None,
+                        source_profile: None,
                     },
                     title: None,
                     cols: 80,
@@ -14721,100 +13915,10 @@ pub(crate) mod tests {
             .cloned()
             .expect("the restarted session is back on the map");
         assert_eq!(
-            crate::service::status::entry_info(
-                &live,
-                &HashMap::new(),
-                None,
-                &crate::store::ProfileNames::new(),
-            )
-            .last_activity_at,
+            crate::service::status::entry_info(&live, &HashMap::new(), None,).last_activity_at,
             observed_at,
             "the replacement entry must read the same cell the pre-restart entry was written \
              through; a per-launch cell would report the build-time value instead"
-        );
-    }
-
-    /// The source-profile snapshot survives a supervisor RESTART, and its
-    /// existence is derived fresh on the way back up (PLAN_M6_75.md item
-    /// 4).
-    ///
-    /// The columns are only worth having if reload reads them: a session
-    /// created from a profile, on a supervisor that then goes away, must
-    /// come back still knowing what it came from. Nothing else in the tree
-    /// covers the reload wiring — the create path builds its entry from the
-    /// request rather than from the row, so a reload that dropped these two
-    /// columns would pass every create-side test.
-    ///
-    /// The profile is DELETED while the supervisor is down, which is both
-    /// the harder case and the honest one: it proves the reloaded snapshot
-    /// is the session's own record rather than something re-derived from a
-    /// catalog that no longer contains it.
-    #[tokio::test]
-    async fn a_reloaded_session_keeps_its_source_profile_and_derives_existence_freshly() {
-        let state = StateDir::new();
-        let cwd = state.path().to_string_lossy().to_string();
-        let created = {
-            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-                .await
-                .expect("supervisor");
-            let created = sup
-                .create_session(
-                    CreateInputs {
-                        cwd: &cwd,
-                        parent: None,
-                        mode: CreateMode::Profile {
-                            profile_id: "starter-claude".to_string(),
-                        },
-                        title: None,
-                        cols: 80,
-                        rows: 24,
-                    },
-                    None,
-                )
-                .await
-                .expect("create from the starter profile");
-            sup.store
-                .delete_profile("starter-claude")
-                .await
-                .expect("delete the profile out from under the session");
-            created
-        };
-
-        let reloaded = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("a second supervisor over the same state directory");
-        let entry = reloaded
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("the session is reloaded");
-        let snapshot = entry
-            .info
-            .source_profile
-            .as_ref()
-            .expect("the stored snapshot survives the process that wrote it");
-        assert_eq!(snapshot.id, "starter-claude");
-        assert_eq!(snapshot.name, "claude");
-
-        // Through a real reply, so the derivation is exercised rather than
-        // the raw column: the profile is gone, and the reply must say so.
-        let page = crate::service::listing::list_all(&reloaded)
-            .await
-            .expect("list");
-        let listed = page
-            .sessions
-            .iter()
-            .find(|session| session.id == created.id)
-            .expect("the reloaded session lists");
-        assert_eq!(
-            listed
-                .source_profile
-                .as_ref()
-                .map(|profile| profile.existence),
-            Some(ProfileExistence::Deleted),
-            "existence is derived at reply time, never reloaded from the row"
         );
     }
 
@@ -14923,221 +14027,6 @@ pub(crate) mod tests {
         assert!(
             sup.sessions.lock().await.is_empty(),
             "and nothing may have been launched"
-        );
-    }
-
-    /// A catalog read that fails AFTER the session is created still tells
-    /// the caller which session exists (PLAN_M6_75.md item 5).
-    ///
-    /// The reply is withheld — an unreadable catalog cannot be degraded
-    /// into "the profile is gone" — but the create itself has already
-    /// happened by then: the row is committed, the tmux session is running,
-    /// and the entry is on the map. So the error is the ONLY thing the
-    /// caller will ever see about a session that exists, and without the id
-    /// in it there is no handle anywhere: an unkeyed create has no
-    /// reservation to reconcile, the caller cannot attach, cannot delete,
-    /// and the obvious response — retry the create — starts a second agent
-    /// in the same directory.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_catalog_failure_after_the_launch_still_names_the_session_it_created() {
-        let state = StateDir::new();
-        let db = state.path().join("supervisor.db");
-        let sup = {
-            let db = db.clone();
-            Supervisor::new_with_seams(
-                state.path(),
-                dummy_exe(),
-                SupervisorTimeouts::default(),
-                SupervisorSeams {
-                    create_crash: Some(Arc::new(move |stage| {
-                        if stage != CreateStage::DuringLaunch {
-                            return Ok(());
-                        }
-                        // After the profile was resolved and the launch
-                        // happened; before the reply is assembled.
-                        let db = db.clone();
-                        tokio::task::block_in_place(move || {
-                            tokio::runtime::Handle::current().block_on(async move {
-                                SessionStore::open(&db, false)
-                                    .await?
-                                    .drop_profile_catalog_for_test()
-                                    .await;
-                                anyhow::Ok(())
-                            })
-                        })?;
-                        Ok(())
-                    })),
-                    ..SupervisorSeams::default()
-                },
-            )
-            .await
-            .expect("supervisor")
-        };
-
-        let failure = sup
-            .create_session(
-                CreateInputs {
-                    cwd: "/",
-                    parent: None,
-                    mode: CreateMode::Profile {
-                        profile_id: "starter-claude".to_string(),
-                    },
-                    title: None,
-                    cols: 80,
-                    rows: 24,
-                },
-                None,
-            )
-            .await
-            .expect_err("an unreadable catalog withholds the reply");
-        let rendered = format!("{failure:#}");
-
-        let published = sup.sessions.lock().await;
-        let (id, _) = published
-            .iter()
-            .next()
-            .expect("the session was created and published before the catalog was read");
-        assert!(
-            rendered.contains(id.as_str()),
-            "the failure must name the session that exists, or nothing ever can: {rendered}"
-        );
-        assert!(
-            rendered.contains("WAS created"),
-            "and must say plainly that it exists, so the caller does not retry into a \
-             duplicate: {rendered}"
-        );
-        assert!(
-            sup.store
-                .session(id)
-                .await
-                .expect("read")
-                .is_some_and(|row| row.outcome == LastOutcome::Running),
-            "the session must be durable and confirmed, not rolled back with the reply"
-        );
-    }
-
-    /// The same for a RESTART: the reply is withheld, and the new
-    /// generation — terminal included — stays published.
-    ///
-    /// Worse than the create case if it were silent, because the obvious
-    /// response to a failed restart is to restart again — which would kill
-    /// the agent this restart just started and launch a third. The message
-    /// therefore names the session AND says the restart succeeded.
-    ///
-    /// ## Why the terminal is asserted, and why the restart is a
-    /// fresh-terminal one
-    ///
-    /// The bug this pins was not the message. A reply-build failure used to
-    /// be classified as an AMBIGUOUS relaunch failure, which runs the
-    /// generic recovery — and that recovery republishes an entry built from
-    /// the PRE-restart one, terminal and all. So a catalog read failing
-    /// after `publish_relaunched` had already installed the new generation
-    /// overwrote it: the map ended up pointing at the terminal the restart
-    /// had just replaced, with a `Launching` outcome, while the agent the
-    /// restart actually started ran in a terminal nothing referenced. That
-    /// contradicts SPEC.md's restart guarantee for a reason that has nothing
-    /// to do with restarting.
-    ///
-    /// The generation alone could not catch it — the recovery republishes
-    /// under `claim.generation` too, so `generation == 1` was true either
-    /// way. What separates them is the TERMINAL, and it only differs when
-    /// the restart builds a fresh one: a reused pane keeps its id across
-    /// `respawn-pane`, so the terminal is identical whichever entry wins.
-    /// Killing the tmux session first is what makes this the fresh-terminal
-    /// path, and the new pane is then probed through tmux to prove it is
-    /// live rather than merely different.
-    #[tokio::test]
-    async fn a_catalog_failure_after_a_restart_keeps_the_new_terminal_published() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let cwd = state.path().to_string_lossy().to_string();
-        let created = sup
-            .create_session(
-                CreateInputs {
-                    cwd: &cwd,
-                    parent: None,
-                    mode: CreateMode::Profile {
-                        profile_id: "starter-claude".to_string(),
-                    },
-                    title: None,
-                    cols: 80,
-                    rows: 24,
-                },
-                None,
-            )
-            .await
-            .expect("create from the starter profile");
-        let before = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("the create publishes an entry")
-            .terminal
-            .clone()
-            .expect("with a terminal");
-
-        // The terminal goes away, which is what an interrupted session (or
-        // a tmux server that died) leaves behind — and is what makes the
-        // restart below build a FRESH terminal with a pane id of its own.
-        sup.tmux
-            .kill_session(&before.tmux_name)
-            .await
-            .expect("kill the session's terminal");
-
-        // Unreadable from here on: the restart's own work does not touch
-        // the catalog, so only the reply-building read fails.
-        sup.store.drop_profile_catalog_for_test().await;
-        let failure = sup
-            .restart_session(&created.id, RestartMode::Fresh, true)
-            .await
-            .expect_err("an unreadable catalog withholds the restart's reply too");
-        let rendered = format!("{failure:#}");
-        assert!(
-            rendered.contains(&created.id) && rendered.contains("SUCCEEDED"),
-            "the failure must name the session and say the restart happened, so nobody \
-             restarts it again: {rendered}"
-        );
-
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("the restarted session stays published despite the withheld reply");
-        assert_eq!(
-            entry.generation, 1,
-            "and it is the NEW generation that is published, not the one the restart replaced"
-        );
-        assert_eq!(
-            *entry.outcome.lock().expect("outcome mutex poisoned"),
-            LastOutcome::Running,
-            "the restart confirmed its launch, so a failure to DESCRIBE the session must not \
-             walk that back to Launching"
-        );
-        let published = entry.terminal.clone().expect("a restarted session has one");
-        assert_ne!(
-            published.pane, before.pane,
-            "the published terminal must be the one the restart created, not the pane it \
-             replaced — a recovery that republished the pre-restart entry would leave the live \
-             terminal unreferenced"
-        );
-        // `Owned`, not merely "not gone": the pane must both exist AND be
-        // this session's, which is the whole point of the map pointing at
-        // it.
-        assert!(
-            matches!(
-                sup.tmux
-                    .pane_process(&published.tmux_name, &published.pane)
-                    .await
-                    .expect("probe the published pane"),
-                PaneProbe::Owned(_)
-            ),
-            "and it must be attachable: tmux has to know the pane the map points at"
         );
     }
 

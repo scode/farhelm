@@ -70,7 +70,8 @@ enum Cmd {
         /// Optional display title; omitted derives from the directory.
         #[arg(long)]
         title: Option<String>,
-        /// Agent profile name; omitted derives the host's last-used profile.
+        /// Agent profile name; omitted reuses the asking session's stored
+        /// agent bundle, including its profile snapshot when present.
         #[arg(long)]
         agent: Option<String>,
         /// Organizational parent id. Never defaults to this session.
@@ -135,8 +136,8 @@ enum Cmd {
 /// judged rather than a per-flag convenience. A host name, a directory, a
 /// profile name, an invocation, a title and an idempotency key are all
 /// plain strings that something DOWNSTREAM decides the legality of — the
-/// helm's registry, the target supervisor's catalog and filesystem, the
-/// relay's own byte caps. Every one of them may legally begin with `-`, and
+/// helm's registry and profile catalog, the target supervisor's filesystem,
+/// and the relay's own byte caps. Every one of them may legally begin with `-`, and
 /// without the allowance clap refuses such a value here as an unrecognized
 /// option, which turns "the target will tell you why that name is wrong"
 /// into "this CLI would not even carry your name". The cost is the usual
@@ -211,7 +212,7 @@ enum AgentCmd {
         /// Host to create on, by the name `farhelm agent hosts` shows.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
         host: Option<String>,
-        /// Agent profile name, resolved on the target host.
+        /// Agent profile name, resolved in the helm-wide catalog.
         #[arg(
             long,
             value_name = "NAME",
@@ -287,9 +288,8 @@ impl AgentCmd {
                 cwd: cwd.clone(),
                 // `--profile` on the command line, `profile_name` on the
                 // wire: the flag is what a user types and the field says
-                // what it IS, which matters because the helm resolves it
-                // against the target host's catalog and an id would be a
-                // different (and wrong) thing to send.
+                // what it IS: the helm resolves this human-facing selector
+                // into the bundle sent to the target supervisor.
                 profile_name: profile.clone(),
                 invocation: invocation.clone(),
                 title: title.clone(),
@@ -1032,7 +1032,6 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
             parent: args.parent,
             cwd,
             invocation: None,
-            profile_id: None,
             profile_name: args.agent,
             title: args.title,
             cols: 80,
@@ -1040,6 +1039,7 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
             intent_key: args.idempotency_key,
             agent_kind: None,
             resume_template: None,
+            source_profile: None,
         })
         .await
         .context("sending the spawn request")?;
@@ -1358,6 +1358,10 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::Create { .. } | farhelm_proto::AgentVerb::Clone { .. } => {
                 ReplyKind::Created
             }
+            // This is an internal supervisor-to-helm query, never a CLI
+            // verb. Classifying it keeps a malformed peer reply recoverable
+            // instead of letting a new wire variant abort this process.
+            farhelm_proto::AgentVerb::ResolveProfile { .. } => ReplyKind::Created,
         }
     }
 
@@ -1368,6 +1372,7 @@ impl ReplyKind {
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Stopped {} => ReplyKind::Stopped,
             AgentReply::Created { .. } => ReplyKind::Created,
+            AgentReply::ResolvedProfile { .. } => ReplyKind::Created,
         }
     }
 
@@ -1499,7 +1504,10 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         // as an empty fleet. `main` never routes one here — see this
         // function's docs for why that is stated as an error and not
         // asserted.
-        AgentReply::Session { .. } | AgentReply::Stopped {} | AgentReply::Created { .. } => {
+        AgentReply::Session { .. }
+        | AgentReply::Stopped {}
+        | AgentReply::Created { .. }
+        | AgentReply::ResolvedProfile { .. } => {
             anyhow::bail!("only hosts and sessions listings are rendered as a table")
         }
     }

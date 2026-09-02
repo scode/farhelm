@@ -487,6 +487,18 @@ async fn session_list_staged(
             view.push(row_of(snapshot, identity, info.clone()));
         }
     }
+    // When provenance exists, one catalog read resolves every row before
+    // filtering or serialization. A raw-only view skips that dependency.
+    // Mutate the nested records in place: cloning whole rows here makes the
+    // fleet path duplicate every title, cwd, invocation, and tab merely to
+    // replace one small provenance enum.
+    if view.iter().any(|row| row.info.source_profile.is_some()) {
+        let profiles = crate::sessions::load_profile_name_index(store).await?;
+        crate::sessions::resolve_session_profiles(
+            &profiles,
+            view.iter_mut().map(|row| &mut row.info),
+        );
+    }
     Ok(assemble(view, filter, sort, hosts_truncated))
 }
 
@@ -761,6 +773,50 @@ mod tests {
                 "{sort:?} must keep the row it sorts first, not the newest-created one"
             );
         }
+    }
+
+    /// A supervisor deliberately reports profile existence as unresolved;
+    /// the fleet listing must replace that marker from one helm catalog read
+    /// before the row can reach either the browser or agent-facing listing.
+    /// This test pins the ownership boundary rather than merely exercising
+    /// the pure three-way comparison.
+    #[tokio::test]
+    async fn a_supervisor_unresolved_profile_is_resolved_in_the_fleet_listing() {
+        use crate::rest_harness;
+
+        let mut source = rest_harness::session("profiled", 1);
+        source.source_profile = Some(farhelm_proto::SourceProfile {
+            id: "starter-claude".to_string(),
+            name: "claude".to_string(),
+            existence: farhelm_proto::ProfileExistence::Unresolved,
+        });
+        let harness = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![source],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .start()
+            .await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+
+        let list = session_list(
+            &harness.manager,
+            &harness.store,
+            &store::SessionFilter::default(),
+            store::ListSort::Created,
+        )
+        .await
+        .expect("the helm resolves the supervisor reply");
+        let source = list.sessions[0]
+            .info
+            .source_profile
+            .as_ref()
+            .expect("profile snapshot survives");
+        assert_eq!(source.existence, farhelm_proto::ProfileExistence::Present);
     }
 
     /// A change to an identity-less host's in-memory sessions, landing in a

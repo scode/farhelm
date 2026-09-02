@@ -288,10 +288,12 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
             parent,
             cwd,
             invocation,
-            profile_id,
             profile_name,
             title,
             intent_key,
+            agent_kind,
+            resume_template,
+            source_profile,
             ..
         } = request
         else {
@@ -300,8 +302,10 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
         assert_eq!(parent.as_deref(), Some("parent-123"));
         assert_eq!(cwd, expected_cwd);
         assert_eq!(invocation, None);
-        assert_eq!(profile_id, None);
         assert_eq!(profile_name.as_deref(), Some("Agent One"));
+        assert_eq!(agent_kind, None);
+        assert_eq!(resume_template, None);
+        assert_eq!(source_profile, None);
         assert_eq!(title.as_deref(), Some("scripted child"));
         assert_eq!(intent_key.as_deref(), Some("retry-7"));
         ControlMsg::SessionCreated {

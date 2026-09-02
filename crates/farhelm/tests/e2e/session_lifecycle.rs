@@ -1188,20 +1188,19 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
     .expect("supervisor did not reject duplicate attachment channel");
 }
 
-/// A peer speaking the LAST protocol version before the non-displacing
-/// attach is refused at the handshake, so its `Attach` never reaches the
-/// handler at all.
+/// A peer speaking protocol 14 is refused at the handshake, so no version-15
+/// request can reach its handler.
 ///
-/// This is the machinery `PROTOCOL_VERSION`'s bump to 9 exists to engage,
-/// pinned at the layer where the engaging happens. `if_unowned` is
-/// decode-additive — a version-8 supervisor drops it without complaint and
-/// performs the DISPLACING attach the caller explicitly asked it not to —
-/// and a silent wrong answer is exactly what SPEC.md's version rule
-/// forbids ("Incompatible versions refuse to connect with a clear,
-/// actionable error; there is no silent degradation"). Since the old
-/// binary cannot be recompiled to prove that here, this proves the thing
-/// that MAKES it unreachable: an old-version peer is refused before it can
-/// send anything, with a diagnostic naming both versions.
+/// Version 15 moved profile resolution into the helm and removed the
+/// supervisor catalog wire. A version-14 supervisor could otherwise read a
+/// resolved profile bundle as a raw create, discarding its new source
+/// snapshot, while old profile CRUD tags no longer have a receiver. That
+/// silent mixed state is exactly what SPEC.md's version rule forbids
+/// ("Incompatible versions refuse to connect with a clear, actionable
+/// error; there is no silent degradation"). Since the old binary cannot be
+/// recompiled to prove that here, this proves the gate that makes it
+/// unreachable: an old-version peer is refused before it can send anything,
+/// with a diagnostic naming both versions.
 ///
 /// The refusal is asserted to arrive as an unsolicited `Error` and to be
 /// followed by teardown, because both halves matter to the fleet story: a
@@ -1221,8 +1220,8 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
     let mut reader = FrameReader::new(read_half);
     let mut writer = FrameWriter::new(write_half);
 
-    // A hello from the version this milestone's field was added AFTER —
-    // the exact peer that would ignore `if_unowned` and displace anyway.
+    // The exact predecessor whose profile-create interpretation is no longer
+    // compatible with the current resolved-bundle wire.
     writer
         .write_control(&ControlMsg::Hello {
             protocol_version: farhelm_proto::PROTOCOL_VERSION - 1,
