@@ -26,6 +26,8 @@
 //! manual-only reply (including no usable systemd user manager) leaves the
 //! command as the whole remedy.
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
 
 use crate::api::{
@@ -38,6 +40,46 @@ use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerBlock, PeerLine};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{ApiBase, Host, HostId, HostKind};
+
+/// The provisioning commands one host row currently contributes to its
+/// actions menu.
+///
+/// This is presentation state, not an authority for whether a run may start.
+/// The permanently mounted provisioning component still rechecks its own
+/// planning flag and the page operation lock when it consumes a request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ProvisioningMenuState {
+    pub(crate) rerun: Option<ProvisioningOperation>,
+    pub(crate) automatic_setup: bool,
+    pub(crate) update: bool,
+    pub(crate) planning: bool,
+}
+
+/// The rendered facts that make one collapsed provisioning trace distinct.
+///
+/// Progress-step churn is deliberately absent: fixed surfaces need dismissal
+/// only when the one-line trace itself appears, changes, or disappears.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProvisioningTraceShape {
+    pub(crate) operation: ProvisioningOperation,
+    pub(crate) status: ProvisioningStatus,
+}
+
+/// Returns the row-menu request only after the provisioning lifecycle accepts it.
+///
+/// A refusal caused by planning or the page operation lock leaves the request
+/// queued. The surrounding effect subscribes to both blockers, so releasing
+/// either gives the same command another pass instead of losing the click.
+/// Returning the accepted value lets the caller defer its signal write until
+/// removal is real, avoiding a false reactive notification on refusal.
+fn accepted_request(
+    requests: &HashMap<HostId, ProvisioningOperation>,
+    host_id: HostId,
+    mut begin_plan: impl FnMut(ProvisioningOperation) -> bool,
+) -> Option<ProvisioningOperation> {
+    let operation = requests.get(&host_id).copied()?;
+    begin_plan(operation).then_some(operation)
+}
 
 /// Registry facts that make a displayed plan belong to this exact row.
 ///
@@ -197,11 +239,22 @@ async fn prepare(
 pub(crate) fn ProvisioningPanel(
     host: Host,
     mut ops: OpLock,
+    /// Whether the global host disclosure currently shows full row details.
+    details_open: bool,
     /// Whether this row's manual local remedy should be replaced by an
     /// automatic ADD probe and offer.
     local_setup: bool,
     /// The exact manual fallback derived from the host phase.
     manual_remedy: Option<Vec<DetailPart>>,
+    /// One-shot menu requests keyed by host.
+    mut action_requests: Signal<HashMap<HostId, ProvisioningOperation>>,
+    /// Each mounted row's current contribution to the host actions menu.
+    mut menu_states: Signal<HashMap<HostId, ProvisioningMenuState>>,
+    /// Collapsed traces whose presence changes fixed-surface geometry.
+    mut trace_shapes: Signal<HashMap<HostId, ProvisioningTraceShape>>,
+    /// Reveal the global details disclosure when preparation produces a
+    /// confirmation that would otherwise be hidden.
+    on_reveal_details: EventHandler<()>,
     /// Paint-only busy bookkeeping for this row in the parent. It never
     /// excludes a run.
     on_running: EventHandler<bool>,
@@ -232,7 +285,12 @@ pub(crate) fn ProvisioningPanel(
     // The parent owns the provisioning-busy set. Removing this row must
     // remove only this component's contribution to it; mutation-busy lives
     // in a different set and is unaffected.
-    use_drop(move || on_running.call(false));
+    use_drop(move || {
+        on_running.call(false);
+        action_requests.write().remove(&host_id);
+        menu_states.write().remove(&host_id);
+        trace_shapes.write().remove(&host_id);
+    });
 
     // One reader per row. A feed bump says only that something changed, so
     // every mounted row re-reads its own host-scoped view; the reader
@@ -290,9 +348,9 @@ pub(crate) fn ProvisioningPanel(
     let plan_base = base.clone();
     let plan_host = host.clone();
     let plan_progress = request_progress.clone();
-    let begin_plan = move |operation: ProvisioningOperation| {
+    let begin_plan = move |operation: ProvisioningOperation| -> bool {
         if *planning.peek() || ops.busy_now() {
-            return;
+            return false;
         }
         planning.set(true);
         pending.set(None);
@@ -315,6 +373,7 @@ pub(crate) fn ProvisioningPanel(
                         local_auto_retry.set(true);
                     }
                     pending.set(Some(plan));
+                    on_reveal_details.call(());
                 }
                 Ok(Preparation::Discovered) => {
                     // Discovery can register a host and can resolve a
@@ -330,6 +389,7 @@ pub(crate) fn ProvisioningPanel(
                         local_auto_retry.set(false);
                     }
                     action_error.set(Some(reason));
+                    on_reveal_details.call(());
                 }
                 Ok(Preparation::Unvalidated(problem)) => {
                     if is_local_add {
@@ -337,17 +397,35 @@ pub(crate) fn ProvisioningPanel(
                     }
                     action_error.set(Some(problem));
                     on_changed.call(());
+                    on_reveal_details.call(());
                 }
                 Err(error) => {
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
                     action_error.set(Some(error));
+                    on_reveal_details.call(());
                 }
             }
             planning.set(false);
         });
+        true
     };
+
+    // The row menu writes a one-shot request while this component keeps the
+    // async lifecycle. Planning and the page lock are tracked here so a
+    // refused request gets another pass when its blocker clears.
+    let mut requested_plan = begin_plan.clone();
+    use_effect(move || {
+        planning();
+        ops.busy();
+        let accepted = accepted_request(&action_requests.read(), host_id, &mut requested_plan);
+        if accepted.is_some_and(|operation| {
+            action_requests.peek().get(&host_id).copied() == Some(operation)
+        }) {
+            action_requests.write().remove(&host_id);
+        }
+    });
 
     // A local down-state probes once after the progress authority has said
     // IDLE. Waiting for that first view prevents a reload during a live run
@@ -397,6 +475,47 @@ pub(crate) fn ProvisioningPanel(
             }
             if *was_local_setup.peek() != local_setup {
                 was_local_setup.set(local_setup);
+            }
+        },
+    ));
+
+    // Publish only the action set. The row owns the menu, but this component
+    // remains the authority for when update, rerun, or automatic setup is a
+    // truthful offer. Signal reads here keep the summary current without
+    // moving any async state into the row.
+    let menu_host_kind = host.kind;
+    use_effect(use_reactive(
+        (&local_setup, &menu_host_kind),
+        move |(local_setup, menu_host_kind)| {
+            let snapshot = progress();
+            let is_planning = planning();
+            let has_pending_plan = pending().is_some();
+            let can_retry_local_setup = local_auto_retry();
+            let run_active = snapshot.as_ref().is_some_and(|view| {
+                view.run_id.is_some() && view.status == ProvisioningStatus::Running
+            });
+            let failed_operation = snapshot.as_ref().and_then(|view| {
+                (view.run_id.is_some() && view.status == ProvisioningStatus::Failed)
+                    .then_some(view.operation)
+                    .flatten()
+            });
+            let update_allowed = menu_host_kind != HostKind::Unrecognized;
+            let plan_in_flight = is_planning || has_pending_plan;
+            let next = ProvisioningMenuState {
+                rerun: (update_allowed && !plan_in_flight)
+                    .then_some(failed_operation)
+                    .flatten(),
+                automatic_setup: !run_active
+                    && update_allowed
+                    && local_setup
+                    && !plan_in_flight
+                    && failed_operation.is_none()
+                    && can_retry_local_setup,
+                update: !run_active && update_allowed && !local_setup && !plan_in_flight,
+                planning: plan_in_flight,
+            };
+            if menu_states.peek().get(&host_id).copied() != Some(next) {
+                menu_states.write().insert(host_id, next);
             }
         },
     ));
@@ -491,7 +610,6 @@ pub(crate) fn ProvisioningPanel(
     let is_accepted_run_waiting = *accepted_run_waiting.read();
     let can_retry_local_setup = *local_auto_retry.read();
     let page_busy = ops.busy();
-    let update_allowed = host.kind != HostKind::Unrecognized;
     let run_active = snapshot
         .as_ref()
         .is_some_and(|view| view.run_id.is_some() && view.status == ProvisioningStatus::Running);
@@ -500,6 +618,30 @@ pub(crate) fn ProvisioningPanel(
             .then_some(view.operation)
             .flatten()
     });
+    let visible_trace = (!details_open)
+        .then(|| {
+            snapshot.as_ref().and_then(|view| {
+                let operation = view.operation?;
+                matches!(
+                    view.status,
+                    ProvisioningStatus::Running | ProvisioningStatus::Failed
+                )
+                .then_some(ProvisioningTraceShape {
+                    operation,
+                    status: view.status,
+                })
+            })
+        })
+        .flatten();
+    use_effect(use_reactive((&visible_trace,), move |(visible_trace,)| {
+        if let Some(shape) = visible_trace {
+            if trace_shapes.peek().get(&host_id).copied() != Some(shape) {
+                trace_shapes.write().insert(host_id, shape);
+            }
+        } else if trace_shapes.peek().contains_key(&host_id) {
+            trace_shapes.write().remove(&host_id);
+        }
+    }));
     let automatic_local_remedy = local_setup
         && (offer.is_some()
             || is_planning
@@ -507,11 +649,20 @@ pub(crate) fn ProvisioningPanel(
             || is_accepted_run_waiting
             || failed_operation.is_some()
             || can_retry_local_setup);
+    let has_details_content = snapshot.as_ref().is_some_and(|view| view.run_id.is_some())
+        || offer.is_some()
+        || is_planning
+        || current_error.is_some()
+        || current_warning.is_some()
+        || current_progress_error.is_some()
+        || (local_setup && manual_remedy.is_some());
 
     rsx! {
         div {
             class: "provisioning-panel",
             "data-provisioning-host": "{host_id}",
+            if details_open && has_details_content {
+            div {
             if let Some(view) = snapshot && view.run_id.is_some() {
                 div {
                         class: "provisioning-run",
@@ -569,50 +720,11 @@ pub(crate) fn ProvisioningPanel(
                         }
                     },
                 }
-            } else if !run_active && update_allowed {
-                div { class: "provisioning-actions",
-                    if let Some(operation) = failed_operation {
-                        button {
-                            r#type: "button",
-                            class: "btn provisioning-rerun",
-                            disabled: page_busy || is_planning,
-                            onclick: {
-                                let mut begin_plan = begin_plan.clone();
-                                move |_| begin_plan(operation)
-                            },
-                            if is_planning { "planning…" } else { "re-run" }
-                        }
-                    }
-                    if local_setup {
-                        if is_planning {
-                            div { class: "provisioning-planning", "checking automatic setup…" }
-                        } else if failed_operation.is_none() && can_retry_local_setup {
-                            button {
-                                r#type: "button",
-                                class: "btn provisioning-auto-setup",
-                                disabled: page_busy,
-                                onclick: {
-                                    let mut begin_plan = begin_plan.clone();
-                                    move |_| begin_plan(ProvisioningOperation::Add)
-                                },
-                                "set up automatically"
-                            }
-                        }
-                    } else {
-                        button {
-                            r#type: "button",
-                            class: "btn provisioning-update",
-                            disabled: page_busy || is_planning,
-                            onclick: {
-                                let mut begin_plan = begin_plan.clone();
-                                move |_| begin_plan(ProvisioningOperation::Update)
-                            },
-                            if is_planning { "planning…" } else { "update" }
-                        }
-                    }
+            } else if is_planning {
+                div {
+                    class: "provisioning-planning",
+                    if local_setup { "checking automatic setup…" } else { "planning…" }
                 }
-            } else if local_setup && is_planning {
-                div { class: "provisioning-planning", "checking automatic setup…" }
             }
 
             if let Some(error) = current_error {
@@ -643,6 +755,14 @@ pub(crate) fn ProvisioningPanel(
                     parts: remedy,
                 }
             }
+            }
+            } else if let Some(shape) = visible_trace {
+                div {
+                    class: "provisioning-trace",
+                    "data-provisioning-status": "{status_label(shape.status)}",
+                    "{operation_label(Some(shape.operation))} provisioning {status_label(shape.status)}"
+                }
+            }
         }
     }
 }
@@ -669,6 +789,34 @@ fn operation_label(operation: Option<ProvisioningOperation>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A menu command must survive the narrow race where another plan or
+    /// page operation becomes busy before the mounted panel consumes it.
+    /// The second pass proves acceptance, rather than observation, is the
+    /// boundary that removes the one-shot request.
+    #[test]
+    fn refused_menu_request_remains_queued_until_a_later_pass_accepts_it() {
+        let host_id = 7;
+        let mut requests = HashMap::from([(host_id, ProvisioningOperation::Update)]);
+        let mut attempts = 0;
+
+        let refused = accepted_request(&requests, host_id, |_| {
+            attempts += 1;
+            false
+        });
+        assert_eq!(refused, None);
+        assert_eq!(requests.get(&host_id), Some(&ProvisioningOperation::Update));
+
+        let accepted = accepted_request(&requests, host_id, |_| {
+            attempts += 1;
+            true
+        });
+        if accepted.is_some_and(|operation| requests.get(&host_id) == Some(&operation)) {
+            requests.remove(&host_id);
+        }
+        assert!(!requests.contains_key(&host_id));
+        assert_eq!(attempts, 2);
+    }
 
     /// The words painted in a run header must cover every rendered state and
     /// operation. Both are also exposed as stable data attributes, so a

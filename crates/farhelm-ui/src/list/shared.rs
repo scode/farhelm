@@ -4,7 +4,7 @@
 //! row state and host identity.
 
 use crate::activity::ActivityStamp;
-use crate::hosts::{host_incarnation, is_connected, phase_label};
+use crate::hosts::{host_incarnation, is_connected, phase_display_label};
 use crate::peer::display_peer;
 use crate::{Host, HostId, HostKind, Session, SessionStatus};
 
@@ -131,7 +131,8 @@ pub(super) struct HostOption {
     /// Every host is offered as a create target regardless of phase (see
     /// `ListView`), so the label is what keeps that from being a trap: a
     /// user picking a host the helm will refuse can see why before they
-    /// submit, and the refusal that follows repeats the same word.
+    /// submit. Selectors retain the stable wire token elsewhere, while this
+    /// visible label and the refusal use the humanized phase phrase.
     pub(super) phase: Option<String>,
     /// This host's current incarnation (`hosts::host_incarnation`) — what an
     /// idempotency key is bound to, so that an id pointed at a different
@@ -370,7 +371,8 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
             local: host.kind == HostKind::Local,
             // Non-connected hosts are labelled with their phase, so choosing
             // one is an informed choice rather than a surprise refusal.
-            phase: (!is_connected(&host.state)).then(|| phase_label(&host.state).to_string()),
+            phase: (!is_connected(&host.state))
+                .then(|| phase_display_label(&host.state).to_string()),
             incarnation: host_incarnation(host),
             connection: host.incarnation,
             identity: host.identity.clone(),
@@ -710,14 +712,14 @@ pub(super) mod tests {
     /// must not be decorated.
     ///
     /// Every host is selectable now, so the label is what keeps that from
-    /// being a trap: the phase a user sees before choosing is the same word
-    /// the helm's refusal will use if they choose it anyway.
+    /// being a trap. The option uses humanized wording while the host row's
+    /// data attribute keeps the stable wire token used by selectors.
     #[test]
     fn an_option_label_names_the_phase_only_when_there_is_one_to_warn_about() {
         assert_eq!(option(1, "this machine", true).label(), "this machine");
         assert_eq!(
-            option_in(2, "user@box", false, "unreachable-reprobing").label(),
-            "user@box (unreachable-reprobing)"
+            option_in(2, "user@box", false, "unreachable, retrying").label(),
+            "user@box (unreachable, retrying)"
         );
         // The name is peer/user-supplied and is escaped like every other
         // rendering of it: an option label is exactly where a directional

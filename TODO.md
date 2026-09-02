@@ -13,29 +13,6 @@ Within a bucket, no order.
 
 ## Near term
 
-- Make the host list one list, and make it look like it belongs next to the session list. Today the sidebar renders
-  hosts TWICE: an always-visible compact strip (`.hosts-compact` in `list/view.rs`) of name plus colored phase word,
-  where the word trails the name at whatever x the name ends on so "connected" lands in a different column on every row
-  and the strip reads as ragged and unfinished; and, behind the "hosts" toggle, the full panel (`hosts.rs`) with its own
-  "HOSTS / add host" header, bold rows with a right-aligned chip and a hover-revealed "⋯" menu, a detail line (version;
-  identity; N sessions), and a per-host action row holding "update" (or "re-run" after a failed run, or "set up
-  automatically" for the local host). Intended shape, mirroring the session list's header: a first row reading "N
-  hosts"; a second row with a "details" toggle and the "add host" button; then ONE list of rows that always show the
-  name, the status pinned to the trailing edge in the same gutter the session rows use, and the "⋯" menu — always
-  visible, muted, rather than hover-revealed (hover has no touch story and is discoverable only by accident). The
-  details toggle reveals, under every row, what the expanded panel shows today: the version/identity/session-count line
-  and any remedy, warning, or error text. The provisioning actions move INTO the "⋯" menu — "update", and the "re-run"
-  and "set up automatically" variants — so no row carries a standing button; the plan confirmation and the run's
-  progress still render inline under the row, and a menu action that starts a run should open that row's details so the
-  confirmation is visible, while a failed run needs a visible trace with details collapsed, since a failed provisioning
-  run does not by itself change the phase the chip shows. Visual polish that rides along: use the session list's status
-  vocabulary (a small dot plus a word) so the two lists speak one visual language, with "connected" quiet (a dot alone)
-  and the words spent on states that need action; humanize the phase words for display ("unreachable, retrying",
-  "identity mismatch") while keeping the hyphenated tokens on the data attributes tests read; consistent row height and
-  hover background. SPEC.md's session-list paragraph says the full hosts panel "opens on demand rather than occupying
-  the session list" — a per-row menu is on demand, but reword that sentence in the same change. Observed 2026-09-02 in
-  the stable install with two hosts; shape settled the same day.
-
 ## Maybe later
 
 - Automate end-to-end testing of the host UPDATE path, including across releases. Nothing in CI updates a host: the

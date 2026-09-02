@@ -58,13 +58,13 @@ async function listWithStubbedFeed(page: Page): Promise<void> {
   await page.goto("/");
   await feed.waitForConnection(1);
   feed.notify(1);
-  // The compact host strip's first read landing is itself a layout change
-  // above the session header, and the popover is a fixed surface measured
-  // once against that header, so `ListView` closes it for exactly that
-  // change (`hosts_strip_shape`). Opening before the strip has settled
-  // therefore races the page's own dismissal; settle first, then open.
-  await expect(page.locator(".hosts-compact-entry").first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".hosts-compact-note", { hasText: "loading hosts" })).toHaveCount(0, {
+  // The host list's first read landing is itself a layout change above the
+  // session header, and the popover is a fixed surface measured once against
+  // that header, so `ListView` closes it for exactly that change
+  // (`hosts_list_shape`). Opening before the list has settled therefore
+  // races the page's own dismissal; settle first, then open.
+  await expect(page.locator(".host-row").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".hosts-status", { hasText: "loading hosts" })).toHaveCount(0, {
     timeout: 20_000,
   });
   // The filter popover sits behind the session header's on-demand toggle; every

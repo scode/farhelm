@@ -130,7 +130,7 @@ test("keyboard focus paints the accent outline; a mouse click does not", async (
     // a documented reason (see that class's `:focus-visible` comment in
     // app.css) — so this half of the test exercises the sheet-wide rule
     // declared once near the top of the file.
-    const btn = page.locator(".hosts-toggle");
+    const btn = page.locator(".host-details-toggle");
     const openButton = target.locator(".session-row-open");
 
     // `.focus()` rather than a real `page.keyboard.press("Tab")` crawl:
