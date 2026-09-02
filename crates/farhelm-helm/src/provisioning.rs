@@ -2210,12 +2210,13 @@ mod tests {
             probe_farhelm: PathBuf::from("farhelm"),
             probe_state_dir: None,
         };
+        // Same stdin-open tail (`cat >/dev/null`) as the local case above, same
+        // reason.
         let script = format!(
             "printf '%s\\n' '{REMOTE_PROBE_MARKER}' >&2; \
              printf '%s%s\\n' '{REMOTE_RESOLVED_PREFIX}' '/resolved/lib/farhelm' >&2; \
-             {}",
-            // Same stdin-open tail as the local case above, same reason.
-            format!("{}; cat >/dev/null", frame_script(old_hello()))
+             {}; cat >/dev/null",
+            frame_script(old_hello())
         );
         let remote_backend = SystemBackend {
             control_dir: root.path().to_path_buf(),
