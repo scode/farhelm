@@ -477,6 +477,7 @@ corrupt_checksum "$WWW/badchecksum" farhelm-x86_64-unknown-linux-musl.tar.gz
 build_two_member_archive_release "$WWW/twomember" 1.2.3
 build_nonregular_member_release "$WWW/nonregular"
 build_good_release "$WWW/prerelease" 1.2.3-rc.1
+build_good_release "$WWW/prerelease-dev" 1.2.3-dev.1
 mkdir -p "$WWW/slow"
 cp -r "$WWW/good"/. "$WWW/slow/"
 mkdir -p "$WWW/sums503" # never actually read: the server 503s the whole prefix
@@ -982,7 +983,10 @@ check "non-regular member exits 1" [ "$RC" -ne 0 ]
 check "non-regular member names the problem" contains "$ERR" "is not a regular file"
 
 # ===========================================================================
-# Scenario: version normalization, including a -rc.N prerelease (D15).
+# Scenario: version normalization, including the -rc.N and -dev.N prereleases
+# (D15). Both suffixes go through the same pattern, so both are driven here:
+# a pattern edit that kept one and dropped the other would otherwise only
+# show up when someone pinned a dev build for real.
 # ===========================================================================
 echo
 echo "== version normalization =="
@@ -993,6 +997,14 @@ for spec in "1.2.3-rc.1" "v1.2.3-rc.1"; do
   check "FARHELM_VERSION=$spec exits 0" [ "$RC" -eq 0 ]
   check "FARHELM_VERSION=$spec normalizes to farhelm 1.2.3-rc.1" \
     contains "$("$HOMEV/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3-rc.1"
+done
+for spec in "1.2.3-dev.1" "v1.2.3-dev.1"; do
+  HOMEV="$WORKDIR/homev-${spec//./-}"
+  mkdir -p "$HOMEV"
+  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$HOMEV/.local/bin" "$BASE/prerelease-dev" "$spec"
+  check "FARHELM_VERSION=$spec exits 0" [ "$RC" -eq 0 ]
+  check "FARHELM_VERSION=$spec normalizes to farhelm 1.2.3-dev.1" \
+    contains "$("$HOMEV/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3-dev.1"
 done
 
 HOMEPLAIN="$WORKDIR/homeplain"

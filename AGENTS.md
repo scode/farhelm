@@ -76,8 +76,8 @@ Report which earlier results were reused and why.
   why only `install.sh` goes through `sh -n`.
 - `bash scripts/test-install-sh.sh` — drives `install.sh` as a real child process against a fixture HTTP server: fresh
   install, update, a forced-failure rollback (macOS-shaped, via a `uname` shim), 404, checksum mismatch, two
-  malformed-archive shapes, version normalization (including a `-rc.N` prerelease), invalid versions, missing
-  prerequisites (via an isolated `PATH`), the exact closing-message contract across five tmux fixtures, the
+  malformed-archive shapes, version normalization (including `-rc.N` and `-dev.N` prereleases), invalid versions,
+  missing prerequisites (via an isolated `PATH`), the exact closing-message contract across five tmux fixtures, the
   `Farhelm.app` bundle a macOS-shaped install assembles (layout, rebuild on update, the pre-icon/opt-out/foreign-bundle
   edge shapes), and that nothing outside `FARHELM_INSTALL_DIR` and that bundle — no `systemctl`/`launchctl` call,
   nothing else under `$HOME` — ever changes. Every invocation goes through `env -i` with an explicit environment, never
@@ -165,6 +165,17 @@ With both settled, the process is:
   mid-stack rewrite of those commits (a fixup round after the trial, say) needs `--ignore-immutable`. That is safe —
   rewriting creates new commits and the tag keeps pointing at what it tagged — but it will otherwise refuse with
   "immutable commits are used to protect shared history" at exactly the moment a trial's feedback wants applying.
+
+# Cutting a dev release
+
+A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`, cut by exactly the procedure above with
+`dev` in place of `rc` everywhere — the bump commit is `chore: release X.Y.Z-dev.N`, N increments per attempt and a tag
+name is never reused, the workflow runs from the tag and marks the release a prerelease (any semver prerelease suffix
+does; `releases/latest` still points at the last stable), and `scripts/install.sh` accepts
+`FARHELM_VERSION=vX.Y.Z-dev.N` the same way it accepts an `-rc.N`. Settle the same two choices first, base and version,
+and ask when the request does not state them; the `-dev.N` and `-rc.N` counters are independent, so `0.3.0-dev.2` and
+`0.3.0-rc.1` can both exist. The name is the whole difference: it tells whoever reads the tag list later that the build
+was a trial of work in progress, not a claim that this is what will ship as `X.Y.Z`.
 
 The browser end-to-end suite is deliberately NOT in that per-change list, and its CI job is disabled (`if: false` in
 ci.yml): it is far too slow to pay on every PR. It gates MERGING instead — before landing a PR stack on main, run

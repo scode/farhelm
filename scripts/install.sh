@@ -100,10 +100,15 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
 '
 # END ASSET TABLE
 
-  # D15's version shape: X.Y.Z or vX.Y.Z, with an optional -rc.N prerelease
-  # suffix; no leading zeros anywhere. See normalize_version below for why a
-  # plain grep -E against this is not, by itself, enough.
-  VERSION_PATTERN='^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$'
+  # D15's version shape: X.Y.Z or vX.Y.Z, with an optional -rc.N or -dev.N
+  # prerelease suffix (the two kinds of prerelease this project cuts — see
+  # AGENTS.md's release sections; a -dev.N is an rc under another name, so
+  # the installer treats the two identically); no leading zeros anywhere.
+  # Any other suffix stays rejected on purpose: a pinned version that does
+  # not match a tag this project would ever publish is a typo, not a
+  # request to try harder. See normalize_version below for why a plain
+  # grep -E against this is not, by itself, enough.
+  VERSION_PATTERN='^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(rc|dev)\.(0|[1-9][0-9]*))?$'
 
   # A literal newline and a literal carriage return, for the checks below
   # that need to test whether a value CONTAINS one. Built with printf rather
@@ -127,7 +132,8 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   GZIP_TAR_PROBE='\037\213\010\000\000\000\000\000\000\003\355\316\261\015\203\060\024\004\120\217\342\015\142\154\364\231\207\046\003\100\220\030\077\026\145\112\044\047\051\336\153\116\272\346\156\175\074\323\150\245\213\230\257\354\076\263\233\322\324\242\324\045\312\174\365\321\152\113\271\014\177\326\035\373\153\335\162\376\306\324\077\072\177\175\000\000\000\000\000\000\000\000\000\200\133\336\272\161\326\206\000\050\000\000'
 
   # Validates $1 against $VERSION_PATTERN and echoes the normalized "vX.Y.Z"
-  # (optionally "-rc.N") tag, or returns failure and prints nothing.
+  # (optionally "-rc.N" or "-dev.N") tag, or returns failure and prints
+  # nothing.
   #
   # Rejects embedded newlines/carriage returns FIRST: grep -E's ^/$ anchors
   # match at the start/end of each LINE, not of the whole value, so a value
@@ -736,14 +742,14 @@ EOF
 
     # 3. Version.
     #
-    # FARHELM_VERSION pins a release, including a -rc.N prerelease (D15);
-    # otherwise the script asks GitHub which tag "latest" currently means.
-    # Either way, exactly one candidate string and one error message are
-    # produced here, and normalize_version validates and normalizes that
+    # FARHELM_VERSION pins a release, including a -rc.N or -dev.N prerelease
+    # (D15); otherwise the script asks GitHub which tag "latest" currently
+    # means. Either way, exactly one candidate string and one error message
+    # are produced here, and normalize_version validates and normalizes that
     # single candidate the same way regardless of where it came from.
     if [ -n "${FARHELM_VERSION:-}" ]; then
       candidate=$FARHELM_VERSION
-      version_error="FARHELM_VERSION='$FARHELM_VERSION' is not X.Y.Z, vX.Y.Z, or a -rc.N prerelease of one"
+      version_error="FARHELM_VERSION='$FARHELM_VERSION' is not X.Y.Z, vX.Y.Z, or a -rc.N or -dev.N prerelease of one"
     else
       # No -L: the redirect itself is the answer (a 302 whose Location
       # names the release tag), not something to chase. `-I` sends HEAD, so
