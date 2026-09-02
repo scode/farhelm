@@ -79,6 +79,86 @@ Within a bucket, no order.
   for, and what this code must never become. A future reader who finds a byte-matcher in the output path with a comment
   that only names the sequences will delete it.
 
+- Move agent profiles from the supervisor to the helm. Today a profile belongs to the supervisor that runs it: the
+  catalog is a table in each host's supervisor.db, seeded with the four starters per install, edited through the host
+  row's "⋯ → profiles" surface, and a create names a profile ID that the target supervisor resolves to an invocation,
+  agent kind, and resume template at launch. SPEC.md states the reason as "the invocation has to exist on the host that
+  runs it", with cross-host sync deferred as post-v1 convenience. That reason is about the command, not the storage — a
+  profile saying `claude` runs through the login shell on whichever host launches it, and the supervisor already
+  launches arbitrary invocations for custom-command creates — and the per-host model works against how hosts are
+  actually used: remote hosts come and go, are not backed up, and should be treated as ephemeral rather than as places
+  configuration accumulates. One catalog per helm is also the natural fit for the planned mode where the desktop app
+  connects to a helm running elsewhere, which is what lets the browser and the desktop app share one logical helm
+  instead of each carrying its own state. Intended user experience, settled 2026-09-02: profiles are the helm's, one
+  catalog, every profile applies to every host, and the create dialog's picker offers the whole catalog regardless of
+  the chosen host. The management surface is reachable from the sidebar but takes no standing vertical space — a popup
+  of some kind (the row "⋯" menu / filter-popover pattern), holding the list with new, edit, and delete, and the
+  "profiles" item leaves the host row menu entirely. No host-specific profiles in this change; if a need ever shows up
+  it becomes an optional "only on these hosts" scope on a helm profile, never a different kind of profile and never
+  something the supervisor knows about. Existing catalogs on hosts are simply DROPPED — no import, no migration, no
+  trace going forward; the simplest code that removes them wins (the maintainer is the only user, and the edited
+  profiles on the two live hosts get recreated by hand). "Last used profile" becomes one memory per helm rather than one
+  per host. A session whose snapshotted profile this helm has no row for — created before the change, or by another helm
+  — shows the snapshotted name as a plain label with no warning state, and clone offers the profile only when this helm
+  holds one under that name, falling back to the raw command otherwise, the same way it already does for a deleted
+  profile. Accepted consequence: the desktop app's embedded helm and the service helm on one machine get separate
+  catalogs, exactly as they already have separate host registries; the connect-to-a-helm mode is what closes that. The
+  architecturally major internal is the create wire: it must carry the resolved bundle (invocation, agent kind, resume
+  template) inline instead of a profile ID, so a profile-backed create stops being distinguishable from a custom-command
+  one on the supervisor side — and custom-command creates gain integration fields for free. The session's profile
+  snapshot (id and name) stays on the supervisor; present/renamed/deleted is derived by the helm against its own catalog
+  when it builds the listing. The agent CLI's `--profile <name>` resolves against the helm, and the spawn fallback that
+  reads the supervisor's most recently used source profile becomes a helm lookup. SPEC.md's "Agent profiles belong to
+  each supervisor" paragraph and the spawn-resolution paragraph, and SPEC_impl.md's supervisor profile-table bullet, are
+  rewritten in the same change; the "post-v1 convenience" sentence goes.
+
+- Move the session list's filter and sort controls onto the session list's own header. Today the sidebar's top line is
+  "hosts filter sort [recently active]": one hosts toggle and three session-list controls sharing a row, which makes the
+  filter and sort read as host controls, and the "13 sessions" count banner further down is the line that actually heads
+  the list. Intended shape: the count banner grows to two rows and becomes the header — the count on the first row ("13
+  sessions", or "5 matching of 13 sessions" when a filter is in force), the filter toggle and the sort select on the
+  second. The visible word "sort" goes (the select's value reads as one; keep it as the control's accessible name). The
+  amber "filtered" word that today appears beside the filter toggle whenever an applied filter narrows the list (bar
+  open or closed; the archive switch alone does not trigger it) goes too: the count wording on the same line already
+  says the list is narrowed, which is what SPEC.md's "the list says visibly that a filter is in force" asks for. The
+  filter itself becomes a POPOVER anchored on its toggle, like the row "⋯" menus (`menu_panel.rs`'s fixed-position,
+  measured-rect pattern, which also already escapes the sidebar's overflow clipping), rather than a bar that opens in
+  the flow and re-jigs the whole sidebar. Inside the popover the filter is LIVE: the list re-filters on every keystroke,
+  so what you see always matches what the fields say, with no apply button and no separate "applied" state to reason
+  about; Escape or a click outside only closes the popover, and the filter stays as typed; a "clear" control stays.
+  Today the bar is a form applied on submit, with `filter` and `filter_draft` as separate signals in `list/view.rs`,
+  kept apart so that a feed-triggered re-read landing mid-edit would use the filter whose results were on screen rather
+  than a half-typed one. Live filtering makes that distinction moot — the typed text IS the filter — so the draft signal
+  goes and the field writes the applied one directly. Mechanics to keep in mind, not UX: every change is a helm round
+  trip (the helm filters the whole fleet in memory and the client walks the reply by cursor), so a short debounce on the
+  text fields is fine as an implementation detail but the intent is that the list follows the typing; `commit_listing`
+  already refuses a read that was walking under an older filter, so a fast typist cannot get a stale result painted over
+  a newer one; and the count and the "no sessions" placeholder keep answering only for a committed result, never for an
+  in-flight read. The hosts toggle on the old top line goes away with the hosts-list rework below. Settled 2026-09-02.
+
+- Make the host list one list, and make it look like it belongs next to the session list. Today the sidebar renders
+  hosts TWICE: an always-visible compact strip (`.hosts-compact` in `list/view.rs`) of name plus colored phase word,
+  where the word trails the name at whatever x the name ends on so "connected" lands in a different column on every row
+  and the strip reads as ragged and unfinished; and, behind the "hosts" toggle, the full panel (`hosts.rs`) with its own
+  "HOSTS / add host" header, bold rows with a right-aligned chip and a hover-revealed "⋯" menu, a detail line (version;
+  identity; N sessions), and a per-host action row holding "update" (or "re-run" after a failed run, or "set up
+  automatically" for the local host). Intended shape, mirroring the session list's header: a first row reading "N
+  hosts"; a second row with a "details" toggle and the "add host" button; then ONE list of rows that always show the
+  name, the status pinned to the trailing edge in the same gutter the session rows use, and the "⋯" menu — always
+  visible, muted, rather than hover-revealed (hover has no touch story and is discoverable only by accident). The
+  details toggle reveals, under every row, what the expanded panel shows today: the version/identity/session-count line
+  and any remedy, warning, or error text. The provisioning actions move INTO the "⋯" menu — "update", and the "re-run"
+  and "set up automatically" variants — so no row carries a standing button; the plan confirmation and the run's
+  progress still render inline under the row, and a menu action that starts a run should open that row's details so the
+  confirmation is visible, while a failed run needs a visible trace with details collapsed, since a failed provisioning
+  run does not by itself change the phase the chip shows. Visual polish that rides along: use the session list's status
+  vocabulary (a small dot plus a word) so the two lists speak one visual language, with "connected" quiet (a dot alone)
+  and the words spent on states that need action; humanize the phase words for display ("unreachable, retrying",
+  "identity mismatch") while keeping the hyphenated tokens on the data attributes tests read; consistent row height and
+  hover background. SPEC.md's session-list paragraph says the full hosts panel "opens on demand rather than occupying
+  the session list" — a per-row menu is on demand, but reword that sentence in the same change. Observed 2026-09-02 in
+  the stable install with two hosts; shape settled the same day.
+
 ## Maybe later
 
 - Automate end-to-end testing of the host UPDATE path, including across releases. Nothing in CI updates a host: the
