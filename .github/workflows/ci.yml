@@ -15,10 +15,30 @@ name: CI
 on:
   push:
     branches: [main]
+  # A DRAFT pull request runs nothing (see the `if:` on the three root jobs
+  # below: `changes`, `dprint`, `dist-check`; everything else hangs off
+  # `changes`). Stacked PRs get rewritten and re-pushed many times before
+  # anyone wants a verdict, and each rewrite used to cost a full run per PR.
+  # Marking a PR ready is the request for CI: `ready_for_review` starts a
+  # run, and later pushes to a ready PR keep running as before.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # On-demand runs for any ref, draft or not, from `gh workflow run ci.yml
+  # --ref <branch>`; the same jobs and the same draft-agnostic path pushes to
+  # main take.
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# One live run per ref. A stacked-PR workflow rewrites and re-pushes many
+# branches at once, often while their previous runs are still going; without
+# this, every superseded run keeps consuming runners to completion for a
+# commit nothing will look at. The group keys on the ref, so a push to a PR
+# branch cancels only that PR's earlier run, never a sibling's or main's.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Docs-only PRs skip the Rust jobs. Every job below except dprint (the
@@ -39,6 +59,8 @@ jobs:
   # Pushes to main have no base to diff against and always run everything.
   changes:
     runs-on: ubicloud
+    # Draft PRs run nothing (see the trigger comment at the top).
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -90,9 +112,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.job }}-
+          # No restore-keys, for the reason the desktop job's cache spells
+          # out: a stale target/ generation restored on a lockfile change
+          # and saved together with the new one grows the entry until it
+          # fills the runner's disk. The fallback survived here after that
+          # incident (#255) and took the test job down the same way on
+          # 2026-09-02, the runner crashing during the RESTORE. The `-v2`
+          # retires every entry the fallback grew; a lockfile change costs
+          # one cold build.
+          key: ${{ runner.os }}-cargo-${{ github.job }}-v2-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           components: clippy
@@ -112,9 +140,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.job }}-
+          # No restore-keys, for the reason the desktop job's cache spells
+          # out: a stale target/ generation restored on a lockfile change
+          # and saved together with the new one grows the entry until it
+          # fills the runner's disk. The fallback survived here after that
+          # incident (#255) and took the test job down the same way on
+          # 2026-09-02, the runner crashing during the RESTORE. The `-v2`
+          # retires every entry the fallback grew; a lockfile change costs
+          # one cold build.
+          key: ${{ runner.os }}-cargo-${{ github.job }}-v2-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           cache: false
@@ -287,9 +321,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.job }}-
+          # No restore-keys, for the reason the desktop job's cache spells
+          # out: a stale target/ generation restored on a lockfile change
+          # and saved together with the new one grows the entry until it
+          # fills the runner's disk. The fallback survived here after that
+          # incident (#255) and took the test job down the same way on
+          # 2026-09-02, the runner crashing during the RESTORE. The `-v2`
+          # retires every entry the fallback grew; a lockfile change costs
+          # one cold build.
+          key: ${{ runner.os }}-cargo-${{ github.job }}-v2-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           target: wasm32-unknown-unknown
@@ -448,6 +488,8 @@ jobs:
 
   dprint:
     runs-on: ubicloud
+    # Draft PRs run nothing (see the trigger comment at the top).
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     steps:
       - uses: actions/checkout@v4
       - name: Check formatting with dprint
@@ -465,6 +507,8 @@ jobs:
   # `changes` filter does not classify as code, and the check is seconds.
   dist-check:
     runs-on: ubicloud
+    # Draft PRs run nothing (see the trigger comment at the top).
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned dist
@@ -502,9 +546,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.job }}-
+          # No restore-keys, for the reason the desktop job's cache spells
+          # out: a stale target/ generation restored on a lockfile change
+          # and saved together with the new one grows the entry until it
+          # fills the runner's disk. The fallback survived here after that
+          # incident (#255) and took the test job down the same way on
+          # 2026-09-02, the runner crashing during the RESTORE. The `-v2`
+          # retires every entry the fallback grew; a lockfile change costs
+          # one cold build.
+          key: ${{ runner.os }}-cargo-${{ github.job }}-v2-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           target: wasm32-unknown-unknown
