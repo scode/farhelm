@@ -13,6 +13,21 @@ Within a bucket, no order.
 
 ## Near term
 
+- Deflake `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e). Fingerprint:
+  `the supervisor never answered the agent request: Elapsed(())` from the peer's 20 s `answer()` budget, panicking at
+  the `answer()` expect. It is a load flake that predates the profiles/host-list stack: on 2026-09-02 a 4-vCPU sandbox
+  running the e2e binary alone at `--test-threads=4` hit it in 2 of 5 runs on main and 3 of 7 on that stack's tip, while
+  16 runs alone (`cargo test -p farhelm --test e2e <name> -- --exact`) passed on both, and every local run on a 6-core
+  machine passed. Never yet seen on a GitHub runner, but the release workflow's build gate runs this suite, so it is a
+  tag-build risk. First suspect is the budget or the helm-death detection racing the request under load, not the relay
+  itself. Climb `.agents/narrow-tests.md`'s ladder from rung 3 (rung 1 does not reproduce) with `RUST_BACKTRACE=1` and
+  the supervisor log, and either fix the latency or widen the oracle the way #299 did for its siblings.
+- Deflake `terminal_backpressure::a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam`
+  (crates/farhelm/tests/e2e). Failed once on a GitHub runner (CI run 33613878036, 2026-09-02, panicking at
+  terminal_backpressure.rs:289) in the `test` job for a PR that touched nothing on the terminal path, and passed on the
+  rerun. The test predates that PR. No local or sandbox reproduction has been attempted; start at rung 3 of
+  `.agents/narrow-tests.md` on a 4-vCPU box, since a single CI sighting says "load", not "logic".
+
 ## Maybe later
 
 - Automate end-to-end testing of the host UPDATE path, including across releases. Nothing in CI updates a host: the
