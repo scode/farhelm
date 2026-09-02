@@ -32,13 +32,14 @@ curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.
 The script detects your platform (Linux x86_64 or aarch64, macOS on Apple silicon), downloads the matching release from
 GitHub, verifies its SHA-256 against the release's `SHA256SUMS`, and puts `farhelm` — and on macOS also
 `farhelm-desktop` — into `~/.local/bin` (set `FARHELM_INSTALL_DIR` to choose another directory; set `FARHELM_VERSION` to
-`X.Y.Z`, `vX.Y.Z`, or a `-rc.N` prerelease of one, e.g. `v1.2.3-rc.1`, to pin a version). On macOS it then assembles
-`~/Applications/Farhelm.app` around copies of those binaries plus the icon from the release archive, so Spotlight,
-Alfred, the Dock, and Cmd-Tab know the app by name (set `FARHELM_NO_APP_BUNDLE=1` to skip that). That is all it does. It
-does not touch systemd, launchd, or your shell configuration, and outside `~/Applications/Farhelm.app` leaves nothing
-behind beyond the install directory (it stages downloads in a temporary directory inside it and deletes that); if
-`~/.local/bin` is not on your `PATH` it tells you and leaves the fix to you. Read it before you run it — it is short,
-and it is the same file for every platform. It needs `curl`, `tar`, and one of `sha256sum`, `shasum`, or `openssl`.
+`X.Y.Z`, `vX.Y.Z`, or a `-rc.N` or `-dev.N` prerelease of one, e.g. `v1.2.3-rc.1`, to pin a version). On macOS it then
+assembles `~/Applications/Farhelm.app` around copies of those binaries plus the icon from the release archive, so
+Spotlight, Alfred, the Dock, and Cmd-Tab know the app by name (set `FARHELM_NO_APP_BUNDLE=1` to skip that). That is all
+it does. It does not touch systemd, launchd, or your shell configuration, and outside `~/Applications/Farhelm.app`
+leaves nothing behind beyond the install directory (it stages downloads in a temporary directory inside it and deletes
+that); if `~/.local/bin` is not on your `PATH` it tells you and leaves the fix to you. Read it before you run it — it is
+short, and it is the same file for every platform. It needs `curl`, `tar`, and one of `sha256sum`, `shasum`, or
+`openssl`.
 
 `FARHELM_VERSION` and `FARHELM_INSTALL_DIR` need to be set for the `sh` at the far end of the pipe, not for `curl` —
 `FARHELM_VERSION=v1.2.3 curl ... | sh` sets it for `curl` and does nothing useful. Put the assignment after the pipe
