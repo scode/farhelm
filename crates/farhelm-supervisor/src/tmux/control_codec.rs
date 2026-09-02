@@ -499,13 +499,42 @@ pub(super) struct PassthroughDecoder {
     pending_escape: bool,
 }
 
+/// One contiguous decoded output segment and whether tmux forwarded it.
+///
+/// A passthrough wrapper tells tmux not to parse its payload. The supervisor
+/// therefore needs this provenance after unwrapping: terminal-query filtering
+/// is safe only for ordinary pane bytes that tmux could already have answered.
+pub(super) struct DecodedOutput {
+    pub(super) bytes: Vec<u8>,
+    pub(super) passthrough: bool,
+}
+
+/// Append a byte without losing the boundary that determines downstream
+/// terminal-query filtering.
+fn push_decoded_byte(output: &mut Vec<DecodedOutput>, byte: u8, passthrough: bool) {
+    if let Some(segment) = output
+        .last_mut()
+        .filter(|segment| segment.passthrough == passthrough)
+    {
+        segment.bytes.push(byte);
+    } else {
+        output.push(DecodedOutput {
+            bytes: vec![byte],
+            passthrough,
+        });
+    }
+}
+
 impl PassthroughDecoder {
     const OPEN: &'static [u8] = b"\x1bPtmux;";
 
-    /// Decode one arbitrary output chunk. Empty output means the chunk
-    /// ended inside an opener or immediately after an escaped byte; the
-    /// next call resumes from that exact state.
-    fn push(&mut self, bytes: &[u8]) -> Vec<u8> {
+    /// Decode one chunk while retaining whether tmux parsed each output run.
+    ///
+    /// Empty output means the chunk ended inside an opener or immediately
+    /// after an escaped byte; the next call resumes from that exact state.
+    /// Separate runs are kept in order because ordinary pane bytes can sit on
+    /// either side of a passthrough payload in one notification.
+    fn push(&mut self, bytes: &[u8]) -> Vec<DecodedOutput> {
         let mut out = Vec::with_capacity(bytes.len());
         for &byte in bytes {
             if self.in_wrapper {
@@ -513,27 +542,27 @@ impl PassthroughDecoder {
                     self.pending_escape = false;
                     match byte {
                         // Payload ESC bytes are doubled inside a wrapper.
-                        0x1b => out.push(0x1b),
+                        0x1b => push_decoded_byte(&mut out, 0x1b, true),
                         // A single ESC + backslash closes the wrapper.
                         b'\\' => self.in_wrapper = false,
                         // Malformed but lossless: preserve a lone ESC and
                         // its follower instead of inventing a sequence.
                         other => {
-                            out.push(0x1b);
-                            out.push(other);
+                            push_decoded_byte(&mut out, 0x1b, true);
+                            push_decoded_byte(&mut out, other, true);
                         }
                     }
                 } else if byte == 0x1b {
                     self.pending_escape = true;
                 } else {
-                    out.push(byte);
+                    push_decoded_byte(&mut out, byte, true);
                 }
                 continue;
             }
 
             self.opener.push(byte);
             while !Self::OPEN.starts_with(&self.opener) {
-                out.push(self.opener.remove(0));
+                push_decoded_byte(&mut out, self.opener.remove(0), false);
             }
             if self.opener == Self::OPEN {
                 self.opener.clear();
@@ -549,7 +578,7 @@ impl PassthroughDecoder {
 #[cfg(test)]
 pub(super) fn unwrap_passthrough(bytes: &[u8]) -> Vec<u8> {
     let mut decoder = PassthroughDecoder::default();
-    let mut out = decoder.push(bytes);
+    let mut out = flatten_decoded_output(decoder.push(bytes));
     if decoder.in_wrapper {
         // A one-shot caller cannot wait for a split wrapper. Preserve it
         // byte-for-byte; the streaming path never needs this fallback.
@@ -557,6 +586,17 @@ pub(super) fn unwrap_passthrough(bytes: &[u8]) -> Vec<u8> {
     }
     out.append(&mut decoder.opener);
     out
+}
+
+/// Flatten decoded segments for test-only callers that do not act on their
+/// provenance. Production live output keeps the segments separate until it
+/// decides whether query filtering may inspect them.
+#[cfg(test)]
+fn flatten_decoded_output(output: Vec<DecodedOutput>) -> Vec<u8> {
+    output
+        .into_iter()
+        .flat_map(|segment| segment.bytes)
+        .collect()
 }
 
 /// Remove the newline control mode adds after one command's stdout.
@@ -643,18 +683,23 @@ pub(super) fn classify_control_line(line: &[u8]) -> Option<ControlLine<'_>> {
     }
 }
 
-/// Turn one notification's escaped payload into pane bytes: undo
-/// control-mode octal escaping, then feed the result through the
-/// stateful passthrough decoder.
+/// Turn one notification's escaped payload into provenance-carrying pane runs.
+///
+/// This undoes control-mode octal escaping, then unwraps the stateful tmux
+/// passthrough framing. A returned passthrough run was forwarded by tmux and
+/// must not be treated as a query tmux already answered.
 ///
 /// One function for BOTH dialects, deliberately. That matters more than
 /// it looks: [`PassthroughDecoder`] carries state ACROSS notifications (a
 /// `ESC P tmux;` wrapper may be split over any number of them), so a
 /// second decode path — or one dialect bypassing the decoder — would
 /// corrupt any wrapper that happens to straddle a dialect boundary. An
-/// empty result is normal and means the chunk ended mid-wrapper; the
-/// caller keeps reading.
-pub(super) fn decode_output_payload(decoder: &mut PassthroughDecoder, escaped: &[u8]) -> Vec<u8> {
+/// empty result is normal and means the chunk ended mid-wrapper; the caller
+/// keeps reading.
+pub(super) fn decode_output_payload(
+    decoder: &mut PassthroughDecoder,
+    escaped: &[u8],
+) -> Vec<DecodedOutput> {
     decoder.push(&unescape_control_output(escaped))
 }
 
@@ -801,8 +846,8 @@ mod tests {
         let expected = b"before\x1b]52;c;aGk=\x1b\\after";
         for split in 0..=wrapped.len() {
             let mut decoder = PassthroughDecoder::default();
-            let mut actual = decoder.push(&wrapped[..split]);
-            actual.extend(decoder.push(&wrapped[split..]));
+            let mut actual = flatten_decoded_output(decoder.push(&wrapped[..split]));
+            actual.extend(flatten_decoded_output(decoder.push(&wrapped[split..])));
             assert!(!decoder.in_wrapper, "wrapper left open at split {split}");
             assert!(
                 !decoder.pending_escape,

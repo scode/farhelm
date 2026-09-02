@@ -17,6 +17,7 @@
 
 mod control_codec;
 mod input;
+mod query_strip;
 mod sink;
 mod stream;
 #[cfg(test)]
@@ -1650,6 +1651,7 @@ impl TmuxDriver {
     /// - `remain-on-exit on`: dead panes stay viewable (SPEC.md).
     /// - `default-terminal xterm-256color`: what xterm.js actually is;
     ///   inner apps probe $TERM.
+    ///   Live query filtering is documented in `tmux/query_strip.rs`.
     /// - `escape-time 0`: tmux waits after a lone ESC byte to see whether
     ///   an escape sequence follows. The default is 500ms before tmux 3.5
     ///   and 10ms from 3.5 on — half a second of visibly laggy Esc

@@ -7,6 +7,7 @@ use super::control_codec::{
     parse_control_marker, read_command_block, read_control_line, strip_command_output_terminator,
     warn_once_about_missing_bracket_paste,
 };
+use super::query_strip::QueryStripper;
 use super::{
     HISTORY_LIMIT, PANE_MODE_FORMAT, PaneModes, TMUX_PAUSE_AFTER_SECS, TmuxDriver,
     control_cleanup_retry_delay, normalize_capture, pane_in_session,
@@ -18,7 +19,7 @@ use anyhow::bail;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::process::Stdio;
-use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
 use tracing::warn;
 
@@ -35,6 +36,10 @@ use tracing::warn;
 /// safe size and pushes the remainder onto the post-cutover path, which
 /// has no length pressure because it can use as many commands as it likes.
 const MAX_CUTOVER_PANE_FILTERS: usize = 200;
+
+/// A short pause lets a split query complete without delaying ordinary live
+/// output indefinitely when the pane has stopped writing.
+const QUERY_STRIP_IDLE_FLUSH: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Upper bound on [`OutputStream::silenced`], the per-attachment memo of
 /// panes already filtered.
@@ -305,6 +310,8 @@ impl TmuxDriver {
             reader: BufReader::new(stdout),
             line: Vec::with_capacity(8192),
             passthrough: PassthroughDecoder::default(),
+            query_strip: QueryStripper::default(),
+            query_strip_deadline: None,
             pane: pane.to_string(),
             session: session.to_string(),
             silenced: HashSet::new(),
@@ -456,6 +463,15 @@ pub struct OutputStream {
     /// Stateful because tmux may split one passthrough wrapper across
     /// several output notifications.
     passthrough: PassthroughDecoder,
+    /// Stateful because tmux may split a terminal query across notifications;
+    /// this applies only after live payload decoding, never to replay bytes.
+    query_strip: QueryStripper,
+    /// Absolute own-pane idle deadline for a retained query candidate.
+    ///
+    /// The control client also carries command replies and other panes' output,
+    /// neither of which says this pane is still writing. Keeping the deadline
+    /// here prevents that unrelated traffic from extending a retained prefix.
+    query_strip_deadline: Option<tokio::time::Instant>,
     /// The one pane this stream speaks for — see the type's own docs for
     /// why a session-wide client needs to know that at all.
     ///
@@ -1053,10 +1069,25 @@ impl OutputStream {
     /// every other.
     pub async fn next_output(&mut self) -> anyhow::Result<Option<OutputEvent>> {
         loop {
+            if let Some(deadline) = self.query_strip_deadline {
+                match tokio::time::timeout_at(deadline, self.reader.fill_buf()).await {
+                    Ok(result) => {
+                        result?;
+                    }
+                    Err(_) => {
+                        return Ok(Some(OutputEvent::Bytes(self.flush_query_strip())));
+                    }
+                }
+            }
             self.line.clear();
             let n = read_control_line(&mut self.reader, &mut self.line).await?;
             if n == 0 {
-                return Ok(None);
+                let bytes = self.flush_query_strip();
+                return if bytes.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(OutputEvent::Bytes(bytes)))
+                };
             }
             // Classify under a borrow of the line buffer, then ACT on an
             // owned decision. The split exists because acting can need
@@ -1067,16 +1098,40 @@ impl OutputStream {
                     line,
                     pane,
                     passthrough,
+                    query_strip,
+                    query_strip_deadline,
                     silenced,
                     ..
                 } = &mut *self;
                 let own_pane = pane.as_bytes();
                 match classify_control_line(strip_line_ending(line)) {
                     Some(ControlLine::Payload { pane, escaped }) if pane == own_pane => {
-                        let bytes = decode_output_payload(passthrough, escaped);
+                        let segments = decode_output_payload(passthrough, escaped);
+                        let mut bytes = Vec::new();
+                        let mut ordinary_bytes = false;
+                        for segment in segments {
+                            if segment.passthrough {
+                                // A wrapper bypassed tmux's terminal parser.
+                                // Flush an ordinary candidate first so wrapper
+                                // bytes cannot complete and be mistaken for it.
+                                bytes.extend(query_strip.flush());
+                                bytes.extend(segment.bytes);
+                            } else {
+                                ordinary_bytes |= !segment.bytes.is_empty();
+                                bytes.extend(query_strip.feed(&segment.bytes));
+                            }
+                        }
+                        if ordinary_bytes {
+                            *query_strip_deadline = query_strip
+                                .has_pending()
+                                .then(|| tokio::time::Instant::now() + QUERY_STRIP_IDLE_FLUSH);
+                        } else if !query_strip.has_pending() {
+                            *query_strip_deadline = None;
+                        }
                         if bytes.is_empty() {
-                            // A chunk that ended mid-wrapper: not an event,
-                            // and not chatter either — keep reading.
+                            // The decoder may await a wrapper continuation, or
+                            // filtering may have consumed a query or retained
+                            // its prefix. None has terminal bytes to emit yet.
                             Decision::Incomplete
                         } else {
                             Decision::Event(OutputEvent::Bytes(bytes))
@@ -1143,7 +1198,12 @@ impl OutputStream {
                         reason = ?self.exit_reason,
                         "tmux control client exited"
                     );
-                    return Ok(None);
+                    let bytes = self.flush_query_strip();
+                    return if bytes.is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(OutputEvent::Bytes(bytes)))
+                    };
                 }
                 Decision::Incomplete => {}
                 Decision::ForeignKnown => self.foreign_dropped += 1,
@@ -1167,6 +1227,16 @@ impl OutputStream {
                 }
             }
         }
+    }
+
+    /// Return a retained ordinary prefix at a stream boundary or idle limit.
+    ///
+    /// A prefix is only withheld while a later own-pane payload might complete
+    /// a table entry. Once that wait ends, clearing both pieces of state keeps
+    /// a later fresh payload from inheriting an obsolete deadline.
+    fn flush_query_strip(&mut self) -> Vec<u8> {
+        self.query_strip_deadline = None;
+        self.query_strip.flush()
     }
 
     /// Lift a tmux-side pause and re-establish this client's stream as a
@@ -1200,6 +1270,11 @@ impl OutputStream {
         // mangle them. The replay itself is capture-pane output, which
         // never contains a wrapper, so nothing is lost by clearing here.
         self.passthrough = PassthroughDecoder::default();
+        // The query suffix belongs to the abandoned pre-pause live stream.
+        // The terminal is reset and replayed before fresh output begins, so
+        // retaining it could consume bytes from that new stream instead.
+        self.query_strip = QueryStripper::default();
+        self.query_strip_deadline = None;
         let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         // Start the positional reads from a known boundary. A pane filter
         // written moments before the `%pause` can still have its reply in
@@ -1419,7 +1494,10 @@ mod tests {
         for line in transcript {
             match classify_control_line(line) {
                 Some(ControlLine::Payload { escaped, .. }) => {
-                    let bytes = decode_output_payload(&mut decoder, escaped);
+                    let bytes = decode_output_payload(&mut decoder, escaped)
+                        .into_iter()
+                        .flat_map(|segment| segment.bytes)
+                        .collect::<Vec<_>>();
                     if !bytes.is_empty() {
                         events.push(OutputEvent::Bytes(bytes));
                     }
@@ -1582,6 +1660,8 @@ mod tests {
             reader: BufReader::new(feeder_stdout),
             line: Vec::new(),
             passthrough: PassthroughDecoder::default(),
+            query_strip: QueryStripper::default(),
+            query_strip_deadline: None,
             pane: "%0".to_string(),
             session: "fh-s".to_string(),
             silenced: HashSet::new(),
@@ -1596,6 +1676,72 @@ mod tests {
             exit_reason: None,
         };
         (stream, command_sink)
+    }
+
+    /// Build the production reader around a pipe whose writer the test owns.
+    ///
+    /// EOF and idle behavior depend on whether the input stays open, which a
+    /// prewritten transcript cannot express. The retained writer lets callers
+    /// stage control lines around a pending terminal prefix without replacing
+    /// the `ChildStdout` production code reads from.
+    fn stream_over_open_pipe() -> (OutputStream, Child, tokio::process::ChildStdin) {
+        let mut feeder = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawning the open transcript feeder");
+        let feeder_stdin = feeder.stdin.take().expect("piped feeder stdin");
+        let feeder_stdout = feeder.stdout.take().expect("piped feeder stdout");
+        let mut command_sink = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawning the command sink");
+        let stdin = command_sink.stdin.take().expect("piped command sink stdin");
+        let stream = OutputStream {
+            driver: TmuxDriver::new(std::path::Path::new("")),
+            client_target: String::new(),
+            output_disabled: true,
+            child: feeder,
+            stdin: Some(stdin),
+            reader: BufReader::new(feeder_stdout),
+            line: Vec::new(),
+            passthrough: PassthroughDecoder::default(),
+            query_strip: QueryStripper::default(),
+            query_strip_deadline: None,
+            pane: "%0".to_string(),
+            session: "fh-s".to_string(),
+            silenced: HashSet::new(),
+            pending_filter_replies: 0,
+            foreign_dropped: 0,
+            exchange_timeout: CONTROL_EXCHANGE_TIMEOUT,
+            pane_list_timeout: PANE_LIST_TIMEOUT,
+            exit_reason: None,
+        };
+        (stream, command_sink, feeder_stdin)
+    }
+
+    /// Write one raw own-pane payload as a complete control-mode line.
+    ///
+    /// The control codec accepts raw ESC bytes as well as tmux's octal form;
+    /// using the raw form keeps split-boundary tests aligned with the bytes the
+    /// passthrough decoder actually receives.
+    async fn feed_own_payload(writer: &mut tokio::process::ChildStdin, payload: &[u8]) {
+        writer
+            .write_all(b"%output %0 ")
+            .await
+            .expect("writing output marker");
+        writer
+            .write_all(payload)
+            .await
+            .expect("writing pane payload");
+        writer
+            .write_all(b"\n")
+            .await
+            .expect("terminating output line");
+        writer.flush().await.expect("flushing pane payload");
     }
 
     #[tokio::test]
@@ -1629,6 +1775,128 @@ mod tests {
             "a foreign pane's payloads and pauses must be dropped before decoding, and this \
              pane's split wrapper must close intact across them"
         );
+    }
+
+    /// A passthrough query must reach the browser because tmux forwarded it.
+    ///
+    /// The identical bare query is stripped because tmux parsed and answered
+    /// it. Testing every wrapper split pins both the provenance boundary and
+    /// the decoder's existing ability to carry that boundary across lines.
+    #[tokio::test]
+    async fn passthrough_queries_bypass_stripping_across_every_wrapper_split() {
+        let wrapped = b"\x1bPtmux;\x1b\x1b[6n\x1b\\";
+        for split in 0..=wrapped.len() {
+            let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
+            feed_own_payload(&mut writer, &wrapped[..split]).await;
+            feed_own_payload(&mut writer, &wrapped[split..]).await;
+            writer
+                .write_all(b"%exit\n")
+                .await
+                .expect("writing stream exit");
+            drop(writer);
+
+            let mut observed = Vec::new();
+            while let Some(OutputEvent::Bytes(bytes)) =
+                stream.next_output().await.expect("reading wrapped query")
+            {
+                observed.extend(bytes);
+            }
+            assert_eq!(
+                observed, b"\x1b[6n",
+                "wrapper split {split} must preserve a tmux-forwarded query"
+            );
+        }
+
+        let (mut stream, _command_sink) = stream_over_transcript(b"%output %0 \x1b[6n\n%exit\n");
+        assert!(
+            stream
+                .next_output()
+                .await
+                .expect("reading bare query")
+                .is_none(),
+            "the ordinary query must be removed because tmux answers it"
+        );
+    }
+
+    /// `%exit` is a stream boundary, so a retained prefix must be emitted
+    /// once before callers learn that the control client ended.
+    #[tokio::test]
+    async fn exit_flushes_a_retained_query_prefix_before_end_of_stream() {
+        let (mut stream, _command_sink) = stream_over_transcript(b"%output %0 \x1b[\n%exit\n");
+        assert_eq!(
+            stream.next_output().await.expect("reading exit flush"),
+            Some(OutputEvent::Bytes(b"\x1b[".to_vec()))
+        );
+        assert_eq!(
+            stream.next_output().await.expect("reading stream end"),
+            None
+        );
+    }
+
+    /// An open pipe with no further own-pane bytes must release a pending
+    /// prefix at the idle deadline instead of waiting forever for EOF.
+    #[tokio::test(start_paused = true)]
+    async fn idle_flushes_a_retained_query_prefix_from_an_open_stream() {
+        let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
+        feed_own_payload(&mut writer, b"\x1b[").await;
+        let read = tokio::spawn(async move {
+            let event = stream.next_output().await.expect("reading idle flush");
+            (stream, event)
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(QUERY_STRIP_IDLE_FLUSH).await;
+        let (stream, event) = read.await.expect("joining idle reader");
+        assert_eq!(event, Some(OutputEvent::Bytes(b"\x1b[".to_vec())));
+        drop(writer);
+        shutdown_test_stream(stream).await;
+    }
+
+    /// EOF settles a retained prefix as ordinary output before `next_output`
+    /// reports the end, matching the `%exit` boundary contract.
+    #[tokio::test]
+    async fn eof_flushes_a_retained_query_prefix_before_end_of_stream() {
+        let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
+        feed_own_payload(&mut writer, b"\x1b[").await;
+        drop(writer);
+        assert_eq!(
+            stream.next_output().await.expect("reading EOF flush"),
+            Some(OutputEvent::Bytes(b"\x1b[".to_vec()))
+        );
+        assert_eq!(stream.next_output().await.expect("reading EOF"), None);
+    }
+
+    /// Shared-client chatter cannot extend a prefix's own-pane idle deadline.
+    ///
+    /// This uses paused time so four unrelated notifications are deliberately
+    /// spaced inside the 50 ms window without making the regression wall-clock
+    /// sensitive. A deadline restarted by each line would remain pending at
+    /// the final advance; only the original own-pane deadline may govern it.
+    #[tokio::test(start_paused = true)]
+    async fn unrelated_control_traffic_does_not_starve_the_idle_flush() {
+        let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
+        feed_own_payload(&mut writer, b"\x1b[").await;
+        let read = tokio::spawn(async move {
+            let event = stream.next_output().await.expect("reading idle flush");
+            (stream, event)
+        });
+        tokio::task::yield_now().await;
+        for _ in 0..4 {
+            tokio::time::advance(std::time::Duration::from_millis(10)).await;
+            writer
+                .write_all(b"%window-renamed @0 unrelated\n")
+                .await
+                .expect("writing unrelated control line");
+            writer
+                .flush()
+                .await
+                .expect("flushing unrelated control line");
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(std::time::Duration::from_millis(10)).await;
+        let (stream, event) = read.await.expect("joining idle reader");
+        assert_eq!(event, Some(OutputEvent::Bytes(b"\x1b[".to_vec())));
+        drop(writer);
+        shutdown_test_stream(stream).await;
     }
 
     /// The exact attach-cutover text, pinned like every other generated
@@ -2212,6 +2480,13 @@ mod tests {
             .await
             .expect("pause command reply");
 
+        // Model an own-pane query prefix received immediately before the
+        // pause. It cannot cross the replay boundary: those live bytes belong
+        // to the abandoned stream, while the bytes after replay begin a fresh
+        // terminal transcript.
+        assert!(stream.query_strip.feed(b"\x1b[").is_empty());
+        assert!(stream.query_strip.has_pending());
+
         let (_, content) = stream
             .resume_paused_with_replay()
             .await
@@ -2219,6 +2494,11 @@ mod tests {
         assert!(
             content.windows(10).any(|window| window == b"PAUSETEST-"),
             "the catch-up replay must carry the pane's history, not an empty capture"
+        );
+        assert_eq!(
+            stream.query_strip.feed(b"6n"),
+            b"6n",
+            "post-replay bytes must not complete a prefix from the abandoned live stream"
         );
 
         // Live output resuming is the other half of the contract: a
@@ -2230,6 +2510,110 @@ mod tests {
         .await;
         shutdown_test_stream(stream).await;
     }
+
+    /// Each query in the stripping table must be answered by the pinned tmux,
+    /// while the query bytes themselves stay out of live output. The explicit
+    /// catalog is independent of the production table so deleting an entry
+    /// cannot quietly delete the guard case that would catch it.
+    #[tokio::test]
+    async fn pinned_tmux_answers_every_stripped_query() {
+        const REQUIRED_QUERY_ENTRIES: &[&[u8]] = &[
+            b"\x1b[6n",
+            b"\x1b[5n",
+            b"\x1b[c",
+            b"\x1b[0c",
+            b"\x1b[>c",
+            b"\x1b[>0c",
+            b"\x1b]10;?\x07",
+            b"\x1b]10;?\x1b\\",
+            b"\x1b]11;?\x07",
+            b"\x1b]11;?\x1b\\",
+        ];
+
+        assert_eq!(
+            super::super::query_strip::all_entries(),
+            REQUIRED_QUERY_ENTRIES,
+            "the production filter must contain exactly the pinned-tmux query catalog"
+        );
+        let server = ScratchServer::start().await;
+        for (index, &query) in REQUIRED_QUERY_ENTRIES.iter().enumerate() {
+            let name = format!("fh-query-{index}");
+            let ready = server.dir.path().join(format!("query-ready-{index}"));
+            let pane = server
+                .driver
+                .create_session(
+                    &name,
+                    "/",
+                    80,
+                    24,
+                    &[("TERM".to_string(), "xterm-256color".to_string())],
+                    &[
+                        "sh".to_string(),
+                        "-c".to_string(),
+                        "while [ ! -f \"$1\" ]; do sleep 0.01; done; \
+                         stty raw -echo; printf '%s' \"$2\"; cat"
+                            .to_string(),
+                        "farhelm-query".to_string(),
+                        ready.to_string_lossy().into_owned(),
+                        String::from_utf8(query.to_vec()).expect("query table is ASCII"),
+                    ],
+                )
+                .await
+                .unwrap_or_else(|error| panic!("creating session for query {query:?}: {error:#}"));
+            let (_modes, _prefill, mut stream) = server
+                .driver
+                .open_replay_stream(&name, &pane)
+                .await
+                .unwrap_or_else(|error| panic!("opening stream for query {query:?}: {error:#}"));
+            std::fs::write(&ready, b"ready").expect("releasing query pane after live stream opens");
+            let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let observed_by_pump = std::sync::Arc::clone(&observed);
+            let query_for_pump = query;
+            pump_until(&mut stream, 10, move |event| {
+                if let OutputEvent::Bytes(bytes) = event {
+                    let mut observed = observed_by_pump.lock().expect("observation lock");
+                    observed.extend_from_slice(bytes);
+                    reply_matches(query_for_pump, &observed)
+                } else {
+                    false
+                }
+            })
+            .await;
+            let observed = observed.lock().expect("observation lock").clone();
+            assert!(
+                !observed.windows(query.len()).any(|window| window == query),
+                "query leaked into live output: {query:?}; observed {observed:?}"
+            );
+            shutdown_test_stream(stream).await;
+        }
+    }
+
+    /// Recognize the response family tmux emits for one guarded query.
+    ///
+    /// The guard needs signatures rather than exact replies because cursor
+    /// coordinates and terminal identity vary with the scratch pane.
+    fn reply_matches(query: &[u8], observed: &[u8]) -> bool {
+        match query {
+            b"\x1b[6n" => {
+                observed.windows(2).any(|window| window == b"\x1b[") && observed.contains(&b'R')
+            }
+            b"\x1b[5n" => observed.windows(4).any(|window| window == b"\x1b[0n"),
+            b"\x1b[c" | b"\x1b[0c" => {
+                observed.windows(3).any(|window| window == b"\x1b[?") && observed.contains(&b'c')
+            }
+            b"\x1b[>c" | b"\x1b[>0c" => {
+                observed.windows(3).any(|window| window == b"\x1b[>") && observed.contains(&b'c')
+            }
+            b"\x1b]10;?\x07" | b"\x1b]10;?\x1b\\" => {
+                observed.windows(9).any(|window| window == b"\x1b]10;rgb:")
+            }
+            b"\x1b]11;?\x07" | b"\x1b]11;?\x1b\\" => {
+                observed.windows(9).any(|window| window == b"\x1b]11;rgb:")
+            }
+            _ => false,
+        }
+    }
+
     /// A session whose OTHER window is flooding must deliver none of that
     /// flood to a terminal's control client — the tmux-side pane filter
     /// doing its job, against a real tmux.
