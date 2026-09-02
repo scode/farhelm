@@ -134,7 +134,8 @@ Linux" below).
   its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when the app exits.
   The window shows the web UI at `http://127.0.0.1:7433/`. If another process owns that port, the app refuses to start
   instead of choosing an undiscoverable origin; stop the conflicting service and relaunch.
-- Add the remote host: open the hosts panel, choose "add host", and enter the host's SSH destination. Farhelm connects
+- Add the remote host from the permanent host list: choose "add host" and enter the host's SSH destination. Use the
+  row's "⋯" menu for host actions, and open "details" when you need evidence or provisioning progress. Farhelm connects
   with your existing passwordless SSH configuration and inspects the host. A supervisor already running for your user is
   registered as-is; on a host without one, Farhelm shows the exact file-and-unit plan and does nothing until you confirm
   it. No root is involved at any point.

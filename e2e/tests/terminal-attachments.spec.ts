@@ -1631,9 +1631,9 @@ test("a completed upload keeps focus where it was and inserts through bracketed 
     // reason that has nothing to do with the insertion path.
     await latchBracketedPaste(page, "terminal");
     // Focus deliberately parked outside the terminal before the drop —
-    // the sidebar's hosts toggle, the stable non-terminal control now
+    // the host details toggle, the stable non-terminal control now
     // that the back button is gone.
-    await page.locator(".hosts-toggle").focus();
+    await page.locator(".host-details-toggle").focus();
     await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: `focus-${stamp}.txt`, mime: "text/plain", content: "x" }],
     });
@@ -1646,7 +1646,7 @@ test("a completed upload keeps focus where it was and inserts through bracketed 
     expect(
       await page.evaluate(() => document.activeElement?.className ?? ""),
       "an upload completing must not move the caret",
-    ).toContain("hosts-toggle");
+    ).toContain("host-details-toggle");
     // `^[[200~` is the pty echoing the bracketed-paste start marker back
     // in caret notation; it is only there if the insertion went through
     // the paste path rather than being written straight at the socket.

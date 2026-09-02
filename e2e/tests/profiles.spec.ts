@@ -153,9 +153,8 @@ async function listWithStubbedFeed(page: Page): Promise<FeedStub> {
   await page.goto("/");
   await feed.waitForConnection(1);
   feed.notify(1);
-  // Arrival check: the hosts panel is behind a toggle now, so the always-
-  // visible compact strip is what proves the first hosts read landed.
-  await expect(page.locator(".hosts-compact-entry").first()).toBeVisible({ timeout: 20_000 });
+  // Arrival check: the first always-visible host row proves the hosts read landed.
+  await expect(page.locator(".host-row").first()).toBeVisible({ timeout: 20_000 });
   return feed;
 }
 
@@ -540,7 +539,7 @@ test.describe("agent profiles", () => {
     await expect(toggle).toBeFocused();
 
     await openProfiles(page);
-    const destination = page.locator(".hosts-toggle");
+    const destination = page.locator(".host-details-toggle");
     await destination.focus();
     await expect(section(page)).toHaveCount(0);
     await expect(destination).toBeFocused();
@@ -559,7 +558,7 @@ test.describe("agent profiles", () => {
       (window as any).__farhelmTestProfiles = { hideFocusTarget: true };
     });
     await section(page).locator(".new-profile-button").click();
-    const outside = page.locator(".hosts-toggle");
+    const outside = page.locator(".host-details-toggle");
     await outside.focus();
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles.hideFocusTarget = false;
@@ -710,7 +709,7 @@ test.describe("agent profiles", () => {
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = { classification: { delayMs: 500 } };
     });
-    const outside = page.locator(".hosts-toggle");
+    const outside = page.locator(".host-details-toggle");
     await outside.focus();
     await page.waitForTimeout(500);
     await expect(section(page)).toBeVisible();
@@ -760,7 +759,7 @@ test.describe("agent profiles", () => {
         classification: { holds: 2, started: 0, releases: [] },
       };
     });
-    const outside = page.locator(".hosts-toggle");
+    const outside = page.locator(".host-details-toggle");
     await outside.focus();
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
@@ -2662,12 +2661,12 @@ test.describe("agent profiles", () => {
         const target = event.target;
         if (!(target instanceof Element) || !target.closest(".profile-save")) return;
         window.removeEventListener("click", handler);
-        (document.querySelector(".hosts-toggle") as HTMLButtonElement).focus();
+        (document.querySelector(".host-details-toggle") as HTMLButtonElement).focus();
       };
       window.addEventListener("click", handler);
     });
     const save = await beginHeldProfileSave(page, profile);
-    const destination = page.locator(".hosts-toggle");
+    const destination = page.locator(".host-details-toggle");
     await expect(destination).toBeFocused();
 
     save.release();
@@ -2800,7 +2799,10 @@ test.describe("agent profiles", () => {
       },
     );
     await listWithStubbedFeed(page);
-    await openHostsPanel(page);
+    // The row's menu toggle is always mounted, so details stay closed: an
+    // expanded details column keeps resizing as host reads land, and the popup
+    // answers any such layout change by closing once the operation settles,
+    // which is not the refusal path this test is about.
     await openProfiles(page);
     await profileRow(page, profile.id).locator(".profile-delete").click();
     await profileRow(page, profile.id).locator(".profile-confirm-delete").click();

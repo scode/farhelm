@@ -610,13 +610,11 @@ test.describe("multi-host", () => {
     }
   });
 
-  // Both hosts, both chips, both identities — the OPENED panel's detailed
-  // two-host baseline, and the one assertion that proves the fleet is a
-  // fleet rather than one host drawn twice. (SPEC.md's without-opening-
-  // anything visibility is the compact strip's contract, pinned in
-  // sidebar.spec.ts; the identities and evidence here are what the panel
-  // adds behind the toggle.)
-  test("hosts-panel-states: both harness hosts render connected chips with identities", async ({
+  // Both hosts, both statuses, both identities: the detailed two-host
+  // baseline, and the one assertion that proves the fleet is a fleet rather
+  // than one host drawn twice. Sidebar coverage pins the collapsed state;
+  // this test opens details to verify the evidence behind both rows.
+  test("host-list-states: both harness hosts render connected statuses with identities", async ({
     page,
     request,
   }) => {
@@ -633,10 +631,11 @@ test.describe("multi-host", () => {
     const local = hostRowByName(page, "this machine");
     await expect(local).toHaveAttribute("data-host-phase", "connected");
     await expect(local).toHaveAttribute("data-host-kind", "local");
-    await expect(local.locator(".host-chip")).toHaveText("connected");
-    // `.host-remove`/`.host-edit` now live inside the row's "⋯" menu, so
-    // the count assertions below apply to the OPEN menu — a local row
-    // opens onto profiles/retry only, never these two.
+    await expect(local.locator(".host-status .status-dot")).toBeVisible();
+    await expect(local.locator(".host-status-label")).toHaveCount(0);
+    // Profiles lives in the app bar. The local row menu contains Retry and
+    // whichever provisioning command its current setup state permits, but
+    // never destination management.
     await openHostMenu(local);
     await expect(local.locator(".host-remove")).toHaveCount(0);
     await expect(local.locator(".host-edit")).toHaveCount(0);
@@ -721,7 +720,7 @@ test.describe("multi-host", () => {
   });
 
   // F1/COR-CONFIRM-CLIP: choosing `remove` used to replace `.host-row-main`'s
-  // contents with the name, the chip, an unshrinkable warning sentence, a
+  // contents with the name, the status, an unshrinkable warning sentence, a
   // second copy of the name, AND both buttons — all on one non-wrapping
   // line, which the 340px sidebar clips exactly the way it once clipped
   // `remove` itself (the regression the previous test guards). This proves
@@ -773,10 +772,58 @@ test.describe("multi-host", () => {
     await assertFullyPaintedAndHitTestable(page, cancel);
   });
 
+  /**
+   * Removal begins and confirms while Details is collapsed. A refused DELETE
+   * must leave its concrete error on the row instead of returning to an
+   * apparently unchanged resting state.
+   */
+  test("a failed removal stays visible with details collapsed", async ({ page }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9021,
+          kind: "ssh",
+          destination: "user@remove-refusal",
+          name: "user@remove-refusal",
+          identity: "identity-remove-refusal",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-remove-refusal",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/hosts/9021", async (route) => {
+      if (route.request().method() === "DELETE") {
+        await route.fulfill({ status: 409, body: "the host is still required" });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto("/");
+    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+    const row = hostRowByName(page, "user@remove-refusal");
+    await openHostMenu(row);
+    await row.locator(".host-remove").click();
+    await row.locator(".host-confirm-remove").click();
+
+    await expect(row.locator(".host-error")).toContainText("the host is still required");
+    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  });
+
   // F2/COR-HOST-MENU-OFFSCREEN: the longest real phase word
   // (`unreachable-reprobing`) is long enough BY ITSELF — no unusually long
   // host name required — to overflow the header line's available width
-  // once the name, the chip, and the "⋯" toggle are all accounted for.
+  // once the name, the status, and the "⋯" toggle are all accounted for.
   // `.host-row-main` used to allow that line to WRAP (to make room for the
   // removal confirmation below it — see `.host-confirm-remove-panel` in
   // app.css), and wrapping sent the "⋯" onto a line of its own starting at
@@ -816,12 +863,29 @@ test.describe("multi-host", () => {
     await page.goto("/");
     await openHostsPanel(page);
     const row = hostRowByName(page, "user@remote-host");
-    await expect(row.locator(".host-chip")).toHaveText("unreachable-reprobing");
+    await expect(row.locator(".host-status-label")).toHaveText("unreachable, retrying");
 
     // The toggle itself, BEFORE opening anything: still on the header's one
     // line, fully inside the sidebar, not wrapped away to the left.
     const toggle = row.locator(".host-row-menu");
     await assertFullyPaintedAndHitTestable(page, toggle);
+
+    const [nameBox, statusBox, toggleBox] = await Promise.all([
+      row.locator(".host-name").boundingBox(),
+      row.locator(".host-status").boundingBox(),
+      toggle.boundingBox(),
+    ]);
+    if (!nameBox || !statusBox || !toggleBox) {
+      throw new Error("the host header elements must all have measurable boxes");
+    }
+    // Same line means the three boxes share a horizontal band, not that
+    // their centers coincide: `.host-row-main` aligns them by BASELINE, so a
+    // taller toggle and a shorter status word sit on one line with different
+    // centers. A wrapped toggle would have no vertical overlap with the name.
+    const boxes = [nameBox, statusBox, toggleBox];
+    const bandTop = Math.max(...boxes.map((box) => box.y));
+    const bandBottom = Math.min(...boxes.map((box) => box.y + box.height));
+    expect(bandBottom - bandTop, "the header elements must overlap vertically").toBeGreaterThan(0);
 
     await openHostMenu(row);
     const panel = row.locator(".host-row-menu-panel");
@@ -832,6 +896,7 @@ test.describe("multi-host", () => {
     // `.host-adopt`: this phase carries no identity to adopt).
     for (const item of [
       row.locator(".host-retry"),
+      row.locator(".provisioning-update"),
       row.locator(".host-edit"),
       row.locator(".host-remove"),
     ]) {
@@ -885,11 +950,39 @@ test.describe("multi-host", () => {
     await expect(row.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
   });
 
+  /**
+   * The Add host form sits above session rows as well as host rows. Its mount
+   * must therefore dismiss a session menu measured against the old layout.
+   */
+  test("add-host-form-closes-a-stray-session-menu", async ({ page, request }) => {
+    const session = await createSession(request, {
+      title: `add-form-menu-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
+    try {
+      await page.goto("/");
+      const sessionRow = page.locator(`[data-session-id="${session.id}"]`);
+      await expect(sessionRow).toBeVisible();
+      await openRowMenu(sessionRow);
+
+      await page.locator(".add-host-button").click();
+      await expect(page.locator(".add-host-form")).toBeVisible();
+      await expect(sessionRow.locator(".session-row-menu-panel")).toHaveCount(0);
+      await expect(sessionRow.locator(".session-row-menu")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    } finally {
+      await cleanupSession(request, session.id);
+    }
+  });
+
   // F9/TEST-HOST-KEYBOARD: `menu_panel.rs`'s keyboard mechanics are pinned
   // headlessly, but nothing before this proved `HostRow` wired them to real
   // DOM elements — every other host-menu test drives it by pointer click and
   // finds items by class alone. An adoptable ssh host is used deliberately:
-  // it is the one state offering all four actions, so the separator's
+  // it offers five actions, including Update, so the separator's
   // position and the wrap boundary are both exercised on the full list
   // rather than a shorter one.
   test("host-menu-keyboard-contract: role=menu, every item reachable, wraps, Escape/Tab restore focus", async ({
@@ -921,17 +1014,32 @@ test.describe("multi-host", () => {
     await page.goto("/");
     await openHostsPanel(page);
     const row = hostRowByName(page, "user@mismatched-keyboard");
-    await openHostMenu(row);
-
     const toggle = row.locator(".host-row-menu");
-    const menu = row.locator(".host-row-menu-items");
-    await expect(menu).toHaveAttribute("role", "menu");
-
     const retry = row.locator(".host-retry");
     const adopt = row.locator(".host-adopt");
+    const update = row.locator(".provisioning-update");
     const edit = row.locator(".host-edit");
     const remove = row.locator(".host-remove");
-    for (const item of [retry, adopt, edit, remove]) {
+    for (const [key, expected] of [
+      ["Enter", retry],
+      ["Space", retry],
+      ["ArrowDown", retry],
+      ["ArrowUp", remove],
+    ] as const) {
+      await toggle.focus();
+      await page.keyboard.press(key);
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(expected).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(toggle).toBeFocused();
+    }
+
+    // Keep the pointer-open path separate from the closed-toggle key cases.
+    await openHostMenu(row);
+    const menu = row.locator(".host-row-menu-items");
+    await expect(menu).toHaveAttribute("role", "menu");
+    for (const item of [retry, adopt, update, edit, remove]) {
       await expect(item).toHaveAttribute("role", "menuitem");
     }
 
@@ -944,6 +1052,8 @@ test.describe("multi-host", () => {
     await expect(retry).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(adopt).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(update).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(edit).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -976,6 +1086,70 @@ test.describe("multi-host", () => {
     await page.keyboard.press("Tab");
     await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
     await expect(toggle).toBeFocused();
+  });
+
+  /**
+   * Automatic setup occupies its canonical slot after Retry in the truthful
+   * local setup menu. The two-item fixture pins ordering and both wrap
+   * boundaries without fabricating mutually exclusive provisioning offers.
+   */
+  test("automatic-setup-menu-order: keyboard navigation includes the conditional setup command", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const local = body.hosts.find((host: any) => host.kind === "local");
+      local.state = {
+        phase: "unreachable-reprobing",
+        cause: "local-supervisor-not-running",
+        last_error: "the local supervisor is absent",
+      };
+      body.hosts = [local];
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/hosts/*/provisioning", async (route) => {
+      const hostId = Number(new URL(route.request().url()).pathname.split("/").at(-2));
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "x-farhelm-build": helmBuild() },
+        body: JSON.stringify({
+          host_id: hostId,
+          run_id: null,
+          operation: null,
+          status: "completed",
+          steps: [],
+          message: null,
+        }),
+      });
+    });
+    await page.route("**/api/hosts/probe", async (route) => {
+      const body = route.request().postDataJSON() as { target?: { kind?: string } };
+      if (body.target?.kind === "local") {
+        await route.fulfill({ status: 503, body: "automatic setup needs retry" });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto("/");
+    const row = page.locator('[data-host-kind="local"]');
+    await expect(row.locator(".provisioning-error")).toContainText("automatic setup needs retry");
+    await openHostMenu(row);
+    const items = row.getByRole("menuitem");
+    await expect(items).toHaveText(["retry", "set up automatically"]);
+    const retry = row.locator(".host-retry");
+    const automatic = row.locator(".provisioning-auto-setup");
+
+    await expect(retry).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(automatic).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(retry).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(automatic).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(retry).toBeFocused();
   });
 
   // F11/TEST-EDIT-CLOSE: nothing before this ACTIVATED Edit — every existing
@@ -1011,15 +1185,21 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
-    await openHostsPanel(page);
+    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
     const row = hostRowByName(page, "user@editable");
     await openHostMenu(row);
     await row.locator(".host-edit").click();
+    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
 
     // Gone the instant the row swaps to the destination field — nothing
     // here dismisses it by hand.
     await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
     const input = row.locator(".host-destination-input");
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue("user@editable");
+
+    await page.locator(".host-details-toggle").click();
+    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
     await expect(input).toBeVisible();
     await expect(input).toHaveValue("user@editable");
 
@@ -1033,7 +1213,7 @@ test.describe("multi-host", () => {
 
   // F14/TEST-BUSY-GUARDS: `aria-disabled`, unlike a native `disabled`
   // attribute, does not stop a click or a keyboard activation from
-  // reaching the button — each of the four item handlers has to refuse
+  // reaching the button — each rendered item handler has to refuse
   // busy on its OWN. Existing tests check only the disabled APPEARANCE.
   // This holds one operation open on the (always-present) local host, then
   // arrows through every item of an UNRELATED, fully adoptable host's menu
@@ -1057,7 +1237,7 @@ test.describe("multi-host", () => {
       await route.continue();
     });
     // Everything addressed to this host, under BOTH shapes its endpoints
-    // take: the sub-resources (`/retry`, `/adopt`,
+    // take: the sub-resources (`/retry`, `/adopt`, `/update`,
     // `/destination`) and the host resource itself, which is what a
     // removal's `DELETE` targets (api.rs). A glob covering only the
     // sub-resources would make `remove`'s guard unobservable here.
@@ -1073,7 +1253,7 @@ test.describe("multi-host", () => {
     // run (`provisioning.rs`) on mount, on every feed notice, and on a
     // fallback poll. It is background traffic with no relationship to the
     // menu, it arrives at times this test does not control, and none of
-    // the four item handlers would ever issue it — so it is named and
+    // the six item handlers would ever issue it — so it is named and
     // excluded here rather than allowed to stand in for the guards this
     // test is actually about.
     const backgroundProvisioningRead = "GET /api/hosts/9013/provisioning";
@@ -1102,6 +1282,20 @@ test.describe("multi-host", () => {
       ];
       await route.fulfill({ response, json: body });
     });
+    await page.route("**/api/hosts/9013/provisioning", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "x-farhelm-build": helmBuild() },
+        body: JSON.stringify({
+          host_id: 9013,
+          run_id: "failed-busy-menu",
+          operation: "update",
+          status: "failed",
+          steps: [],
+          message: "retry the failed update",
+        }),
+      });
+    });
 
     // Every step below runs while a stalled route holds the shared
     // operation token. Releasing it has to happen even when an assertion
@@ -1124,9 +1318,11 @@ test.describe("multi-host", () => {
       await openHostMenu(target);
       const retry = target.locator(".host-retry");
       const adopt = target.locator(".host-adopt");
+      const rerun = target.locator(".provisioning-rerun");
+      const update = target.locator(".provisioning-update");
       const edit = target.locator(".host-edit");
       const remove = target.locator(".host-remove");
-      const items = [retry, adopt, edit, remove];
+      const items = [retry, adopt, rerun, update, edit, remove];
       for (const item of items) {
         await expect(item).toHaveAttribute("aria-disabled", "true");
       }
@@ -1173,6 +1369,100 @@ test.describe("multi-host", () => {
       expect(menuAttributableHits()).toEqual([]);
     } finally {
       releaseLocalRetry();
+    }
+  });
+
+  /**
+   * Automatic setup has its own conditional item and click handler. Holding
+   * an unrelated retry proves that item remains focusable but cannot enqueue
+   * a second local probe while the page operation lock is busy.
+   */
+  test("automatic setup refuses forced activation while another host operation is busy", async ({
+    page,
+  }) => {
+    let releaseSource!: () => void;
+    const heldSource = new Promise<void>((resolve) => {
+      releaseSource = resolve;
+    });
+    let localProbeCount = 0;
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const local = body.hosts.find((host: any) => host.kind === "local");
+      local.state = {
+        phase: "unreachable-reprobing",
+        cause: "local-supervisor-not-running",
+        last_error: "the local supervisor is absent",
+      };
+      body.hosts = [
+        local,
+        {
+          id: 9014,
+          kind: "ssh",
+          destination: "user@busy-source",
+          name: "user@busy-source",
+          identity: "identity-busy-source",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-busy-source",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/hosts/*/provisioning", async (route) => {
+      const hostId = Number(new URL(route.request().url()).pathname.split("/").at(-2));
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "x-farhelm-build": helmBuild() },
+        body: JSON.stringify({
+          host_id: hostId,
+          run_id: null,
+          operation: null,
+          status: "completed",
+          steps: [],
+          message: null,
+        }),
+      });
+    });
+    await page.route("**/api/hosts/probe", async (route) => {
+      const body = route.request().postDataJSON() as { target?: { kind?: string } };
+      if (body.target?.kind === "local") {
+        localProbeCount += 1;
+        await route.fulfill({ status: 503, body: "automatic setup needs retry" });
+      } else {
+        await route.continue();
+      }
+    });
+    await page.route("**/api/hosts/9014/retry", async (route) => {
+      await heldSource;
+      await route.continue();
+    });
+
+    try {
+      await page.goto("/");
+      const local = page.locator('[data-host-kind="local"]');
+      const source = page.locator('[data-host-id="9014"]');
+      await expect(local.locator(".provisioning-error")).toContainText(
+        "automatic setup needs retry",
+      );
+      expect(localProbeCount).toBe(1);
+
+      await openHostMenu(source);
+      await source.locator(".host-retry").click();
+      await openHostMenu(local);
+      const automatic = local.locator(".provisioning-auto-setup");
+      await expect(automatic).toHaveAttribute("aria-disabled", "true");
+      await automatic.focus();
+      await expect(automatic).toBeFocused();
+      await automatic.dispatchEvent("click");
+      expect(localProbeCount).toBe(1);
+    } finally {
+      releaseSource();
     }
   });
 
@@ -1226,8 +1516,8 @@ test.describe("multi-host", () => {
       "data-host-phase",
       "unreachable-reprobing",
     );
-    await expect(local.locator(".host-chip")).toHaveText(
-      "unreachable-reprobing",
+    await expect(local.locator(".host-status-label")).toHaveText(
+      "unreachable, retrying",
     );
     // The remedy is the helm's own sentence, with the state directory
     // intact: a hint that said only `farhelm supervisor run` would send the
@@ -1291,7 +1581,7 @@ test.describe("multi-host", () => {
     await openHostsPanel(page);
     const row = hostRowByName(page, "user@reinstalled");
     await expect(row).toHaveAttribute("data-host-phase", "identity-mismatch");
-    await expect(row.locator(".host-chip")).toHaveText("identity-mismatch");
+    await expect(row.locator(".host-status-label")).toHaveText("identity mismatch");
     // Both, because the decision is between them.
     await expect(row.locator(".host-detail")).toContainText("identity-before");
     await expect(row.locator(".host-detail")).toContainText("identity-after");
@@ -1406,7 +1696,7 @@ test.describe("multi-host", () => {
     ).toEqual({ reported: "identity-displayed" });
   });
 
-  // Adding a host through the FORM registers it and the chip then reports
+  // Adding a host through the form registers it and the status then reports
   // what was found — here, a real supervisor, so the row progresses to
   // connected on its own.
   //
@@ -1720,7 +2010,7 @@ test.describe("multi-host", () => {
   });
 
   // A host that GOES AWAY, driven for real: the harness's remote supervisor
-  // is killed, and everything that follows from that — the chip's phase,
+  // is killed, and everything that follows from that — the row's phase,
   // its sessions' staleness, what an operation against them does, and what
   // opening one shows — is asserted against the actual helm.
   //
@@ -1799,9 +2089,9 @@ test.describe("multi-host", () => {
 
     // SPEC.md: sessions on an unreachable host "stay in the list from the
     // helm's last-known knowledge, clearly marked". Both halves are the
-    // assertion — the chip reaching the phase that says re-probing
+    // assertion — the status reaching the phase that says re-probing
     // continues forever, and the rows staying put with their marking.
-    test("unreachable-host-goes-stale: the chip re-probes and its sessions are marked", async ({
+    test("unreachable-host-goes-stale: the status re-probes and its sessions are marked", async ({
       page,
       request,
     }) => {
@@ -1880,7 +2170,7 @@ test.describe("multi-host", () => {
       // surface must not be described as merely down, and the only way to
       // keep that true is to render the phase the helm reports.
       await expect(notice).toContainText(info.remote_ssh);
-      await expect(notice).toContainText("unreachable-reprobing");
+      await expect(notice).toContainText("unreachable, retrying");
       await expect(notice).toContainText("no terminal");
 
       expect(
@@ -1892,8 +2182,9 @@ test.describe("multi-host", () => {
 
     // SPEC.md: operations against a session on an unreachable host "are
     // refused with a clear error; nothing queues for later delivery in v1".
-    // The refusal has to name the host's state — the same phase word the
-    // chip shows — because "it failed" is not something a user can act on.
+    // The row's data attribute keeps the stable wire phase for selectors;
+    // the visible refusal must name that state in humanized prose because
+    // "it failed" is not something a user can act on.
     test("op-refused-on-unreachable: the helm's own 409 words, and nothing queued", async ({
       page,
       request,
@@ -2041,19 +2332,21 @@ test.describe("multi-host", () => {
   // plausible-looking text. Unique sentinels make each assertion about THAT
   // field in THAT row, and the table is exhaustive so a phase added later
   // arrives here without coverage rather than silently unrendered.
-  test("hosts-panel-phase-table: every phase chips and details itself", async ({
+  test("host-list-phase-table: every phase renders status and details", async ({
     page,
   }) => {
     const phases = [
       {
         id: 8001,
         phase: "connecting",
+        display: "connecting",
         state: { phase: "connecting", attempt: 3, last_error: "sentinel-connecting" },
         needles: ["3", "sentinel-connecting"],
       },
       {
         id: 8002,
         phase: "unreachable-reprobing",
+        display: "unreachable, retrying",
         state: {
           phase: "unreachable-reprobing",
           cause: "transport-failure",
@@ -2064,6 +2357,7 @@ test.describe("multi-host", () => {
       {
         id: 8003,
         phase: "connected",
+        display: null,
         state: {
           phase: "connected",
           identity: "sentinel-identity",
@@ -2075,6 +2369,7 @@ test.describe("multi-host", () => {
       {
         id: 8004,
         phase: "version-skew",
+        display: "version skew",
         state: {
           phase: "version-skew",
           peer_protocol: 99,
@@ -2089,6 +2384,7 @@ test.describe("multi-host", () => {
       {
         id: 8005,
         phase: "identity-mismatch",
+        display: "identity mismatch",
         state: {
           phase: "identity-mismatch",
           recorded: "sentinel-recorded",
@@ -2099,18 +2395,21 @@ test.describe("multi-host", () => {
       {
         id: 8006,
         phase: "identity-unverified",
+        display: "identity unverified",
         state: { phase: "identity-unverified", recorded: "sentinel-unverified" },
         needles: ["sentinel-unverified"],
       },
       {
         id: 8007,
         phase: "duplicate",
+        display: "duplicate",
         state: { phase: "duplicate", twin: 4242, identity: "sentinel-duplicate" },
         needles: ["4242", "sentinel-duplicate"],
       },
       {
         id: 8008,
         phase: "retired",
+        display: "retired",
         state: { phase: "retired", reason: "sentinel-retired" },
         needles: ["sentinel-retired"],
       },
@@ -2119,6 +2418,7 @@ test.describe("multi-host", () => {
       {
         id: 8009,
         phase: "unrecognized",
+        display: "unrecognized",
         state: { phase: "invented-by-a-later-helm" },
         needles: ["does not know"],
       },
@@ -2147,11 +2447,14 @@ test.describe("multi-host", () => {
       const row = page.locator(`[data-host-id="${entry.id}"]`);
       await expect(row).toBeVisible();
       await expect(row).toHaveAttribute("data-host-phase", entry.phase);
-      // The chip carries the helm's own word, which is also the word its
-      // refusals use — visible, not merely present in the DOM.
-      const chip = row.locator(".host-chip");
-      await expect(chip).toBeVisible();
-      await expect(chip).toHaveText(entry.phase);
+      const status = row.locator(".host-status");
+      await expect(status.locator(".status-dot")).toBeVisible();
+      if (entry.display === null) {
+        await expect(row.getByRole("status", { name: "connected" })).toHaveCount(1);
+        await expect(status.locator(".host-status-label")).toHaveCount(0);
+      } else {
+        await expect(status.locator(".host-status-label")).toHaveText(entry.display);
+      }
       const detail = row.locator(".host-detail");
       await expect(detail).toBeVisible();
       for (const needle of entry.needles) {
@@ -2339,8 +2642,9 @@ test.describe("multi-host", () => {
   //
   // The host is registered for real (a destination nothing answers at)
   // rather than mocked, because what is under test is the helm's refusal
-  // reaching the form: the same phase word the chip shows has to be in the
-  // message, or a user comparing the two has nothing to match.
+  // reaching the form. The row's data attribute proves the stable wire
+  // phase, while the visible refusal must carry the corresponding humanized
+  // wording.
   test("create-on-unreachable-refused: the helm's words in place, and no session", async ({
     page,
     request,
@@ -2393,7 +2697,7 @@ test.describe("multi-host", () => {
   // The two optional install fields left blank must reach the helm as
   // ABSENT, never as empty strings: the helm takes `""` literally, and a
   // host registered to dial a binary named nothing never connects for a
-  // reason no chip can explain.
+  // reason no status can explain.
   test("add-host-blank-optional-fields: blanks are omitted rather than sent empty", async ({
     page,
     request,

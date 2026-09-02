@@ -4,7 +4,7 @@
 //! read-state model both this panel and the stale session view are drawn
 //! from.
 //!
-//! ## Why the state chip is the whole point
+//! ## Why the row status is always present
 //!
 //! SPEC.md: "Per-host connection state is always visible." Not behind a
 //! menu, not only when something is wrong, and not summarized into
@@ -13,14 +13,10 @@
 //! red dot and no idea whether to wait (`connecting`), do nothing
 //! (`unreachable-reprobing` re-probes forever), upgrade a binary
 //! (`version-skew`), make a decision (`identity-mismatch`), or press retry
-//! (`retired`). Each row therefore carries the phase, the evidence behind
-//! it, and — where one exists — the sentence to act on.
-//!
-//! The chip's TEXT is the helm's own phase vocabulary verbatim, not a
-//! friendlier synonym. The same strings appear in the helm's logs and inside
-//! every refusal a non-connected host produces ("host 3 is
-//! unreachable-reprobing, so this operation is refused…"), and a user
-//! comparing an error against this panel has to find the same word in both.
+//! (`retired`). Each row therefore keeps a phase-colored dot in the trailing
+//! gutter. Connected is deliberately quiet; every other phase adds a
+//! humanized word, while the stable wire token remains on `data-host-phase`
+//! for automation and machine-authored diagnostics.
 //!
 //! ## Peer-supplied text is displayed, never trusted to lay itself out
 //!
@@ -58,8 +54,8 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::api::{
-    Commit, ProbeResponse, ProvisioningSubmission, adopt_host, probe_ssh_host, provision_host,
-    remove_host, retry_host, set_host_destination,
+    Commit, ProbeResponse, ProvisioningOperation, ProvisioningSubmission, adopt_host,
+    probe_ssh_host, provision_host, remove_host, retry_host, set_host_destination,
 };
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
@@ -68,18 +64,20 @@ use crate::menu_panel::{
 };
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
-use crate::provisioning::{PlanConfirmation, ProvisioningPanel};
+use crate::provisioning::{
+    PlanConfirmation, ProvisioningMenuState, ProvisioningPanel, ProvisioningTraceShape,
+};
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
 // ---------------------------------------------------------------------
 // The phase vocabulary
 // ---------------------------------------------------------------------
 
-/// The chip's text for one phase: the helm's own stable label.
+/// The stable wire token for one phase.
 ///
 /// Kept as a total match rather than a derived string so that a new phase
 /// forces a deliberate decision here — the alternative, deriving the label
-/// from the wire tag, would silently show `Unrecognized` as an empty chip.
+/// from the wire tag, would silently show `Unrecognized` as an empty token.
 pub(crate) fn phase_label(state: &HostPhase) -> &'static str {
     match state {
         HostPhase::Connecting { .. } => "connecting",
@@ -94,7 +92,27 @@ pub(crate) fn phase_label(state: &HostPhase) -> &'static str {
     }
 }
 
-/// The CSS modifier the chip carries, grouping the eight phases by what a
+/// The words this client shows for one host phase.
+///
+/// Wire tokens remain hyphenated because data attributes, requests, logs,
+/// and helm refusals use them as stable handles. Display text has a different
+/// job: it should read as ordinary prose beside a status dot. Keeping this a
+/// total match makes a newly added phase choose both forms deliberately.
+pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
+    match state {
+        HostPhase::Connecting { .. } => "connecting",
+        HostPhase::Unreachable { .. } => "unreachable, retrying",
+        HostPhase::Connected { .. } => "connected",
+        HostPhase::VersionSkew { .. } => "version skew",
+        HostPhase::IdentityMismatch { .. } => "identity mismatch",
+        HostPhase::IdentityUnverified { .. } => "identity unverified",
+        HostPhase::Duplicate { .. } => "duplicate",
+        HostPhase::Retired { .. } => "retired",
+        HostPhase::Unrecognized => "unrecognized",
+    }
+}
+
+/// The CSS modifier the row status carries, grouping the phases by what a
 /// person watching the panel should do about them: nothing yet
 /// (`connecting`), nothing at all (`unreachable-reprobing` — it re-probes
 /// forever and recovers unaided), all is well (`connected`), or look at this
@@ -207,7 +225,7 @@ const LOCAL_SUPERVISOR_NOT_RUNNING: &str = "local-supervisor-not-running";
 ///
 /// Every branch renders values the helm supplied rather than restating the
 /// phase in longer words: both versions on a skew, both identities on a
-/// mismatch, the transport's own text when a host will not answer. A chip
+/// mismatch, the transport's own text when a host will not answer. A status
 /// that said only "unreachable" would leave a user with nothing to search
 /// for.
 ///
@@ -436,7 +454,7 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
 /// has since failed to refresh, and a failure with nothing behind it. A
 /// plain `Option<Result<…>>` — which this replaced — can only express three,
 /// and it expresses the wrong three: a failed poll erases the snapshot, so
-/// one dropped request blanks every chip on the surface SPEC.md requires to
+/// one dropped request blanks every status on the surface SPEC.md requires to
 /// always show connection state.
 ///
 /// The two consumers then diverge deliberately, because their honesty
@@ -561,7 +579,7 @@ pub(crate) fn stale_session_notice(host_name: &str, lookup: HostLookup<'_>) -> V
             parts.push(DetailPart::text(format!(
                 " is {phase}, so there is no terminal to show — everything below is the helm's \
                  last-known record of this session. ",
-                phase = phase_label(&host.state),
+                phase = phase_display_label(&host.state),
             )));
             parts.extend(state_detail(&host.state));
             if let Some(remedy) = state_remedy(&host.state) {
@@ -602,8 +620,8 @@ pub(crate) fn stale_session_notice(host_name: &str, lookup: HostLookup<'_>) -> V
 /// need every signal it touches passed in by hand.
 type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Commit, String>>>>;
 
-/// The hosts panel: every registered host, its state, and the management
-/// verbs SPEC.md's host management consists of.
+/// The permanent host list: every registered host, its state, and the
+/// management verbs SPEC.md's host management consists of.
 ///
 /// ## Where the data and the in-flight state come from
 ///
@@ -612,7 +630,7 @@ type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Com
 /// page would be a second cadence nobody chose. `on_changed` is how a
 /// mutation asks for an immediate refetch instead of waiting out the poll —
 /// there is nothing honest to paint optimistically, because every host verb
-/// changes state this side cannot predict (an add's chip is whatever the
+/// changes state this side cannot predict (an add's status is whatever the
 /// connection finds; a retarget's is a fresh active-retry window).
 ///
 /// `ops` is the page's single live-operation token (`ops::OpLock`), and it
@@ -679,6 +697,8 @@ pub(crate) fn HostsPanel(
     mut ops: OpLock,
     mut mutation_busy_hosts: Signal<std::collections::HashSet<HostId>>,
     mut provisioning_busy_hosts: Signal<std::collections::HashSet<HostId>>,
+    /// The collapsed provisioning traces that currently contribute row height.
+    mut provisioning_trace_shapes: Signal<HashMap<HostId, ProvisioningTraceShape>>,
     /// Which host row's "⋯" menu is open, if any — `ListView`'s signal, kept
     /// in step with `session_menu_open` below so at most one row menu is
     /// ever open across the whole sidebar (see this component's own doc).
@@ -686,6 +706,9 @@ pub(crate) fn HostsPanel(
     /// The session list's own open-menu signal — written (never read) here,
     /// purely to close a session row's menu when a host row's opens.
     mut session_menu_open: Signal<Option<String>>,
+    /// The fixed filter popover must close when details move its session-header
+    /// anchor, just as it did when the former full host panel changed height.
+    mut filter_open: Signal<bool>,
     on_changed: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -705,6 +728,16 @@ pub(crate) fn HostsPanel(
     let mut editing = use_signal(|| None::<HostId>);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
+    // One disclosure controls every row. It stays client-local and resets on
+    // page mount; a host refresh changes facts, not the user's chosen level
+    // of detail.
+    let mut details_open = use_signal(|| false);
+    // Provisioning stays mounted in each row, while its commands render in
+    // the row-owned floating menu. These maps are the narrow bridge between
+    // those two render locations: summaries flow out, one-shot requests in.
+    let provisioning_menu_states = use_signal(HashMap::<HostId, ProvisioningMenuState>::new);
+    let mut provisioning_action_requests =
+        use_signal(HashMap::<HostId, ProvisioningOperation>::new);
     // An add that committed with an unreadable reply, which has no row to
     // sit on — see the form's `on_added`.
     let mut add_warning = use_signal(|| None::<String>);
@@ -721,16 +754,14 @@ pub(crate) fn HostsPanel(
     // at whichever row visually slides underneath it, including this
     // panel's own destructive `remove`.
     //
-    // `ListView` closes both signals for the layout changes IT causes
-    // directly (the hosts panel or create form opening, the compact strip
-    // …) — see its own effect's doc — but `adding` is this component's
-    // OWN private state, invisible to that effect, which is why this has
-    // to be a second, narrower use_effect here rather than one more read
-    // added to that list.
+    // `ListView` closes both signals for layout changes it owns — see its
+    // own effect's doc — but `adding` is this component's private state,
+    // invisible there. That is why this needs a second, narrower effect.
     use_effect(move || {
         adding();
         host_menu_open.set(None);
         session_menu_open.set(None);
+        filter_open.set(false);
     });
 
     // One shared shape for the ordinary host-row mutations: claim the page's
@@ -793,6 +824,10 @@ pub(crate) fn HostsPanel(
         // — would hide it behind the very panel that triggered it. See
         // `on_adopt` just below for the identical reasoning.
         host_menu_open.set(None);
+        if !*details_open.peek() {
+            filter_open.set(false);
+        }
+        details_open.set(true);
         let base = retry_base.clone();
         // The started/refused answer is ignored here and in the two verbs
         // below: their controls simply stay as they are, so a click that
@@ -817,6 +852,10 @@ pub(crate) fn HostsPanel(
         // the identity changed again renders its refusal where the user can
         // actually see it.
         host_menu_open.set(None);
+        if !*details_open.peek() {
+            filter_open.set(false);
+        }
+        details_open.set(true);
         let base = adopt_base.clone();
         run(
             host,
@@ -885,8 +924,31 @@ pub(crate) fn HostsPanel(
     let busy = ops.busy();
     rsx! {
         section { class: "hosts-panel",
-            div { class: "hosts-panel-header",
-                span { class: "hosts-panel-title", "hosts" }
+            div { class: "hosts-header",
+                div { class: "host-count",
+                    if let Some(hosts) = read.hosts() {
+                        if hosts.len() == 1 { "1 host" } else { "{hosts.len()} hosts" }
+                    } else {
+                        "hosts"
+                    }
+                }
+                div { class: "hosts-header-controls",
+                button {
+                    r#type: "button",
+                    class: "btn host-details-toggle",
+                    aria_expanded: details_open(),
+                    onclick: move |_| {
+                        details_open.toggle();
+                        // Every row changes height together. A fixed menu is
+                        // measured once, and the filter popover is fixed to
+                        // the session header, so neither can survive that
+                        // reflow with trustworthy geometry.
+                        host_menu_open.set(None);
+                        session_menu_open.set(None);
+                        filter_open.set(false);
+                    },
+                    "details"
+                }
                 button {
                     r#type: "button",
                     class: "btn add-host-button",
@@ -907,6 +969,7 @@ pub(crate) fn HostsPanel(
                         adding.set(!open);
                     },
                     "add host"
+                }
                 }
             }
             if adding() {
@@ -971,13 +1034,29 @@ pub(crate) fn HostsPanel(
                                 error: errors.read().get(&host.id).cloned(),
                                 warning: warnings.read().get(&host.id).cloned(),
                             },
+                            details_open: details_open(),
+                            provisioning_menu: provisioning_menu_states
+                                .read()
+                                .get(&host.id)
+                                .copied()
+                                .unwrap_or_default(),
                             local_setup,
                             provisioning_section: rsx! {
                                 ProvisioningPanel {
                                     host: host.clone(),
                                     ops,
+                                    details_open: details_open(),
                                     local_setup,
                                     manual_remedy: state_remedy(&host.state),
+                                    action_requests: provisioning_action_requests,
+                                    menu_states: provisioning_menu_states,
+                                    trace_shapes: provisioning_trace_shapes,
+                                    on_reveal_details: move |_| {
+                                        filter_open.set(false);
+                                        details_open.set(true);
+                                        host_menu_open.set(None);
+                                        session_menu_open.set(None);
+                                    },
                                     on_running: {
                                         let id = host.id;
                                         move |running: bool| {
@@ -1012,6 +1091,10 @@ pub(crate) fn HostsPanel(
                                 // exactly as it was, not close it out from
                                 // under a click that did nothing.
                                 host_menu_open.set(None);
+                                if !*details_open.peek() {
+                                    filter_open.set(false);
+                                }
+                                details_open.set(true);
                                 destination_draft.set(destination);
                                 editing.set(Some(id));
                             },
@@ -1031,6 +1114,19 @@ pub(crate) fn HostsPanel(
                             },
                             on_remove_confirm: on_remove_confirm.clone(),
                             on_remove_cancel: move |_| confirming_remove.set(None),
+                            on_provisioning: move |(id, operation): (HostId, ProvisioningOperation)| {
+                                if ops.busy_now()
+                                    || provisioning_busy_hosts.peek().contains(&id)
+                                {
+                                    return;
+                                }
+                                if !*details_open.peek() {
+                                    filter_open.set(false);
+                                }
+                                details_open.set(true);
+                                host_menu_open.set(None);
+                                provisioning_action_requests.write().insert(id, operation);
+                            },
                             on_menu_toggle: move |id: HostId| {
                                 let currently = *host_menu_open.peek() == Some(id);
                                 host_menu_open.set(if currently { None } else { Some(id) });
@@ -1040,6 +1136,7 @@ pub(crate) fn HostsPanel(
                                 // open, across BOTH panels" doc.
                                 if !currently {
                                     session_menu_open.set(None);
+                                    filter_open.set(false);
                                 }
                             },
                             host,
@@ -1064,7 +1161,7 @@ pub(crate) fn HostsPanel(
 // rendered clipped off the right edge by `.app-sidebar`'s
 // `overflow: hidden auto`, invisible and unclickable, with nothing in the
 // DOM or in Playwright's `toBeVisible` to notice. Folding every verb but
-// the always-visible name/chip into one "⋯" menu — built the same way as
+// the always-visible name/status into one "⋯" menu — built the same way as
 // the session row's (PR #239, mechanics shared via `menu_panel`) — leaves
 // `.host-row-main` exactly three children regardless of host kind, so
 // there is no longer a control count for the sidebar's width to run out
@@ -1075,15 +1172,19 @@ pub(crate) fn HostsPanel(
 /// them.
 ///
 /// `Retry` is offered in every phase, like the button it replaces; `Adopt`
-/// only when [`adoptable`] names an identity;
-/// `Edit`/`Remove` only on an ssh row (see `HostRow`'s own doc for why an
-/// unmanageable kind gets neither). The separator before `Remove` is
+/// only when [`adoptable`] names an identity; provisioning commands mirror
+/// the permanently mounted provisioning component's current offers; and
+/// `Edit`/`Remove` only appear on an ssh row (see `HostRow`'s own doc for why
+/// an unmanageable kind gets neither). The separator before `Remove` is
 /// drawn in the rsx, not modeled here — see `MenuOrder` in `menu_panel`
 /// for why a separator is never counted as an item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum HostMenuAction {
     Retry,
     Adopt,
+    Rerun,
+    AutomaticSetup,
+    Update,
     Edit,
     Remove,
 }
@@ -1093,9 +1194,12 @@ enum HostMenuAction {
 /// identical reason: the canonical order lives in one place so the
 /// rendered list and the navigable list cannot disagree about what "the
 /// first item" or "the last item" means.
-const HOST_MENU_ACTIONS: [HostMenuAction; 4] = [
+const HOST_MENU_ACTIONS: [HostMenuAction; 7] = [
     HostMenuAction::Retry,
     HostMenuAction::Adopt,
+    HostMenuAction::Rerun,
+    HostMenuAction::AutomaticSetup,
+    HostMenuAction::Update,
     HostMenuAction::Edit,
     HostMenuAction::Remove,
 ];
@@ -1120,10 +1224,17 @@ type HostMenuWiring = menu_panel::MenuWiring<HostMenuAction, HostId, { HOST_MENU
 /// Builds this render's host-menu item list from the row's own state: the
 /// bridge between `adoptable`/`manageable`'s booleans and the shared
 /// `MenuOrder::pack`'s generic `(action) -> bool` predicate.
-fn host_menu_order(adoptable: bool, manageable: bool) -> HostMenuOrder {
+fn host_menu_order(
+    adoptable: bool,
+    manageable: bool,
+    provisioning: ProvisioningMenuState,
+) -> HostMenuOrder {
     HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| match action {
         HostMenuAction::Retry => true,
         HostMenuAction::Adopt => adoptable,
+        HostMenuAction::Rerun => provisioning.rerun.is_some(),
+        HostMenuAction::AutomaticSetup => provisioning.automatic_setup,
+        HostMenuAction::Update => provisioning.update,
         HostMenuAction::Edit | HostMenuAction::Remove => manageable,
     })
 }
@@ -1152,7 +1263,7 @@ fn host_menu_label(name: &str) -> String {
 }
 
 /// The host row's class list for its one independent visual state beyond
-/// its own phase chip — the host row's counterpart to
+/// its own phase status — the host row's counterpart to
 /// `list::row::row_class`, narrower because a host row has neither a
 /// `stale` nor a `selected` concept of its own.
 fn host_row_class(menu_open: bool) -> &'static str {
@@ -1246,7 +1357,7 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
     HOST_ROW_RENDERS.with(|renders| renders.borrow().iter().map(|(id, n)| (*id, *n)).collect())
 }
 
-/// One host's row: name, state chip, the evidence, the remedy, and whichever
+/// One host's row: name, state, the evidence, the remedy, and whichever
 /// controls that state actually offers.
 ///
 /// The controls are state-driven rather than uniform, which is the point:
@@ -1268,54 +1379,50 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// appear to belong to a different host than it does.
 ///
 /// `data-host-id`/`data-host-phase`/`data-host-kind` are the browser suite's
-/// handles, on the wrapper rather than on the chip so a test can find a row
+/// handles, on the wrapper rather than on the status so a test can find a row
 /// and then assert about anything inside it.
 ///
 /// ## Prop shape
 ///
-/// Provisioning took this signature to twenty props, which fired the standing
-/// "regroup once props are actively growing" condition the session row was
-/// held to (lore/PLAN_M7.md item 5). The derived per-row STATE is therefore
-/// grouped into [`HostRowControls`] and [`HostRowActivity`] — split by what
-/// changes together, one for what the user has opened and one for what the
-/// helm is doing about it, so that a change to either says which.
+/// Provisioning pushed this signature past the standing "regroup once props
+/// are actively growing" condition the session row was held to
+/// (lore/PLAN_M7.md item 5). The derived per-row STATE is therefore grouped
+/// into [`HostRowControls`] and [`HostRowActivity`] — split by what changes
+/// together, one for what the user has opened and one for what the helm is
+/// doing about it, so that a change to either says which.
 ///
-/// Everything else stays a direct prop, each for its own reason. The nine
-/// event handlers must (see [`HostRowActivity`]) — four of them are host
-/// verbs, the rest move local UI state. The two `Element` sections are
-/// rendered markup rather than state, and the panel builds them. The draft is
-/// a `Signal` handle the destination form writes through, not a value to
-/// compare. And `local_setup` is a fact about the HOST — the one unreachable
-/// cause with an automatic remedy — derived by the panel because the
-/// provisioning section it also builds needs the same answer, so it belongs
-/// beside `host` rather than inside a group describing what the row is doing.
+/// Everything else stays a direct prop, each for its own reason. The event
+/// handlers cover host mutations, provisioning, and local UI transitions;
+/// they must stay stable for the memoization boundary described above. The two
+/// `Element` sections are rendered markup rather than state, and the panel
+/// builds them. The draft is a `Signal` handle the destination form writes
+/// through, not a value to compare. And `local_setup` is a fact about the HOST
+/// — the one unreachable cause with an automatic remedy — derived by the panel
+/// because the provisioning section it also builds needs the same answer, so
+/// it belongs beside `host` rather than inside a group describing what the row
+/// is doing.
 ///
 /// ## The menu, and what stays outside it
 ///
-/// `retry`/`adopt`/`edit destination`/`remove` render inside one
+/// `retry`/`adopt`, the currently truthful provisioning commands,
+/// `edit destination`, and `remove` render inside one
 /// "⋯" menu (`.host-row-menu` toggle, `.host-row-menu-panel` panel) built on
 /// the same generic mechanics the session row's menu uses (`menu_panel`) —
-/// see that module's own doc for what is shared and why. The name and phase
-/// chip stay on the row line outside the menu, and so do the
-/// `confirming_remove`/`editing` sub-states: unlike the session row's
-/// confirm/rename, which swap the CONTENTS of an already-open panel, a host
-/// row's confirm-remove and edit-destination REPLACE the whole row line —
-/// exactly as they did before this menu existed — because the destination
-/// field and the delete consequence both need more room than a menu item
-/// affords, and neither is a command among others the way `remove`'s own
-/// menu entry is. The row's own kebab menu therefore has no internal
-/// sub-states at all: opening the item list is the only thing an open panel
-/// ever shows.
+/// see that module's own doc for what is shared and why. The name, phase
+/// status, and muted toggle stay on the row line. Destination editing and
+/// removal confirmation use full-width blocks below it; while either is
+/// open the toggle stays in its trailing gutter but is disabled, preventing
+/// a competing command without making the row jump horizontally.
 ///
-/// Every one of the four items closes the menu when chosen, but the two
-/// GROUPS do it for different reasons and from different layers.
+/// Every actionable item closes the menu when chosen. Provisioning commands
+/// additionally open the global details disclosure before sending their
+/// one-shot request to the permanently mounted provisioning component, so
+/// planning feedback and confirmation never appear invisibly.
 ///
-/// `edit destination` and `remove` swap out the branch that contains the
-/// menu entirely (this row's `confirming_remove`/`editing` sub-states, see
-/// above), so closing is a correctness requirement: nothing does it
-/// automatically, the menu would otherwise keep whatever `menu_open` it
-/// last had, and cancelling back out of either flow would silently reopen a
-/// menu the user never asked to reopen. `HostsPanel`'s own `on_edit_start`/
+/// `edit destination` and `remove` disable the toggle and open subordinate
+/// blocks, so closing is a correctness requirement: cancelling either flow
+/// must not silently revive a menu the user never asked to reopen.
+/// `HostsPanel`'s own `on_edit_start`/
 /// `on_remove_start` are where that close happens, past their own busy
 /// guard — the item's click here only REQUESTS the flow, so there is one
 /// state change to account for rather than the item and the panel each
@@ -1333,6 +1440,10 @@ fn HostRow(
     controls: HostRowControls,
     /// What the management verbs are doing to this row (grouped state).
     activity: HostRowActivity,
+    /// The global details disclosure, shared by every host row.
+    details_open: bool,
+    /// Provisioning commands currently offered in this row's menu.
+    provisioning_menu: ProvisioningMenuState,
     /// The feed-driven setup/update surface built by the panel.
     provisioning_section: Element,
     destination_draft: Signal<String>,
@@ -1344,6 +1455,9 @@ fn HostRow(
     on_remove_start: EventHandler<HostId>,
     on_remove_confirm: EventHandler<HostId>,
     on_remove_cancel: EventHandler<()>,
+    /// Route a provisioning menu command back to this row's permanently
+    /// mounted provisioning component.
+    on_provisioning: EventHandler<(HostId, ProvisioningOperation)>,
     /// Open or close THIS row's "⋯" menu — `HostsPanel`'s toggle callback,
     /// built the same way the session row's `on_menu_toggle` is (see
     /// `HostsPanel`'s own doc for the single-open discipline it keeps).
@@ -1386,7 +1500,8 @@ fn HostRow(
     // below has to notice an item withdrawn (a poll turning `adoptable` off)
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
-    let menu_order = host_menu_order(adoptable_now, manageable);
+    let menu_order = host_menu_order(adoptable_now, manageable, provisioning_menu);
+    let provisioning_disabled = busy || provisioning_menu.planning;
 
     // ===== This row's own "⋯" menu state ================================
     //
@@ -1494,9 +1609,9 @@ fn HostRow(
     // `menu_panel::reconcile_menu_focus`'s own doc for the general rule
     // this applies.
     use_effect(use_reactive(
-        (&adoptable_now, &manageable),
-        move |(adoptable, manageable)| {
-            let order = host_menu_order(adoptable, manageable);
+        (&adoptable_now, &manageable, &provisioning_menu),
+        move |(adoptable, manageable, provisioning_menu)| {
+            let order = host_menu_order(adoptable, manageable, provisioning_menu);
             item_handles
                 .write()
                 .retain(|action, _| order.position(*action).is_some());
@@ -1561,28 +1676,24 @@ fn HostRow(
             "data-host-kind": "{kind_attribute}",
             div { class: "host-row-main",
                 span { class: "host-name peer-value", dir: "ltr", "{shown_name}" }
-                span { class: "host-chip {phase_class(&host.state)}", "{phase_label(&host.state)}" }
-                // While confirming a removal, the header line shows only
-                // the name and chip — no third element here at all. The
-                // confirmation itself renders as a SIBLING block below
-                // `.host-row-main` (see it just past this div's own close),
-                // never as a branch competing for room on this line
-                // (F2/COR-HOST-MENU-OFFSCREEN): this line has to stay
-                // `flex-wrap: nowrap` (see `.host-row-main` in app.css) so
-                // the "⋯" toggle can never be pushed onto a second line at
-                // the row's LEFT edge by a long phase word, which is what
-                // used to drag its floating menu off-screen with it.
-                if editing {
-                    HostDestinationForm {
-                        draft: destination_draft,
-                        busy,
-                        on_submit: move |destination| on_edit_submit.call((id, destination)),
-                        on_cancel: move |_| on_edit_cancel.call(()),
+                span {
+                    class: "host-status {phase_class(&host.state)}",
+                    role: "status",
+                    aria_label: is_connected(&host.state).then_some("connected"),
+                    span { class: "status-dot", "aria-hidden": "true" }
+                    if !is_connected(&host.state) {
+                        span { class: "host-status-label", "{phase_display_label(&host.state)}" }
                     }
-                } else if !confirming_remove {
+                }
+                // The line always keeps its three children. Edit and remove
+                // disable the menu rather than replacing its toggle, so the
+                // trailing gutter does not jump while their full-width
+                // blocks render below. `nowrap` remains load-bearing for the
+                // fixed-position panel (F2/COR-HOST-MENU-OFFSCREEN).
                     button {
                         r#type: "button",
                         class: "btn host-row-menu",
+                        disabled: editing || confirming_remove,
                         aria_label: host_menu_label(&host.name),
                         aria_expanded: menu_open,
                         aria_haspopup: "menu",
@@ -1622,7 +1733,7 @@ fn HostRow(
                         },
                         "⋯"
                     }
-                    if menu_open {
+                    if menu_open && !editing && !confirming_remove {
                         div {
                             class: "host-row-menu-panel",
                             style: menu_panel_placement_style(placement()),
@@ -1693,6 +1804,103 @@ fn HostRow(
                                         // make "adopt X" read as something
                                         // else.
                                         span { class: "peer-value", dir: "ltr", "{label}" }
+                                    }
+                                }
+                                if let Some(operation) = provisioning_menu.rerun {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn host-row-menu-item provisioning-rerun",
+                                        role: "menuitem",
+                                        aria_disabled: if provisioning_disabled { "true" },
+                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Rerun) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(menu_wiring, HostMenuAction::Rerun, element.data())
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(HostMenuAction::Rerun));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(HostMenuAction::Rerun),
+                                                menu_wiring,
+                                                &id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if provisioning_disabled {
+                                                return;
+                                            }
+                                            on_provisioning.call((id, operation));
+                                        },
+                                        if provisioning_menu.planning { "planning…" } else { "re-run" }
+                                    }
+                                }
+                                if provisioning_menu.automatic_setup {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn host-row-menu-item provisioning-auto-setup",
+                                        role: "menuitem",
+                                        aria_disabled: if provisioning_disabled { "true" },
+                                        tabindex: if menu_tab_stop == Some(HostMenuAction::AutomaticSetup) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(
+                                                menu_wiring,
+                                                HostMenuAction::AutomaticSetup,
+                                                element.data(),
+                                            )
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(HostMenuAction::AutomaticSetup));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(HostMenuAction::AutomaticSetup),
+                                                menu_wiring,
+                                                &id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if provisioning_disabled {
+                                                return;
+                                            }
+                                            on_provisioning.call((id, ProvisioningOperation::Add));
+                                        },
+                                        "set up automatically"
+                                    }
+                                }
+                                if provisioning_menu.update {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn host-row-menu-item provisioning-update",
+                                        role: "menuitem",
+                                        aria_disabled: if provisioning_disabled { "true" },
+                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Update) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(menu_wiring, HostMenuAction::Update, element.data())
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(HostMenuAction::Update));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(HostMenuAction::Update),
+                                                menu_wiring,
+                                                &id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if provisioning_disabled {
+                                                return;
+                                            }
+                                            on_provisioning.call((id, ProvisioningOperation::Update));
+                                        },
+                                        if provisioning_menu.planning { "planning…" } else { "update" }
                                     }
                                 }
                                 if manageable {
@@ -1776,9 +1984,8 @@ fn HostRow(
                             }
                         }
                     }
-                }
             }
-            // The removal prompt: a full-width block BELOW the name/chip
+            // The removal prompt: a full-width block BELOW the name/status
             // header line, not a flex child squeezed onto it (see the
             // guard on that line, just above). It has to fit an
             // unshrinkable warning sentence, a second copy of the
@@ -1825,9 +2032,19 @@ fn HostRow(
                     }
                 }
             }
-            PeerLine { class: "host-detail", parts: detail }
-            if !local_setup && let Some(remedy) = remedy {
-                PeerLine { class: "host-remedy", parts: remedy }
+            if editing {
+                HostDestinationForm {
+                    draft: destination_draft,
+                    busy,
+                    on_submit: move |destination| on_edit_submit.call((id, destination)),
+                    on_cancel: move |_| on_edit_cancel.call(()),
+                }
+            }
+            if details_open {
+                PeerLine { class: "host-detail", parts: detail }
+                if !local_setup && let Some(remedy) = remedy {
+                    PeerLine { class: "host-remedy", parts: remedy }
+                }
             }
             // The refusal is the HELM's sentence and routinely embeds
             // peer-supplied text — an adoption superseded by a re-probe
@@ -2215,17 +2432,15 @@ mod tests {
         ]
     }
 
-    /// The chip must show the helm's OWN phase vocabulary, because a user
-    /// comparing a refused operation ("host 3 is unreachable-reprobing, so
-    /// this operation is refused…") against this panel has to find the same
-    /// word in both. A friendlier synonym here would break that match with
-    /// nothing to indicate it had.
+    /// Every phase keeps a stable wire token for data attributes and
+    /// machine-authored refusals, even though visible row wording is now
+    /// humanized separately.
     ///
     /// Exhaustive over the whole taxonomy rather than a sample: a label is a
     /// one-line match arm, and the failure it guards against — a new phase
     /// borrowing another's word — is invisible unless every phase is listed.
     #[test]
-    fn every_phase_is_chipped_with_the_helms_own_label() {
+    fn every_phase_keeps_the_helms_wire_token() {
         let labels: Vec<&str> = every_phase().iter().map(phase_label).collect();
         assert_eq!(
             labels,
@@ -2245,6 +2460,29 @@ mod tests {
         // panel and a refusal disagree about which host is which.
         let unique: std::collections::HashSet<&str> = labels.iter().copied().collect();
         assert_eq!(unique.len(), labels.len());
+    }
+
+    /// Display labels turn wire separators into prose without collapsing
+    /// distinct states. This matters because the row spends words only on
+    /// non-connected phases, so each word has to identify the state on its
+    /// own while `data-host-phase` retains the exact token for automation.
+    #[test]
+    fn every_phase_has_humanized_display_words() {
+        let labels: Vec<&str> = every_phase().iter().map(phase_display_label).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "connecting",
+                "unreachable, retrying",
+                "connected",
+                "version skew",
+                "identity mismatch",
+                "identity unverified",
+                "duplicate",
+                "retired",
+                "unrecognized",
+            ]
+        );
     }
 
     /// Every phase's detail must carry ITS OWN evidence — the sentinels make
@@ -2361,22 +2599,21 @@ mod tests {
     /// state — the host row's version of the fixed-numbering hazard
     /// `list::row`'s
     /// `menu_order_follows_the_retention_state_rather_than_a_fixed_numbering`
-    /// pins for the session row, applied to `HOST_MENU_ACTIONS`'s four
-    /// items instead of the session row's four.
+    /// pins for the session row, applied to the host menu's management and
+    /// provisioning commands.
     ///
-    /// An adoptable ssh host offers every action there is (up to four); an
-    /// ordinary ssh host offers three, since `adopt` only ever joins an
-    /// identity mismatch. The reserved local row (never `manageable` — see
+    /// With no provisioning offer, an adoptable ssh host has four commands
+    /// and an ordinary ssh host has three. The reserved local row (never `manageable` — see
     /// [`HostRow`]'s own doc) drops `edit` and `remove` entirely regardless,
     /// which must move `adopt`'s position rather than leave a gap where
     /// `edit` would have sat — the same packing `MenuOrder::pack` guarantees
     /// for the session row.
     #[test]
     fn the_host_menu_follows_manageability_and_adoptability() {
-        use HostMenuAction::{Adopt, Edit, Remove, Retry};
+        use HostMenuAction::{Adopt, AutomaticSetup, Edit, Remove, Rerun, Retry, Update};
 
         // Ssh, adoptable: every item, in the declared order.
-        let ssh_adoptable = host_menu_order(true, true);
+        let ssh_adoptable = host_menu_order(true, true, ProvisioningMenuState::default());
         assert_eq!(ssh_adoptable.len(), 4);
         assert_eq!(ssh_adoptable.get(0), Some(Retry));
         assert_eq!(ssh_adoptable.get(1), Some(Adopt));
@@ -2387,7 +2624,7 @@ mod tests {
         // Ssh, not adoptable (the ordinary case: most phases offer no
         // adopt): `adopt` drops out and `edit`/`remove` shift up to fill
         // the gap rather than leaving one at position 2.
-        let ssh_plain = host_menu_order(false, true);
+        let ssh_plain = host_menu_order(false, true, ProvisioningMenuState::default());
         assert_eq!(ssh_plain.len(), 3);
         assert_eq!(ssh_plain.get(0), Some(Retry));
         assert_eq!(ssh_plain.get(1), Some(Edit));
@@ -2404,7 +2641,7 @@ mod tests {
         // `manageable` as two independent facts rather than encoding "local
         // implies never adoptable" itself, which is what lets this case be
         // exercised directly instead of only through the ssh fixtures above.
-        let local = host_menu_order(true, false);
+        let local = host_menu_order(true, false, ProvisioningMenuState::default());
         assert_eq!(local.len(), 2);
         assert_eq!(local.get(0), Some(Retry));
         assert_eq!(local.get(1), Some(Adopt));
@@ -2412,10 +2649,48 @@ mod tests {
         assert_eq!(local.position(Remove), None);
 
         // The ordinary local row: just the unconditional retry item.
-        let local_plain = host_menu_order(false, false);
+        let local_plain = host_menu_order(false, false, ProvisioningMenuState::default());
         assert_eq!(local_plain.len(), 1);
         assert_eq!(local_plain.get(0), Some(Retry));
         assert_eq!(local_plain.last(), Some(Retry));
+
+        // A failed remote update offers rerun and update between identity
+        // actions and destination management. Remove remains last, after
+        // the visual destructive separator rendered by the row.
+        let failed_remote = host_menu_order(
+            false,
+            true,
+            ProvisioningMenuState {
+                rerun: Some(ProvisioningOperation::Update),
+                update: true,
+                ..ProvisioningMenuState::default()
+            },
+        );
+        assert_eq!(failed_remote.len(), 5);
+        assert_eq!(failed_remote.get(1), Some(HostMenuAction::Rerun));
+        assert_eq!(failed_remote.get(2), Some(HostMenuAction::Update));
+        assert_eq!(failed_remote.last(), Some(Remove));
+
+        // Structural coverage deliberately enables every conditional action:
+        // the canonical array, not the current lifecycle, owns keyboard order.
+        let all_actions = host_menu_order(
+            true,
+            true,
+            ProvisioningMenuState {
+                rerun: Some(ProvisioningOperation::Update),
+                automatic_setup: true,
+                update: true,
+                planning: false,
+            },
+        );
+        assert_eq!(all_actions.len(), 7);
+        assert_eq!(all_actions.get(0), Some(Retry));
+        assert_eq!(all_actions.get(1), Some(Adopt));
+        assert_eq!(all_actions.get(2), Some(Rerun));
+        assert_eq!(all_actions.get(3), Some(AutomaticSetup));
+        assert_eq!(all_actions.get(4), Some(Update));
+        assert_eq!(all_actions.get(5), Some(Edit));
+        assert_eq!(all_actions.get(6), Some(Remove));
     }
 
     /// The value an adopt SENDS is the raw one; the value it SHOWS is
@@ -2601,7 +2876,7 @@ mod tests {
     /// opposite decisions from them.
     ///
     /// The one that matters most is the third: a failed refresh must keep
-    /// the snapshot (so the panel can keep drawing chips) while still
+    /// the snapshot (so the list can keep drawing statuses) while still
     /// reporting the failure (so nothing claims to be current). A model that
     /// dropped the snapshot on failure blanks the one surface SPEC.md
     /// requires to always show host state.
@@ -2704,7 +2979,7 @@ mod tests {
         ));
         assert!(notice.contains("user@box"), "the host is named: {notice}");
         assert!(
-            notice.contains("version-skew"),
+            notice.contains("version skew"),
             "the real phase, not a generic unreachable: {notice}"
         );
         assert!(
@@ -2867,6 +3142,7 @@ mod tests {
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: ()| {});
+            let on_provisioning = use_callback(|_: (HostId, ProvisioningOperation)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
             rsx! {
                 HostRow {
@@ -2882,6 +3158,8 @@ mod tests {
                         error: None,
                         warning: None,
                     },
+                    details_open: false,
+                    provisioning_menu: ProvisioningMenuState::default(),
                     provisioning_section: dioxus::core::VNode::empty(),
                     destination_draft,
                     on_retry,
@@ -2892,6 +3170,7 @@ mod tests {
                     on_remove_start,
                     on_remove_confirm,
                     on_remove_cancel,
+                    on_provisioning,
                     on_menu_toggle,
                 }
             }
@@ -2946,6 +3225,7 @@ mod tests {
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: ()| {});
+            let on_provisioning = use_callback(|_: (HostId, ProvisioningOperation)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
             let confirming = CONFIRMING.with(std::cell::Cell::get);
             let refused = REFUSED.with(std::cell::Cell::get);
@@ -2966,6 +3246,8 @@ mod tests {
                                 .then(|| "the helm refused this verb".to_string()),
                             warning: None,
                         },
+                        details_open: false,
+                        provisioning_menu: ProvisioningMenuState::default(),
                         provisioning_section: dioxus::core::VNode::empty(),
                         destination_draft,
                         on_retry,
@@ -2976,6 +3258,7 @@ mod tests {
                         on_remove_start,
                         on_remove_confirm,
                         on_remove_cancel,
+                        on_provisioning,
                         on_menu_toggle,
                     }
                 }

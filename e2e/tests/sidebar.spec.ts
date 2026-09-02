@@ -14,8 +14,8 @@
  * The suite grew with the redesign's later PRs and now also covers the
  * row actions menu's own contracts (containment, float, selection
  * isolation, rename-in-panel, consequence wrap, stale-menu
- * reconciliation) and the sidebar's on-demand chrome (hosts/filter
- * toggles, the compact host strip, the applied-filter note).
+ * reconciliation) and the sidebar's on-demand chrome (host details, the
+ * filter popover, and the applied-filter note).
  *
  * The menu's own group is the largest of those and is worth naming, since
  * almost none of it can be checked anywhere else: the anchor's covered-
@@ -191,23 +191,23 @@ async function fillSidebarPastOneScreen(
 }
 
 /**
- * Wait for the always-visible compact host strip's own MOUNT-TIME read to
+ * Wait for the always-visible host list's own mount-time read to
  * land, before opening a row menu whose test cares WHY the menu later
  * closes (or stays open).
  *
- * `hosts_strip_shape` (list.rs) is one of the six signals the menu's own
- * close-on-layout-shift effect watches: the strip changing shape — its
- * "loading hosts…" note giving way to real chips, or a refresh-error line
+ * `hosts_list_shape` (list.rs) is one of the signals the menu's own
+ * close-on-layout-shift effect watches: the list changing shape — its
+ * "loading hosts…" note giving way to rows, or a refresh-error line
  * — is itself an internal layout cause, indistinguishable from whatever
  * cause a test means to isolate (a toggle click, a real scroll, a resize)
  * unless this read has already settled before the menu opens. Without
  * this, a dismissal test can pass for the wrong reason (closed by the
- * strip's own async landing, not by the cause under test), and a
+ * list's own async landing, not by the cause under test), and a
  * stays-open test can flake on unrelated host-read timing.
  */
-async function waitForHostsStripSettled(page: Page): Promise<void> {
+async function waitForHostsListSettled(page: Page): Promise<void> {
   await expect(
-    page.locator(".hosts-compact-note", { hasText: "loading hosts" }),
+    page.locator(".hosts-status", { hasText: "loading hosts" }),
   ).toHaveCount(0, { timeout: 20_000 });
 }
 
@@ -728,7 +728,7 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     const toggle = target.getByRole("button", { name: `session actions for ${title}` });
     await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
@@ -803,10 +803,10 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    // A host read landing mid-test changes the compact strip's shape,
+    // A host read landing mid-test changes the permanent list's shape,
     // which list.rs treats as a layout cause and closes any open menu for
     // — see the clipping test below for the same precaution.
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     await openRowMenu(target);
     const toggle = target.locator(".session-row-menu");
@@ -883,7 +883,7 @@ test("an archived row's three-item menu navigates on its own length", async ({ p
     await page.locator(".filter-include-archived").check();
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     await openRowMenu(target);
     const menu = target.getByRole("menu");
@@ -971,7 +971,7 @@ test("archiving under an open menu renumbers it and navigation follows", async (
 
   const target = row(page, sessionId);
   await expect(target).toBeVisible({ timeout: 20_000 });
-  await waitForHostsStripSettled(page);
+  await waitForHostsListSettled(page);
   await openRowMenu(target);
   await expect(target.getByRole("menuitem")).toHaveCount(5);
 
@@ -1032,7 +1032,7 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
     // The lone session auto-attaches, and its terminal takes focus for
     // itself when the mount lands — which can be after the row is already
     // visible. Every step below is a focus move followed by a keystroke,
@@ -1177,7 +1177,7 @@ test("a confirm prompt ignores the menu's keys and keeps its state", async ({ pa
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     await openRowMenu(target);
     await target.locator(".session-row-delete").click();
@@ -1213,7 +1213,7 @@ test("a confirm prompt ignores the menu's keys and keeps its state", async ({ pa
  * dropping it on the document body.
  *
  * Escape is not the only way this menu closes. A sidebar scroll or
- * resize, the hosts panel or filter popover opening, the create form, and a
+ * resize, host details or the filter popover opening, the create form, and a
  * refresh that reorders the row all close it through `ListView`, which
  * owns `menu_open` and does not consult the row at all. If an item held
  * focus, unmounting it leaves the user at the top of the document — one
@@ -1240,7 +1240,7 @@ test("a menu dismissed by a layout change returns focus to its toggle", async ({
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     await openRowMenu(target);
     const toggle = target.locator(".session-row-menu");
@@ -1300,7 +1300,7 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
     // Same precaution, for the same reason, as "opening the actions menu
     // enters it" above: this test asserts where focus IS at several points,
     // and the lone session's terminal takes focus for itself when its mount
@@ -1388,7 +1388,7 @@ test("an open menu leaves the other rows' toggles clickable", async ({ page, req
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, b.id)).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     const firstIsA = (await row(page, a.id).boundingBox())!.y < (await row(page, b.id).boundingBox())!.y;
     const first = firstIsA ? row(page, a.id) : row(page, b.id);
@@ -1457,7 +1457,7 @@ test("an open menu tints its own row and presses its own toggle", async ({ page,
     const plainRow = row(page, b.id);
     await expect(selectedRow).toBeVisible({ timeout: 20_000 });
     await expect(plainRow).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     const [hoverTint, accent, selectedTint] = await Promise.all([
       tokenColor(page, "--bg-2"),
@@ -1553,7 +1553,7 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
     await openRowMenu(target);
 
     const panel = target.locator(".session-row-menu-panel");
@@ -1645,7 +1645,7 @@ test("the actions panel stays inside a narrow viewport", async ({ page, request 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     await openRowMenu(target);
     const panel = target.locator(".session-row-menu-panel");
@@ -1841,22 +1841,22 @@ test("the archive consequence wraps fully visible inside the panel", async ({
 });
 
 /**
- * The sidebar's resting chrome keeps the compact host strip, two-row session
- * header, session rows, and create control visible; the full hosts panel and
- * filter popover are closed until toggled. The strip keeps SPEC.md's per-host
- * connection state (name and phase word) on screen the whole time.
+ * The sidebar's resting chrome keeps one host list, the two-row session
+ * header, session rows, and create control visible. Host details and the
+ * filter popover remain closed until requested.
  *
- * This is the interviewed contents decision (BUGS_BURNDOWN.md issue 5)
- * plus the SPEC amendment's compact-indicator half stated as one test: a
- * regression that either re-inlines a panel permanently or drops the
- * strip (losing the always-visible phase) fails here.
+ * This pins the one-list contract directly: a regression that hides the
+ * list, restores the old duplicate strip, or makes host actions hover-only
+ * fails at the resting state where those choices matter.
  */
-test("hosts and filter live behind toggles while the compact strip keeps phases visible", async ({
+test("the host list is permanent while details and filtering stay on demand", async ({
   page,
 }) => {
   await page.goto("/");
-  // Resting state: neither surface mounted, both toggles present.
-  await expect(page.locator(".hosts-toggle")).toBeVisible();
+  await expect(page.locator(".hosts-panel")).toBeVisible();
+  await expect(page.locator(".hosts-toggle")).toHaveCount(0);
+  await expect(page.locator(".sidebar-controls")).toHaveCount(0);
+  await expect(page.locator(".host-details-toggle")).toBeVisible();
   await expect(page.locator(".filter-toggle")).toBeVisible();
   // Session controls belong to the two-row list header, not the hosts-only
   // top strip. DOM order matters here because the count explains the rows
@@ -1866,34 +1866,94 @@ test("hosts and filter live behind toggles while the compact strip keeps phases 
   await expect(header.locator(":scope > .list-header-controls")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls .filter-toggle")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls .sort-select")).toHaveCount(1);
-  await expect(page.locator(".sidebar-controls .filter-toggle")).toHaveCount(0);
-  await expect(page.locator(".sidebar-controls .sort-select")).toHaveCount(0);
-  // The toggles SAY they are closed — the state assistive technology
-  // reads, and the state openHostsPanel/openFilterBar key off.
-  await expect(page.locator(".hosts-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-  // The hosts panel stays MOUNTED while collapsed (unmounting would
-  // discard in-flight host work — see list.rs), so closed means hidden,
-  // not absent; the filter popover owns no tasks and really unmounts.
-  await expect(page.locator(".hosts-panel")).toBeHidden();
   await expect(page.locator(".filter-popover")).toHaveCount(0);
-  // The compact strip carries every host's name and phase chip — the
-  // stack's local supervisor is connected, and the phase word is the
-  // SAME vocabulary the full panel uses.
-  const entry = page.locator(".hosts-compact-entry").first();
-  await expect(entry).toBeVisible({ timeout: 20_000 });
-  await expect(entry.locator(".host-chip")).toHaveText("connected", { timeout: 20_000 });
+  const rows = page.locator(".host-row");
+  await expect(rows.first()).toBeVisible({ timeout: 20_000 });
+  const count = await rows.count();
+  await expect(page.locator(".host-count")).toHaveText(count === 1 ? "1 host" : `${count} hosts`);
+  const local = rows.first();
+  await expect(local.locator(".host-status .status-dot")).toBeVisible();
+  await expect(local.locator(".host-status-label")).toHaveCount(0);
+  await expect(local.locator(".host-row-menu")).toHaveCSS("opacity", "1");
 
-  // Each toggle opens its surface; toggling again closes it, back to the
-  // resting state rather than accumulating panels.
   await openHostsPanel(page);
-  await expect(page.locator(".hosts-toggle")).toHaveAttribute("aria-expanded", "true");
-  await page.locator(".hosts-toggle").click();
-  await expect(page.locator(".hosts-panel")).toBeHidden();
+  for (let index = 0; index < count; index += 1) {
+    await expect(rows.nth(index).locator(".host-detail")).toBeVisible();
+  }
+  await page.locator(".host-details-toggle").click();
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
 
   await openFilterBar(page);
   await page.locator(".filter-toggle").click();
   await expect(page.locator(".filter-popover")).toHaveCount(0);
+});
+
+/**
+ * One header disclosure reveals version evidence for every host together.
+ *
+ * Two connected fixture rows make the global scope observable: a per-row
+ * disclosure accidentally wired only to the first row cannot satisfy both
+ * version-line assertions after the single click.
+ */
+test("host details reveal every row's version line together", async ({ page, request }) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  await page.route(
+    (url) => url.pathname === "/api/hosts",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+        json: {
+          hosts: [
+            {
+              id: 31,
+              kind: "local",
+              destination: null,
+              name: "this machine",
+              identity: "detail-local",
+              remote_farhelm: null,
+              remote_state_dir: null,
+              state: {
+                phase: "connected",
+                identity: "detail-local",
+                build_version: "1.2.3-local",
+                refresh: { status: "ok", sessions: 1 },
+              },
+            },
+            {
+              id: 32,
+              kind: "ssh",
+              destination: "user@detail-remote",
+              name: "user@detail-remote",
+              identity: "detail-remote",
+              remote_farhelm: null,
+              remote_state_dir: null,
+              state: {
+                phase: "connected",
+                identity: "detail-remote",
+                build_version: "4.5.6-remote",
+                refresh: { status: "ok", sessions: 2 },
+              },
+            },
+          ],
+        },
+      });
+    },
+  );
+
+  await page.goto("/");
+  const rows = page.locator(".host-row");
+  await expect(rows).toHaveCount(2, { timeout: 20_000 });
+  await expect(rows.locator(".host-detail")).toHaveCount(0);
+  await page.locator(".host-details-toggle").click();
+  await expect(rows.nth(0).locator(".host-detail")).toContainText("1.2.3-local");
+  await expect(rows.nth(1).locator(".host-detail")).toContainText("4.5.6-remote");
 });
 
 /**
@@ -1975,17 +2035,15 @@ test("a filtered-out row's open menu stays closed when the row returns", async (
 });
 
 /**
- * The compact strip is PER-HOST: several hosts render several entries,
- * each named with its own phase word and color class, and a long
- * unbroken host name ellipsizes instead of widening the strip.
+ * The permanent list is per-host: several hosts render several rows, each
+ * named with its own status, and a long unbroken host name ellipsizes instead
+ * of widening the sidebar.
  *
- * The single-host stack only ever shows one connected chip, which a
- * strip that collapsed the fleet to one entry (or hard-coded
- * "connected") would also pass; a stubbed two-host registry in mixed
- * phases is what makes the per-host claim falsifiable, and the 200-char
- * name is what exercises the ellipsis where the strip actually lives.
+ * A stubbed two-host registry in mixed phases makes the row count and status
+ * mapping falsifiable. The 200-character name exercises the same width
+ * pressure that once pushed host actions out of the sidebar.
  */
-test("the compact strip names every host with its own phase and clips long names", async ({
+test("the host list counts every host, humanizes phases, and clips long names", async ({
   page,
   request,
 }) => {
@@ -2041,15 +2099,19 @@ test("the compact strip names every host with its own phase and clips long names
   );
   await page.goto("/");
 
-  const entries = page.locator(".hosts-compact-entry");
+  const entries = page.locator(".host-row");
   await expect(entries).toHaveCount(2, { timeout: 20_000 });
-  await expect(entries.nth(0).locator(".hosts-compact-name")).toHaveText("this machine");
-  await expect(entries.nth(0).locator(".host-chip")).toHaveText("connected");
-  await expect(entries.nth(1).locator(".host-chip")).toHaveText("unreachable-reprobing");
-  // The long name is clipped by the strip, not allowed to widen it: the
+  await expect(page.locator(".host-count")).toHaveText("2 hosts");
+  await expect(entries.nth(0).locator(".host-name")).toHaveText("this machine");
+  await expect(entries.nth(0).locator(".host-status-label")).toHaveCount(0);
+  await expect(entries.nth(1).locator(".host-status-label")).toHaveText(
+    "unreachable, retrying",
+  );
+  await expect(entries.nth(1)).toHaveAttribute("data-host-phase", "unreachable-reprobing");
+  // The long name is clipped by the row, not allowed to widen it: the
   // element paints less than it holds, and its box stays inside the
   // sidebar.
-  const name = entries.nth(1).locator(".hosts-compact-name");
+  const name = entries.nth(1).locator(".host-name");
   expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
   const nameBox = (await name.boundingBox())!;
@@ -2527,12 +2589,11 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     await page.setViewportSize({ width: 900, height: 500 });
     await page.goto("/");
     await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
-    // Settled BEFORE any scroll or menu open: the strip's own async host
-    // read landing is itself one of the six internal layout causes
-    // list.rs's close-on-shift effect watches, and this test's whole
-    // premise (a row genuinely scrolled into view, then a menu that stays
-    // put) must not race it.
-    await waitForHostsStripSettled(page);
+    // Settled BEFORE any scroll or menu open: the permanent host list's
+    // loading, count, and error shape must stop changing before this test
+    // measures a menu. Its premise (a row genuinely scrolled into view,
+    // then a menu that stays put) must not race an initial host read.
+    await waitForHostsListSettled(page);
 
     const sidebar = page.locator(".app-sidebar");
     await expect
@@ -2649,10 +2710,10 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // it already make this the slowest test in the file) closes with an
     // actual click: this is the one place in this file that both opens a
     // menu AND still needs it open several real seconds later. `is_loading`
-    // (what `waitForHostsStripSettled` above watches) only ever flips ONCE,
+    // (what `waitForHostsListSettled` above watches) only ever flips ONCE,
     // so it cannot catch a LATER hosts re-read landing with a different
     // outcome — a real SSH host's connection flapping on a busy CI runner,
-    // say — flipping `hosts_strip_shape`'s error component and closing the
+    // say — flipping `hosts_list_shape`'s error component and closing the
     // menu out from under this test through no fault of the clipping fix
     // itself. `openRowMenu` is idempotent on an already-open menu (its own
     // doc, verified: it checks `aria-expanded` before ever clicking), so
@@ -2667,10 +2728,11 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // ONE bounded retry around the confirm prompt actually appearing.
     // This is honest tolerance for a real, DESIGNED behavior, not
     // flake-papering over an unproven race: list.rs closes the whole menu
-    // — panel and all — on any of six background layout causes it
-    // deliberately does not distinguish from a user-driven one (a host's
-    // phase flapping among them, via the compact strip's shape — see
-    // `waitForHostsStripSettled`'s own doc), and this test's own long
+    // — panel and all — when `layout_epoch`, `show_create`, or
+    // `hosts_list_shape` reports movement. The relevant background cases
+    // here are sidebar geometry, create-form state, and the permanent host
+    // list's loading/count/error or collapsed-trace shape; an ordinary host
+    // phase change is not one of them. This test's own long
     // fixture setup gives a real host on a shared, long-lived stack far
     // more wall-clock time to do exactly that than an isolated repeat of
     // this one test ever sees. None of those causes are a bug in the
@@ -2722,10 +2784,10 @@ test("scrolling the sidebar closes an open row menu", async ({ page, request }) 
     await page.setViewportSize({ width: 900, height: 500 });
     await page.goto("/");
     await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
-    // Settled before the menu opens — see `waitForHostsStripSettled`'s own
+    // Settled before the menu opens — see `waitForHostsListSettled`'s own
     // doc for why an unsettled strip can close the menu for the wrong
     // reason.
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
 
     const sidebar = page.locator(".app-sidebar");
     await expect
@@ -2770,8 +2832,8 @@ test("scrolling the sidebar closes an open row menu", async ({ page, request }) 
 });
 
 /**
- * The sidebar's own on-demand toggles are layout causes too: opening the
- * hosts panel, the filter popover, or the create dialog each mounts a whole
+ * The sidebar's own on-demand controls are layout causes too: opening host
+ * details, the filter popover, or the create dialog each changes content
  * section above the rows (list.rs's `use_effect` near `show_create`), which
  * is exactly the kind of internal shift `layout_epoch` does NOT cover (that
  * counter is for the ancestor-owned scroll/resize listeners in lib.rs) —
@@ -2779,7 +2841,7 @@ test("scrolling the sidebar closes an open row menu", async ({ page, request }) 
  * per surface, because each is a separate signal the effect subscribes to
  * and a regression could plausibly drop any one of the three independently.
  */
-test("opening the hosts panel closes an open row menu", async ({ page, request }) => {
+test("opening host details closes an open row menu", async ({ page, request }) => {
   const session = await createSession(request, {
     title: `menu-hosts-${Date.now()}`,
     cwd: "/tmp",
@@ -2789,15 +2851,12 @@ test("opening the hosts panel closes an open row menu", async ({ page, request }
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
     await openRowMenu(target);
 
-    await page.locator(".hosts-toggle").click();
-    // The surface actually appeared — without this, a toggle that silently
-    // failed to open anything would still make the assertions below pass
-    // (the menu was never touched either way), proving nothing about the
-    // dismissal this test claims.
-    await expect(page.locator(".hosts-panel")).toBeVisible();
+    await page.locator(".host-details-toggle").click();
+    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".host-detail").first()).toBeVisible();
 
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
@@ -2806,7 +2865,91 @@ test("opening the hosts panel closes an open row menu", async ({ page, request }
   }
 });
 
-/** See "opening the hosts panel closes an open row menu" — same contract,
+/** Host menus use independent state from session menus, so Details must
+ * dismiss this second fixed-surface path explicitly. */
+test("opening host details closes an open host-row menu", async ({ page }) => {
+  await page.goto("/");
+  await waitForHostsListSettled(page);
+  const host = page.locator(".host-row").first();
+  await openHostMenu(host);
+
+  await page.locator(".host-details-toggle").click();
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(host.locator(".host-row-menu-panel")).toHaveCount(0);
+  await expect(host.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+});
+
+/** The filter is anchored below the host list, so changing every host row's
+ * detail height must invalidate that fixed measurement too. */
+test("opening host details closes the filter popover", async ({ page }) => {
+  await page.goto("/");
+  await waitForHostsListSettled(page);
+  await openFilterBar(page);
+
+  await page.locator(".host-details-toggle").click();
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
+  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+});
+
+/** Mounting and unmounting Add host move the filter's session-header anchor.
+ * Both directions must discard the old fixed coordinates. */
+test("toggling the add-host form closes the filter popover", async ({ page }) => {
+  await page.goto("/");
+  await waitForHostsListSettled(page);
+
+  await openFilterBar(page);
+  await page.locator(".add-host-button").click();
+  await expect(page.locator(".add-host-form")).toBeVisible();
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
+  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+
+  await openFilterBar(page);
+  await page.locator(".add-host-button").click();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
+  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+});
+
+/** Opening a host row menu is the reverse half of filter/menu mutual
+ * exclusion; only the newly requested surface may remain. */
+test("opening a host-row menu closes the filter popover", async ({ page }) => {
+  await page.goto("/");
+  await waitForHostsListSettled(page);
+  await openFilterBar(page);
+
+  const host = page.locator(".host-row").first();
+  await openHostMenu(host);
+  await expect(host.locator(".host-row-menu-panel")).toBeVisible();
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
+  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+});
+
+/** Session menus enter the same mutual-exclusion path through a separate
+ * signal, so they need their own browser boundary. */
+test("opening a session-row menu closes the filter popover", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `filter-session-menu-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible();
+    await waitForHostsListSettled(page);
+    await openFilterBar(page);
+
+    await openRowMenu(target);
+    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
+    await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/** See "opening host details closes an open row menu" — same contract,
  * the filter popover's own toggle. */
 test("opening the filter popover closes an open row menu", async ({ page, request }) => {
   const session = await createSession(request, {
@@ -2818,7 +2961,7 @@ test("opening the filter popover closes an open row menu", async ({ page, reques
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
     await openRowMenu(target);
 
     await page.locator(".filter-toggle").click();
@@ -2903,7 +3046,7 @@ test("the session header controls are usable while the first listing read is pen
   }
 });
 
-/** See "opening the hosts panel closes an open row menu" — same contract,
+/** See "opening host details closes an open row menu" — same contract,
  * the "new session" create dialog's own toggle. */
 test("opening the create-session form closes an open row menu", async ({ page, request }) => {
   const session = await createSession(request, {
@@ -2915,7 +3058,7 @@ test("opening the create-session form closes an open row menu", async ({ page, r
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
     await openRowMenu(target);
 
     await page.locator(".new-session-button").click();
@@ -3013,7 +3156,7 @@ test("a listing refresh with nothing layout-relevant to report leaves an open ro
 
   const target = row(page, sessionId);
   await expect(target).toBeVisible({ timeout: 20_000 });
-  await waitForHostsStripSettled(page);
+  await waitForHostsListSettled(page);
   await openRowMenu(target);
 
   const before = listingReads;
@@ -3061,7 +3204,7 @@ test("resizing the viewport closes an open row menu", async ({ page, request }) 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsStripSettled(page);
+    await waitForHostsListSettled(page);
     await openRowMenu(target);
 
     const before = page.viewportSize()!;

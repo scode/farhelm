@@ -13,7 +13,13 @@ import { expect, Page, APIRequestContext, test, TestInfo } from "@playwright/tes
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { openHostMenu, openHostsPanel, stubFeed, type FeedStub } from "./helpers/fleet";
+import {
+  openFilterBar,
+  openHostMenu,
+  openHostsPanel,
+  stubFeed,
+  type FeedStub,
+} from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
@@ -186,9 +192,11 @@ async function waitForProgress(
   return await progress(request, host);
 }
 
-/** Open the real add form and submit one destination — opening the
- * hosts panel itself first (idempotent), so callers need no per-call
- * prerequisite. */
+/** Open the real add form and submit one destination.
+ *
+ * Ensuring host details first keeps any resulting plan or diagnostic visible
+ * without making callers repeat the disclosure prerequisite.
+ */
 async function probeRemote(page: Page, destination: string): Promise<void> {
   await openHostsPanel(page);
   await page.getByRole("button", { name: "add host" }).click();
@@ -567,10 +575,23 @@ test("a transient local probe error can be retried into the run-setup answer", a
       local: { probe: "error", message: "temporary local probe failure" },
     },
   });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/hosts/probe", async (route) => {
+    const body = route.request().postDataJSON() as { target?: { kind?: string } };
+    if (body.target?.kind !== "local") return route.continue();
+    await held;
+    await route.continue();
+  });
   await page.goto("/");
-  await openHostsPanel(page);
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  release();
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-error")).toContainText("temporary local probe failure");
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await openHostMenu(local);
   await expect(local.locator(".provisioning-auto-setup")).toBeVisible();
 
   await configureBackend();
@@ -615,8 +636,19 @@ test("local automatic discovery does not start before the authoritative idle vie
 test("manual-only local setup leaves the manual command primary", async ({ page }) => {
   const state = { down: true };
   const feed = await controlLocalState(page, state);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/hosts/probe", async (route) => {
+    const body = route.request().postDataJSON() as { target?: { kind?: string } };
+    if (body.target?.kind !== "local") return route.continue();
+    await held;
+    await route.continue();
+  });
   await page.goto("/");
-  await openHostsPanel(page);
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  release();
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-manual:not(.secondary)")).toContainText(
     "farhelm supervisor run",
@@ -624,12 +656,123 @@ test("manual-only local setup leaves the manual command primary", async ({ page 
   await expect(local.locator(".provisioning-error")).toContainText(
     "this is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel",
   );
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
   await expect(local.locator(".provisioning-plan")).toHaveCount(0);
+  await openHostMenu(local);
   await expect(local.locator(".provisioning-auto-setup")).toHaveCount(0);
 
   state.down = false;
   await notifyFeed(feed, 2);
   await expect(local.locator(".provisioning-error")).toHaveCount(0);
+});
+
+/**
+ * A committed local probe with an unreadable body still needs a person to
+ * reconcile what happened. The disclosure must therefore open from its
+ * resting state even though no confirmation can be rendered.
+ */
+test("an unvalidated automatic local probe reveals its feedback", async ({ page }) => {
+  const state = { down: true };
+  await controlLocalState(page, state);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/hosts/probe", async (route) => {
+    const body = route.request().postDataJSON() as { target?: { kind?: string } };
+    if (body.target?.kind !== "local") return route.continue();
+    await held;
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
+      body: "{not-json",
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  release();
+  await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toContainText(
+    "the helm accepted the local probe, but its reply could not be read",
+  );
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+});
+
+/**
+ * Automatic setup has no initiating click that can reveal its confirmation.
+ * Releasing a held plan from the collapsed state must open Details through
+ * the child-to-parent reveal bridge.
+ */
+test("an automatic local plan reveals its confirmation", async ({ page }) => {
+  const state = { down: true };
+  await controlLocalState(page, state);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/hosts/probe", async (route) => {
+    const body = route.request().postDataJSON() as { target?: { kind?: string } };
+    if (body.target?.kind !== "local") return route.continue();
+    await held;
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
+      body: JSON.stringify({
+        result: "provisionable",
+        probe_id: "held-local-plan",
+        confirmation: "install the local supervisor",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  release();
+  await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toContainText(
+    "install the local supervisor",
+  );
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+});
+
+/**
+ * Feed-driven host props must republish menu offers even when retained
+ * progress does not change. This pins the local-setup and host-kind inputs as
+ * reactive dependencies rather than values captured on the first render.
+ */
+test("a local setup phase transition republishes provisioning commands", async ({ page }) => {
+  const state = { down: false };
+  const feed = await controlLocalState(page, state, { greetOnConnect: false });
+  await configureBackend({
+    targets: { local: { probe: "error", message: "retry automatic setup" } },
+  });
+  await page.route("**/api/hosts/*/provisioning", async (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split("/").at(-2));
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
+      body: JSON.stringify({
+        host_id: id,
+        run_id: null,
+        operation: null,
+        status: "completed",
+        steps: [],
+        message: null,
+      }),
+    });
+  });
+
+  await page.goto("/");
+  const local = page.locator('[data-host-kind="local"]');
+  await openHostMenu(local);
+  await expect(local.locator(".provisioning-update")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  state.down = true;
+  await notifyFeed(feed, 2);
+  await expect(local.locator(".provisioning-error")).toContainText("retry automatic setup");
+  await openHostMenu(local);
+  await expect(local.locator(".provisioning-update")).toHaveCount(0);
+  await expect(local.locator(".provisioning-auto-setup")).toBeVisible();
 });
 
 test("a failed local ADD keeps its rerun action in the local setup state", async ({ page }) => {
@@ -652,6 +795,7 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
   await page.goto("/");
   await openHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
+  await openHostMenu(local);
   await expect(local.locator(".provisioning-rerun")).toBeVisible();
   await local.locator(".provisioning-rerun").click();
   await expect(local.locator(".provisioning-error")).toContainText(
@@ -697,24 +841,149 @@ test("UPDATE plans once, binds to the row, and releases OpLock at acceptance", a
   await waitForProgress(request, accepted.host_id, "completed");
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   await page.goto("/");
-  await openHostsPanel(page);
+  await expect(page.locator(".hosts-panel")).toBeVisible();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  // Completed retained runs are resting history, not collapsed traces.
+  await expect(row.locator(".provisioning-trace")).toHaveCount(0);
+  await openHostMenu(row);
   await expect(row.locator(".provisioning-update")).toBeVisible();
+  const toggle = row.locator(".host-row-menu");
+  await row.locator(".provisioning-update").focus();
   await page.evaluate((id) => {
     const button = document.querySelector(`[data-host-id="${id}"] .provisioning-update`)!;
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   }, accepted.host_id);
+  await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toBeFocused();
   await expect(row.locator(".provisioning-plan")).toBeVisible();
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
   expect((await backendEvents()).filter((event) => event.event === "probe")).toHaveLength(1);
+
+  await openHostMenu(row);
+  await expect(row.locator(".provisioning-update")).toHaveCount(0);
+  await expect(row.locator(".provisioning-rerun")).toHaveCount(0);
+  await expect(row.locator(".provisioning-auto-setup")).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
   await row.locator(".provisioning-confirm").dispatchEvent("click");
   await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  // Collapsing details must retain a short trace: connection state does not
+  // carry provisioning failure or progress, so hiding the whole run would
+  // make an active update disappear from the row.
+  await page.locator(".host-details-toggle").click();
+  await expect(row.locator(".provisioning-run")).toHaveCount(0);
+  await expect(row.locator(".provisioning-trace")).toHaveText("update provisioning running");
   // `.host-edit` lives inside the row's own "⋯" menu now — see the
   // earlier ADD case's comment for why `toBeDisabled()` still applies.
   await openHostMenu(row);
   await expect(row.locator(".host-edit")).toBeDisabled();
+});
+
+/**
+ * A plan can land after Details and the fixed filter are already open. The
+ * confirmation changes host-list height without toggling Details, so its
+ * arrival must dismiss the filter independently.
+ */
+test("a newly landed plan closes an already-open filter", async ({
+  page,
+  request,
+}, testInfo) => {
+  const remote = destination(testInfo, "plan-filter");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await page.goto("/");
+  await openHostsPanel(page);
+  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await openHostMenu(row);
+  await row.locator(".provisioning-update").click();
+  // Choosing update opens Details for every row, which resizes the sidebar,
+  // and that resize is itself a layout change the page answers by closing
+  // the filter. How long the details keep settling depends on the machine,
+  // so rather than guessing a quiet period, open the filter and require it
+  // to SURVIVE a beat; a filter closed by leftover settling is reopened.
+  // Once it holds, the only thing that can close it is the plan the held
+  // route is about to release.
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(row.locator(".provisioning-planning")).toBeVisible();
+  const toggle = page.locator(".filter-toggle");
+  await expect
+    .poll(
+      async () => {
+        if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+        await page.waitForTimeout(300);
+        return page.locator(".filter-popover").count();
+      },
+      { timeout: 20_000, intervals: [100, 250, 500] },
+    )
+    .toBe(1);
+  release();
+
+  await expect(row.locator(".provisioning-plan")).toBeVisible();
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
+  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+});
+
+/**
+ * Running, failed, and cleared traces each alter the collapsed host-list
+ * shape. A fixed filter opened below that host must close at every boundary,
+ * including running-to-failed where the traced host set itself is unchanged.
+ */
+test("collapsed trace transitions invalidate fixed-surface geometry", async ({
+  page,
+  request,
+}, testInfo) => {
+  const remote = destination(testInfo, "trace-shape");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(1);
+  let view: Progress = {
+    run_id: "trace-shape",
+    operation: "update",
+    status: "completed",
+    steps: [],
+    message: null,
+  };
+  await page.route(`**/api/hosts/${accepted.host_id}/provisioning`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
+      body: JSON.stringify({ host_id: accepted.host_id, ...view }),
+    });
+  });
+
+  await page.goto("/");
+  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+
+  for (const status of ["running", "failed", "completed"] as const) {
+    await openFilterBar(page);
+    view = { ...view, status };
+    await notifyFeed(feed, status === "running" ? 2 : status === "failed" ? 3 : 4);
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
+    await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+    if (status === "completed") {
+      await expect(row.locator(".provisioning-trace")).toHaveCount(0);
+    } else {
+      await expect(row.locator(".provisioning-trace")).toHaveAttribute(
+        "data-provisioning-status",
+        status,
+      );
+    }
+  }
 });
 
 test("a row change and an observed foreign run each discard a pending plan", async ({
@@ -727,6 +996,7 @@ test("a row change and an observed foreign run each discard a pending plan", asy
   await page.goto("/");
   await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await expect(row.locator(".provisioning-plan")).toBeVisible();
 
@@ -738,6 +1008,7 @@ test("a row change and an observed foreign run each discard a pending plan", asy
   await expect(row.locator(".provisioning-plan")).toHaveCount(0);
 
   await configureBackend({ targets: { [target(changed)]: { hold_actions: true } } });
+  await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await expect(row.locator(".provisioning-plan")).toBeVisible();
   const competingPlan = await request.post(`/api/hosts/${accepted.host_id}/update`);
@@ -769,6 +1040,7 @@ test("UPDATE planning refusal shows the concrete reason without minting a confir
     new URL(response.url()).pathname === `/api/hosts/${accepted.host_id}/update`
     && response.request().method() === "POST",
   );
+  await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await refusal;
   await expect(row.locator(".provisioning-error")).toContainText(
@@ -812,6 +1084,7 @@ test("a refused UPDATE consumes its plan and leaves unrelated controls usable", 
   const planResponse = page.waitForResponse((response) =>
     new URL(response.url()).pathname === `/api/hosts/${accepted.host_id}/update`,
   );
+  await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   const displayed = (await (await planResponse).json()) as { probe_id: string };
   const competingPlan = await request.post(`/api/hosts/${accepted.host_id}/update`);
@@ -858,6 +1131,7 @@ test("mismatched accepted identity routes progress to the returned host", async 
   const planResponse = page.waitForResponse(
     (response) => new URL(response.url()).pathname === `/api/hosts/${from.host_id}/update`,
   );
+  await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   expect((await planResponse).status()).toBe(200);
   await row.locator(".provisioning-confirm").dispatchEvent("click");
@@ -883,6 +1157,7 @@ test("a malformed accepted UPDATE consumes the plan, warns, and releases page co
   await page.goto("/");
   await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await row.locator(".provisioning-confirm").dispatchEvent("click");
 
@@ -991,11 +1266,13 @@ test("failed ADD rerun probes the registered destination and discovery resolves 
     },
   });
   await page.goto("/");
-  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await expect(row.locator(".provisioning-trace")).toHaveText("setup provisioning failed");
+  await openHostsPanel(page);
   await expect(row.locator(".provisioning-run-message")).toContainText(
     "supervisor started but attachment failed",
   );
+  await openHostMenu(row);
   await row.locator(".provisioning-rerun").click();
 
   await expect.poll(async () => (await progress(request, accepted.host_id)).status).toBe("completed");
@@ -1056,7 +1333,13 @@ test("failed UPDATE rerun plans and confirms through the host update route", asy
     new URL(response.url()).pathname === `/api/hosts/${added.host_id}/update`
     && response.request().method() === "POST",
   );
+  await openHostMenu(row);
+  const toggle = row.locator(".host-row-menu");
+  await row.locator(".provisioning-rerun").focus();
   await row.locator(".provisioning-rerun").dispatchEvent("click");
+  await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toBeFocused();
   expect((await rerunPlanResponse).status()).toBe(200);
   await expect(row.locator(".provisioning-plan")).toBeVisible();
   expect(updateRequests).toEqual(["plan"]);
