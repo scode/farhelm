@@ -590,9 +590,20 @@ async fn non_utf8_terminal_output_survives_live_stream() {
         .await
         .expect("create");
 
-    let (_channel, mut live) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let (channel, mut live) = h.client.attach(&session.id, 80, 24).await.expect("attach");
     let mut live_bytes = Vec::new();
-    wait_for(&mut live, &mut live_bytes, "BINARY-MARKER", 20).await;
+    // The fixture writes the invalid byte only when asked, and it is asked
+    // through this attachment, so the byte cannot have been written before
+    // the attach snapshot was taken: whatever carries it is the live stream,
+    // which is the only path this test makes a claim about.
+    wait_for(&mut live, &mut live_bytes, "FAKE-AGENT READY", 20).await;
+    h.client.send_input(channel, b"\n".to_vec()).await;
+    // `send_input` returning proves only that the frame was queued. The
+    // supervisor's tmux `send-keys` exchange behind it is allowed 30 s under
+    // load, so the marker's budget has to cover that whole exchange plus the
+    // output's trip back, or this test would re-grow the load flake it exists
+    // to remove.
+    wait_for(&mut live, &mut live_bytes, "BINARY-MARKER", 40).await;
     assert!(
         live_bytes.contains(&0xff),
         "live output replaced or dropped the invalid byte: {live_bytes:?}"
@@ -3217,11 +3228,100 @@ async fn create_with_degenerate_size_clamps_to_1x1() {
 /// the PTY happens not to split that particular read; this reassembles
 /// the byte stream in order regardless of where the line breaks fell, so
 /// the assertion below holds independent of read-boundary behavior.
+///
+/// Escape sequences are removed before splitting, not treated as
+/// whitespace, because the stream glues them straight onto pane text. The
+/// attach replay ends with synthesized restoration sequences, the cursor
+/// address among them, and nothing puts whitespace between that tail and
+/// the first live bytes. When READY was captured into the replay, the wait
+/// for it can return with that tail still queued, so the input-triggered
+/// hex line that follows reads `ESC[2;1H61` in the transcript, which a
+/// whitespace split drops whole, `61` included. Whether READY lands in the
+/// replay or arrives live is a scheduling accident, so the tokenizer has to
+/// be indifferent to it.
 fn hex_tokens(text: &str) -> Vec<u8> {
-    text.split_whitespace()
+    strip_escape_sequences(text)
+        .split_whitespace()
         .filter(|token| token.len() == 2 && token.bytes().all(|b| b.is_ascii_hexdigit()))
         .map(|token| u8::from_str_radix(token, 16).expect("validated two ASCII hex digits"))
         .collect()
+}
+
+/// Remove every ECMA-48 escape sequence from terminal text, whole.
+///
+/// The grammar covered: a CSI sequence (`ESC [`, then parameter bytes
+/// `0x30..=0x3f` and intermediate bytes `0x20..=0x2f`, then one final byte
+/// `0x40..=0x7e`) and a plain escape (`ESC`, zero or more intermediate bytes
+/// `0x20..=0x2f`, then one final byte `0x30..=0x7e`), so `ESC(B` goes as a
+/// unit, not as `ESC(` with a `B` left behind to glue onto a token. A
+/// sequence the text cuts short (a lone trailing ESC, a CSI with no final
+/// byte) is dropped up to the cut; an ESC followed by something that cannot
+/// be a final byte (a non-ASCII character, say) drops only the ESC and keeps
+/// the character intact. String-type sequences such as OSC are not parsed:
+/// tmux does not emit them around a pane redraw, and guessing at their
+/// terminators would risk swallowing real output.
+fn strip_escape_sequences(text: &str) -> String {
+    let is_intermediate = |b: u8| (0x20..=0x2f).contains(&b);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('\x1b') {
+        out.push_str(&rest[..at]);
+        let after = &rest.as_bytes()[at + 1..];
+        let mut end = 0;
+        if after.first() == Some(&b'[') {
+            end = 1;
+            while after
+                .get(end)
+                .is_some_and(|b| (0x30..=0x3f).contains(b) || is_intermediate(*b))
+            {
+                end += 1;
+            }
+            if after.get(end).is_some_and(|b| (0x40..=0x7e).contains(b)) {
+                end += 1;
+            }
+        } else {
+            while after.get(end).is_some_and(|b| is_intermediate(*b)) {
+                end += 1;
+            }
+            if after.get(end).is_some_and(|b| (0x30..=0x7e).contains(b)) {
+                end += 1;
+            }
+        }
+        // `end` only ever advanced over ASCII bytes, so it is a char boundary.
+        rest = &rest[at + 1 + end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The tokenizer must recover every byte from the exact transcript shape
+/// that flaked under load: a replay's trailing cursor address glued to the
+/// first hex token, with the acknowledgement on its own line. A whitespace
+/// split alone reads this as seven bytes, not eight.
+#[test]
+fn hex_tokens_survive_a_cursor_address_glued_to_the_first_token() {
+    let transcript = "FAKE-AGENT READY\r\n\x1b[2;1H61 7f 62 1b 5b 41 03\r\n7a\r\n\x1b(B\x1b[0m";
+    assert_eq!(
+        hex_tokens(transcript),
+        [0x61, 0x7f, 0x62, 0x1b, 0x5b, 0x41, 0x03, 0x7a]
+    );
+}
+
+/// Every escape shape the replay tail can put in front of a token must
+/// vanish whole, including the ones whose final byte is itself a hex
+/// digit: a charset designation (`ESC(B`) or a CSI ending in `A`..`F`
+/// left half-stripped would turn `61` into `B61` and lose the byte. Cut
+/// sequences and a non-ASCII character after ESC must not eat real text.
+#[test]
+fn strip_escape_sequences_removes_whole_sequences_and_nothing_else() {
+    assert_eq!(strip_escape_sequences("\x1b(B61 7f"), "61 7f");
+    assert_eq!(strip_escape_sequences("\x1b[1A61"), "61");
+    assert_eq!(strip_escape_sequences("\x1b[?25f61 \x1b[0m7a"), "61 7a");
+    assert_eq!(strip_escape_sequences("\x1b=61"), "61");
+    assert_eq!(strip_escape_sequences("61\x1b"), "61");
+    assert_eq!(strip_escape_sequences("61\x1b[2;1"), "61");
+    assert_eq!(strip_escape_sequences("\x1bé 61"), "é 61");
+    assert_eq!(strip_escape_sequences("plain 61 7f"), "plain 61 7f");
 }
 
 /// Byte-verbatim input delivery, pinned end to end through a raw-mode
