@@ -1726,4 +1726,5 @@ The client↔helm edge has no hello to refuse at, so the helm stamps its build o
 against the one compiled into its bundle. A mismatch — including a helm that reports no build at all — surfaces a reload
 prompt and, more importantly, withdraws every UNATTENDED behavior that depends on the helm honoring this milestone's
 vocabulary: the terminal heartbeat and automatic reconnect both stop, while anything the user explicitly asks for keeps
-working.
+working. The sidebar's app bar shows the helm's build at all times: the client's own compiled build until a mismatching
+stamp is reported (agreement means the two are the same string), and the reported stamp from then on.
