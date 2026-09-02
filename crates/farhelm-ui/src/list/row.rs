@@ -766,7 +766,7 @@ pub(super) fn SessionRow(
     // the teardown below tell "the menu was taken away from a focused
     // item" (hand focus back to the toggle) from "the user went somewhere
     // else and the menu closed behind them" (leave their focus alone):
-    // clicking the hosts toggle, the filter bar, or the create form moves
+    // clicking the hosts toggle or the create form moves
     // focus first and closes the menu second, so `focusout` has already
     // cleared this by the time the teardown runs. An item UNMOUNTING
     // cannot fire `focusout` here — a removed node's events never reach
@@ -989,7 +989,7 @@ pub(super) fn SessionRow(
     // Every close funnels through here, whichever path caused it —
     // Escape, Tab, a click on the toggle, or one of `ListView`'s
     // automatic dismissals (a sidebar scroll or resize, the hosts panel
-    // or filter bar opening, the create form, the row reordering under a
+    // or create form opening, the row reordering under a
     // refresh). Those last ones are the reason this cannot live in the
     // key handler: `ListView` owns `menu_open` and closes it without
     // consulting this row at all, so a teardown written per key press

@@ -2881,16 +2881,16 @@ mod tests {
     /// The sidebar's two filter controls read the switch differently, on
     /// purpose, and this pins the pair rather than either half alone.
     ///
-    /// `list::ListView` decides the "filtered" badge with
-    /// [`SessionFilter::narrows_beyond_archive`] and the Clear button's
-    /// enablement with a full comparison against the default. The switch is
-    /// the one setting where those disagree, and each direction is a
-    /// separate way to get it wrong: badge the switch and the ordinary list
-    /// announces a filter nobody applied; hide the switch from Clear and a
-    /// user who turned it on has no control offering to put it back.
+    /// `rows::count_banner` chooses its matching wording with
+    /// [`SessionFilter::narrows_beyond_archive`], while `list::ListView`
+    /// enables Clear with a full comparison against the default. The switch
+    /// is the one setting where those disagree, and each direction is a
+    /// separate way to get it wrong: call the widened view matching and the
+    /// ordinary count lies; hide the switch from Clear and a user who turned
+    /// it on has no control offering to put it back.
     ///
     /// Kept beside the predicate rather than in the view because that is
-    /// where the decision is testable at all — the badge itself is Dioxus
+    /// where the decision is testable at all — the count wording is Dioxus
     /// markup a browser has to render, and the e2e archive spec pins the
     /// rendered half.
     #[test]

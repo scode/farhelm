@@ -350,15 +350,14 @@ samp {
   width: 340px;
   flex-shrink: 0;
   /* x is clipped, y scrolls (shorthand order: x then y). Session rows
-   * stack and ellipsize per line, but the on-demand full hosts panel and
-   * filter bar still lay out wide non-wrapping lines that can exceed
-   * this column while open; the clip is what keeps their overflow from
-   * widening the page. Still required, not redesign debt. */
+   * stack and ellipsize per line, while the on-demand full hosts panel can
+   * still lay out wide non-wrapping lines that would otherwise widen the
+   * page. The filter controls are fixed outside this clipping context. */
   overflow: hidden auto;
   /* The sidebar is CHROME, not content: it sits one level above the
      ground the terminal shares with the page, which is the single
      biggest reason this shell no longer reads as one flat field.
-     Everything inside it — rows, hosts panel, filter bar, banners —
+     Everything inside it — rows, hosts panel, banners —
      inherits this level unless it deliberately floats above it.
 
      The hairline survives the level change rather than being made
@@ -424,12 +423,8 @@ samp {
   font-size: 12px;
 }
 
-/* The sidebar's resting chrome (BUGS_BURNDOWN.md issue 5): two on-demand
-   toggles for the hosts panel and the filter bar, so the column's
-   permanent contents stay rows-plus-create. The "filtered" note beside
-   them is load-bearing, not decoration — an applied filter keeps
-   narrowing the list while its bar is closed, and without the note a
-   hidden filter reads as a shrunken fleet. */
+/* The sidebar's top chrome is host management only. Session-list controls
+   belong in the list header with the count whose committed rows they change. */
 .sidebar-controls {
   display: flex;
   align-items: baseline;
@@ -442,38 +437,28 @@ samp {
   padding: 2px 8px;
 }
 
-.filter-active-note {
-  color: var(--warn);
-  font-size: 12px;
+/* The count remains its own element for the committed-list contract, while
+   the wrapper makes it a two-row header with controls that affect those rows. */
+.list-header {
 }
 
-/* The listing order, in the sidebar header rather than inside the filter
-   bar: the bar is closed on every load by design, and a remembered order
-   must not be reachable only by opening something (see the control's own
-   comment in list/view.rs). `margin-left: auto` pushes it to the trailing
-   edge so the two toggles stay grouped as the header's actions and this
-   reads as the state it is. */
-.sidebar-sort {
+.list-header-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  color: var(--fg-1);
-  font-size: 12px;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-1);
 }
 
-/* Deliberately compact and unbounded in the other direction: the three
-   labels are short and known, so the control can be sized to its content
-   without the filter fields' max-width guard against long typed values. */
-.sidebar-sort .sort-select {
+/* A select's displayed value says what ordering is in force, so the visible
+   "sort" label would repeat it. The accessible label remains in the markup. */
+.list-header-controls .sort-select {
+  margin-left: auto;
   background: var(--bg-0);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
-  /* `font: inherit` alone, and it is doing real work: a form control does
-     not inherit type styling by default, so this is what pulls the 12px
-     from `.sidebar-sort` above rather than a second declaration of it. */
-  font: inherit;
+  font: 12px var(--font-ui);
   padding: 1px 4px;
 }
 
@@ -2687,25 +2672,31 @@ samp {
 
 /* ===== Filter and search ========================================== */
 
-/* Filter and search (PLAN_M6_75.md item 7). Mounted on demand behind the
-   sidebar's "filter" toggle: the permanent "filtered" note beside the
-   toggles (see .filter-active-note) is what keeps an applied query from
-   becoming something a user has to go looking for to explain a short
-   list while the controls themselves are closed.
-
-   A wrapping row rather than the create form's column, because these are
-   several short, independent dimensions plus the archive switch rather than one form to fill in top to
-   bottom — and wrapping is what keeps them all reachable at a narrow width
-   instead of pushing the apply control off the edge. */
-.session-filter {
+/* Filter and search is a fixed popover because the sidebar scrolls and clips
+   ordinary descendants. Its coordinates come only from
+   `filter_popover_placement_style`: a class-level position would leak into
+   the measured state and detach the panel from the header toggle. The count
+   line remains the visible closed-filter announcement, so this surface need
+   not reserve in-flow space while it is closed. */
+.filter-popover {
+  position: fixed;
+  z-index: 20;
+  box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
-  padding: 10px 14px 0;
+  width: 288px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
 }
 
-.session-filter label {
+.filter-popover label {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2713,18 +2704,18 @@ samp {
   color: var(--fg-1);
 }
 
-.session-filter .filter-archived {
+.filter-popover .filter-archived {
   flex-direction: row;
   align-items: center;
   padding-bottom: 5px;
 }
 
-.session-filter .filter-archived input {
+.filter-popover .filter-archived input {
   width: auto;
 }
 
-.session-filter input,
-.session-filter select {
+.filter-popover input,
+.filter-popover select {
   background: var(--bg-0);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2738,7 +2729,7 @@ samp {
   max-width: 14em;
 }
 
-.session-filter .btn {
+.filter-popover .btn {
   font-size: 13px;
   padding: 4px 10px;
 }

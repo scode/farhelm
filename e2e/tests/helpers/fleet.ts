@@ -797,7 +797,7 @@ export async function openHostsPanel(page: Page): Promise<void> {
 }
 
 /**
- * Open the sidebar's filter bar if it is not already open — the same
+ * Open the session list's filter popover if it is not already open — the same
  * on-demand-toggle story as [`openHostsPanel`], for every test that
  * applies, clears, or inspects the session filter.
  */
@@ -806,7 +806,7 @@ export async function openFilterBar(page: Page): Promise<void> {
   if ((await toggle.getAttribute("aria-expanded")) !== "true") {
     await toggle.click();
   }
-  await expect(page.locator(".session-filter")).toBeVisible();
+  await expect(page.locator(".filter-popover")).toBeVisible();
 }
 
 /**

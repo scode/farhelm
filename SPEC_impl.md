@@ -234,10 +234,12 @@ destructive action on this one. Because the panel therefore floats over rows tha
 carried by three cues instead of by proximity alone — the toggle holds a pressed accent state, its row holds a tint, and
 the panel is a raised surface with a shadow. **One at a time:** at most one row's menu is open, and it closes on any
 layout change that could have moved the row it was measured against (a sidebar scroll or resize, the hosts panel or
-filter bar opening, the create form, the row reordering under a refresh), because the panel's coordinates are a one-time
-snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown)
-lands focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is
-a single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
+create form opening, compact-host-strip shape changes, the row reordering under a refresh), because the panel's
+coordinates are a one-time snapshot. Opening the fixed filter popover also closes a row menu, but that is mutual
+exclusion between floating surfaces rather than a geometry event: opening the popover does not reflow the rows.
+**Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands
+focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a
+single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
 that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body.
 An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather than
 going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the user
