@@ -463,7 +463,7 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
 test("a long profile-backed invocation badge clips inside the row", async ({ page, request }) => {
   const local = await localHostId(request);
   const name = `contained-profile-${"p".repeat(280)}`;
-  const profile = await createProfile(request, local, { name });
+  const profile = await createProfile(request, { name });
   const session = await createSession(request, {
     title: `contained-profile-session-${Date.now()}`,
     cwd: "/tmp",
@@ -497,7 +497,7 @@ test("a long profile-backed invocation badge clips inside the row", async ({ pag
     ).toBeGreaterThan(20);
   } finally {
     await cleanupSession(request, session.id);
-    await cleanupProfile(request, local, profile.id);
+    await cleanupProfile(request, profile.id);
   }
 });
 
@@ -2109,29 +2109,21 @@ test("a local session's host line is provisional until the registry confirms it"
   }
 });
 
-/**
- * Closing the hosts panel takes its open profiles section with it: on
- * reopen the section starts closed rather than silently reading a
- * catalog behind a collapsed surface.
- *
- * The panel itself stays MOUNTED while collapsed (in-flight host work
- * must survive a close — see list.rs), so this reset is the one piece of
- * panel state the close deliberately clears, and nothing else pins it.
- */
-test("closing the hosts panel closes its profiles section", async ({ page }) => {
+/** Closing the app-bar popup discards its local editor draft, so reopening
+ * starts at the shared catalog rather than resurrecting an abandoned form. */
+test("closing the profiles popup discards its open editor", async ({ page }) => {
   await page.goto("/");
-  await openHostsPanel(page);
-  // `.host-profiles-toggle` now lives inside the host row's own "⋯" menu.
-  const firstHostRow = page.locator(".host-row").first();
-  await openHostMenu(firstHostRow);
-  const toggleProfiles = firstHostRow.locator(".host-profiles-toggle");
-  await toggleProfiles.click();
-  await expect(page.locator(".profiles-section")).toBeVisible({ timeout: 20_000 });
+  const toggle = page.locator(".profiles-toggle");
+  await toggle.click();
+  await expect(page.locator(".profiles-popover")).toBeVisible({ timeout: 20_000 });
+  await page.locator(".profiles-popover .new-profile-button").click();
+  await expect(page.locator(".profiles-popover .profile-form")).toBeVisible();
 
-  await page.locator(".hosts-toggle").click();
-  await expect(page.locator(".hosts-panel")).toBeHidden();
-  await openHostsPanel(page);
-  await expect(page.locator(".profiles-section")).toHaveCount(0);
+  await toggle.click();
+  await expect(page.locator(".profiles-popover")).toHaveCount(0);
+  await toggle.click();
+  await expect(page.locator(".profiles-popover")).toBeVisible();
+  await expect(page.locator(".profiles-popover .profile-form")).toHaveCount(0);
 });
 
 /**

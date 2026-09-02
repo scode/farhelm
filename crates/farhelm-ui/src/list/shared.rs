@@ -40,9 +40,8 @@ pub(super) struct RowState {
     pub(super) confirming_archive: bool,
     pub(super) renaming: bool,
     pub(super) nav_disabled: bool,
-    /// Whether this row's actions menu is the (at most one) open one —
-    /// the hosts panel's `profiles_open` shape, derived from `ListView`'s
-    /// `menu_open` signal.
+    /// Whether this row's actions menu is the at-most-one open row menu,
+    /// derived from `ListView`'s `menu_open` signal.
     pub(super) menu_open: bool,
     /// Whether this row's session is the one the right pane currently
     /// shows — derived from `ListView`'s `selected` signal, same shape as
@@ -310,13 +309,10 @@ pub(super) fn matching_host_option<'a>(
 /// The host a create would ACTUALLY go to: the user's choice while it still
 /// exists, and [`default_create_host`]'s answer otherwise.
 ///
-/// Extracted because two places need the same answer and a second copy would
-/// be the one that drifted: the create dialog renders it (a selector must
-/// show the target that would be used, never one that has since left the
-/// registry) and `ListView` points the profile catalog's reader at it. A
-/// disagreement between those two would put one host's profiles under another
-/// host's create — the exact failure `profiles::CatalogRead` refuses to make
-/// possible from its side.
+/// Extracted because both the create dialog and its request binding need the
+/// same answer. A selector must show the target that would be used, never one
+/// that has since left the registry, and the idempotency key must name that
+/// same installation.
 pub(super) fn effective_create_host(
     hosts: &[HostOption],
     chosen: Option<HostId>,

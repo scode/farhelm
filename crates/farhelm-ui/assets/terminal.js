@@ -836,12 +836,19 @@
    * the operative values everywhere but the browser suite. Read once per
    * mount into that mount's own object: nothing here is shared between
    * islands, and a test that forgets to clear the global still only
-   * affects the page it set it on.
+   * affects the page it set it on. `targetEl` confines a held marker to the
+   * island a focus test intends to delay; otherwise another terminal mounting
+   * first could consume the one-shot hold and turn the test into a timing race.
    */
-  function replayControls() {
+  function replayControls(el) {
     const overrides = window.__farhelmTestReplay || {};
+    const ownsHold =
+      !!overrides.holdMarker &&
+      !overrides.holdConsumed &&
+      (!overrides.targetEl || overrides.targetEl === el);
+    if (ownsHold) overrides.holdConsumed = true;
     return {
-      holdMarker: !!overrides.holdMarker,
+      holdMarker: ownsHold,
       heldReason: null,
       limits: {
         bufferBytes: overrides.bufferBytes || REPLAY_BUFFER_LIMIT,
@@ -3086,7 +3093,7 @@
             revealed: false,
             revealedInWriteCallback: false,
             viewportAtTailOnReveal: null,
-            ...replayControls(),
+            ...replayControls(spec.el),
           },
         };
 
@@ -3351,7 +3358,9 @@
           testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
           testHook.replay.viewportAtTailOnReveal = buffer.viewportY === buffer.baseY;
           showTerminal(el, spec.connecting);
-          if (takesFocus()) term.focus();
+          if (takesFocus()) {
+            term.focus();
+          }
         }
 
         /**
@@ -3367,20 +3376,22 @@
          * mid-word, sending the rest of the title to the agent.
          *
          * So focus is only taken from somewhere that is not a deliberate
-         * choice. The line is drawn at TYPING TARGETS, not at focus per
-         * se: an editable control (the rename field is the motivating
-         * case) or another island's terminal keeps focus, because pulling
-         * keystrokes out from under active typing is the theft this guard
-         * exists to prevent. A focused BUTTON does not hold the reveal
-         * back — the tab-strip selector is the concrete case: selecting a
-         * tab leaves focus on its button, and the whole point of the
-         * selection was to type into that tab once it is ready. Stealing
-         * from a button costs nothing (buttons consume no keystrokes
-         * beyond activation), while refusing would strand every
-         * select-then-type flow.
+         * choice. Editable controls and another island's terminal keep focus
+         * because pulling keystrokes out from under active typing is the theft
+         * this guard exists to prevent. A mounted profiles popup is a
+         * structural veto, including while its active control is being
+         * replaced through `body`. The reveal gets no retry after dismissal;
+         * the user can click the terminal when they want to type there.
+         *
+         * Other focused buttons do not hold the reveal back. The tab-strip
+         * selector is the concrete case: selecting a tab leaves focus on its
+         * button, and the point of that selection is to type into the tab once
+         * it is ready. Treating every button like a typing target would strand
+         * that select-then-type flow.
          */
         function takesFocus() {
           if (!focusOnReveal || focusedEl !== spec.el) return false;
+          if (document.querySelector(".profiles-popover")) return false;
           const active = document.activeElement;
           if (!active || active === document.body) return true;
           if (el && el.contains(active)) return true;

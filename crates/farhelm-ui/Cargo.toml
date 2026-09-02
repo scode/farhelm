@@ -16,6 +16,10 @@ dist = false
 
 [dependencies]
 dioxus.workspace = true
+# Races renderer bridge calls against one deadline on both wasm and desktop.
+# The JavaScript commit still guards its own side effect because dropping the
+# Rust future cannot cancel script that the renderer has already started.
+futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,6 +30,10 @@ serde_json.workspace = true
 # instead of a partial hand-rolled parser. Pure Rust with no OS glue, so it
 # compiles to wasm exactly as this crate's web target needs.
 shell-words.workspace = true
+# `Instant` with the standard monotonic contract on both native and wasm.
+# The wasm standard library does not implement `std::time::Instant`, while
+# popup focus deadlines must use one Rust-owned clock on both renderers.
+web-time = "1.1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `Storage` is added on top of the workspace features (which carry

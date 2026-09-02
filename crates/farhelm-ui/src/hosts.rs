@@ -4,13 +4,6 @@
 //! read-state model both this panel and the stale session view are drawn
 //! from.
 //!
-//! Each row also expands one host's PROFILES (PLAN_M6_75.md item 8). That
-//! surface lives in `profiles` and is only mounted from here, which is the
-//! right split for what it is: a profile is per-supervisor state, so the row
-//! that says whether a host is reachable is the row whose catalog can only be
-//! read while it is — but nothing about editing a catalog is this module's
-//! business.
-//!
 //! ## Why the state chip is the whole point
 //!
 //! SPEC.md: "Per-host connection state is always visible." Not behind a
@@ -75,7 +68,6 @@ use crate::menu_panel::{
 };
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
-use crate::profiles::{CatalogSurface, ProfilesSection};
 use crate::provisioning::{PlanConfirmation, ProvisioningPanel};
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
@@ -655,21 +647,10 @@ type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Com
 /// destination rediscovers all of it — so a prompt threatening deletion
 /// would describe an operation this verb does not perform.
 ///
-/// ## The profiles section (PLAN_M6_75.md item 8)
-///
-/// Each row can expand one, and this panel is where it belongs because a
-/// profile IS per-host state: the row that says whether a host is reachable
-/// is the row whose catalog can only be read while it is. One at a time, like
-/// the destination field and the removal prompt — `profiles_open` is
-/// `ListView`'s signal, since it is also what points the catalog surface at a
-/// host, and a section open while another host's read is in flight would be a
-/// section showing profiles that are not its own.
-///
 /// ## One row menu open, across BOTH panels
 ///
-/// `host_menu_open`/`session_menu_open` are the same discipline
-/// `profiles_open` above already keeps, extended to cover a second signal
-/// this panel does not own: `ListView` holds both (see its own doc), because
+/// `host_menu_open`/`session_menu_open` are two signals this panel does not
+/// own: `ListView` holds both (see its own doc), because
 /// only the component both the session list and this panel mount underneath
 /// is in a position to say "opening yours closes mine". A fully unified
 /// `Option<RowMenuKey>` (one signal, tagged by which kind of row it names)
@@ -698,10 +679,6 @@ pub(crate) fn HostsPanel(
     mut ops: OpLock,
     mut mutation_busy_hosts: Signal<std::collections::HashSet<HostId>>,
     mut provisioning_busy_hosts: Signal<std::collections::HashSet<HostId>>,
-    /// Which host's profiles section is expanded, if any — also the catalog
-    /// surface's target, which is what keeps "what is on screen" and "what is
-    /// being read" one fact rather than two.
-    mut profiles_open: Signal<Option<HostId>>,
     /// Which host row's "⋯" menu is open, if any — `ListView`'s signal, kept
     /// in step with `session_menu_open` below so at most one row menu is
     /// ever open across the whole sidebar (see this component's own doc).
@@ -709,8 +686,6 @@ pub(crate) fn HostsPanel(
     /// The session list's own open-menu signal — written (never read) here,
     /// purely to close a session row's menu when a host row's opens.
     mut session_menu_open: Signal<Option<String>>,
-    /// The one-door reader behind that section (`profiles::CatalogSurface`).
-    profiles: CatalogSurface,
     on_changed: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -807,23 +782,6 @@ pub(crate) fn HostsPanel(
         true
     };
 
-    // Fold this host's profiles section away before a verb that can move the
-    // INSTALL behind its row (adopt, retarget) or remove the row outright.
-    //
-    // The section's own binding already discards its state when the target's
-    // incarnation changes (`profiles::ProfilesSection`), but that reconciliation
-    // waits for the hosts read to land and tell it. Closing the section here
-    // covers the window in between, where an editor draft or a delete
-    // confirmation would still be on screen aimed at a catalog that is about
-    // to belong to a different supervisor — and where starter profile ids
-    // collide by construction, so aiming at the wrong one is not a refusal but
-    // a wrong write.
-    let mut fold_profiles = move |host: HostId| {
-        if *profiles_open.peek() == Some(host) {
-            profiles_open.set(None);
-        }
-    };
-
     let retry_base = base.clone();
     let on_retry = move |host: HostId| {
         // Closes the menu unconditionally, before the request is even
@@ -860,7 +818,7 @@ pub(crate) fn HostsPanel(
         // actually see it.
         host_menu_open.set(None);
         let base = adopt_base.clone();
-        let started = run(
+        run(
             host,
             Box::pin(async move {
                 adopt_host(&base, host, &reported)
@@ -868,14 +826,6 @@ pub(crate) fn HostsPanel(
                     .map(|()| Commit::Confirmed)
             }),
         );
-        // An adopt binds this row to a different install, so whatever its
-        // profiles section is showing stops being about this host — but only
-        // once the adopt is actually OUT. A click refused by the operation
-        // token started nothing, and collapsing the section for it would throw
-        // away an editor draft over an action that never happened.
-        if started {
-            fold_profiles(host);
-        }
     };
 
     let remove_base = base.clone();
@@ -892,16 +842,10 @@ pub(crate) fn HostsPanel(
         // A removal has no host row to report back, so it confirms itself:
         // the 200 IS the whole answer, and there is no body for a decode to
         // fail on.
-        let started = run(
+        run(
             host,
             Box::pin(async move { remove_host(&base, host).await.map(|()| Commit::Confirmed) }),
         );
-        // The row is going away; its section goes with it rather than being
-        // left aimed at an id the registry will not have — once the removal is
-        // actually out (see the adopt above).
-        if started {
-            fold_profiles(host);
-        }
     };
 
     let edit_base = base.clone();
@@ -911,13 +855,6 @@ pub(crate) fn HostsPanel(
             host,
             Box::pin(async move { set_host_destination(&base, host, &destination).await }),
         );
-        // A retarget points this row at another machine — same id, different
-        // supervisor, and therefore a different catalog with colliding ids —
-        // so its profiles section folds away. Only once the request is out:
-        // the same rule the field below keeps, and for the same reason.
-        if started {
-            fold_profiles(host);
-        }
         // Closed once the request is actually OUT: its outcome lands in this
         // row's error line either way, so leaving the field open would only
         // invite a second submit of the same edit. A submit that was refused
@@ -1026,7 +963,6 @@ pub(crate) fn HostsPanel(
                                 confirming_remove: *confirming_remove.read() == Some(host.id),
                                 editing: *editing.read() == Some(host.id),
                                 menu_open: *host_menu_open.read() == Some(host.id),
-                                showing_profiles: *profiles_open.read() == Some(host.id),
                             },
                             activity: HostRowActivity {
                                 busy: mutation_busy_hosts.read().contains(&host.id)
@@ -1034,37 +970,6 @@ pub(crate) fn HostsPanel(
                                     || busy,
                                 error: errors.read().get(&host.id).cloned(),
                                 warning: warnings.read().get(&host.id).cloned(),
-                            },
-                            on_profiles_toggle: move |id: HostId| {
-                                // Collapsing a section UNMOUNTS it, so this
-                                // must not act mid-request for the same
-                                // reason the add-host toggle must not: the
-                                // response would be left with nothing to act
-                                // on it.
-                                if ops.busy_now()
-                                    || provisioning_busy_hosts.peek().contains(&id)
-                                {
-                                    return;
-                                }
-                                // Profiles opens its own management surface
-                                // directly below the row; leaving the "⋯"
-                                // panel open would let it cover the very
-                                // section this click asked to see.
-                                host_menu_open.set(None);
-                                confirming_remove.set(None);
-                                editing.set(None);
-                                let open = *profiles_open.peek() == Some(id);
-                                profiles_open.set((!open).then_some(id));
-                            },
-                            profiles_section: rsx! {
-                                if *profiles_open.read() == Some(host.id) {
-                                    ProfilesSection {
-                                        host: host.id,
-                                        host_name: host.name.clone(),
-                                        surface: profiles,
-                                        ops,
-                                    }
-                                }
                             },
                             local_setup,
                             provisioning_section: rsx! {
@@ -1163,20 +1068,20 @@ pub(crate) fn HostsPanel(
 // the session row's (PR #239, mechanics shared via `menu_panel`) — leaves
 // `.host-row-main` exactly three children regardless of host kind, so
 // there is no longer a control count for the sidebar's width to run out
-// on.
+// on. Profiles have since moved to the app bar, but the remaining host verbs
+// keep this menu because the same narrow-sidebar constraint still applies.
 
 /// One command in a host row's actions menu, in the order the menu offers
 /// them.
 ///
-/// `Profiles` and `Retry` are offered in every phase, like the buttons
-/// they replace; `Adopt` only when [`adoptable`] names an identity;
+/// `Retry` is offered in every phase, like the button it replaces; `Adopt`
+/// only when [`adoptable`] names an identity;
 /// `Edit`/`Remove` only on an ssh row (see `HostRow`'s own doc for why an
 /// unmanageable kind gets neither). The separator before `Remove` is
 /// drawn in the rsx, not modeled here — see `MenuOrder` in `menu_panel`
 /// for why a separator is never counted as an item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum HostMenuAction {
-    Profiles,
     Retry,
     Adopt,
     Edit,
@@ -1188,8 +1093,7 @@ enum HostMenuAction {
 /// identical reason: the canonical order lives in one place so the
 /// rendered list and the navigable list cannot disagree about what "the
 /// first item" or "the last item" means.
-const HOST_MENU_ACTIONS: [HostMenuAction; 5] = [
-    HostMenuAction::Profiles,
+const HOST_MENU_ACTIONS: [HostMenuAction; 4] = [
     HostMenuAction::Retry,
     HostMenuAction::Adopt,
     HostMenuAction::Edit,
@@ -1218,7 +1122,7 @@ type HostMenuWiring = menu_panel::MenuWiring<HostMenuAction, HostId, { HOST_MENU
 /// `MenuOrder::pack`'s generic `(action) -> bool` predicate.
 fn host_menu_order(adoptable: bool, manageable: bool) -> HostMenuOrder {
     HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| match action {
-        HostMenuAction::Profiles | HostMenuAction::Retry => true,
+        HostMenuAction::Retry => true,
         HostMenuAction::Adopt => adoptable,
         HostMenuAction::Edit | HostMenuAction::Remove => manageable,
     })
@@ -1261,19 +1165,14 @@ fn host_row_class(menu_open: bool) -> &'static str {
 
 /// Which of the host row's optional surfaces the user has opened.
 ///
-/// Grouped because all four answer one question — what does this row offer
+/// Grouped because all three answer one question — what does this row offer
 /// beyond its ordinary control strip right now — and because `HostsPanel`
-/// narrows all four from at-most-one-row signals to a boolean here: its own
-/// `confirming_remove` and `editing`, the `profiles_open` that `ListView`
-/// owns and hands it to coordinate the profiles surface, and the
-/// `host_menu_open` `ListView` owns to keep at most one row menu open across
+/// narrows all three from at-most-one-row signals to a boolean here: its own
+/// `confirming_remove` and `editing`, and the `host_menu_open` `ListView`
+/// owns to keep at most one row menu open across
 /// BOTH the session list and the hosts panel (see `HostsPanel`'s own doc for
-/// that single-open discipline). Not one enum, because they do not fully
-/// exclude each other: the removal prompt and the destination field do (the
-/// panel's own handlers close one to open the other, and both close the
-/// menu itself — see `HostRow`'s own doc), but an expanded profiles section
-/// survives both, and the menu is what OFFERS the other two in the first
-/// place.
+/// that single-open discipline). Not one enum because the panel already owns
+/// the first two signals while the list owns the cross-panel menu signal.
 ///
 /// State only, like every group here — see [`HostRowActivity`] for why no
 /// group may ever carry a callback.
@@ -1286,11 +1185,6 @@ struct HostRowControls {
     /// Whether this row's "⋯" menu is the (at most one, across sessions AND
     /// hosts) open one.
     menu_open: bool,
-    /// Whether THIS row's profiles section is the expanded one. Inside the row
-    /// it picks the toggle's LABEL and nothing else, since the section itself
-    /// arrives as built markup — but the row needs the fact to write that
-    /// label, so the markup alone would not do.
-    showing_profiles: bool,
 }
 
 /// The operation-related presentation state of this row: whether its
@@ -1377,11 +1271,6 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// handles, on the wrapper rather than on the chip so a test can find a row
 /// and then assert about anything inside it.
 ///
-/// `profiles_section` arrives as already-built markup rather than as the
-/// several props the section would otherwise need threaded through here. The
-/// row's job is to own the toggle and the place the section hangs; deciding
-/// what a catalog surface is and how it reads is the panel's, one level up.
-///
 /// ## Prop shape
 ///
 /// Provisioning took this signature to twenty props, which fired the standing
@@ -1391,7 +1280,7 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// changes together, one for what the user has opened and one for what the
 /// helm is doing about it, so that a change to either says which.
 ///
-/// Everything else stays a direct prop, each for its own reason. The ten
+/// Everything else stays a direct prop, each for its own reason. The nine
 /// event handlers must (see [`HostRowActivity`]) — four of them are host
 /// verbs, the rest move local UI state. The two `Element` sections are
 /// rendered markup rather than state, and the panel builds them. The draft is
@@ -1403,7 +1292,7 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 ///
 /// ## The menu, and what stays outside it
 ///
-/// `profiles`/`retry`/`adopt`/`edit destination`/`remove` render inside one
+/// `retry`/`adopt`/`edit destination`/`remove` render inside one
 /// "⋯" menu (`.host-row-menu` toggle, `.host-row-menu-panel` panel) built on
 /// the same generic mechanics the session row's menu uses (`menu_panel`) —
 /// see that module's own doc for what is shared and why. The name and phase
@@ -1418,7 +1307,7 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// sub-states at all: opening the item list is the only thing an open panel
 /// ever shows.
 ///
-/// Every one of the five items closes the menu when chosen, but the two
+/// Every one of the four items closes the menu when chosen, but the two
 /// GROUPS do it for different reasons and from different layers.
 ///
 /// `edit destination` and `remove` swap out the branch that contains the
@@ -1432,14 +1321,9 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// state change to account for rather than the item and the panel each
 /// closing it.
 ///
-/// `retry`, `adopt`, and `profiles` do NOT replace the row's branch — the
-/// row stays exactly as it is, and `profiles` only expands a section below
-/// it — so nothing here is stale to protect against the way the two above
-/// are. They close the menu anyway, from `HostsPanel`'s own callbacks, for a
-/// visibility reason instead: all three can produce something the user must
-/// actually see right where the "⋯" panel sits — Profiles' management
-/// surface, or a Retry/Adopt refusal rendered in this row's own error line —
-/// and an opaque, still-open panel would cover exactly that.
+/// `retry` and `adopt` do not replace the row's branch. They close the menu
+/// from `HostsPanel`'s own callbacks because either can produce a refusal in
+/// the row's error line, exactly where an opaque open panel would cover it.
 #[component]
 fn HostRow(
     host: Host,
@@ -1449,12 +1333,9 @@ fn HostRow(
     controls: HostRowControls,
     /// What the management verbs are doing to this row (grouped state).
     activity: HostRowActivity,
-    /// The expanded section, or nothing. Built by the panel.
-    profiles_section: Element,
     /// The feed-driven setup/update surface built by the panel.
     provisioning_section: Element,
     destination_draft: Signal<String>,
-    on_profiles_toggle: EventHandler<HostId>,
     on_retry: EventHandler<HostId>,
     on_adopt: EventHandler<(HostId, String)>,
     on_edit_start: EventHandler<(HostId, String)>,
@@ -1472,7 +1353,6 @@ fn HostRow(
         confirming_remove,
         editing,
         menu_open,
-        showing_profiles,
     } = controls;
     let HostRowActivity {
         busy,
@@ -1752,35 +1632,6 @@ fn HostRow(
                                 aria_label: host_menu_label(&host.name),
                                 button {
                                     r#type: "button",
-                                    class: "btn host-row-menu-item host-profiles-toggle",
-                                    role: "menuitem",
-                                    aria_disabled: if busy { "true" },
-                                    tabindex: if menu_tab_stop == Some(HostMenuAction::Profiles) { "0" } else { "-1" },
-                                    onmounted: move |element| {
-                                        remember_menu_item(menu_wiring, HostMenuAction::Profiles, element.data())
-                                    },
-                                    onfocusin: move |_| {
-                                        menu_focus.set(menu_order.position(HostMenuAction::Profiles));
-                                    },
-                                    onfocusout: move |_| menu_focus.set(None),
-                                    onkeydown: move |evt| {
-                                        handle_menu_key(
-                                            &evt,
-                                            menu_order.position(HostMenuAction::Profiles),
-                                            menu_wiring,
-                                            &id,
-                                        );
-                                    },
-                                    onclick: move |_| {
-                                        if busy {
-                                            return;
-                                        }
-                                        on_profiles_toggle.call(id);
-                                    },
-                                    if showing_profiles { "hide profiles" } else { "profiles" }
-                                }
-                                button {
-                                    r#type: "button",
                                     class: "btn host-row-menu-item host-retry",
                                     role: "menuitem",
                                     aria_disabled: if busy { "true" },
@@ -2000,11 +1851,6 @@ fn HostRow(
                 }
             }
             {provisioning_section}
-            // Inside the row rather than after it, so the section is visibly
-            // attached to the host whose profiles it holds — on a fleet, a
-            // panel of profiles floating between two rows would belong to
-            // whichever the reader guessed.
-            {profiles_section}
         }
     }
 }
@@ -2515,11 +2361,11 @@ mod tests {
     /// state — the host row's version of the fixed-numbering hazard
     /// `list::row`'s
     /// `menu_order_follows_the_retention_state_rather_than_a_fixed_numbering`
-    /// pins for the session row, applied to `HOST_MENU_ACTIONS`'s five
+    /// pins for the session row, applied to `HOST_MENU_ACTIONS`'s four
     /// items instead of the session row's four.
     ///
-    /// An adoptable ssh host offers every action there is (up to five); an
-    /// ordinary ssh host offers four, since `adopt` only ever joins an
+    /// An adoptable ssh host offers every action there is (up to four); an
+    /// ordinary ssh host offers three, since `adopt` only ever joins an
     /// identity mismatch. The reserved local row (never `manageable` — see
     /// [`HostRow`]'s own doc) drops `edit` and `remove` entirely regardless,
     /// which must move `adopt`'s position rather than leave a gap where
@@ -2527,27 +2373,25 @@ mod tests {
     /// for the session row.
     #[test]
     fn the_host_menu_follows_manageability_and_adoptability() {
-        use HostMenuAction::{Adopt, Edit, Profiles, Remove, Retry};
+        use HostMenuAction::{Adopt, Edit, Remove, Retry};
 
         // Ssh, adoptable: every item, in the declared order.
         let ssh_adoptable = host_menu_order(true, true);
-        assert_eq!(ssh_adoptable.len(), 5);
-        assert_eq!(ssh_adoptable.get(0), Some(Profiles));
-        assert_eq!(ssh_adoptable.get(1), Some(Retry));
-        assert_eq!(ssh_adoptable.get(2), Some(Adopt));
-        assert_eq!(ssh_adoptable.get(3), Some(Edit));
-        assert_eq!(ssh_adoptable.get(4), Some(Remove));
+        assert_eq!(ssh_adoptable.len(), 4);
+        assert_eq!(ssh_adoptable.get(0), Some(Retry));
+        assert_eq!(ssh_adoptable.get(1), Some(Adopt));
+        assert_eq!(ssh_adoptable.get(2), Some(Edit));
+        assert_eq!(ssh_adoptable.get(3), Some(Remove));
         assert_eq!(ssh_adoptable.last(), Some(Remove));
 
         // Ssh, not adoptable (the ordinary case: most phases offer no
         // adopt): `adopt` drops out and `edit`/`remove` shift up to fill
         // the gap rather than leaving one at position 2.
         let ssh_plain = host_menu_order(false, true);
-        assert_eq!(ssh_plain.len(), 4);
-        assert_eq!(ssh_plain.get(0), Some(Profiles));
-        assert_eq!(ssh_plain.get(1), Some(Retry));
-        assert_eq!(ssh_plain.get(2), Some(Edit));
-        assert_eq!(ssh_plain.get(3), Some(Remove));
+        assert_eq!(ssh_plain.len(), 3);
+        assert_eq!(ssh_plain.get(0), Some(Retry));
+        assert_eq!(ssh_plain.get(1), Some(Edit));
+        assert_eq!(ssh_plain.get(2), Some(Remove));
         assert_eq!(ssh_plain.position(Adopt), None);
 
         // The local row's identity-mismatch menu shape: unmanageable, so
@@ -2561,18 +2405,16 @@ mod tests {
         // implies never adoptable" itself, which is what lets this case be
         // exercised directly instead of only through the ssh fixtures above.
         let local = host_menu_order(true, false);
-        assert_eq!(local.len(), 3);
-        assert_eq!(local.get(0), Some(Profiles));
-        assert_eq!(local.get(1), Some(Retry));
-        assert_eq!(local.get(2), Some(Adopt));
+        assert_eq!(local.len(), 2);
+        assert_eq!(local.get(0), Some(Retry));
+        assert_eq!(local.get(1), Some(Adopt));
         assert_eq!(local.position(Edit), None);
         assert_eq!(local.position(Remove), None);
 
-        // The ordinary local row: just the two unconditional items.
+        // The ordinary local row: just the unconditional retry item.
         let local_plain = host_menu_order(false, false);
-        assert_eq!(local_plain.len(), 2);
-        assert_eq!(local_plain.get(0), Some(Profiles));
-        assert_eq!(local_plain.get(1), Some(Retry));
+        assert_eq!(local_plain.len(), 1);
+        assert_eq!(local_plain.get(0), Some(Retry));
         assert_eq!(local_plain.last(), Some(Retry));
     }
 
@@ -3017,7 +2859,6 @@ mod tests {
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_host_row() {
         fn app() -> Element {
             let destination_draft = use_signal(String::new);
-            let on_profiles_toggle = use_callback(|_: HostId| {});
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
             let on_edit_start = use_callback(|_: (HostId, String)| {});
@@ -3035,17 +2876,14 @@ mod tests {
                         confirming_remove: false,
                         editing: false,
                         menu_open: false,
-                        showing_profiles: false,
                     },
                     activity: HostRowActivity {
                         busy: false,
                         error: None,
                         warning: None,
                     },
-                    profiles_section: dioxus::core::VNode::empty(),
                     provisioning_section: dioxus::core::VNode::empty(),
                     destination_draft,
-                    on_profiles_toggle,
                     on_retry,
                     on_adopt,
                     on_edit_start,
@@ -3100,7 +2938,6 @@ mod tests {
 
         fn app() -> Element {
             let destination_draft = use_signal(String::new);
-            let on_profiles_toggle = use_callback(|_: HostId| {});
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
             let on_edit_start = use_callback(|_: (HostId, String)| {});
@@ -3122,7 +2959,6 @@ mod tests {
                             confirming_remove: confirming == id,
                             editing: false,
                             menu_open: false,
-                            showing_profiles: false,
                         },
                         activity: HostRowActivity {
                             busy: false,
@@ -3130,10 +2966,8 @@ mod tests {
                                 .then(|| "the helm refused this verb".to_string()),
                             warning: None,
                         },
-                        profiles_section: dioxus::core::VNode::empty(),
                         provisioning_section: dioxus::core::VNode::empty(),
                         destination_draft,
-                        on_profiles_toggle,
                         on_retry,
                         on_adopt,
                         on_edit_start,

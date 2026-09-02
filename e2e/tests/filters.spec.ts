@@ -147,7 +147,7 @@ test.describe("session list filtering", () => {
   // that fails between creating and deleting would leak a profile into a
   // fleet every later run shares — and this suite's own convention is that
   // the stack a test finds is the stack the next one finds.
-  const profiles: { host: number; id: string }[] = [];
+  const profiles: string[] = [];
 
   test.afterEach(async ({ request }) => {
     while (created.length) {
@@ -157,12 +157,12 @@ test.describe("session list filtering", () => {
     while (profiles.length) {
       const profile = profiles.pop();
       if (!profile) continue;
-      const response = await request.delete(`/api/hosts/${profile.host}/profiles/${profile.id}`);
+      const response = await request.delete(`/api/profiles/${profile}`);
       // Already deleted is the NORMAL outcome here, not an error: the one
       // test that makes a profile deletes it on the way through.
       if (!response.ok() && response.status() !== 404) {
         throw new Error(
-          `cleanup: deleting profile ${profile.id} failed (${response.status()}): ${await response
+          `cleanup: deleting profile ${profile} failed (${response.status()}): ${await response
             .text()}`,
         );
       }
@@ -622,7 +622,7 @@ test.describe("session list filtering", () => {
   }) => {
     const local = await localHostId(request);
     const profileName = `e2e-profile-${Date.now()}`;
-    const created_profile = await request.post(`/api/hosts/${local}/profiles`, {
+    const created_profile = await request.post("/api/profiles", {
       data: { name: profileName, invocation: FAKE_AGENT, agent_kind: "generic" },
     });
     expect(created_profile.ok(), await created_profile.text()).toBeTruthy();
@@ -630,7 +630,7 @@ test.describe("session list filtering", () => {
     // Registered for cleanup BEFORE anything else can fail: this test deletes
     // the profile itself further down, but a failure in between would
     // otherwise leave it in a fleet every later run shares.
-    profiles.push({ host: local, id: profile.id });
+    profiles.push(profile.id);
 
     const fromProfile = await createSession(request, {
       title: `profile-session-${Date.now()}`,
@@ -640,7 +640,7 @@ test.describe("session list filtering", () => {
 
     // The profile goes away; the session does not, and neither does its
     // snapshot.
-    const deleted = await request.delete(`/api/hosts/${local}/profiles/${profile.id}`);
+    const deleted = await request.delete(`/api/profiles/${profile.id}`);
     expect(deleted.ok(), await deleted.text()).toBeTruthy();
 
     await listWithStubbedFeed(page);

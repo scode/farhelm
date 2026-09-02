@@ -13,8 +13,8 @@
 //   injected into its own command line, runs it, obeys the pointer line it
 //   printed, and then — driven by a `$farhelm ...` line typed into its
 //   terminal through the BROWSER — clones itself onto the other host, with
-//   its agent resolved by profile NAME against that host's own catalog,
-//   and the new row appears in the UI without a reload.
+//   its agent resolved by profile NAME against the helm catalog, and the new
+//   row appears in the UI without a reload.
 //
 // That case is chosen because it is precisely what a supervisor-local
 // implementation cannot do. It needs the host list the helm owns, the
@@ -53,7 +53,6 @@ import {
   cleanupSession,
   createProfile,
   createSession,
-  FAKE_AGENT,
   listHosts,
   selfSshAvailable,
 } from "./helpers/fleet";
@@ -222,9 +221,9 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
   /**
    * Spec: a `$farhelm clone this session onto <host>` typed into a remote
    * session's terminal creates a session on the OTHER host, in the same
-   * directory and with the same title, whose agent came from the profile
-   * of the SAME NAME in that host's own catalog — and the new row appears
-   * in a browser that never reloaded.
+   * directory and with the same title, whose agent came from the profile of
+   * the SAME NAME in the helm catalog — and the new row appears in a browser
+   * that never reloaded.
    *
    * This is SPEC.md's cross-host clone, clause for clause. Every assertion
    * is a separate way for the feature to be built wrong:
@@ -232,11 +231,9 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
    * - **The new session is on the other host.** A supervisor-local
    *   implementation would have created it beside the source, which is the
    *   one outcome that looks like success and is not.
-   * - **Its profile is the TARGET's, resolved by name.** The two hosts
-   *   here deliberately hold same-named profiles with DIFFERENT ids and
-   *   different invocations, so an implementation that carried the
-   *   source's profile id across would land on nothing — or, in
-   *   production, on a starter profile with the same id that nobody chose.
+   * - **Its profile still exists under its snapshotted name.** The helm-wide
+   *   catalog is the authority, so the clone carries the same profile id only
+   *   while that row still has the same name.
    * - **Title and cwd are copied.** A clone that re-derived a title from
    *   the directory is the difference a user notices first.
    * - **`CLONED:<id>` matches the new row.** That is what proves the id on
@@ -247,7 +244,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
    *   promise is that the fleet view is live, and a test that navigated
    *   would prove nothing about it.
    */
-  test("clones onto the other host, resolving the agent by profile name", async ({
+  test("clones onto the other host from the matching helm profile", async ({
     page,
     context,
     request,
@@ -262,7 +259,6 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
     const work = stackScratchDir(`agent-relay-${stamp}-`);
 
     let sourceProfile: string | undefined;
-    let targetProfile: string | undefined;
     let source: { id: string } | undefined;
     let cloned: string | undefined;
     let driver: Page | undefined;
@@ -271,7 +267,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
       // SessionStart hook into the launch's argv, which is the first link
       // of the chain under test.
       sourceProfile = (
-        await createProfile(request, remote.id, {
+        await createProfile(request, {
           name,
           invocation: relayAgentInvocation(),
           // Claude-kind with NO explicit resume template: the supervisor
@@ -281,17 +277,6 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
           agent_kind: "claude",
         })
       ).id;
-      // The TARGET profile: same NAME, different id, and a deliberately
-      // different invocation. Same name is what makes the clone resolvable
-      // at all; a different definition is what makes "it resolved HERE"
-      // observable rather than assumed.
-      targetProfile = (
-        await createProfile(request, local.id, { name, invocation: FAKE_AGENT })
-      ).id;
-      expect(targetProfile, "the two hosts must mint different ids for the same name").not.toBe(
-        sourceProfile,
-      );
-
       source = await createSession(request, {
         title: `relay-source-${stamp}`,
         cwd: work,
@@ -317,7 +302,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
       await expect(page.locator(`[data-session-id="${cloned}"]`)).toBeVisible({ timeout: 30_000 });
       expect(page.url(), "the observer must not navigate to discover the clone").toBe(observerUrl);
 
-      // ...on the other host, from the other host's profile, carrying the
+      // ...on the other host, from the same helm profile, carrying the
       // source's directory and title.
       const listing = await request.get("/api/sessions?include_archived=true");
       expect(listing.ok(), `GET /api/sessions: ${listing.status()}`).toBe(true);
@@ -330,8 +315,8 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
       expect(row.cwd, "a clone copies the source's directory").toBe(work);
       expect(
         row.source_profile?.id,
-        "the agent must come from the TARGET host's same-named profile, never the source's id",
-      ).toBe(targetProfile);
+        "the agent must come from the helm row that still matches the snapshot",
+      ).toBe(sourceProfile);
       expect(row.source_profile?.name).toBe(name);
     } finally {
       await driver?.close();
@@ -342,23 +327,22 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
       // order briefly leaves rows describing a profile that is already
       // gone. `profiles.spec.ts` documents the same ordering.
       //
-      // What this deliberately does NOT clean up is the local host's
-      // REMEMBERED DEFAULT, which the clone's own success wrote and which
+      // What this deliberately does NOT clean up is the helm's REMEMBERED
+      // DEFAULT, which the clone's own success wrote and which
       // now names a deleted profile. That is the shared state every
       // profile-using spec leaves behind, and the create dialog already
       // has a defined answer for it (SPEC.md's ask-don't-guess: it
       // selects nothing and waits) that `fillCreateForm` is written
       // around. There is no API to forget a default, so the alternative
       // would be leaving the profile itself behind — strictly worse.
-      if (targetProfile) await cleanupProfile(request, local.id, targetProfile);
-      if (sourceProfile) await cleanupProfile(request, remote.id, sourceProfile);
+      if (sourceProfile) await cleanupProfile(request, sourceProfile);
       fs.rmSync(work, { recursive: true, force: true });
     }
   });
 
   /**
-   * Spec: with NO same-named profile on the target host, the clone is
-   * refused — naming the host and the profile — and no session is created.
+   * Spec: when the source's snapshotted profile no longer exists under that
+   * name in the helm catalog, the clone is refused and creates no session.
    *
    * SPEC.md's agent section calls this out in those words: "No match is a
    * refusal naming the host and the profile", with "deliberately no
@@ -370,11 +354,10 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
    * mystery in production, where the other machine has different software
    * installed.
    *
-   * The target host is given a DIFFERENTLY-named profile rather than none
-   * at all, so the refusal is proven to be about the NAME rather than
-   * about an empty catalog.
+   * A differently named profile remains, so the refusal is proven to be
+   * about the snapshot match rather than an empty catalog.
    */
-  test("refuses, naming the host and the profile, when the target has no such name", async ({
+  test("refuses, naming the host and the profile, when the helm has no such name", async ({
     context,
     request,
   }) => {
@@ -394,7 +377,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
     let driver: Page | undefined;
     try {
       sourceProfile = (
-        await createProfile(request, remote.id, {
+        await createProfile(request, {
           name: wanted,
           invocation: relayAgentInvocation(),
           // Claude-kind with NO explicit resume template: the supervisor
@@ -404,7 +387,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
           agent_kind: "claude",
         })
       ).id;
-      decoyProfile = (await createProfile(request, local.id, { name: decoy })).id;
+      decoyProfile = (await createProfile(request, { name: decoy })).id;
 
       source = await createSession(request, {
         title: `relay-miss-${stamp}`,
@@ -412,6 +395,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
         host: remote.id,
         profile_id: sourceProfile,
       });
+      await cleanupProfile(request, sourceProfile);
 
       driver = await context.newPage();
       await openRelayTerminal(driver, source.id);
@@ -434,8 +418,8 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
     } finally {
       await driver?.close();
       if (source) await cleanupSession(request, source.id);
-      if (decoyProfile) await cleanupProfile(request, local.id, decoyProfile);
-      if (sourceProfile) await cleanupProfile(request, remote.id, sourceProfile);
+      if (decoyProfile) await cleanupProfile(request, decoyProfile);
+      if (sourceProfile) await cleanupProfile(request, sourceProfile);
       fs.rmSync(work, { recursive: true, force: true });
     }
   });
@@ -471,12 +455,11 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
     const absent = path.join(work, "no-such-directory");
 
     let sourceProfile: string | undefined;
-    let targetProfile: string | undefined;
     let source: { id: string } | undefined;
     let driver: Page | undefined;
     try {
       sourceProfile = (
-        await createProfile(request, remote.id, {
+        await createProfile(request, {
           name,
           invocation: relayAgentInvocation(),
           // Claude-kind with NO explicit resume template: the supervisor
@@ -486,10 +469,6 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
           agent_kind: "claude",
         })
       ).id;
-      targetProfile = (
-        await createProfile(request, local.id, { name, invocation: FAKE_AGENT })
-      ).id;
-
       source = await createSession(request, {
         title: `relay-cwd-${stamp}`,
         cwd: work,
@@ -512,8 +491,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
     } finally {
       await driver?.close();
       if (source) await cleanupSession(request, source.id);
-      if (targetProfile) await cleanupProfile(request, local.id, targetProfile);
-      if (sourceProfile) await cleanupProfile(request, remote.id, sourceProfile);
+      if (sourceProfile) await cleanupProfile(request, sourceProfile);
       fs.rmSync(work, { recursive: true, force: true });
     }
   });

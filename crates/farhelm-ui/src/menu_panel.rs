@@ -5,7 +5,7 @@
 //! ## Why this lives outside both rows
 //!
 //! The two menus render completely different ITEMS (rename/stop/archive/
-//! delete versus profiles/retry/adopt/edit/remove) with completely different
+//! delete versus retry/adopt/edit/remove) with completely different
 //! visibility rules, so nothing here decides what a menu contains or what
 //! its items do. What the two rows share instead is everything about a menu
 //! that has NOTHING to do with what it lists: a `position: fixed` panel has
@@ -28,7 +28,7 @@
 //! navigation, Home/End, filing a freshly-mounted item's handle, moving focus
 //! to a computed position) is IDENTICAL once that question can be asked,
 //! whether the answer is the session row's five actions or the host row's
-//! five (a coincidence of today's action sets, not an assumption baked in
+//! four (today's maxima, not assumptions baked in
 //! anywhere here — see `MenuOrder`'s own doc for why `N` is still a
 //! per-row compile-time constant rather than a shared one). Rather
 //! than write that logic twice against two concrete enums, it is written
@@ -1644,8 +1644,8 @@ mod tests {
         // Nothing to focus: no panel item exists, so no key can move
         // focus into one. Neither row's `MenuOrder` produces this today —
         // each caller currently keeps at least one item unconditional in
-        // every state (`profiles`/`retry` for the host row, `rename`/
-        // `delete` for the session row) — which is exactly why it is
+        // every state (`retry` for the host row, `rename`/`delete` for the
+        // session row) — which is exactly why it is
         // pinned — a future control set that could empty a menu must not
         // make this arithmetic underflow.
         assert_eq!(next_menu_focus(0, None, Next), None);

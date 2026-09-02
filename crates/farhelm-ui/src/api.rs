@@ -2,7 +2,7 @@
 //! endpoint — the session routes
 //! (fetch/create/stop/restart/rename/delete/tab-open/tab-close), the host
 //! registry's (list/probe/provision/update/retarget/remove/adopt/retry) since
-//! PLAN_M7.md item 7 extended the M6 host surface, and the per-host profile catalog's
+//! PLAN_M7.md item 7 extended the M6 host surface, and the helm-wide profile catalog's
 //! (list/create/update/delete) since PLAN_M6_75.md item 5 did the same —
 //! each exposing every failure — transport, status, or body-read — as a
 //! single displayable `String`. Internally, the shared send funnel keeps a
@@ -1268,8 +1268,8 @@ pub(crate) async fn fetch_sessions(
 /// an untested cadence.
 pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 
-/// What a create says to launch: a command line, or a profile from the
-/// target host's catalog (PLAN_M6_75.md item 3's two creation modes).
+/// What a create says to launch: a command line, or a profile from the helm
+/// catalog (PLAN_M6_75.md item 3's two creation modes).
 ///
 /// One argument rather than two optional ones, because the wire treats them
 /// as a CHOICE: a body naming both is refused (a profile already states what
@@ -1283,10 +1283,8 @@ pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 pub(crate) enum CreateAgent<'a> {
     /// A raw invocation, shell-split by the supervisor.
     Command(&'a str),
-    /// A `Profile::id` from the TARGET host's own catalog — profiles are
-    /// per-supervisor, so an id from another host names nothing here and the
-    /// create simply fails to resolve it, rather than falling back to
-    /// anything.
+    /// A `Profile::id` from the helm catalog. The helm resolves it before
+    /// forwarding the resulting invocation to the selected host.
     Profile(&'a str),
 }
 
@@ -1968,7 +1966,7 @@ pub(crate) enum Commit {
 /// `authority` names the surface that WILL say what happened — the read that
 /// follows this mutation — and it is a parameter rather than a constant
 /// because the answer differs per resource: a host verb is settled by the
-/// hosts list, a profile verb by that host's catalog. A message naming the
+/// hosts list, a profile verb by the helm catalog. A message naming the
 /// wrong one is worse than a vague one, since it sends the user to a surface
 /// that has nothing to do with what they just did.
 fn unvalidated_note(error: impl std::fmt::Display, authority: &str) -> String {
@@ -2222,16 +2220,13 @@ pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
 // ---------------------------------------------------------------------
 // Agent profiles (PLAN_M6_75.md items 5 and 8)
 //
-// Every route here is host-SCOPED, and that is the contract rather than a
-// URL style: a profile lives on one supervisor, its id means nothing on
-// another machine, and the helm proxies each request to that host's live
-// connection — so a profile operation against a host that is down is
-// refused exactly like a session operation against it, naming the state.
+// Profiles belong to the helm and every host consumes this one catalog. The
+// UI therefore reads and writes only `/api/profiles`; selected-host state is
+// not part of any profile request.
 // ---------------------------------------------------------------------
 
-/// What `GET /api/hosts/{id}/profiles` answers with: one host's catalog and
-/// this helm's remembered default for it, together (farhelm-helm's
-/// `ProfilesView`).
+/// What `GET /api/profiles` answers with: the helm catalog and its remembered
+/// default together (farhelm-helm's `ProfilesView`).
 ///
 /// The pairing is the point rather than a convenience. SPEC.md's creation
 /// rule — default to the last-used profile, ASK when it is gone — is a
@@ -2241,13 +2236,13 @@ pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
 /// to land.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 pub(crate) struct ProfileCatalog {
-    /// The catalog in the supervisor's own order (by id, stable across
+    /// The catalog in the helm's own order (by id, stable across
     /// renames). Not re-sorted here: the helm does not sort it either, and a
     /// picker that reordered itself on every rename would move options out
     /// from under a user mid-choice.
     pub(crate) profiles: Vec<Profile>,
-    /// The id of the profile a session was last created from on this host,
-    /// or `None` if none ever was.
+    /// The id of the profile a session was last created from in this helm, or
+    /// `None` if none ever was.
     ///
     /// May name a profile ABSENT from `profiles`, and that combination is
     /// meaningful rather than a bug: it is a deleted default, which is
@@ -2288,15 +2283,13 @@ pub(crate) struct ProfileSpec {
     pub(crate) resume_template: Option<Vec<String>>,
 }
 
-/// Read one host's profile catalog and this helm's remembered default for it.
+/// Read the helm-wide profile catalog and its remembered default together.
 ///
-/// A live read from the owning supervisor — the helm holds no cache for it —
-/// so this fails while that host is not connected, with the helm's own words
-/// naming the state. That is the honest behavior for a picker: a cached
-/// catalog would let a user choose a profile from a machine that cannot be
-/// reached to launch it.
-pub(crate) async fn fetch_profiles(base: &str, host: HostId) -> Result<ProfileCatalog, String> {
-    let url = format!("{base}/api/hosts/{host}/profiles");
+/// The pair is one snapshot because a dangling remembered id is meaningful:
+/// it tells the picker to ask instead of silently substituting another
+/// profile. Every host uses this same catalog.
+pub(crate) async fn fetch_profiles(base: &str) -> Result<ProfileCatalog, String> {
+    let url = format!("{base}/api/profiles");
     let resp = send(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
@@ -2309,14 +2302,14 @@ pub(crate) async fn fetch_profiles(base: &str, host: HostId) -> Result<ProfileCa
 /// How a profile mutation the helm ACCEPTED came back.
 ///
 /// [`Commit`]'s shape plus the one thing the host verbs have no use for: the
-/// profile as the supervisor now holds it. The caller needs it, and needs it
+/// profile as the helm now holds it. The caller needs it, and needs it
 /// synchronously — the authoritative catalog re-read is a round trip away,
 /// and until it lands this client would otherwise still be handing out the
 /// definition it just replaced (see `profiles::CatalogRead::absorb`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProfileCommit {
     /// Accepted, and the reply described the result: the profile as the
-    /// supervisor now holds it.
+    /// helm now holds it.
     Confirmed(Profile),
     /// Accepted, but the reply could not be read by this build. Carries the
     /// decode failure, for a warning line — and, deliberately, nothing to
@@ -2332,17 +2325,15 @@ pub(crate) enum ProfileCommit {
 async fn profile_commit(resp: reqwest::Response) -> ProfileCommit {
     match resp.json::<Profile>().await {
         Ok(profile) => ProfileCommit::Confirmed(profile),
-        Err(error) => {
-            ProfileCommit::Unvalidated(unvalidated_note(error, "this host's profile list below"))
-        }
+        Err(error) => ProfileCommit::Unvalidated(unvalidated_note(error, "the profile list below")),
     }
 }
 
-/// Define a new profile on one host (`POST /api/hosts/{id}/profiles`).
+/// Define a new profile in the helm catalog (`POST /api/profiles`).
 ///
 /// Nothing is validated here. The name's control-character rule, the
 /// per-field size cap, the catalog bound and the `{conversation}` placeholder
-/// rule for an integrated kind's resume template are all the supervisor's,
+/// rule for an integrated kind's resume template are all the helm's,
 /// and its refusal is what the user acts on — a second copy of those rules in
 /// the client would be the one that drifted, and it could not check the
 /// catalog bound at all.
@@ -2354,10 +2345,9 @@ async fn profile_commit(resp: reqwest::Response) -> ProfileCommit {
 /// follows is the authoritative account either way.
 pub(crate) async fn create_profile(
     base: &str,
-    host: HostId,
     spec: &ProfileSpec,
 ) -> Result<ProfileCommit, String> {
-    let url = format!("{base}/api/hosts/{host}/profiles");
+    let url = format!("{base}/api/profiles");
     let resp = send(client().post(&url).json(&spec)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
@@ -2365,8 +2355,7 @@ pub(crate) async fn create_profile(
     Ok(profile_commit(resp).await)
 }
 
-/// Replace a profile's whole definition
-/// (`POST /api/hosts/{id}/profiles/{profile_id}`).
+/// Replace a helm profile's whole definition (`POST /api/profiles/{profile_id}`).
 ///
 /// A POST to the resource rather than a PUT or PATCH, matching this API's own
 /// verb vocabulary (`/stop`, `/rename`, `/destination`) — and emphatically
@@ -2379,14 +2368,10 @@ pub(crate) async fn create_profile(
 /// silently adopting the new name.
 pub(crate) async fn update_profile(
     base: &str,
-    host: HostId,
     profile_id: &str,
     spec: &ProfileSpec,
 ) -> Result<ProfileCommit, String> {
-    let url = format!(
-        "{base}/api/hosts/{host}/profiles/{}",
-        encode_path_segment(profile_id)
-    );
+    let url = format!("{base}/api/profiles/{}", encode_path_segment(profile_id));
     let resp = send(client().post(&url).json(&spec)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
@@ -2394,8 +2379,7 @@ pub(crate) async fn update_profile(
     Ok(profile_commit(resp).await)
 }
 
-/// Remove a profile from one host's catalog
-/// (`DELETE /api/hosts/{id}/profiles/{profile_id}`).
+/// Remove a profile from the helm catalog (`DELETE /api/profiles/{profile_id}`).
 ///
 /// The reply is an empty object, exactly like `stop` and session `delete`, so
 /// a 200 IS the whole answer and there is nothing for a decode to fail on.
@@ -2405,15 +2389,8 @@ pub(crate) async fn update_profile(
 /// that named this profile, because a default outliving its profile is what
 /// lets the next create dialog say "the one you last used is gone, pick
 /// another" instead of quietly offering nothing.
-pub(crate) async fn delete_profile(
-    base: &str,
-    host: HostId,
-    profile_id: &str,
-) -> Result<(), String> {
-    let url = format!(
-        "{base}/api/hosts/{host}/profiles/{}",
-        encode_path_segment(profile_id)
-    );
+pub(crate) async fn delete_profile(base: &str, profile_id: &str) -> Result<(), String> {
+    let url = format!("{base}/api/profiles/{}", encode_path_segment(profile_id));
     let resp = send(client().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);

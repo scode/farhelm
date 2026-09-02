@@ -58,9 +58,8 @@
 //!   matches beyond the cut while reporting a count that included them.
 //!   Both counts are taken from the same in-memory view the rows come
 //!   from, in the same request. [`profiles`] is the other half of that
-//!   surface: the helm-owned profile catalog is served at `/api/profiles`,
-//!   while the existing host-scoped profile routes are temporary aliases of
-//!   the same handlers. The helm also remembers one raw default id for the
+//!   surface: the helm-owned profile catalog is served only at
+//!   `/api/profiles`. The helm also remembers one raw default id for the
 //!   catalog.
 //!
 //! M1's argv session flags (`--ssh`, `--cwd`, `--agent`, `--title`,
@@ -168,8 +167,7 @@ mod precondition;
 /// `/api/preferences` — the one client preference (list order, last
 /// selection) the helm remembers for every client at once.
 mod preferences;
-/// Helm-owned agent profile CRUD, with temporary host-scoped route aliases
-/// for the unchanged UI.
+/// Helm-owned agent profile CRUD.
 mod profiles;
 
 /// The session REST surface — the list, the owner-lookup routing behind
@@ -554,10 +552,9 @@ fn api_router(state: Arc<AppState>) -> Router {
         // catch that with, and the build stamp it does have can be up to a
         // poll interval stale, which is exactly the window a rolled-back
         // helm lives in. A path an older helm does not serve cannot be
-        // misread: the upgrade simply fails (a 404, or the UI's own
-        // index.html from the static fallback — either way no WebSocket),
-        // the attempt counts as a failure, the ladder carries on, and the
-        // stamp check latches the mismatch moments later.
+        // misread: the upgrade fails with an API 404, the attempt counts as a
+        // failure, the ladder carries on, and the stamp check latches the
+        // mismatch moments later.
         .route(
             "/api/sessions/{id}/term/unowned",
             get(terminal::term_ws_if_unowned),
@@ -602,17 +599,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/retry",
             axum::routing::post(hosts::retry_host),
         )
-        // The host-shaped routes remain temporary aliases for the current UI.
-        // Their handlers parse but otherwise ignore `id`; both route families
-        // operate on the one helm-owned catalog below.
-        .route(
-            "/api/hosts/{id}/profiles",
-            get(profiles::list_profiles).post(profiles::create_profile),
-        )
-        .route(
-            "/api/hosts/{id}/profiles/{profile_id}",
-            axum::routing::post(profiles::update_profile).delete(profiles::delete_profile),
-        )
         .route(
             "/api/profiles",
             get(profiles::list_catalog_profiles).post(profiles::create_catalog_profile),
@@ -635,6 +621,11 @@ fn api_router(state: Arc<AppState>) -> Router {
         // with nothing else in common: it names no session, carries no data,
         // and holds no attachment.
         .route("/api/events", get(events::events_ws))
+        // API paths are reserved before the public SPA fallback is installed.
+        // Without this catch-all, an extensionless GET typo receives
+        // index.html and looks successful until JSON decoding fails; other
+        // methods inherit the static service's unrelated 405 response.
+        .route("/api/{*rest}", axum::routing::any(api_not_found))
         // Applied to the ROUTES already assembled above. The exchange route
         // is added afterwards and is therefore structurally outside the
         // authenticated boundary rather than exempted inside middleware.
@@ -741,6 +732,15 @@ fn api_router(state: Arc<AppState>) -> Router {
                 .layer(axum::middleware::from_fn(middleware::desktop_webview_cors)),
         )
         .with_state(state)
+}
+
+/// Return the ordinary status for an authenticated but unknown API path.
+///
+/// This handler intentionally defines no response-body schema. Its job is to
+/// keep API namespace misses inside the protected control-plane router so no
+/// configured UI source can reinterpret them as static or client-side paths.
+async fn api_not_found() -> axum::http::StatusCode {
+    axum::http::StatusCode::NOT_FOUND
 }
 
 /// Where [`build_router`] gets the web UI it serves, decided once at
@@ -1061,6 +1061,19 @@ mod embedded_ui_tests {
         request(Method::GET, path)
     }
 
+    /// A loopback API request carrying a real device credential minted by the
+    /// harness. Namespace-miss tests must pass authentication so they prove
+    /// routing reaches the protected 404 rather than merely observing a 401.
+    fn authenticated_api_request(method: Method, path: &str, secret: &str) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "127.0.0.1:7433")
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
     /// Spec: `/` serves the embedded tree's `index.html` verbatim, byte for
     /// byte, as `text/html` — the content type a browser needs to actually
     /// render it rather than offer it as a download.
@@ -1189,6 +1202,61 @@ mod embedded_ui_tests {
         );
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
         assert_eq!(body.as_ref(), FIXTURE_INDEX_HTML);
+    }
+
+    /// Unknown control-plane paths stay API 404s for every ordinary HTTP
+    /// method, regardless of which production UI fallback is configured.
+    /// This prevents a removed GET route from becoming index.html and keeps
+    /// non-GET misses from inheriting a static service's 405 contract.
+    #[tokio::test]
+    async fn api_misses_never_fall_through_either_ui_source() {
+        let embedded_harness = rest_harness::idle_helm().await;
+        let embedded_secret = embedded_harness.state.auth.mint_device().await.unwrap();
+        let embedded = build_router(
+            Arc::clone(&embedded_harness.state),
+            UiSource::Embedded(&FIXTURE_UI),
+            7433,
+        );
+
+        let dir_harness = rest_harness::idle_helm().await;
+        let dir_secret = dir_harness.state.auth.mint_device().await.unwrap();
+        let dist = tempfile::tempdir().unwrap();
+        std::fs::write(dist.path().join("index.html"), FIXTURE_INDEX_HTML).unwrap();
+        let directory = build_router(
+            Arc::clone(&dir_harness.state),
+            UiSource::Dir(dist.path().to_path_buf()),
+            7433,
+        );
+
+        for (router, secret, source) in [
+            (embedded, embedded_secret, "embedded"),
+            (directory, dir_secret, "directory"),
+        ] {
+            for method in [
+                Method::GET,
+                Method::HEAD,
+                Method::POST,
+                Method::PUT,
+                Method::PATCH,
+                Method::DELETE,
+                Method::OPTIONS,
+            ] {
+                let response = router
+                    .clone()
+                    .oneshot(authenticated_api_request(
+                        method.clone(),
+                        "/api/removed-route",
+                        &secret,
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::NOT_FOUND,
+                    "{source} UI returned the wrong status for {method}"
+                );
+            }
+        }
     }
 
     /// Spec: a path WITH an extension that matches no compiled file is a

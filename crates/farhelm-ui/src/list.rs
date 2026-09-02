@@ -25,7 +25,7 @@
 //!
 //! ## Profiles reach the list in two places (PLAN_M6_75.md item 8)
 //!
-//! The create dialog gains an agent picker over the target host's catalog,
+//! The create dialog gains an agent picker over the helm-wide catalog,
 //! and a row created from a profile names the profile it SNAPSHOTTED. Both
 //! rules — what a fresh dialog preselects, and how a snapshot reads once the
 //! catalog has moved on — live in `profiles` rather than being re-derived by
