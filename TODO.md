@@ -20,20 +20,6 @@ Within a bucket, no order.
   answerable at a glance; the skew banner already covers the mismatch case, this covers the question before anything
   mismatches.
 
-- Stop the create dialog's inert command field from impersonating the launch command after a clone. Cloning a
-  profile-backed row seeds the dialog with the row's RAW invocation, and while a profile is selected that field is
-  deliberately disabled-but-not-emptied (`CreatePrefill::invocation` documents why: switching the picker to "custom
-  command (below)" must offer the row's own command rather than whatever the form last held). What the user then sees
-  misleads: clone a Claude session, switch the agent picker to a Codex profile, and the disabled field still shows the
-  claude command line, reading as "this is what will run and you cannot change it". Nobody is actually stuck — in
-  profile mode the field's text is inert (the create names the profile id and the wire refuses a request naming both),
-  and the "custom command (below)" option re-enables editing — but nothing on screen says either of those things, and
-  the parenthetical label does not carry the weight. Not a model gap: sessions record `source_profile` as a snapshot
-  with existence states, and `prefill_from` already maps a custom-created source to the editable command mode. Fix
-  directions: in profile mode display the SELECTED profile's own command in the field (or empty it and keep the clone's
-  raw invocation off-screen as the seed for a later switch to custom), and make the label state the contract outright.
-  Observed 2026-08-31 in live use of the new clone action, immediately after its first release into the stable install.
-
 - Stop terminal-query replies leaking into the shell as typed garbage. Symptom: after a short-lived command that probes
   the terminal — `sprite list` is a reliable case, and anything on lipgloss/termenv, vim's `t_RV`, or a bare `CSI 6n`
   will do — the pane shows `^[]11;rgb:0000/0000/0000^[\^[[2;1R` on its own line and the next prompt has

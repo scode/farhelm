@@ -249,11 +249,10 @@ pub(super) struct CreatePrefill {
     /// The row's raw launch command, ALWAYS carried regardless of which
     /// mode [`agent`](Self::agent) trusts.
     ///
-    /// Needed even for a profile-backed clone: the form's command field is
-    /// merely disabled while a profile is selected, not emptied, so
-    /// leaving it holding whatever the mounted form last typed would let a
-    /// user who switches this clone to "custom command" submit a stale,
-    /// unrelated string instead of the row's own command.
+    /// This is the seed for custom-command mode. While a profile is selected,
+    /// the disabled field displays that profile's current invocation instead;
+    /// retaining the raw value here keeps switching to custom mode faithful to
+    /// the cloned row without making the profile-mode display look executable.
     pub(super) invocation: String,
     pub(super) agent: PrefillAgent,
 }
@@ -1075,6 +1074,18 @@ pub(super) fn CreateSessionForm(
         .as_ref()
         .map(|choice| choice.value().to_string())
         .unwrap_or_else(|| UNRESOLVED_VALUE.to_string());
+    // Profile mode is display-only: resolve the selected definition from the
+    // current catalog, while custom mode keeps rendering the signal that
+    // carries the clone seed and any user edits.
+    let displayed_invocation = match (&agent.choice, offered) {
+        (Some(AgentChoice::Profile(id)), Some(catalog)) => catalog
+            .profiles
+            .iter()
+            .find(|profile| profile.id == *id)
+            .map(|profile| display_peer(&profile.invocation))
+            .unwrap_or_default(),
+        _ => invocation.read().clone(),
+    };
 
     // What a submit would launch, resolved SYNCHRONOUSLY inside the handler
     // from the live signals and the catalog as it stands at that instant —
@@ -1626,14 +1637,14 @@ pub(super) fn CreateSessionForm(
                 }
             }
             // Present in both modes and INERT in one: a profile already says
-            // what to run, the wire refuses a create naming both, and a field
-            // that stayed live would invite a user to type a command that is
-            // not what launches. `required` follows the mode for the same
-            // reason — an empty command is exactly right when a profile
+            // what to run, the wire refuses a create naming both, and the
+            // profile's own invocation is the only honest value to show while
+            // the field cannot be edited. `required` follows the mode for the
+            // same reason — an empty command is exactly right when a profile
             // supplies it.
             label {
                 if by_profile {
-                    "agent command (unused: the selected profile supplies it)"
+                    "agent command (the selected profile's own; choose \"custom command\" above to edit)"
                 } else {
                     "agent command"
                 }
@@ -1644,12 +1655,13 @@ pub(super) fn CreateSessionForm(
                     autocorrect: "off",
                     autocapitalize: "none",
                     spellcheck: "false",
-                    // See the working-directory field's own comment just
-                    // above: a clone can seed this from a peer-supplied
-                    // command line, and this is the same escaped-display /
-                    // raw-seed model plus the same per-value isolation.
+                    // In custom mode this shows the clone's escaped raw seed
+                    // or the user's edit, while profile mode replaces the
+                    // display with the selected definition's escaped
+                    // invocation. Submission still reads the raw-seed model
+                    // below, never this profile-mode presentation.
                     dir: "ltr",
-                    value: "{invocation}",
+                    value: "{displayed_invocation}",
                     disabled: busy || by_profile,
                     oninput: move |evt| {
                         invocation.set(evt.value());
