@@ -501,10 +501,9 @@ pub(crate) struct CreateReq {
     /// this host's own catalog (`GET /api/hosts/{id}/profiles`), since
     /// profiles are per-supervisor and an id means nothing on another host.
     ///
-    /// A successful profile-backed create is also what UPDATES this host's
+    /// A successful profile-backed create also updates the helm-wide
     /// remembered default (see [`create_session`]): "last used" means a
-    /// session was actually created from it, not that a picker was opened
-    /// on it.
+    /// session was actually created from it, not that a picker was opened.
     profile_id: Option<String>,
     title: Option<String>,
     /// Which registered host to create on — a `HostView::id` from
@@ -816,7 +815,7 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 /// target host's own profile catalog (PLAN_M6_75.md item 3's second creation
 /// mode). Two consequences live here rather than on the supervisor:
 ///
-/// - The helm REMEMBERS the profile as that host's last-used one, in
+/// - The helm REMEMBERS the profile as its fleet-wide last-used id in
 ///   helm.db, but only after the create SUCCEEDS. A create that failed its
 ///   preconditions did not establish a preference — remembering an
 ///   attempted profile would make a typo the default the next dialog
@@ -866,7 +865,8 @@ pub(crate) async fn create_session(
     // is no interval between "which install" and "which connection" for
     // anything to land in. The cache seed this create goes on to make
     // revalidates the same claim under the host's write lock; the remembered
-    // default does not, by design (it is a bare id per registry row).
+    // default does not, by design: it is a helm-wide suggestion rather than
+    // a claim about the install currently behind this registry row.
     if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
         return http_error(e);
     }
@@ -910,7 +910,7 @@ pub(crate) async fn create_session(
 /// [`record_session`] would leave a real session running that the UI could
 /// not route to for a refresh interval, and one that skipped
 /// [`remember_default_profile`] would silently make the two creation
-/// surfaces disagree about what this host's last-used profile is.
+/// surfaces disagree about the helm-wide last-used profile.
 ///
 /// What is deliberately NOT here is routing. Naming the target host is where
 /// the two callers genuinely differ — the REST edge takes a registry id from
@@ -927,7 +927,7 @@ pub(crate) async fn create_session(
 /// veto, and only then the bookkeeping. A caller that rejects the session
 /// the target answered with is saying the create it asked for did not
 /// happen — so the row must not be seeded into the cache and must not
-/// rewrite the host's remembered default on the way out. That is not
+/// rewrite the helm-wide remembered default on the way out. That is not
 /// hypothetical tidiness: the clone verb's veto fires on a legitimate
 /// idempotency REPLAY, where the target answers with a session that already
 /// existed, and letting the bookkeeping run first can move a
@@ -1135,17 +1135,12 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
     }
 }
 
-/// Record `profile_id` as this host's last-used profile, and invalidate.
+/// Record `profile_id` as the helm-wide last-used profile, and invalidate.
 ///
-/// Written straight to the store against the registry row, unlike
-/// [`record_session`]'s claim-checked cache seed: the remembered default is a
-/// bare id per registry entry, not bound to the install the create ran on
-/// (SPEC.md, Sessions / Creation). A reply landing after a retarget records
-/// its id all the same, and the worst case is a wrong DEFAULT in a dropdown.
-/// Takes the host id alone rather than the create's `SessionClaim` for the
-/// same reason: the claim's connection facts are deliberately not consulted
-/// here, and a signature that carried them would suggest a check this write
-/// does not make.
+/// The remembered id belongs to the helm rather than a host registry row.
+/// `host` is diagnostic context and records the ordering domain of the
+/// supervisor-issued creation sequence; it does not make the default
+/// host-owned or bind it to an installation.
 ///
 /// Best effort, on the same terms as [`record_session`]: the session has
 /// been created and the caller is about to be told so, and a preference that
@@ -1165,9 +1160,9 @@ async fn remember_default_profile(
 ) {
     match state
         .store
-        .remember_profile_default_from_session(
-            host,
+        .remember_profile_default_from_host_session(
             profile_id,
+            host,
             session.creation_seq,
             session.created_at,
             &session.id,
@@ -1180,7 +1175,7 @@ async fn remember_default_profile(
             host,
             profile_id = manager::peer_text(profile_id).as_str(),
             error = %error,
-            "the session was created but its profile could not be remembered as this host's \
+            "the session was created but its profile could not be remembered as the helm-wide \
              default; the next create dialog will suggest the previous one"
         ),
     }

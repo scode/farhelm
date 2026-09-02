@@ -2505,7 +2505,7 @@ fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::
 /// only because [`validate_profile_fields`] had to move below the handler
 /// to be reachable from the store's own writes; `handlers` imports it back
 /// for the create-override check, which is the other half of the same rule.
-pub(crate) const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
+pub(crate) use farhelm_proto::RESUME_TEMPLATE_ELEMENT_CAP;
 
 /// Everything a profile record must satisfy before it is stored, or after
 /// it is read back (PLAN_M6_75.md item 4).
@@ -2528,7 +2528,7 @@ pub(crate) const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
 ///
 /// - **The field cap.** [`farhelm_proto::PROFILE_FIELD_CAP`] bounds this
 ///   record's own caller-supplied text. Together with
-///   [`farhelm_proto::MAX_PROFILES_PER_HOST`] (enforced in the insert's own
+///   [`farhelm_proto::MAX_PROFILES`] (enforced in the insert's own
 ///   transaction, since only a transaction can read a COUNT truthfully) it
 ///   is what keeps `ProfileList` sendable — and a catalog that could outgrow
 ///   one reply could never be listed, and therefore never be trimmed back
@@ -2564,65 +2564,7 @@ pub(crate) fn validate_profile_fields(
     agent_kind: farhelm_proto::AgentKind,
     resume_template: Option<&[String]>,
 ) -> Result<(), String> {
-    let template_bytes: usize = resume_template
-        .iter()
-        .flat_map(|template| template.iter())
-        .map(String::len)
-        .sum();
-    let field_len = name.len() + invocation.len() + template_bytes;
-    if field_len > farhelm_proto::PROFILE_FIELD_CAP {
-        return Err(format!(
-            "profile name, invocation, and resume template together are {field_len} bytes, \
-             exceeding the {}-byte limit",
-            farhelm_proto::PROFILE_FIELD_CAP
-        ));
-    }
-    if resume_template.is_some_and(|template| template.len() > RESUME_TEMPLATE_ELEMENT_CAP) {
-        return Err(format!(
-            "resume template has {} elements, exceeding the \
-             {RESUME_TEMPLATE_ELEMENT_CAP}-element limit",
-            resume_template.map_or(0, <[String]>::len)
-        ));
-    }
-    if name.chars().any(char::is_control) {
-        return Err("profile name must not contain control characters".to_string());
-    }
-    if name.trim().is_empty() {
-        return Err(
-            "profile name must not be empty or only whitespace; a profile is a NAMED definition \
-             and a blank label cannot be picked out of a list"
-                .to_string(),
-        );
-    }
-    if let Some(template) = resume_template {
-        crate::agent_kind::ensure_resume_template(template)?;
-    }
-    // Checked on the STRING before the split, because `shell_words` would
-    // happily carry a NUL through into an argv element and the message
-    // should name the field the caller sent rather than a token of it.
-    if invocation.contains('\0') {
-        return Err(
-            "profile invocation contains a NUL byte, which cannot survive being passed to a \
-             program"
-                .to_string(),
-        );
-    }
-    let argv = shell_words::split(invocation)
-        .map_err(|e| format!("profile invocation does not parse as a command line: {e}"))?;
-    crate::agent_kind::ensure_executable_argv("profile invocation", &argv)?;
-    // Checked here rather than left to `IntegrationSnapshot::resolve` below:
-    // the profile editor renders this store-side `Err` verbatim
-    // (`profiles.rs`'s error path), and it is the ONLY UI the `{cwd}`
-    // placeholder gets — no separate client-side check exists to catch a
-    // wrapper invocation typed with the placeholder in argv[0].
-    crate::agent_kind::ensure_no_cwd_program("profile invocation", &argv)?;
-    crate::agent_kind::IntegrationSnapshot::resolve(
-        &argv[0],
-        Some(agent_kind),
-        resume_template.map(<[String]>::to_vec),
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    farhelm_proto::validate_profile_fields(name, invocation, agent_kind, resume_template)
 }
 
 /// What [`SessionStore::create_profile`] did, since one of the two answers
@@ -2640,7 +2582,7 @@ pub enum ProfileCreation {
     /// Stored, with the id the store minted for it.
     Created(farhelm_proto::Profile),
     /// Refused: the catalog already holds
-    /// [`farhelm_proto::MAX_PROFILES_PER_HOST`] profiles and NOTHING was
+    /// [`farhelm_proto::MAX_PROFILES`] profiles and NOTHING was
     /// written.
     CatalogFull,
 }
@@ -4531,7 +4473,7 @@ impl SessionStore {
     /// (PLAN_M6_75.md item 4).
     ///
     /// Unpaginated because the catalog is BOUNDED
-    /// ([`farhelm_proto::MAX_PROFILES_PER_HOST`], enforced by
+    /// ([`farhelm_proto::MAX_PROFILES`], enforced by
     /// [`SessionStore::create_profile`]); see that constant's docs for why a
     /// catalog that could outgrow one reply would be a catalog nobody could
     /// trim back.
@@ -4655,7 +4597,7 @@ impl SessionStore {
             let held: i64 = tx
                 .query_row("SELECT COUNT(*) FROM profiles", [], |r| r.get(0))
                 .context("counting profiles")?;
-            if held as usize >= farhelm_proto::MAX_PROFILES_PER_HOST {
+            if held as usize >= farhelm_proto::MAX_PROFILES {
                 // Rolled back by the drop, having written nothing.
                 return Ok(ProfileCreation::CatalogFull);
             }
@@ -9867,14 +9809,14 @@ mod tests {
     }
 
     /// The catalog bound at its exact boundary (PLAN_M6_75.md item 4): the
-    /// create that brings the catalog TO `MAX_PROFILES_PER_HOST` succeeds
+    /// create that brings the catalog TO `MAX_PROFILES` succeeds
     /// and the next one is refused with nothing written.
     ///
     /// Boundary rather than "some large number" because an off-by-one here
     /// is invisible in production until the day someone hits it, and both
     /// directions are real failures: refusing one early costs a profile
     /// nobody could explain, and allowing one extra is the first step of
-    /// the unbounded catalog `MAX_PROFILES_PER_HOST` exists to prevent —
+    /// the unbounded catalog `MAX_PROFILES` exists to prevent —
     /// one too large to LIST, and therefore too large to trim back.
     ///
     /// The starters count toward the bound, deliberately: they are ordinary
@@ -9884,7 +9826,7 @@ mod tests {
     async fn the_catalog_bound_refuses_the_create_that_would_exceed_it() {
         let (_dir, store) = fresh_store().await;
         let seeded = store.profiles().await.expect("catalog").len();
-        for i in seeded..farhelm_proto::MAX_PROFILES_PER_HOST {
+        for i in seeded..farhelm_proto::MAX_PROFILES {
             assert!(
                 matches!(
                     store
@@ -9903,7 +9845,7 @@ mod tests {
         }
         assert_eq!(
             store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES_PER_HOST
+            farhelm_proto::MAX_PROFILES
         );
         assert_eq!(
             store
@@ -9919,7 +9861,7 @@ mod tests {
         );
         assert_eq!(
             store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES_PER_HOST,
+            farhelm_proto::MAX_PROFILES,
             "a refused create must write nothing at all"
         );
     }
@@ -10473,7 +10415,7 @@ mod tests {
     ///
     /// This is the whole reason the count lives inside the insert's
     /// transaction rather than in the handler. A caller that counted first
-    /// and inserted after would read `MAX_PROFILES_PER_HOST - 1` in BOTH
+    /// and inserted after would read `MAX_PROFILES - 1` in BOTH
     /// racers, and both would insert — a catalog one profile past a bound
     /// whose entire job is to keep `ProfileList` sendable. Reading the
     /// count in the same transaction as the insert is what makes the second
@@ -10487,7 +10429,7 @@ mod tests {
     async fn two_creates_racing_the_last_catalog_slot_produce_exactly_one_profile() {
         let (_dir, store) = fresh_store().await;
         let seeded = store.profiles().await.expect("catalog").len();
-        for i in seeded..farhelm_proto::MAX_PROFILES_PER_HOST - 1 {
+        for i in seeded..farhelm_proto::MAX_PROFILES - 1 {
             store
                 .create_profile(
                     format!("p{i}"),
@@ -10500,7 +10442,7 @@ mod tests {
         }
         assert_eq!(
             store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES_PER_HOST - 1,
+            farhelm_proto::MAX_PROFILES - 1,
             "premise: exactly one slot left"
         );
 
@@ -10530,7 +10472,7 @@ mod tests {
         );
         assert_eq!(
             store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES_PER_HOST,
+            farhelm_proto::MAX_PROFILES,
             "and the catalog must land exactly ON the bound, never past it"
         );
     }

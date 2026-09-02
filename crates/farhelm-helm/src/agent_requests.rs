@@ -866,7 +866,7 @@ fn on_host<T>(result: anyhow::Result<T>, host_name: &str) -> anyhow::Result<T> {
 }
 
 /// `create`: one session on any host, from a profile name, a raw
-/// invocation, or the target host's remembered default.
+/// invocation, or the helm-wide remembered default.
 ///
 /// ## The selector rules, and why each refusal is loud
 ///
@@ -875,15 +875,10 @@ fn on_host<T>(result: anyhow::Result<T>, host_name: &str) -> anyhow::Result<T> {
 /// already says what to run, so there is no honest merge, and picking a
 /// winner would launch something the caller did not choose.
 ///
-/// Naming NEITHER falls back to this host's remembered default profile —
-/// the same one the create dialog preselects and the same intent
-/// `farhelm spawn` with no `--agent` has. The fallback is the HELM's
-/// memory (helm.db's `remembered_profiles`), not the target supervisor's
-/// own last-used profile, and the difference is worth knowing: a session
-/// created on that host by some other client updates the supervisor's
-/// notion and not this one's. The helm's is the right answer here because
-/// this whole feature is an agent talking to the helm, and it is the
-/// helm's create dialog the user would otherwise have used.
+/// Naming NEITHER falls back to the helm-wide remembered id. During this
+/// migration part the target supervisor still resolves that id in its own
+/// catalog, so the id may be absent or may name a different definition;
+/// profile resolution moves to the helm in the next part.
 ///
 /// A remembered default naming a profile that has since been DELETED is
 /// not softened: the create fails with the target supervisor's own
@@ -961,7 +956,11 @@ async fn create_for_agent(
         (Some(profile_name), None) => crate::sessions::CreateMode::ProfileName(profile_name),
         (None, Some(invocation)) => crate::sessions::CreateMode::Raw(invocation),
         (None, None) => {
-            let default = state.store.remembered_profile(host).await?;
+            // This migration stage remembers one helm-wide id, but the
+            // target supervisor still resolves it in its own catalog. Part
+            // two moves resolution with the catalog; until then this can
+            // refuse or select a target-host definition with the same id.
+            let default = state.store.remembered_profile().await?;
             crate::sessions::CreateMode::Profile(default.ok_or_else(|| {
                 anyhow::Error::new(crate::SupervisorError {
                     kind: ErrorKind::InvalidRequest,
@@ -4777,7 +4776,7 @@ mod tests {
     /// is the half with durable consequences. Refusing after
     /// `do_create_session`'s bookkeeping still refuses, but by then the
     /// replayed row has been seeded into the cache and its profile written
-    /// as the host's remembered default — effects of a create the agent is
+    /// as the helm-wide remembered default — effects of a create the agent is
     /// simultaneously being told did not occur. The seeded default is
     /// deliberately PROVENANCE-LESS (an upgraded database's row, or an
     /// administrative write) and names a different profile, because that is
@@ -4845,7 +4844,7 @@ mod tests {
         // Written through the store's administrative entry point, which is
         // the one that records no source session — see the docstring.
         h.store
-            .remember_profile_default(local, "local-p9")
+            .remember_profile_default("local-p9")
             .await
             .expect("seeding a remembered default");
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -4879,11 +4878,11 @@ mod tests {
 
         assert_eq!(
             h.store
-                .remembered_profile(local)
+                .remembered_profile()
                 .await
                 .expect("reading the remembered default"),
             Some("local-p9".to_string()),
-            "a clone that made nothing must not rewrite the host's remembered default"
+            "a clone that made nothing must not rewrite the helm-wide remembered default"
         );
         assert_eq!(
             h.manager.events().revision(),

@@ -67,8 +67,8 @@ impl CreateAdmission {
 }
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, AgentVerb, ControlMsg, ErrorKind, Frame, MAX_PROFILES_PER_HOST,
-    MAX_SESSION_ID_BYTES, RestartMode, SessionInfo, TerminalSelector,
+    AgentKind, AgentVerb, ControlMsg, ErrorKind, Frame, MAX_PROFILES, MAX_SESSION_ID_BYTES,
+    RestartMode, SessionInfo, TerminalSelector,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -2375,7 +2375,7 @@ async fn refuse(tx: &mpsc::Sender<Frame>, req_id: u64, kind: ErrorKind, message:
 /// (`ControlMsg::ProfileList`).
 ///
 /// Unpaginated and unfiltered: the catalog is bounded
-/// ([`MAX_PROFILES_PER_HOST`]) precisely so that one reply is always
+/// ([`MAX_PROFILES`]) precisely so that one reply is always
 /// enough, and a picker that showed only some of the options would not be a
 /// picker.
 async fn handle_list_profiles(sup: &Arc<Supervisor>, tx: &mpsc::Sender<Frame>, req_id: u64) {
@@ -2436,7 +2436,7 @@ async fn handle_create_profile(
                 req_id,
                 ErrorKind::InvalidRequest,
                 format!(
-                    "this host already holds the maximum of {MAX_PROFILES_PER_HOST} profiles; \
+                    "this host already holds the maximum of {MAX_PROFILES} profiles; \
                      delete one before creating another"
                 ),
             )

@@ -5019,7 +5019,13 @@ mod tests {
 
         fixture
             .store
-            .remember_profile_default_from_session(host, "profile-b", Some(0), 100, "gone-source-b")
+            .remember_profile_default_from_host_session(
+                "profile-b",
+                host,
+                Some(0),
+                100,
+                "gone-source-b",
+            )
             .await
             .unwrap();
         let before = fixture.manager.events().revision();
@@ -5051,7 +5057,7 @@ mod tests {
         // hop, so the loop's terminal condition is BOTH observations.
         let deadline = tokio::time::Instant::now() + REFRESH_INTERVAL * 4;
         loop {
-            let remembered = fixture.store.remembered_profile(host).await.unwrap();
+            let remembered = fixture.store.remembered_profile().await.unwrap();
             let revision = fixture.manager.events().revision();
             if remembered.as_deref() == Some("profile-a") && revision > before {
                 break;
