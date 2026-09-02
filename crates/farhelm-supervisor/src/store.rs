@@ -71,17 +71,12 @@
 //! writers are fenced on `generation`, so neither can write across a
 //! relaunch.
 //!
-//! The profiles catalog (PLAN_M6_75.md item 4) is the one table here whose
-//! rows are not about a session at all: it holds the named, user-editable
-//! agent definitions SPEC.md's "a fresh supervisor is not empty" promises,
-//! and it is the ONLY copy of the truth about which profiles currently
-//! exist. Sessions never join against it to learn what they were launched
-//! with — they carry their own immutable snapshot — and the two
-//! `source_profile_*` columns beside that snapshot record only the
-//! profile's IDENTITY as it was chosen ([`ProfileSnapshot`]). Whether that
-//! profile still exists, and under which name, is derived at reply-build
-//! time from this catalog and never stored (see `service::status`'s
-//! derivation and `farhelm_proto::SourceProfile` for the contract).
+//! Agent profiles themselves live in the helm's catalog. This store keeps
+//! only the immutable profile identity snapshotted when a session was
+//! created, beside the resolved invocation and integration fields needed to
+//! relaunch that session without consulting a helm. Profile existence is
+//! therefore deliberately absent here: the supervisor reports it as
+//! unresolved and the helm derives it against its own current catalog.
 //!
 //! The `title` is the one piece of metadata a USER can change after
 //! creation (PLAN_M5.md item 3), and its writer —
@@ -124,7 +119,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 14;
+const SCHEMA_VERSION: i64 = 15;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -145,100 +140,6 @@ fn mint_session_token() -> anyhow::Result<String> {
 /// single-row by construction (a `CHECK` on this value), so every read and
 /// write names it explicitly rather than scanning.
 const META_ROW_ID: i64 = 0;
-
-/// The profiles catalog's DDL, shared verbatim by the fresh-database path
-/// and by the version-7-to-8 migration so the two cannot drift.
-///
-/// `agent_kind` carries [`agent_kind_column`]'s stable vocabulary, the same
-/// spelling `sessions.agent_kind` uses — one vocabulary, so a profile and
-/// the session it creates can never disagree about what "claude" means.
-/// `resume_template` is [`resume_template_column`]'s JSON array, NULL for
-/// the two meanings `farhelm_proto::Profile::resume_template` gives it (an
-/// integrated kind deriving its own default, or a generic profile with no
-/// resume at all).
-///
-/// No `NOT NULL` on `resume_template` and no uniqueness on `name`: names
-/// are deliberately non-unique (the wire docs' reasoning — `id` is what
-/// anything references, and refusing a duplicate name turns a cosmetic
-/// collision into a dead end).
-const PROFILES_SCHEMA: &str = "CREATE TABLE profiles (
-                 id              TEXT PRIMARY KEY,
-                 name            TEXT NOT NULL,
-                 invocation      TEXT NOT NULL,
-                 agent_kind      TEXT NOT NULL,
-                 resume_template TEXT
-             ) STRICT;";
-
-/// The starter catalog SPEC.md promises every supervisor ships with —
-/// plain and permission-skipping ("yolo") variants of Claude Code and
-/// Codex, four rows total — inserted ONCE, in the same transaction that
-/// creates the table (PLAN_M6_75.md item 4).
-///
-/// ## Why seeding rides the schema ladder rather than a seeded-flag
-///
-/// The requirement is that a starter a user DELETES stays deleted forever,
-/// across every later restart. That is a statement about seeding happening
-/// exactly once per database, and the ladder gives it for free: a migration
-/// step runs on the transition between two `user_version` values and can
-/// never run again, so "already seeded" is not a fact anything has to
-/// record, consult, or keep in step — it is implied by the version stamp
-/// the seeding transaction itself committed. A `supervisor_meta.profiles_
-/// seeded` flag would instead introduce a SECOND durable fact that can
-/// disagree with the table it describes (a flag lost to a partial write, a
-/// startup path that reads it wrong, a future migration that rebuilds the
-/// table), and every one of those disagreements re-seeds profiles the user
-/// deliberately removed — the exact failure this must not have. It would
-/// also have to be consulted at every startup, where the ladder is
-/// consulted only when the version actually moves.
-///
-/// The starters are ordinary rows with no marking of any kind: nothing
-/// downstream may treat them as special, because SPEC.md makes them
-/// editable and deletable like any other profile.
-///
-/// ## Why the ids are fixed strings rather than minted UUIDs
-///
-/// A profile id is opaque and only ever meaningful to the supervisor that
-/// minted it (`farhelm_proto::Profile::id`), so there is nothing to be
-/// gained from making a starter's id unpredictable — and a fixed id makes a
-/// freshly created database and a migrated one byte-identical in this
-/// table, which is what lets `migrated_and_fresh_schemas_agree` compare the
-/// seeded DATA and not merely the columns. Collision with a later
-/// user-created profile is impossible: creates mint UUIDs, which these are
-/// deliberately not shaped like.
-///
-/// ## Why the plain starters' resume templates are NULL but the yolo ones' are not
-///
-/// NULL is `Profile::resume_template`'s "let the kind supply its default"
-/// (see that field's docs), which is precisely what `starter-claude` and
-/// `starter-codex` want: `IntegrationSnapshot::resolve` derives the resume
-/// argv from the invocation's argv0 alone (`default_resume_template` in
-/// `agent_kind/mod.rs`), so a user editing `claude` to `/opt/bin/claude`
-/// keeps resuming through the edited path with no second copy of the
-/// template to fall out of step.
-///
-/// That derivation is exactly why `starter-claude-yolo` and
-/// `starter-codex-yolo` CANNOT use NULL: derivation builds from argv0
-/// only, so it would produce `claude --resume {conversation}` and `codex
-/// resume {conversation}` — silently dropping
-/// `--dangerously-skip-permissions` / `--yolo` and resuming an unattended
-/// session back into a permission-gated one. These two rows instead carry
-/// an explicit template that re-asserts the flag. The tradeoff is the one
-/// the paragraph above describes in reverse: an explicit template is
-/// frozen against later edits to the invocation, so a user who repoints
-/// `codex --yolo` to a wrapper script keeps resuming through the literal
-/// `codex` executable and `--yolo` argument recorded here. That is
-/// accepted for these two rows
-/// because the alternative — silently losing the permission-skipping flag
-/// on resume — is the worse failure.
-const STARTER_PROFILES: &str = "INSERT INTO profiles \
-                 (id, name, invocation, agent_kind, resume_template) VALUES \
-                 ('starter-claude', 'claude', 'claude', 'claude', NULL), \
-                 ('starter-claude-yolo', 'claude-yolo', \
-                  'claude --dangerously-skip-permissions', 'claude', \
-                  '[\"claude\",\"--dangerously-skip-permissions\",\"--resume\",\"{conversation}\"]'), \
-                 ('starter-codex', 'codex', 'codex', 'codex', NULL), \
-                 ('starter-codex-yolo', 'codex-yolo', 'codex --yolo', 'codex', \
-                  '[\"codex\",\"--yolo\",\"resume\",\"{conversation}\"]');";
 
 /// What the supervisor last WITNESSED about a session's agent, durably
 /// (PLAN_M3.md item 2). Not a cached liveness probe: see the module docs
@@ -1461,7 +1362,7 @@ pub struct StoredSession {
 ///
 /// The durable half of `farhelm_proto::SourceProfile`, whose third field —
 /// the profile's CURRENT existence — is deliberately absent here: existence
-/// is a statement about the catalog at reply-build time, and a column
+/// is a statement about the helm catalog at reply-build time, and a column
 /// holding it would be wrong the moment anyone edited or deleted a profile.
 /// See that wire type's docs for the whole snapshot-plus-derived-existence
 /// argument; this struct is the "nothing mutable lives in the snapshot"
@@ -1487,17 +1388,6 @@ pub struct ProfileSnapshot {
     pub name: String,
 }
 
-/// The catalog projection reply-building needs: profile id to its CURRENT
-/// name, for every profile that currently exists.
-///
-/// Read once per reply rather than once per session — a page of sessions
-/// costs one catalog read, not one lookup per row (`farhelm_proto::
-/// SourceProfile`'s note on per-snapshot lookup cost). Absence of a key IS
-/// the deleted case, which is why this is a whole-catalog map rather than a
-/// per-id query returning `Option`: a page mixing present, renamed, and
-/// deleted profiles resolves out of one map with no further I/O.
-pub type ProfileNames = HashMap<String, String>;
-
 /// The supervisor's session database.
 ///
 /// Wraps the connection in `Arc<Mutex<..>>` (a std, not tokio, mutex —
@@ -1514,19 +1404,6 @@ pub type ProfileNames = HashMap<String, String>;
 #[derive(Clone, Debug)]
 pub struct SessionStore {
     conn: Arc<Mutex<Connection>>,
-    /// How many times [`SessionStore::profile_names`] has been asked for
-    /// the catalog, for the tests that pin reply-build COST rather than
-    /// reply-build correctness (PLAN_M6_75.md item 5's "one read per
-    /// reply, not one per session").
-    ///
-    /// Test-only, and it has to be here rather than in the tests: the
-    /// contract is about how many times production code calls the store,
-    /// which nothing outside the store can observe. Cloned with the handle
-    /// (an `Arc`), so a counter read through any clone sees every clone's
-    /// reads — which is what a test holding one handle while the supervisor
-    /// holds another needs.
-    #[cfg(test)]
-    profile_name_reads: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -1577,8 +1454,8 @@ pub struct SessionStore {
 ///   anticipated: both are process-independent facts about this HOST's
 ///   install, not about any one session.
 /// - 8: PLAN_M6_75.md item 4 — the `profiles` catalog together with its
-///   starter rows ([`STARTER_PROFILES`], which also argues why seeding is a
-///   migration rather than a startup check), and `sessions.source_profile_
+///   starter rows (seeded by the migration rather than a startup check), and
+///   `sessions.source_profile_
 ///   id`/`source_profile_name`, the immutable identity of the profile a
 ///   session was created from. One step for both, and nothing backfilled;
 ///   the step's own comment carries the reasoning for each.
@@ -1648,7 +1525,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         // migrations below exist to preserve DATA, and there is none to
         // preserve here. The two paths must agree on the result, which
         // `migrated_and_fresh_schemas_agree` pins.
-        conn.execute_batch(&format!(
+        conn.execute_batch(
             "BEGIN;
              CREATE TABLE sessions (
                  id            TEXT PRIMARY KEY,
@@ -1699,11 +1576,9 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
-             {PROFILES_SCHEMA}
-             {STARTER_PROFILES}
-             PRAGMA user_version = 14;
-             COMMIT;"
-        ))
+             PRAGMA user_version = 15;
+             COMMIT;",
+        )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
     }
@@ -1895,20 +1770,32 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         // already means — raw-created — so migrated rows and rows this
         // build writes for raw creates are indistinguishable by design.
         //
-        // The starters land HERE, in the same transaction, and so an
-        // upgrading host gets the catalog SPEC.md promises rather than an
-        // empty one. See `STARTER_PROFILES` for why this transaction — not
-        // a flag consulted at startup — is what makes seeding happen
-        // exactly once and keeps a deleted starter deleted.
-        conn.execute_batch(&format!(
+        // The catalog is created here only as historical migration state.
+        // Version 15 drops it after the session snapshot columns have
+        // survived every intermediate schema shape.
+        conn.execute_batch(
             "BEGIN;
              ALTER TABLE sessions ADD COLUMN source_profile_id   TEXT;
              ALTER TABLE sessions ADD COLUMN source_profile_name TEXT;
-             {PROFILES_SCHEMA}
-             {STARTER_PROFILES}
+             CREATE TABLE profiles (
+                 id              TEXT PRIMARY KEY,
+                 name            TEXT NOT NULL,
+                 invocation      TEXT NOT NULL,
+                 agent_kind      TEXT NOT NULL,
+                 resume_template TEXT
+             ) STRICT;
+             INSERT INTO profiles
+                 (id, name, invocation, agent_kind, resume_template) VALUES
+                 ('starter-claude', 'claude', 'claude', 'claude', NULL),
+                 ('starter-claude-yolo', 'claude-yolo',
+                  'claude --dangerously-skip-permissions', 'claude',
+                  '[\"claude\",\"--dangerously-skip-permissions\",\"--resume\",\"{conversation}\"]'),
+                 ('starter-codex', 'codex', 'codex', 'codex', NULL),
+                 ('starter-codex-yolo', 'codex-yolo', 'codex --yolo', 'codex',
+                  '[\"codex\",\"--yolo\",\"resume\",\"{conversation}\"]');
              PRAGMA user_version = 8;
-             COMMIT;"
-        ))
+             COMMIT;",
+        )
         .context("migrating schema from version 7 to 8")?;
         version = 8;
     }
@@ -2073,6 +1960,19 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         )
         .context("migrating schema from version 13 to 14")?;
         version = 14;
+    }
+    if version == 14 {
+        // Profiles moved to helm.db. Sessions retain their immutable
+        // source-profile snapshots, but a supervisor must not keep a second
+        // mutable catalog that could diverge from the helm's authority.
+        conn.execute_batch(
+            "BEGIN;
+             DROP TABLE profiles;
+             PRAGMA user_version = 15;
+             COMMIT;",
+        )
+        .context("migrating schema from version 14 to 15")?;
+        version = 15;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -2436,63 +2336,8 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
     Ok(row)
 }
 
-/// The column list every profile read shares, in the order
-/// [`read_profile_columns`] expects — the same drift hazard
-/// [`SESSION_COLUMNS`] documents, on a much smaller table.
-const PROFILE_COLUMNS: &str = "id, name, invocation, agent_kind, resume_template";
-
-/// One profile row exactly as SQLite hands it over, before the two
-/// fallible decodings (`agent_kind`, `resume_template`) that cannot run
-/// inside a rusqlite row mapper. Same two-stage shape, same reason, as
-/// [`SessionColumns`].
-type ProfileColumns = (String, String, String, String, Option<String>);
-
-fn read_profile_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProfileColumns> {
-    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-}
-
-/// Finish decoding a profile row, refusing rather than guessing on a value
-/// outside this build's vocabulary — the trust-boundary rule
-/// [`decode_session_row`] states in full.
-///
-/// The wire [`farhelm_proto::Profile`] IS the stored shape, so there is no
-/// store-side mirror type here (unlike [`StoredSession`], which carries
-/// `tmux_name`/`pane` that no reply has any business seeing). A profile has
-/// no supervisor-private field to hide and no derived field to compute: the
-/// catalog holds exactly what a client sent and exactly what a client is
-/// told back, and a second struct would be a copy with nothing to add.
-fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::Profile> {
-    let (id, name, invocation, kind, template) = columns;
-    let agent_kind = agent_kind_from_column(&kind).with_context(|| format!("profile {id}"))?;
-    let resume_template =
-        resume_template_from_column(template).with_context(|| format!("profile {id}"))?;
-    // The SEMANTIC rules too, not merely the syntactic ones. A row that
-    // decodes into a well-formed struct can still describe a profile no
-    // create could use — a blank name that renders as an unpickable row, an
-    // invocation naming no program, an oversized record that makes
-    // `ProfileList` undeliverable — and until this ran below the handler,
-    // reaching that state took nothing more exotic than a database restored
-    // from a build with looser rules, or one hand-edited.
-    //
-    // REFUSED rather than skipped, which is the same stance every other
-    // decode in this module takes and the right one here for a sharper
-    // reason: quietly dropping the row from the listing would leave a
-    // profile the user can see in no picker and therefore cannot delete or
-    // repair, while every create that names its id keeps working.
-    validate_profile_fields(&name, &invocation, agent_kind, resume_template.as_deref())
-        .map_err(|message| anyhow::anyhow!("profile {id}: {message}"))?;
-    Ok(farhelm_proto::Profile {
-        id,
-        name,
-        invocation,
-        agent_kind,
-        resume_template,
-    })
-}
-
 /// Cap on how many argv elements a resume template may carry, whether it
-/// arrives as a profile definition or as a `CreateSession` override
-/// (PLAN_M3.md items 6 and 7; PLAN_M6_75.md item 4).
+/// arrives in a resolved `CreateSession` bundle (PLAN_M3.md items 6 and 7).
 ///
 /// Independent of the byte caps it is enforced alongside, because the two
 /// bound different things: a template of ten thousand EMPTY elements costs
@@ -2501,91 +2346,7 @@ fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::
 /// reservation row. 64 elements is far beyond every real resume invocation
 /// (`claude --resume {conversation}` is three).
 ///
-/// It lives HERE rather than beside the request caps in `service::handlers`
-/// only because [`validate_profile_fields`] had to move below the handler
-/// to be reachable from the store's own writes; `handlers` imports it back
-/// for the create-override check, which is the other half of the same rule.
 pub(crate) use farhelm_proto::RESUME_TEMPLATE_ELEMENT_CAP;
-
-/// Everything a profile record must satisfy before it is stored, or after
-/// it is read back (PLAN_M6_75.md item 4).
-///
-/// One function for every one of those moments, because the alternative is
-/// rules that hold only where someone remembered to apply them. It began as
-/// a handler-side check on `CreateProfile`/`UpdateProfile`, which left
-/// [`SessionStore::create_profile`] and [`SessionStore::update_profile`]
-/// admitting anything a direct caller handed them, and left
-/// [`decode_profile_row`] returning whatever an older build (or a hand-edit)
-/// had committed. Both gaps end in the same two places: a catalog too large
-/// to LIST, or a snapshotted restart with an argv nothing can run.
-///
-/// The `Err` is the user-facing message verbatim (SPEC.md's concrete,
-/// actionable errors), naming the limit it hit — the same shape
-/// `create_mode` and the create caps use. Callers wrap it in whichever
-/// `ErrorKind` or context their boundary wants.
-///
-/// The rules, and why each:
-///
-/// - **The field cap.** [`farhelm_proto::PROFILE_FIELD_CAP`] bounds this
-///   record's own caller-supplied text. Together with
-///   [`farhelm_proto::MAX_PROFILES`] (enforced in the insert's own
-///   transaction, since only a transaction can read a COUNT truthfully) it
-///   is what keeps `ProfileList` sendable — and a catalog that could outgrow
-///   one reply could never be listed, and therefore never be trimmed back
-///   down.
-/// - **The element cap.** [`RESUME_TEMPLATE_ELEMENT_CAP`], for the reason
-///   that constant gives.
-/// - **A printable, non-blank name.** A profile name is a one-line label
-///   rendered in pickers, logs, and terminals exactly as a session title is,
-///   so it gets the title's rule for control characters: refused, never
-///   sanitized, because it is caller data nothing legitimate spells this
-///   way. It additionally may not be EMPTY or all whitespace, which is where
-///   the two part company — a session title may be blank (the server derives
-///   one), but a profile is a NAMED definition whose whole purpose is being
-///   picked out of a list, and a blank row in that list is not something a
-///   user can act on or tell apart from its neighbours.
-/// - **A usable invocation.** Parsed as a command line and checked as an
-///   executable argv (`agent_kind::ensure_executable_argv`), refused if its
-///   program slot is the `{cwd}` placeholder (`agent_kind::ensure_no_cwd_program`),
-///   then resolved through the very same `IntegrationSnapshot::resolve` a
-///   create will run it through — so a profile that could never launch
-///   anything is refused when it is WRITTEN rather than at every create
-///   that names it afterwards. Catching it here is what keeps "pick a
-///   profile" from being a request that can fail for reasons the picker
-///   could not have shown.
-/// - **An executable resume template**
-///   (`agent_kind::ensure_resume_template`). Same argument, one step further
-///   out: the moment a bad template would otherwise be discovered is a
-///   restart that has a captured conversation to resume and no way left to
-///   do it.
-pub(crate) fn validate_profile_fields(
-    name: &str,
-    invocation: &str,
-    agent_kind: farhelm_proto::AgentKind,
-    resume_template: Option<&[String]>,
-) -> Result<(), String> {
-    farhelm_proto::validate_profile_fields(name, invocation, agent_kind, resume_template)
-}
-
-/// What [`SessionStore::create_profile`] did, since one of the two answers
-/// is a refusal rather than a failure.
-///
-/// A dedicated outcome instead of an `Err`: the catalog being full is a
-/// bounded, expected answer to a legitimate request (the caller must be
-/// told which limit it hit and what to do about it), not an error the store
-/// failed at. It is spelled here rather than checked by the caller because
-/// the check and the insert must be ONE transaction — a count read outside
-/// it could be stale by the time the insert lands, which is precisely how a
-/// bound gets exceeded by concurrent creates.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProfileCreation {
-    /// Stored, with the id the store minted for it.
-    Created(farhelm_proto::Profile),
-    /// Refused: the catalog already holds
-    /// [`farhelm_proto::MAX_PROFILES`] profiles and NOTHING was
-    /// written.
-    CatalogFull,
-}
 
 fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Option<Reservation>> {
     let row = conn
@@ -2687,8 +2448,6 @@ impl SessionStore {
         .context("session store open task panicked")??;
         Ok(SessionStore {
             conn: Arc::new(Mutex::new(conn)),
-            #[cfg(test)]
-            profile_name_reads: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -3364,37 +3123,6 @@ impl SessionStore {
             return Ok(false);
         };
         Ok(expected.as_bytes().ct_eq(token.as_bytes()).into())
-    }
-
-    /// The newest profile-backed session's immutable source snapshot.
-    ///
-    /// No catalog join appears here on purpose. Spawn defaults to the last
-    /// profile that was actually used, even when that profile has since
-    /// been deleted; the caller must then refuse and name `--agent`, never
-    /// walk backward to an older surviving profile. The monotonic creation
-    /// sequence is the chronology authority; unlike wall-clock seconds and
-    /// random ids, it cannot tie or reorder same-second creates.
-    pub async fn latest_source_profile(&self) -> anyhow::Result<Option<ProfileSnapshot>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<ProfileSnapshot>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.query_row(
-                "SELECT source_profile_id, source_profile_name FROM sessions \
-                 WHERE source_profile_id IS NOT NULL \
-                 ORDER BY creation_seq DESC LIMIT 1",
-                [],
-                |row| {
-                    Ok(ProfileSnapshot {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                    })
-                },
-            )
-            .optional()
-            .context("reading the most recently used source profile")
-        })
-        .await
-        .context("last-used profile read task panicked")?
     }
 
     /// The reservation for `intent_key`, if this state directory has ever
@@ -4467,308 +4195,6 @@ impl SessionStore {
         .await
         .context("session load task panicked")?
     }
-
-    /// The whole profiles catalog, ordered by [`farhelm_proto::Profile::id`]
-    /// ASCENDING — the order `ControlMsg::ProfileList` promises on the wire
-    /// (PLAN_M6_75.md item 4).
-    ///
-    /// Unpaginated because the catalog is BOUNDED
-    /// ([`farhelm_proto::MAX_PROFILES`], enforced by
-    /// [`SessionStore::create_profile`]); see that constant's docs for why a
-    /// catalog that could outgrow one reply would be a catalog nobody could
-    /// trim back.
-    pub async fn profiles(&self) -> anyhow::Result<Vec<farhelm_proto::Profile>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<farhelm_proto::Profile>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT {PROFILE_COLUMNS} FROM profiles ORDER BY id ASC"
-                ))
-                .context("preparing profile list query")?;
-            // Two stages for `load_all`'s reason: the fallible decoding
-            // cannot happen inside a rusqlite row mapper.
-            let raw = stmt
-                .query_map([], read_profile_columns)
-                .context("querying profiles")?
-                .collect::<Result<Vec<_>, rusqlite::Error>>()
-                .context("decoding profile rows")?;
-            raw.into_iter().map(decode_profile_row).collect()
-        })
-        .await
-        .context("profile list task panicked")?
-    }
-
-    /// One profile by id, or `None` when the catalog does not hold it.
-    ///
-    /// `None` is the load-bearing answer on the create path: it is the
-    /// unknown-profile precondition (PLAN_M6_75.md item 4), which fails a
-    /// create visibly with no session rather than falling back to some other
-    /// profile. A profile can vanish between a client reading the picker and
-    /// submitting, so this really is a race and not merely a malformed
-    /// request.
-    pub async fn profile(&self, id: &str) -> anyhow::Result<Option<farhelm_proto::Profile>> {
-        let conn = Arc::clone(&self.conn);
-        let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<farhelm_proto::Profile>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let raw = conn
-                .query_row(
-                    &format!("SELECT {PROFILE_COLUMNS} FROM profiles WHERE id = ?1"),
-                    rusqlite::params![id],
-                    read_profile_columns,
-                )
-                .optional()
-                .context("reading one profile")?;
-            raw.map(decode_profile_row).transpose()
-        })
-        .await
-        .context("profile read task panicked")?
-    }
-
-    /// Every profile's CURRENT name, keyed by id — the projection
-    /// source-profile existence is derived from ([`ProfileNames`]).
-    ///
-    /// Deliberately not `profiles()` filtered down by the caller: existence
-    /// derivation needs only the two columns, runs on every reply that
-    /// carries a profile-created session, and has no business paying for the
-    /// invocations and templates of a catalog it is not showing.
-    pub async fn profile_names(&self) -> anyhow::Result<ProfileNames> {
-        #[cfg(test)]
-        self.profile_name_reads
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<ProfileNames> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let mut stmt = conn
-                .prepare("SELECT id, name FROM profiles")
-                .context("preparing profile name query")?;
-            let names = stmt
-                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-                .context("querying profile names")?
-                .collect::<Result<ProfileNames, rusqlite::Error>>()
-                .context("decoding profile names")?;
-            Ok(names)
-        })
-        .await
-        .context("profile name read task panicked")?
-    }
-
-    /// Store a new profile under a freshly minted id, unless the catalog is
-    /// already full (PLAN_M6_75.md item 4).
-    ///
-    /// The COUNT bound is enforced here rather than by the handler because
-    /// only a transaction can enforce it truthfully: a caller that counted
-    /// first and inserted after would be reading a number that another
-    /// create can invalidate in between, which is exactly how a bound gets
-    /// exceeded. The per-record FIELD bound is the handler's — it is a
-    /// property of the request alone, needs no view of the catalog, and
-    /// belongs where the rest of that request's caller-supplied text is
-    /// measured.
-    ///
-    /// The id is a UUID minted here rather than accepted from the caller,
-    /// for `insert_session`'s reason: an id is a reference, and letting a
-    /// client choose one lets it collide with (or overwrite) another
-    /// profile. Starter profiles are the one exception and they are not
-    /// created through this path at all — they are seeded by the schema
-    /// ladder with deliberately non-UUID ids (see [`STARTER_PROFILES`]).
-    ///
-    /// The SEMANTIC rules ([`validate_profile_fields`]) run here rather than
-    /// only at the request boundary. The handler checks first so a client
-    /// gets an `InvalidRequest` with the exact message, but that check is
-    /// not what makes the rule true: every direct caller — a test, a future
-    /// import path, a repair tool — would otherwise be able to commit a row
-    /// that `ProfileList` cannot render and no create can launch.
-    pub async fn create_profile(
-        &self,
-        name: String,
-        invocation: String,
-        agent_kind: farhelm_proto::AgentKind,
-        resume_template: Option<Vec<String>>,
-    ) -> anyhow::Result<ProfileCreation> {
-        validate_profile_fields(&name, &invocation, agent_kind, resume_template.as_deref())
-            .map_err(|message| anyhow::anyhow!("refusing to store this profile: {message}"))?;
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<ProfileCreation> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the profile create transaction")?;
-            let held: i64 = tx
-                .query_row("SELECT COUNT(*) FROM profiles", [], |r| r.get(0))
-                .context("counting profiles")?;
-            if held as usize >= farhelm_proto::MAX_PROFILES {
-                // Rolled back by the drop, having written nothing.
-                return Ok(ProfileCreation::CatalogFull);
-            }
-            let profile = farhelm_proto::Profile {
-                id: uuid::Uuid::new_v4().to_string(),
-                name,
-                invocation,
-                agent_kind,
-                resume_template,
-            };
-            tx.execute(
-                "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![
-                    profile.id,
-                    profile.name,
-                    profile.invocation,
-                    agent_kind_column(profile.agent_kind),
-                    resume_template_column(profile.resume_template.as_deref()),
-                ],
-            )
-            .context("inserting profile row")?;
-            tx.commit().context("committing the profile create")?;
-            Ok(ProfileCreation::Created(profile))
-        })
-        .await
-        .context("profile create task panicked")?
-    }
-
-    /// Replace a profile's definition wholesale, keyed by its id, and give
-    /// back what is now stored — or `None` when no profile with that id
-    /// exists.
-    ///
-    /// A full replacement rather than a patch, matching the wire contract
-    /// (`ControlMsg::UpdateProfile`): per-field optionality would make
-    /// "clear the resume template" and "leave it alone" the same request.
-    /// Last-write-wins with no version token, exactly like a session rename.
-    ///
-    /// Touches NOTHING else — no session row is read or written here. That
-    /// is SPEC.md's snapshot rule holding structurally rather than by
-    /// discipline: sessions carry their own launch and resume snapshot and
-    /// their own copy of the name they were created under, so an edit
-    /// literally has nothing of theirs to disturb.
-    ///
-    /// Validated exactly as a create is ([`SessionStore::create_profile`]
-    /// carries the argument): an update that accepted what a create refuses
-    /// would let a bounded catalog be grown past its bound one edit at a
-    /// time.
-    pub async fn update_profile(
-        &self,
-        profile: farhelm_proto::Profile,
-    ) -> anyhow::Result<Option<farhelm_proto::Profile>> {
-        validate_profile_fields(
-            &profile.name,
-            &profile.invocation,
-            profile.agent_kind,
-            profile.resume_template.as_deref(),
-        )
-        .map_err(|message| anyhow::anyhow!("refusing to store this profile: {message}"))?;
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<farhelm_proto::Profile>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let changed = conn
-                .execute(
-                    "UPDATE profiles SET name = ?2, invocation = ?3, agent_kind = ?4, \
-                     resume_template = ?5 WHERE id = ?1",
-                    rusqlite::params![
-                        profile.id,
-                        profile.name,
-                        profile.invocation,
-                        agent_kind_column(profile.agent_kind),
-                        resume_template_column(profile.resume_template.as_deref()),
-                    ],
-                )
-                .context("updating profile row")?;
-            Ok((changed > 0).then_some(profile))
-        })
-        .await
-        .context("profile update task panicked")?
-    }
-
-    /// How many catalog reads [`SessionStore::profile_names`] has served —
-    /// see that counter's own docs.
-    #[cfg(test)]
-    pub(crate) fn profile_name_reads(&self) -> u64 {
-        self.profile_name_reads
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    /// Make every catalog read FAIL, by removing the table they read.
-    ///
-    /// Test-only, and the only way to exercise the reply paths' behaviour
-    /// when the catalog cannot be read at all. Those paths deliberately
-    /// refuse rather than degrade — an empty catalog is indistinguishable
-    /// from "every profile was deleted", so a degrading reply would render
-    /// a transient database error as a page of sessions whose profiles are
-    /// all gone — and a refusal nothing exercises is a refusal nobody knows
-    /// still works.
-    #[cfg(test)]
-    pub(crate) async fn drop_profile_catalog_for_test(&self) {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || {
-            conn.lock()
-                .expect("session db mutex poisoned")
-                .execute_batch("DROP TABLE profiles;")
-                .expect("drop the catalog");
-        })
-        .await
-        .expect("catalog drop task panicked");
-    }
-
-    /// Store a profile under an id the CALLER chooses, for the one test
-    /// that needs an id the catalog once held to exist again.
-    ///
-    /// Test-only, and deliberately not a variant of
-    /// [`SessionStore::create_profile`]: minting the id is what stops a
-    /// client from colliding with (or overwriting) another profile, so
-    /// production has no business choosing one. The test that needs this is
-    /// pinning that a create refused for an unknown profile REPLAYS its
-    /// refusal even after a profile with that exact id exists again — a
-    /// state that cannot be reached through the real API at all, which is
-    /// precisely why the replay rule needs to be pinned rather than assumed.
-    #[cfg(test)]
-    pub(crate) async fn insert_profile_with_id(
-        &self,
-        profile: farhelm_proto::Profile,
-    ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.execute(
-                "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![
-                    profile.id,
-                    profile.name,
-                    profile.invocation,
-                    agent_kind_column(profile.agent_kind),
-                    resume_template_column(profile.resume_template.as_deref()),
-                ],
-            )
-            .context("inserting a profile under a chosen id")?;
-            Ok(())
-        })
-        .await
-        .context("profile insert task panicked")?
-    }
-
-    /// Remove a profile from the catalog. `false` means no profile with that
-    /// id was there and nothing was deleted — which the handler reports as
-    /// `NotFound` rather than as a silent success, per
-    /// `ControlMsg::DeleteProfile`'s own docs.
-    ///
-    /// Like [`SessionStore::update_profile`], this touches no session row.
-    /// Sessions created from the deleted profile keep running and keep their
-    /// snapshot; the only thing that changes for them is what a catalog
-    /// lookup finds the next time a reply derives their source profile's
-    /// existence.
-    pub async fn delete_profile(&self, id: &str) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
-        let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let deleted = conn
-                .execute("DELETE FROM profiles WHERE id = ?1", rusqlite::params![id])
-                .context("deleting profile row")?;
-            Ok(deleted > 0)
-        })
-        .await
-        .context("profile delete task panicked")?
-    }
 }
 
 #[cfg(test)]
@@ -4958,8 +4384,16 @@ mod tests {
                  ADD COLUMN dedup_scope TEXT NOT NULL DEFAULT 'permanent';",
         )
         .expect("v7 through v9 columns");
-        conn.execute_batch(PROFILES_SCHEMA)
-            .expect("v8 profile catalog");
+        conn.execute_batch(
+            "CREATE TABLE profiles (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 invocation TEXT NOT NULL,
+                 agent_kind TEXT NOT NULL,
+                 resume_template TEXT
+             ) STRICT;",
+        )
+        .expect("v8 profile catalog");
         for (index, id) in ["old-a", "old-b"].into_iter().enumerate() {
             conn.execute(
                 "INSERT INTO sessions (id, title, cwd, invocation, tmux_name, pane, created_at, \
@@ -5531,13 +4965,18 @@ mod tests {
         let db_path = dir.path().join("supervisor.db");
         plant_v7_database(&db_path, "s1");
         let conn = Connection::open(&db_path).expect("open v7 fixture");
-        conn.execute_batch(&format!(
+        conn.execute_batch(
             "ALTER TABLE sessions ADD COLUMN source_profile_id TEXT;
              ALTER TABLE sessions ADD COLUMN source_profile_name TEXT;
-             {PROFILES_SCHEMA}
-             {STARTER_PROFILES}
-             PRAGMA user_version = 8;"
-        ))
+             CREATE TABLE profiles (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 invocation TEXT NOT NULL,
+                 agent_kind TEXT NOT NULL,
+                 resume_template TEXT
+             ) STRICT;
+             PRAGMA user_version = 8;",
+        )
         .expect("v8 schema");
         conn.execute(
             "INSERT INTO create_reservations
@@ -5767,31 +5206,16 @@ mod tests {
     /// not compared: `ALTER TABLE ADD COLUMN` produces differently
     /// punctuated SQL for an identical result.
     ///
-    /// One piece of DATA is compared too, and only one: the starter
-    /// profiles (PLAN_M6_75.md item 4). They are seeded by the same schema
-    /// step on both paths, so a fresh install and an upgraded host must
-    /// both come up with the same catalog — an upgrade that skipped the
-    /// seed would leave a long-running host as the only one where SPEC.md's
-    /// "a fresh supervisor is not empty" quietly does not hold, and no
-    /// schema comparison would notice. This is also why the starter ids are
-    /// FIXED rather than minted (see `STARTER_PROFILES`): the two databases
-    /// can be compared row for row.
     #[tokio::test]
     async fn migrated_and_fresh_schemas_agree() {
         let dir = tempfile::tempdir().expect("tempdir");
         let migrated = dir.path().join("migrated.db");
         plant_v1_database(&migrated, &[]);
-        let migrated_store = SessionStore::open(&migrated, true).await.expect("migrate");
+        let _migrated_store = SessionStore::open(&migrated, true).await.expect("migrate");
         let fresh = dir.path().join("fresh.db");
-        let fresh_store = SessionStore::open(&fresh, true).await.expect("create");
+        let _fresh_store = SessionStore::open(&fresh, true).await.expect("create");
 
         assert_eq!(columns_of(&migrated), columns_of(&fresh));
-        assert_eq!(
-            migrated_store.profiles().await.expect("migrated catalog"),
-            fresh_store.profiles().await.expect("fresh catalog"),
-            "both paths seed the same starter catalog, or an upgraded host is the only one \
-             without one"
-        );
         // Indexes too, not just columns: the reservation table's index is
         // PARTIAL, so a migration that created an unqualified one would
         // still match column-for-column while quietly indexing an immortal
@@ -8666,6 +8090,26 @@ mod tests {
         );
     }
 
+    /// Restore the profiles table that every schema from v8 through v14 had.
+    ///
+    /// These downgrade fixtures start from a current v15 database, where the
+    /// table is deliberately absent. Recreating the historical table is what
+    /// makes their claimed old `user_version` truthful and exercises v15's
+    /// unconditional drop rather than weakening that migration for malformed
+    /// fixtures.
+    fn restore_pre_v15_profiles_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE profiles (
+                 id              TEXT PRIMARY KEY,
+                 name            TEXT NOT NULL,
+                 invocation      TEXT NOT NULL,
+                 agent_kind      TEXT NOT NULL,
+                 resume_template TEXT
+             ) STRICT;",
+        )
+        .expect("restore the historical profiles table");
+    }
+
     /// The v11-to-v12 migration preserves every preexisting row and gives
     /// each one the only truthful historical value: it was not archived.
     #[tokio::test]
@@ -8679,6 +8123,7 @@ mod tests {
         drop(store);
 
         let conn = Connection::open(&db_path).expect("open fixture");
+        restore_pre_v15_profiles_table(&conn);
         // Every column added AFTER v11 has to come off, not just the one
         // this test is about: the ladder replays from whatever
         // `user_version` claims, and a leftover column makes the next
@@ -8752,6 +8197,7 @@ mod tests {
         drop(store);
 
         let conn = Connection::open(&db_path).expect("open fixture");
+        restore_pre_v15_profiles_table(&conn);
         // Same "every later column has to come off" requirement
         // `schema_11_rows_migrate_as_unarchived` documents — `conversation_
         // source` postdates this migration too.
@@ -8830,6 +8276,7 @@ mod tests {
         drop(store);
 
         let conn = Connection::open(&db_path).expect("open fixture");
+        restore_pre_v15_profiles_table(&conn);
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN conversation_source;
              PRAGMA user_version = 13;",
@@ -9458,414 +8905,6 @@ mod tests {
         assert!(store.session("gone").await.expect("read").is_none());
     }
 
-    /// SPEC.md's "a fresh supervisor is not empty", spelled out: the exact
-    /// starter catalog a brand-new database comes up with (PLAN_M6_75.md
-    /// item 4).
-    ///
-    /// Pinned field by field rather than counted, because each field is a
-    /// product decision somebody could plausibly "tidy" into something
-    /// wrong: the KINDS are what select conversation capture and per-kind
-    /// status sharpening at all (a starter that landed as `Generic` would
-    /// silently ship a profile with no integration), the NULL resume
-    /// templates on the plain starters are the deliberate "let the kind
-    /// supply its default" spelling rather than an omission, and the
-    /// EXPLICIT resume templates on the yolo starters are what keeps a
-    /// resumed yolo session actually yolo instead of silently losing its
-    /// permission-skipping flag — see `STARTER_PROFILES` for the full
-    /// rationale on both.
-    #[tokio::test]
-    async fn a_fresh_database_ships_the_four_starter_profiles() {
-        let (_dir, store) = fresh_store().await;
-        let profiles = store.profiles().await.expect("catalog");
-        assert_eq!(
-            profiles,
-            vec![
-                farhelm_proto::Profile {
-                    id: "starter-claude".to_string(),
-                    name: "claude".to_string(),
-                    invocation: "claude".to_string(),
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: None,
-                },
-                farhelm_proto::Profile {
-                    id: "starter-claude-yolo".to_string(),
-                    name: "claude-yolo".to_string(),
-                    invocation: "claude --dangerously-skip-permissions".to_string(),
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: Some(vec![
-                        "claude".to_string(),
-                        "--dangerously-skip-permissions".to_string(),
-                        "--resume".to_string(),
-                        "{conversation}".to_string(),
-                    ]),
-                },
-                farhelm_proto::Profile {
-                    id: "starter-codex".to_string(),
-                    name: "codex".to_string(),
-                    invocation: "codex".to_string(),
-                    agent_kind: farhelm_proto::AgentKind::Codex,
-                    resume_template: None,
-                },
-                farhelm_proto::Profile {
-                    id: "starter-codex-yolo".to_string(),
-                    name: "codex-yolo".to_string(),
-                    invocation: "codex --yolo".to_string(),
-                    agent_kind: farhelm_proto::AgentKind::Codex,
-                    resume_template: Some(vec![
-                        "codex".to_string(),
-                        "--yolo".to_string(),
-                        "resume".to_string(),
-                        "{conversation}".to_string(),
-                    ]),
-                },
-            ],
-            "a fresh supervisor ships claude, claude-yolo, codex, and codex-yolo, in id order"
-        );
-    }
-
-    /// The seeding contract that is easiest to break and worst to break:
-    /// starters are seeded ONCE, so a starter the user DELETED stays
-    /// deleted across every later start of the supervisor (PLAN_M6_75.md
-    /// item 4).
-    ///
-    /// A re-seed would be maximally annoying rather than merely wrong — the
-    /// profile the user removed would come back on every restart, forever,
-    /// with no way for them to make it stop. This is exactly what a
-    /// startup-time "is the catalog seeded?" check gets wrong when its flag
-    /// and its table disagree, and why the seed rides the schema ladder
-    /// instead (see `STARTER_PROFILES`).
-    ///
-    /// Also asserts an EDITED starter survives, which is the same rule seen
-    /// from the other side: an idempotent re-seed that "restored" the
-    /// original definition would quietly discard the user's edit.
-    #[tokio::test]
-    async fn a_deleted_starter_stays_deleted_and_an_edited_one_stays_edited() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("supervisor.db");
-        let store = SessionStore::open(&path, true).await.expect("open");
-        // Delete both Claude starters, leaving the two Codex ones — covers
-        // deletion of both a NULL-template and an explicit-template row.
-        assert!(
-            store
-                .delete_profile("starter-claude")
-                .await
-                .expect("delete")
-        );
-        assert!(
-            store
-                .delete_profile("starter-claude-yolo")
-                .await
-                .expect("delete")
-        );
-        store
-            .update_profile(farhelm_proto::Profile {
-                id: "starter-codex".to_string(),
-                name: "Codex (mine)".to_string(),
-                invocation: "codex --search".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Codex,
-                resume_template: None,
-            })
-            .await
-            .expect("update")
-            .expect("the starter is there to edit");
-        drop(store);
-
-        let reopened = SessionStore::open(&path, true).await.expect("reopen");
-        let profiles = reopened.profiles().await.expect("catalog");
-        assert_eq!(
-            profiles.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
-            vec!["starter-codex", "starter-codex-yolo"],
-            "deleted starters must not be re-seeded by a later start, \
-             and the untouched yolo starter must survive alongside the edited one"
-        );
-        assert_eq!(profiles[0].name, "Codex (mine)");
-        assert_eq!(profiles[0].invocation, "codex --search");
-        assert_eq!(
-            profiles[1],
-            farhelm_proto::Profile {
-                id: "starter-codex-yolo".to_string(),
-                name: "codex-yolo".to_string(),
-                invocation: "codex --yolo".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Codex,
-                resume_template: Some(vec![
-                    "codex".to_string(),
-                    "--yolo".to_string(),
-                    "resume".to_string(),
-                    "{conversation}".to_string(),
-                ]),
-            },
-            "the untouched starter's explicit resume template survives too"
-        );
-    }
-
-    /// The catalog's CRUD contract end to end, through the on-disk round
-    /// trip: what a create stores is what a read gives back, an update
-    /// replaces wholesale, a delete removes, and both mutating verbs report
-    /// honestly when the id is not there.
-    ///
-    /// The id-ascending list order is asserted rather than assumed because
-    /// it is a WIRE promise (`ControlMsg::ProfileList`), not an artifact of
-    /// however SQLite happens to return rows.
-    #[tokio::test]
-    async fn profiles_round_trip_through_create_update_and_delete() {
-        let (_dir, store) = fresh_store().await;
-        let created = match store
-            .create_profile(
-                "Local Claude".to_string(),
-                "/opt/bin/claude --verbose".to_string(),
-                farhelm_proto::AgentKind::Claude,
-                Some(vec![
-                    "/opt/bin/claude".to_string(),
-                    "--resume".to_string(),
-                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                ]),
-            )
-            .await
-            .expect("create")
-        {
-            ProfileCreation::Created(profile) => profile,
-            ProfileCreation::CatalogFull => panic!("a catalog of four starters is not full"),
-        };
-        assert_ne!(created.id, "", "the store mints the id");
-        assert_eq!(
-            store.profile(&created.id).await.expect("read"),
-            Some(created.clone()),
-            "what a create reports must be exactly what the row holds"
-        );
-
-        let listed = store.profiles().await.expect("list");
-        let ids: Vec<&str> = listed.iter().map(|profile| profile.id.as_str()).collect();
-        assert!(
-            ids.is_sorted(),
-            "the listing is id-ascending, as the wire contract promises: {ids:?}"
-        );
-        assert!(ids.contains(&created.id.as_str()));
-
-        // A full replacement, including CLEARING the resume template — the
-        // case a patch-shaped update could not express at all.
-        let edited = farhelm_proto::Profile {
-            id: created.id.clone(),
-            name: "Renamed".to_string(),
-            invocation: "bash".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
-        };
-        assert_eq!(
-            store
-                .update_profile(edited.clone())
-                .await
-                .expect("update")
-                .as_ref(),
-            Some(&edited)
-        );
-        assert_eq!(
-            store.profile(&created.id).await.expect("read"),
-            Some(edited)
-        );
-
-        assert!(store.delete_profile(&created.id).await.expect("delete"));
-        assert_eq!(store.profile(&created.id).await.expect("read"), None);
-        assert!(
-            !store.delete_profile(&created.id).await.expect("delete"),
-            "deleting what is already gone reports so rather than claiming success"
-        );
-        assert_eq!(
-            store
-                .update_profile(farhelm_proto::Profile {
-                    id: created.id.clone(),
-                    name: "ghost".to_string(),
-                    invocation: "bash".to_string(),
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
-                })
-                .await
-                .expect("update"),
-            None,
-            "an update is an edit of something that exists, never a create in disguise"
-        );
-    }
-
-    /// A wrapper profile's `{cwd}` elements are TEXT to the store, never a
-    /// value to substitute — filling the placeholder belongs to
-    /// `fill_cwd`, at spawn time, against the session's own directory, not
-    /// the catalog's.
-    ///
-    /// Asserted through the same create/update/read round trip as
-    /// [`profiles_round_trip_through_create_update_and_delete`]. The
-    /// contract under test: a profile with `{cwd}` in an ARGUMENT slot
-    /// (never `argv[0]`, which [`validate_profile_fields`] refuses) must
-    /// come back byte-for-byte identical to what was written, in both the
-    /// invocation string and the resume template vector — the store holds
-    /// the text and never substitutes.
-    #[tokio::test]
-    async fn a_wrapper_profile_round_trips_with_its_placeholders_intact() {
-        let (_dir, store) = fresh_store().await;
-        let invocation = "w run {cwd} claude".to_string();
-        let template = vec![
-            "w".to_string(),
-            "run".to_string(),
-            crate::agent_kind::CWD_PLACEHOLDER.to_string(),
-            "claude".to_string(),
-            "--resume".to_string(),
-            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-        ];
-
-        let created = match store
-            .create_profile(
-                "Wrapper".to_string(),
-                invocation.clone(),
-                farhelm_proto::AgentKind::Claude,
-                Some(template.clone()),
-            )
-            .await
-            .expect("a profile whose placeholder sits in an argument slot must be accepted")
-        {
-            ProfileCreation::Created(profile) => profile,
-            ProfileCreation::CatalogFull => panic!("a catalog of four starters is not full"),
-        };
-        assert_eq!(
-            created.invocation, invocation,
-            "create must not touch {{cwd}}"
-        );
-        assert_eq!(
-            created.resume_template.as_deref(),
-            Some(template.as_slice()),
-            "create must not touch the template's {{cwd}} element either"
-        );
-        assert_eq!(
-            store.profile(&created.id).await.expect("read"),
-            Some(created.clone()),
-            "a read must give back exactly what was written, placeholders intact"
-        );
-
-        let updated = farhelm_proto::Profile {
-            id: created.id.clone(),
-            name: "Wrapper (renamed)".to_string(),
-            invocation: invocation.clone(),
-            agent_kind: farhelm_proto::AgentKind::Claude,
-            resume_template: Some(template.clone()),
-        };
-        assert_eq!(
-            store
-                .update_profile(updated.clone())
-                .await
-                .expect("an update replaying the same placeholders must also be accepted"),
-            Some(updated.clone())
-        );
-        assert_eq!(
-            store.profile(&created.id).await.expect("read"),
-            Some(updated),
-            "an update must not substitute either, any more than a create does"
-        );
-
-        // Plan D5: `{cwd}` is independent of agent kind. A GENERIC profile
-        // has no integration and so no `{conversation}` obligation on its
-        // template — this covers the two shapes rule 5 above does not: no
-        // template at all, and a template that never mentions
-        // `{conversation}`, both of which `ensure_resume_template`'s
-        // conversation check would refuse for an INTEGRATED kind but must
-        // accept here.
-        let generic_no_template = match store
-            .create_profile(
-                "Generic wrapper, no template".to_string(),
-                invocation.clone(),
-                farhelm_proto::AgentKind::Generic,
-                None,
-            )
-            .await
-            .expect("a generic profile may use {cwd} with no resume template at all")
-        {
-            ProfileCreation::Created(profile) => profile,
-            ProfileCreation::CatalogFull => panic!("plenty of catalog room left"),
-        };
-        assert_eq!(generic_no_template.invocation, invocation);
-        assert_eq!(generic_no_template.resume_template, None);
-
-        let generic_template_without_conversation = vec![
-            "w".to_string(),
-            "run".to_string(),
-            crate::agent_kind::CWD_PLACEHOLDER.to_string(),
-            "cat".to_string(),
-        ];
-        let generic_with_template = match store
-            .create_profile(
-                "Generic wrapper, plain template".to_string(),
-                invocation.clone(),
-                farhelm_proto::AgentKind::Generic,
-                Some(generic_template_without_conversation.clone()),
-            )
-            .await
-            .expect(
-                "a generic profile's template may use {cwd} without ever mentioning \
-                 {conversation}, since a generic kind offers no resume to fill it into",
-            ) {
-            ProfileCreation::Created(profile) => profile,
-            ProfileCreation::CatalogFull => panic!("plenty of catalog room left"),
-        };
-        assert_eq!(
-            generic_with_template.resume_template.as_deref(),
-            Some(generic_template_without_conversation.as_slice())
-        );
-    }
-
-    /// The catalog bound at its exact boundary (PLAN_M6_75.md item 4): the
-    /// create that brings the catalog TO `MAX_PROFILES` succeeds
-    /// and the next one is refused with nothing written.
-    ///
-    /// Boundary rather than "some large number" because an off-by-one here
-    /// is invisible in production until the day someone hits it, and both
-    /// directions are real failures: refusing one early costs a profile
-    /// nobody could explain, and allowing one extra is the first step of
-    /// the unbounded catalog `MAX_PROFILES` exists to prevent —
-    /// one too large to LIST, and therefore too large to trim back.
-    ///
-    /// The starters count toward the bound, deliberately: they are ordinary
-    /// rows, and a bound that excused them would be a bound on a number
-    /// nobody can observe.
-    #[tokio::test]
-    async fn the_catalog_bound_refuses_the_create_that_would_exceed_it() {
-        let (_dir, store) = fresh_store().await;
-        let seeded = store.profiles().await.expect("catalog").len();
-        for i in seeded..farhelm_proto::MAX_PROFILES {
-            assert!(
-                matches!(
-                    store
-                        .create_profile(
-                            format!("p{i}"),
-                            "bash".to_string(),
-                            farhelm_proto::AgentKind::Generic,
-                            None,
-                        )
-                        .await
-                        .expect("create"),
-                    ProfileCreation::Created(_)
-                ),
-                "profile {i} is still within the bound"
-            );
-        }
-        assert_eq!(
-            store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES
-        );
-        assert_eq!(
-            store
-                .create_profile(
-                    "one too many".to_string(),
-                    "bash".to_string(),
-                    farhelm_proto::AgentKind::Generic,
-                    None,
-                )
-                .await
-                .expect("create"),
-            ProfileCreation::CatalogFull
-        );
-        assert_eq!(
-            store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES,
-            "a refused create must write nothing at all"
-        );
-    }
-
     /// A session's source-profile snapshot must survive the on-disk round
     /// trip intact, and a HALF-written pair must be refused at load
     /// (PLAN_M6_75.md item 4).
@@ -9967,8 +9006,8 @@ mod tests {
         );
     }
 
-    /// The version-7-to-8 migration against a database that ALREADY HAS
-    /// session rows (PLAN_M6_75.md item 4).
+    /// The full migration ladder preserves a version-7 session while
+    /// removing the obsolete profile catalog at version 15.
     ///
     /// `migrated_and_fresh_schemas_agree` compares an EMPTY migrated
     /// database against a fresh one, which cannot distinguish "preserves
@@ -9976,16 +9015,12 @@ mod tests {
     /// This is the shape a real upgrading host has: sessions already
     /// running, created by a build that had no catalog at all.
     ///
-    /// Three promises, and each fails differently. The pre-existing session
-    /// survives with every column intact — a migration that rebuilt the
-    /// table would be the classic way to lose one. It comes back
-    /// raw-created rather than acquiring some invented profile, which is
-    /// the honest reading of a session that predates the whole feature.
-    /// And the starter catalog appears, so an upgraded host is not the one
-    /// place where SPEC.md's "a fresh supervisor is not empty" quietly does
-    /// not hold.
+    /// This matters because the ladder still passes through the historical
+    /// version-8 catalog shape before version 15 drops it. The session's
+    /// newly added source columns must remain null and its other metadata
+    /// must survive both transitions.
     #[tokio::test]
-    async fn the_v7_to_v8_migration_preserves_sessions_and_seeds_the_catalog() {
+    async fn the_full_migration_preserves_v7_sessions_and_drops_the_catalog() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("supervisor.db");
         plant_v7_database(&path, "s1");
@@ -10003,22 +9038,15 @@ mod tests {
             "a session that predates the catalog is raw-created, not a session whose profile \
              the migration had to invent"
         );
-        assert_eq!(
-            store
-                .profiles()
-                .await
-                .expect("catalog")
-                .iter()
-                .map(|profile| profile.id.as_str())
-                .collect::<Vec<_>>(),
-            vec![
-                "starter-claude",
-                "starter-claude-yolo",
-                "starter-codex",
-                "starter-codex-yolo",
-            ],
-            "an upgrading host gets the starter catalog too"
-        );
+        let conn = Connection::open(&path).expect("inspect migrated schema");
+        let profile_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'profiles'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect table list");
+        assert_eq!(profile_tables, 0, "version 15 must drop the catalog");
     }
 
     /// A version-7-to-8 migration that fails PARTWAY must leave the
@@ -10164,316 +9192,6 @@ mod tests {
         assert_eq!(
             row.created_at, 1_700_000_000,
             "and the crashed attempt's timestamp is still preserved alongside it"
-        );
-    }
-
-    /// A profile row this build cannot honestly decode is REFUSED, with
-    /// context naming the row — never defaulted, and never quietly dropped
-    /// from the listing.
-    ///
-    /// The database is a trust boundary like any other input: a row is
-    /// whatever the last writer, a crash, a downgrade, or a hand-edit left
-    /// behind. Both failure modes here would be silent in the worst way.
-    /// Defaulting an unrecognized `agent_kind` to `Generic` would turn a
-    /// Claude profile into one with no integration — no capture, no
-    /// sharpening — with nothing anywhere saying so. Dropping a row with a
-    /// malformed template from the listing would make a profile the user
-    /// can see in no picker and therefore cannot delete or repair, while
-    /// the create that names it keeps working.
-    ///
-    /// Asserted through BOTH readers, because they are separate queries
-    /// with separate decode paths and a fix applied to one would leave the
-    /// other guessing.
-    ///
-    /// The table covers SEMANTIC corruption as well as syntactic, and that
-    /// half is the newer and less obvious one. A row can decode into a
-    /// perfectly well-formed `Profile` and still describe something no
-    /// create could use or no listing could render — a blank name that is a
-    /// row a user cannot tell from its neighbours, an invocation naming no
-    /// program, a record large enough to make `ProfileList` undeliverable, a
-    /// template whose program slot is the substitution placeholder. Reaching
-    /// that state needs nothing exotic: a database written by a build with
-    /// looser rules, restored from a backup, or hand-edited.
-    ///
-    /// The two `{cwd}`-first rows (invocation, template) exercise
-    /// `decode_profile_row`'s call into `validate_profile_fields`, which is
-    /// where a profile row's `ensure_no_cwd_program` check lives — a
-    /// hand-edited row naming `{cwd}` as its program would otherwise decode
-    /// into a well-formed `Profile` that no create could have written and
-    /// no restart could safely launch.
-    #[tokio::test]
-    async fn a_corrupt_profile_row_is_refused_by_both_readers() {
-        for (column, value, expected) in [
-            ("agent_kind", "'sonnet'", "unrecognized agent kind"),
-            ("resume_template", "'not json'", "resume template"),
-            // Semantic corruption: each of these decodes cleanly and is
-            // still a profile the rest of the system cannot honor.
-            ("name", "''", "must not be empty"),
-            ("name", "'   '", "must not be empty"),
-            ("name", "'tab\theld'", "control characters"),
-            ("invocation", "''", "is empty"),
-            // A SQL literal holding the two characters `''` — a command
-            // line that parses to one empty token, which exists and names
-            // nothing.
-            ("invocation", "''''''", "names no program"),
-            (
-                "resume_template",
-                "'[\"\", \"--resume\", \"{conversation}\"]'",
-                "names no program",
-            ),
-            (
-                "resume_template",
-                "'[\"{conversation}\", \"--resume\"]'",
-                "the PROGRAM",
-            ),
-            ("invocation", "'{cwd} claude'", "the PROGRAM"),
-            (
-                "resume_template",
-                "'[\"{cwd}\", \"claude\", \"--resume\", \"{conversation}\"]'",
-                "the PROGRAM",
-            ),
-            (
-                "name",
-                &format!("'{}'", "x".repeat(farhelm_proto::PROFILE_FIELD_CAP + 1)),
-                "exceeding",
-            ),
-        ] {
-            let (_dir, store) = fresh_store().await;
-            {
-                let conn = store.conn.lock().expect("db mutex");
-                conn.execute_batch(&format!(
-                    "UPDATE profiles SET {column} = {value} WHERE id = 'starter-claude';"
-                ))
-                .expect("hand-edit the row into a shape this build cannot read");
-            }
-
-            let listed = store
-                .profiles()
-                .await
-                .expect_err("a listing that silently omitted the row would hide it forever");
-            let read = store
-                .profile("starter-claude")
-                .await
-                .expect_err("and the single read must agree with the listing");
-            for (what, refusal) in [("listing", &listed), ("read", &read)] {
-                let rendered = format!("{refusal:#}");
-                assert!(
-                    rendered.contains(expected) && rendered.contains("starter-claude"),
-                    "the {what}'s refusal must name both the fault and the row it is in: \
-                     {rendered}"
-                );
-            }
-        }
-    }
-
-    /// The store's OWN writes refuse a profile no create could use, without
-    /// depending on a handler having checked first.
-    ///
-    /// The handler check is the one that produces a good client error, and
-    /// it is not going anywhere — but it is not what makes the rule true.
-    /// Anything else reaching these methods (a test, a repair path, a future
-    /// import) could otherwise commit a row that `ProfileList` cannot render
-    /// and no create can launch, which then has to be caught on the way back
-    /// OUT by the decode. Refusing at both ends is what keeps the catalog
-    /// from ever holding such a row in the first place.
-    ///
-    /// Create and update are asserted together because an update that
-    /// accepted what a create refuses would let a bounded catalog be grown
-    /// past its bound one edit at a time.
-    ///
-    /// The two `{cwd}`-as-program cases (invocation and template)
-    /// additionally pin the shared refusal wording
-    /// `agent_kind::ensure_no_cwd_program` produces. That is the same
-    /// message `validate_profile_fields` hands back to the handler, which
-    /// is what the profile editor actually shows — but the store methods
-    /// under test here wrap it with their own "refusing to store this
-    /// profile:" prefix before returning it, so this pins the shared
-    /// wording embedded in the store's error, not a byte-for-byte capture
-    /// of the editor's text; `handlers.rs`'s own `CreateProfile` /
-    /// `UpdateProfile` tests pin that boundary directly.
-    #[tokio::test]
-    async fn the_store_refuses_a_profile_no_create_could_use() {
-        let (_dir, store) = fresh_store().await;
-        let seeded = store.profiles().await.expect("catalog").len();
-
-        // `pins_wording` replaces a `what.contains("{cwd}")` string check
-        // that used the case's prose label as control flow — fragile,
-        // because renaming a label for clarity would silently stop
-        // checking the wording. An explicit field says which cases carry
-        // the wording assertion without coupling it to how the case is
-        // described.
-        for (what, name, invocation, kind, template, pins_wording) in [
-            (
-                "a blank name",
-                "   ",
-                "bash",
-                farhelm_proto::AgentKind::Generic,
-                None,
-                false,
-            ),
-            (
-                "an invocation naming no program",
-                "empty program",
-                "''",
-                farhelm_proto::AgentKind::Generic,
-                None,
-                false,
-            ),
-            (
-                "a template whose program slot is the placeholder",
-                "placeholder program",
-                "claude",
-                farhelm_proto::AgentKind::Claude,
-                Some(vec![
-                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    "--resume".to_string(),
-                ]),
-                false,
-            ),
-            (
-                "an invocation whose program slot is the {cwd} placeholder",
-                "cwd program invocation",
-                "{cwd} claude",
-                farhelm_proto::AgentKind::Claude,
-                None,
-                true,
-            ),
-            (
-                "a resume template whose program slot is the {cwd} placeholder",
-                "cwd program template",
-                "claude",
-                farhelm_proto::AgentKind::Claude,
-                Some(vec![
-                    crate::agent_kind::CWD_PLACEHOLDER.to_string(),
-                    "claude".to_string(),
-                    "--resume".to_string(),
-                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                ]),
-                true,
-            ),
-        ] {
-            let create_err = store
-                .create_profile(
-                    name.to_string(),
-                    invocation.to_string(),
-                    kind,
-                    template.clone(),
-                )
-                .await
-                .expect_err(&format!(
-                    "a create with {what} must be refused by the store"
-                ));
-            let update_err = store
-                .update_profile(farhelm_proto::Profile {
-                    id: "starter-claude".to_string(),
-                    name: name.to_string(),
-                    invocation: invocation.to_string(),
-                    agent_kind: kind,
-                    resume_template: template,
-                })
-                .await
-                .expect_err(&format!("and so must an update with {what}"));
-            // The `{cwd}` cases exist to pin the FULL wording, not merely
-            // that a refusal occurs: a future change that refused the
-            // shape for a different reason, or dropped part of the
-            // message, would silently regress the only UI the placeholder
-            // gets. The other cases above only assert that a refusal
-            // happens at all.
-            if pins_wording {
-                for (side, err) in [("create", &create_err), ("update", &update_err)] {
-                    let rendered = err.to_string();
-                    assert!(
-                        rendered.contains("PROGRAM")
-                            && rendered.contains(crate::agent_kind::CWD_PLACEHOLDER)
-                            && rendered.contains("belongs in an argument slot"),
-                        "{side}'s refusal for {what} must use the full placeholder-as-program \
-                         wording: {rendered}"
-                    );
-                }
-            }
-        }
-
-        assert_eq!(
-            store.profiles().await.expect("catalog").len(),
-            seeded,
-            "not one refused write may have landed"
-        );
-        assert_eq!(
-            store
-                .profile("starter-claude")
-                .await
-                .expect("read")
-                .expect("the starter is still there")
-                .name,
-            "claude",
-            "and the refused updates must have left the row they targeted alone"
-        );
-    }
-
-    /// Two creates racing at the catalog's last free slot: exactly one wins
-    /// (PLAN_M6_75.md item 4).
-    ///
-    /// This is the whole reason the count lives inside the insert's
-    /// transaction rather than in the handler. A caller that counted first
-    /// and inserted after would read `MAX_PROFILES - 1` in BOTH
-    /// racers, and both would insert — a catalog one profile past a bound
-    /// whose entire job is to keep `ProfileList` sendable. Reading the
-    /// count in the same transaction as the insert is what makes the second
-    /// racer see the first one's row.
-    ///
-    /// Run through `tokio::join!` on one store handle, which is what the
-    /// supervisor's own concurrent requests look like: the store serializes
-    /// on its connection mutex, so the two transactions genuinely order
-    /// against each other rather than merely appearing to.
-    #[tokio::test]
-    async fn two_creates_racing_the_last_catalog_slot_produce_exactly_one_profile() {
-        let (_dir, store) = fresh_store().await;
-        let seeded = store.profiles().await.expect("catalog").len();
-        for i in seeded..farhelm_proto::MAX_PROFILES - 1 {
-            store
-                .create_profile(
-                    format!("p{i}"),
-                    "bash".to_string(),
-                    farhelm_proto::AgentKind::Generic,
-                    None,
-                )
-                .await
-                .expect("create");
-        }
-        assert_eq!(
-            store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES - 1,
-            "premise: exactly one slot left"
-        );
-
-        let create = |name: &str| {
-            let store = store.clone();
-            let name = name.to_string();
-            async move {
-                store
-                    .create_profile(
-                        name,
-                        "bash".to_string(),
-                        farhelm_proto::AgentKind::Generic,
-                        None,
-                    )
-                    .await
-                    .expect("create")
-            }
-        };
-        let (first, second) = tokio::join!(create("racer-a"), create("racer-b"));
-        let created = [&first, &second]
-            .iter()
-            .filter(|outcome| matches!(outcome, ProfileCreation::Created(_)))
-            .count();
-        assert_eq!(
-            created, 1,
-            "exactly one racer may take the last slot: {first:?} and {second:?}"
-        );
-        assert_eq!(
-            store.profiles().await.expect("catalog").len(),
-            farhelm_proto::MAX_PROFILES,
-            "and the catalog must land exactly ON the bound, never past it"
         );
     }
 }

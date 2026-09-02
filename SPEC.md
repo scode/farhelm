@@ -57,9 +57,9 @@ One control plane, two ways to face it:
    serves the web UI too.
 
 The two client forms have the same capabilities: terminal, attachments, lifecycle operations, host registration, and
-profile management (profile edits are proxied through the helm to the owning supervisor). They differ only in packaging.
-These are the only two faces the helm has — a web UI, or the local app embedding it. There is no remote
-native-app-to-helm mode: a helm running on a Linux host is reached through its web UI, period.
+profile management in the helm-owned catalog. They differ only in packaging. These are the only two faces the helm has —
+a web UI, or the local app embedding it. There is no remote native-app-to-helm mode: a helm running on a Linux host is
+reached through its web UI, period.
 
 The Mac is not architecturally special: it runs a normal supervisor that any helm — the app's embedded one, or one on a
 Linux host — can register and drive. The supervisor is a plain command-line process on every platform:
@@ -132,13 +132,11 @@ The helm is a plain command-line process too, with the same layering as supervis
 systemd units for it, so a reboot of the helm's machine brings the web UI back; on the Mac, the helm lives and dies with
 the app.
 
-Agent profiles belong to each supervisor: the invocation has to exist on the host that runs it. Creating a session
-offers the target host's profiles, and `--agent` on the spawn CLI resolves against the session's host. Syncing profiles
-across hosts is post-v1 convenience, not a v1 requirement. A fresh supervisor is not empty: it ships with editable
-starter profiles for Claude Code and Codex, each in a plain and a permission-skipping ("yolo") variant: `claude`,
-`claude-yolo`, `codex`, and `codex-yolo`. Integrations are not user-authored — a profile optionally names an agent kind
-from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that kind's status heuristics and
-conversation-identity capture; profiles without a kind get generic treatment.
+Agent profiles belong to the helm: one catalog applies to every host the helm manages, while the invocation still has to
+exist on the host that runs it. A fresh helm seeds editable starter profiles for Claude Code and Codex, each in a plain
+and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, and `codex-yolo`. Integrations are not
+user-authored — a profile optionally names an agent kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which
+selects that kind's status heuristics and conversation-identity capture; profiles without a kind get generic treatment.
 
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
@@ -173,12 +171,8 @@ Session creation is one action, not a wizard. Only the working directory is fund
   on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
-- Agent profile: defaults to the last-used profile on the target host; if that profile no longer exists, the client asks
-  instead of guessing. "Last-used" is a plain profile id remembered per registry entry, and that is the whole mechanism:
-  it is not bound to the install behind the entry, carries no precondition, and is revalidated against nothing beyond
-  the host's current catalog. A reinstalled or retargeted host that has a profile under the same id gets it preselected.
-  That is accepted because a default is a suggestion in a dropdown, never an action; machinery to detect "same id,
-  different install" is not wanted.
+- Agent profile: defaults to the helm's one last-used profile. If it no longer exists, the client asks instead of
+  guessing. The remembered value is a helm-wide profile id, not per-host state.
 - Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
   session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
   different install after the session was selected falls back to the helm's own host rather than silently aiming the
@@ -556,13 +550,14 @@ or refresh.
 
 The CLI's contract, since agents will script against it: on success it prints the child session id to stdout and exits
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
-status. Precondition failures exit nonzero with a message on stderr. Only `--cwd` is required; everything else defaults
-exactly as interactive creation does (last-used profile on the host, generated title). An optional idempotency key makes
-retries safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather
-than creating another. Keys are scoped to the host and live as long as the child session does. Guaranteed
-Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other
-Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
-see Durability.)
+status. Precondition failures exit nonzero with a message on stderr. Only `--cwd` is required; with no selector, the
+child reuses the asking session's own stored invocation, agent kind, resume template, and profile snapshot. That path
+works with no helm attached. `--agent <name>` resolves the exact name through the attached helm's catalog and is refused
+with a remedy when no helm is attached. The title is generated when omitted. An optional idempotency key makes retries
+safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather than
+creating another. Keys are scoped to the host and live as long as the child session does. Guaranteed Farhelm-injected
+environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are
+illustrative, not contract. (The user's login-shell environment is separately guaranteed; see Durability.)
 
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
 spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
@@ -585,16 +580,12 @@ rather than a degenerate case. The preconditions are the helm's ordinary ones: a
 target is that supervisor's own refusal, reported verbatim rather than paraphrased on the way back, and an unreachable
 target is refused with its state named. The new session appears in every client the way any other create does.
 
-The agent is resolved by NAME, never by profile id. Profile ids are minted per supervisor and every fresh install seeds
-the same starter profiles, so an id carried to another host does not fail — it resolves, onto a profile nobody chose.
-`create --profile` therefore looks the name up in the TARGET host's catalog, and a clone follows its source's profile id
-only when the target is the source's own host, resolving by the snapshotted name otherwise. No match is a refusal naming
-the host and the profile. There is deliberately no fallback to the source's raw invocation: a command line written for
-one machine may name a binary that is absent, a different build, or one that takes different flags on another, and
-SPEC.md's ask-don't-guess rule applies to machines as much as to profiles. A session created from a raw invocation in
-the first place has no name to resolve and clones as that invocation. A create naming neither a profile nor an
-invocation falls back to the target host's remembered default, exactly as interactive creation and `farhelm spawn --cwd`
-alone do.
+The agent is resolved by NAME in the helm's catalog. `create --profile` resolves that name once into a launch bundle,
+and a clone follows its source's snapshotted profile id on any host while the helm still holds it. No match is a refusal
+naming the profile. There is deliberately no fallback to the source's raw invocation: a command line written for one
+machine may name a binary that is absent, a different build, or one that takes different flags on another. A session
+created from a raw invocation has no profile to follow and clones as that invocation. A create naming neither a profile
+nor an invocation falls back to the helm-wide remembered default.
 
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
 the verbs, the `*` marker, that a session's own credential is what authorizes the question, and what to do about "no
@@ -671,7 +662,6 @@ Further requirements:
   add-on; v1 leans on agent conversation resume instead.
 - A prompt composer or message-level abstraction over the terminal.
 - Multi-writer session sharing, or multiple concurrent helms.
-- Profile syncing across hosts.
 - TLS on the web edge — the helm binds loopback only, and tunnels provide transport security.
 - Tailscale integration, and built-in tunneling for the web edge — that stays a local port plus user-managed SSH
   forwarding. (Automatic SSH transport for the helm-to-supervisor edge is in scope; see Topology.)

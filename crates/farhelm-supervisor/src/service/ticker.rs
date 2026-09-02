@@ -1777,6 +1777,7 @@ mod tests {
                         invocation: "/opt/bin/claude".to_string(),
                         agent_kind: None,
                         resume_template: None,
+                        source_profile: None,
                     },
                     title: Some("ticker".to_string()),
                     cols: 80,

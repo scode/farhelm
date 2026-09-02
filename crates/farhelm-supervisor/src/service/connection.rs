@@ -1767,72 +1767,6 @@ mod tests {
         }
     }
 
-    /// PLAN_M6_75.md item 3's four profile replies, table-driven exactly
-    /// like the tab/upload siblings above — including `ProfileList`, whose
-    /// OVERSIZE path is exercised too.
-    ///
-    /// The oversize case is not padding here. `ProfileList` is the one
-    /// version-10 reply that carries an unbounded collection of
-    /// user-authored strings, so it is the one that can plausibly outgrow
-    /// `MAX_FRAME_LEN` — and if it does, the substitution must still be a
-    /// correlated `Error` rather than a panic or an unsendable frame.
-    /// (PLAN_M6_75.md item 3's catalog bound, enforced at create/update,
-    /// is what makes that situation unreachable in practice; this is the
-    /// backstop for a catalog that got large some other way — an older
-    /// build, a hand-edited database.)
-    ///
-    /// The whole family failing to appear here at all was the shape of the
-    /// bug this test was added for: a reply variant absent from
-    /// `reply_frame`'s correlator compiles fine and panics the first time a
-    /// handler actually builds one, taking down every session sharing the
-    /// connection.
-    #[test]
-    fn reply_frame_accepts_the_profile_replies_including_an_oversized_list() {
-        let profile = |id: &str, name: String| farhelm_proto::Profile {
-            id: id.to_string(),
-            name,
-            invocation: "claude".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Claude,
-            resume_template: None,
-        };
-        for msg in [
-            ControlMsg::ProfileList {
-                req_id: 20,
-                profiles: vec![profile("prof-1", "Claude Code".to_string())],
-            },
-            ControlMsg::ProfileCreated {
-                req_id: 21,
-                profile: profile("prof-1", "Claude Code".to_string()),
-            },
-            ControlMsg::ProfileUpdated {
-                req_id: 22,
-                profile: profile("prof-1", "Claude Code".to_string()),
-            },
-            ControlMsg::ProfileDeleted { req_id: 23 },
-        ] {
-            assert_eq!(reply_frame(&msg), Frame::control(&msg));
-        }
-
-        let oversized = ControlMsg::ProfileList {
-            req_id: 24,
-            profiles: vec![profile(
-                "prof-1",
-                "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
-            )],
-        };
-        assert!(
-            Frame::control(&oversized).exceeds_max_len(),
-            "test fixture must actually exceed MAX_FRAME_LEN"
-        );
-        let decoded: ControlMsg =
-            serde_json::from_slice(&reply_frame(&oversized).body).expect("substituted reply");
-        let ControlMsg::Error { req_id, kind, .. } = decoded else {
-            panic!("an oversized ProfileList must degrade to a correlated Error: {decoded:?}");
-        };
-        assert_eq!(req_id, 24, "the substitution must still correlate");
-        assert_eq!(kind, ErrorKind::Internal);
-    }
-
     /// `reply_frame` panics on a message with no `req_id` to correlate an
     /// oversize substitution against. This is pinning an explicit
     /// invariant, not documenting an accident: a silent fallback here
@@ -1872,6 +1806,7 @@ mod tests {
                         invocation: "agent".to_string(),
                         agent_kind: None,
                         resume_template: None,
+                        source_profile: None,
                     },
                     title: Some("parent".to_string()),
                     cols: 80,
@@ -2003,6 +1938,7 @@ mod tests {
                         invocation: "agent".to_string(),
                         agent_kind: None,
                         resume_template: None,
+                        source_profile: None,
                     },
                     title: Some("parent".to_string()),
                     cols: 80,

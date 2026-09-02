@@ -444,7 +444,7 @@ fn source_is_newer(candidate: ProfileSource<'_>, stored: ProfileSource<'_>) -> b
 /// - **host, parent, status, profile — EXACT.** Each is an identifier or a
 ///   value chosen from a finite set
 ///   the client already has in hand (the hosts list, the status vocabulary,
-///   the host's profile catalog), so a substring match would only ever
+///   the helm's profile catalog), so a substring match would only ever
 ///   create surprises: `error` matching nothing else today but matching a
 ///   future `error_recovered`, or a profile named `claude` also selecting
 ///   `claude-review`.
@@ -3943,6 +3943,29 @@ impl HelmStore {
         .context("profile update task panicked")?
     }
 
+    /// Plant a profile row that the normal catalog decoder must reject.
+    ///
+    /// Mutation-order tests need a catalog read to fail without damaging the
+    /// session cache or connection registry they use for routing. Production
+    /// writers validate every field, so this test-only seam bypasses them in
+    /// the narrowest possible way and leaves all ordinary store behavior real.
+    #[cfg(test)]
+    pub(crate) async fn plant_invalid_profile_for_test(&self) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            conn.execute(
+                "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
+                 VALUES ('invalid-test-profile', 'broken', 'agent', 'unknown', NULL)",
+                [],
+            )
+            .context("planting invalid profile row")?;
+            Ok(())
+        })
+        .await
+        .context("invalid profile fixture task panicked")?
+    }
+
     /// Delete one profile and report whether its id existed; the raw
     /// remembered default is intentionally left untouched when it dangles.
     pub async fn delete_profile(&self, id: &str) -> anyhow::Result<bool> {
@@ -4177,7 +4200,7 @@ mod tests {
         }
     }
 
-    /// A profile-backed fixture with the supervisor's strict chronology.
+    /// A profile-backed fixture with a supervisor-assigned creation sequence.
     fn sequenced_profiled_session(
         id: &str,
         created_at: i64,

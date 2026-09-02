@@ -12,8 +12,8 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, Profile, RestartMode, SessionInfo, TabInfo,
-    TerminalSelector, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
+    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, ProfileSnapshot, RestartMode, SessionInfo,
+    TabInfo, TerminalSelector, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -710,6 +710,9 @@ pub struct CreateExtras {
     /// kind's template must contain a `{conversation}` element; the
     /// supervisor refuses the create otherwise.
     pub resume_template: Option<Vec<String>>,
+    /// The helm-resolved profile identity. This travels with the invocation
+    /// so the supervisor can persist provenance without owning a catalog.
+    pub source_profile: Option<ProfileSnapshot>,
 }
 
 /// A live connection to one supervisor, shared by every request in flight.
@@ -2437,15 +2440,13 @@ impl SupervisorClient {
         .await
     }
 
-    /// [`SupervisorClient::create_session`] carrying PLAN_M3.md item 7's
-    /// snapshot overrides as well as item 6's idempotency key.
+    /// [`SupervisorClient::create_session`] carrying a fully resolved launch
+    /// bundle as well as PLAN_M3.md item 6's idempotency key.
     ///
-    /// The overrides have no UI caller and are not expected to gain one
-    /// before M6.75's profiles: the UI sends nothing and lets the supervisor
-    /// derive the kind from the invocation's basename. This entry point
-    /// exists because the API and the tests ARE the consumers in the
-    /// meantime — a wrapper script or `env claude` classifies as generic
-    /// by design, and there has to be a way to say otherwise.
+    /// Raw creates leave the profile snapshot absent and may let the
+    /// supervisor infer the agent kind. Profile-backed creates use this same
+    /// entry point after the helm has resolved the catalog row, because the
+    /// supervisor deliberately has no catalog of its own.
     pub async fn create_session_with_extras(
         &self,
         cwd: &str,
@@ -2464,239 +2465,20 @@ impl SupervisorClient {
                     parent: None,
                     profile_name: None,
                     cwd: cwd.to_string(),
-                    // Always the RAW mode: this client has no profile
-                    // catalog to resolve against and no picker to have
-                    // chosen from. Sending a profile-backed create is the
-                    // helm's proxying work (PLAN_M6_75.md item 5), and
-                    // naming both modes here would be a request the
-                    // supervisor refuses outright.
                     invocation: Some(invocation.to_string()),
-                    profile_id: None,
                     title,
                     cols,
                     rows,
                     intent_key: extras.intent_key,
                     agent_kind: extras.agent_kind,
                     resume_template: extras.resume_template,
+                    source_profile: extras.source_profile,
                 },
             )
             .await?
         {
             ControlMsg::SessionCreated { session, .. } => created_session(session),
             other => Err(wrong_reply("CreateSession", &other)),
-        }
-    }
-
-    /// Create a session FROM A PROFILE rather than from a raw command line
-    /// (PLAN_M6_75.md items 3 and 5).
-    ///
-    /// The two creation modes are mutually exclusive on the wire — a request
-    /// naming both is refused outright — which is why this is a separate
-    /// method rather than an `Option` threaded through
-    /// [`Self::create_session_with_extras`]: a single entry point taking
-    /// both would make "name exactly one" a runtime check on this side of a
-    /// call that has no way to recover from getting it wrong.
-    ///
-    /// `agent_kind` and `resume_template` are deliberately absent: a profile
-    /// already states its kind and its resume template, and sending an
-    /// override alongside a profile id is one of the requests the supervisor
-    /// refuses. `intent_key` is not — idempotency belongs to the caller in
-    /// both modes, and the selected mode plus the profile identity join the
-    /// fingerprint, so a retry cannot flip a profile create into a raw one.
-    ///
-    /// A profile that no longer exists fails the create VISIBLY, with no
-    /// session anywhere (SPEC.md's ask-don't-guess rule at the supervisor's
-    /// end of it): the refusal arrives as an ordinary [`SupervisorError`]
-    /// and must never be answered by quietly picking another profile.
-    pub async fn create_session_from_profile(
-        &self,
-        cwd: &str,
-        profile_id: &str,
-        title: Option<String>,
-        cols: u16,
-        rows: u16,
-        intent_key: Option<String>,
-    ) -> anyhow::Result<SessionInfo> {
-        let req_id = self.req_id();
-        match self
-            .request(
-                req_id,
-                ControlMsg::CreateSession {
-                    req_id,
-                    parent: None,
-                    profile_name: None,
-                    cwd: cwd.to_string(),
-                    // Exactly one of the two is `Some`; see this method's
-                    // own docs for why that is a type-level split here
-                    // rather than a check.
-                    invocation: None,
-                    profile_id: Some(profile_id.to_string()),
-                    title,
-                    cols,
-                    rows,
-                    intent_key,
-                    agent_kind: None,
-                    resume_template: None,
-                },
-            )
-            .await?
-        {
-            ControlMsg::SessionCreated { session, .. } => created_session(session),
-            other => Err(wrong_reply("CreateSession", &other)),
-        }
-    }
-
-    /// Create a session from a profile NAME, resolved by the supervisor
-    /// being asked rather than by this helm.
-    ///
-    /// The distinction from [`Self::create_session_from_profile`] is the
-    /// whole reason this exists, and it is about WHEN the name becomes an
-    /// id. Resolving here means reading the target's catalog, picking an
-    /// id, and then sending a create that names that id — three steps with
-    /// two gaps a rename, an edit or a delete can land in, after which the
-    /// create either fails on a name the caller can still see or launches
-    /// settings the caller's name no longer describes. The supervisor
-    /// resolves the name INSIDE creation, under the same lock that reserves
-    /// the intent key, so there is no window at all.
-    ///
-    /// It also makes a keyed retry mean what a caller expects. The
-    /// supervisor fingerprints the SELECTOR it was sent, so two attempts
-    /// under one key carrying one name agree by construction; a helm-side
-    /// lookup would fingerprint whatever id the catalog happened to hold at
-    /// each attempt, and a rename between them would turn a replay into a
-    /// conflict.
-    ///
-    /// The refusals — no such name, an ambiguous name — are the
-    /// supervisor's own and arrive as ordinary [`SupervisorError`]s. They
-    /// name the profile but say only "this host", so a caller that reached
-    /// a host by NAME is expected to say which host it meant.
-    pub async fn create_session_from_profile_name(
-        &self,
-        cwd: &str,
-        profile_name: &str,
-        title: Option<String>,
-        cols: u16,
-        rows: u16,
-        intent_key: Option<String>,
-    ) -> anyhow::Result<SessionInfo> {
-        let req_id = self.req_id();
-        match self
-            .request(
-                req_id,
-                ControlMsg::CreateSession {
-                    req_id,
-                    parent: None,
-                    profile_name: Some(profile_name.to_string()),
-                    cwd: cwd.to_string(),
-                    invocation: None,
-                    profile_id: None,
-                    title,
-                    cols,
-                    rows,
-                    intent_key,
-                    agent_kind: None,
-                    resume_template: None,
-                },
-            )
-            .await?
-        {
-            ControlMsg::SessionCreated { session, .. } => created_session(session),
-            other => Err(wrong_reply("CreateSession", &other)),
-        }
-    }
-
-    /// This supervisor's whole profile catalog, ordered by profile id
-    /// (PLAN_M6_75.md item 3).
-    ///
-    /// Unpaginated, and that is the protocol's arithmetic rather than this
-    /// method's optimism: the catalog's size and each profile's text are
-    /// both capped (`MAX_PROFILES`, `PROFILE_FIELD_CAP`), so one
-    /// reply always fits. There is deliberately no cursor to thread here.
-    pub async fn list_profiles(&self) -> anyhow::Result<Vec<Profile>> {
-        let req_id = self.req_id();
-        match self
-            .request(req_id, ControlMsg::ListProfiles { req_id })
-            .await?
-        {
-            ControlMsg::ProfileList { profiles, .. } => Ok(profiles),
-            other => bail!("unexpected reply to list_profiles: {other:?}"),
-        }
-    }
-
-    /// Define a new profile, returning it as stored — including the id the
-    /// supervisor just minted, which the caller has no other way to learn.
-    ///
-    /// Every field travels VERBATIM. The supervisor is the sole authority on
-    /// what a profile may contain (its control-character refusal, its field
-    /// cap, its catalog bound, and its rule that an integrated kind's resume
-    /// template must carry a `{conversation}` placeholder), and a second
-    /// copy of those rules here would only be a second thing to drift.
-    pub async fn create_profile(
-        &self,
-        name: &str,
-        invocation: &str,
-        agent_kind: AgentKind,
-        resume_template: Option<Vec<String>>,
-    ) -> anyhow::Result<Profile> {
-        let req_id = self.req_id();
-        match self
-            .request(
-                req_id,
-                ControlMsg::CreateProfile {
-                    req_id,
-                    name: name.to_string(),
-                    invocation: invocation.to_string(),
-                    agent_kind,
-                    resume_template,
-                },
-            )
-            .await?
-        {
-            ControlMsg::ProfileCreated { profile, .. } => Ok(profile),
-            other => bail!("unexpected reply to create_profile: {other:?}"),
-        }
-    }
-
-    /// Replace a profile's definition wholesale, keyed by its id.
-    ///
-    /// A full replacement rather than a patch, exactly as the wire shape is:
-    /// per-field optionality would make "clear the resume template" and
-    /// "leave it alone" the same request. Nothing about an edit touches
-    /// sessions already created from this profile — their launch and resume
-    /// snapshots are their own (SPEC.md's snapshot rule).
-    pub async fn update_profile(&self, profile: Profile) -> anyhow::Result<Profile> {
-        let req_id = self.req_id();
-        match self
-            .request(req_id, ControlMsg::UpdateProfile { req_id, profile })
-            .await?
-        {
-            ControlMsg::ProfileUpdated { profile, .. } => Ok(profile),
-            other => bail!("unexpected reply to update_profile: {other:?}"),
-        }
-    }
-
-    /// Remove a profile from the catalog.
-    ///
-    /// Deleting NEVER touches the sessions created from it: they keep
-    /// running, keep their snapshots, and keep filtering under the name they
-    /// snapshotted — what changes is that their `SourceProfile` starts
-    /// reporting `Deleted`. An unknown id is a `NotFound` [`SupervisorError`]
-    /// rather than a silent success, because a client asking to delete
-    /// something that is not there is working from a stale catalog.
-    pub async fn delete_profile(&self, profile_id: &str) -> anyhow::Result<()> {
-        let req_id = self.req_id();
-        match self
-            .request(
-                req_id,
-                ControlMsg::DeleteProfile {
-                    req_id,
-                    profile_id: profile_id.to_string(),
-                },
-            )
-            .await?
-        {
-            ControlMsg::ProfileDeleted { .. } => Ok(()),
-            other => bail!("unexpected reply to delete_profile: {other:?}"),
         }
     }
 

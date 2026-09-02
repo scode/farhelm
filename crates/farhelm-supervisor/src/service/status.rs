@@ -4,10 +4,9 @@
 //!
 //! These are the read-out half of the state model the `service` module doc
 //! describes — the half that answers "what happened to this session?" from
-//! three inputs, all of them handed in: the entry's own durable record and
-//! sample cell, a pane-state map the CALLER's liveness probe returned, and
-//! a profile-catalog map the caller read for the reply being built. Nothing
-//! here goes looking for any of them.
+//! two inputs, both handed in: the entry's own durable record and sample
+//! cell, and a pane-state map the CALLER's liveness probe returned. Nothing
+//! here goes looking for either one.
 //!
 //! The guarantee that shape buys holds for the SYNCHRONOUS
 //! classification core — `session_status`, `session_restart_offer`, and
@@ -18,13 +17,6 @@
 //! classify every entry from the result, and what makes the
 //! classification testable against hand-built entries with no tmux, no
 //! store, and no supervisor at all.
-//!
-//! The third input is why the catalog is a MAP rather than a store handle
-//! (PLAN_M6_75.md item 4). One read serves a whole page, the caller owns
-//! the failure decision — an unreadable catalog fails the reply rather than
-//! reading as "every profile was deleted" — and deriving whether a
-//! session's profile still exists costs this module no I/O and no store
-//! handle.
 //!
 //! PLAN_M6_75.md item 2's activity classification did not weaken the shape
 //! either: the sampler's
@@ -70,7 +62,7 @@ use super::launch_artifacts::{
     read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
 };
 use super::terminals::{Terminal, tabs_from_pane_states};
-use crate::store::{LastOutcome, ProfileNames, Transition};
+use crate::store::{LastOutcome, Transition};
 use crate::tmux::PaneState;
 use anyhow::Context;
 use farhelm_proto::{
@@ -357,52 +349,11 @@ fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
         .restart_offer(capture.committed_conversation())
 }
 
-/// What became of the profile a session snapshotted, as of right now
-/// (PLAN_M6_75.md items 3 and 4).
-///
-/// `snapshotted_name` is the name the session recorded at creation;
-/// `current_name` is what a catalog lookup on its id found, and `None`
-/// means the catalog has no such id at all. The three outcomes are the
-/// whole of the derivation:
-///
-/// - no such id → [`ProfileExistence::Deleted`],
-/// - present under the snapshotted name → [`ProfileExistence::Present`],
-/// - present under any other name → [`ProfileExistence::Renamed`].
-///
-/// The lookup is the CALLER's because only the caller knows how many
-/// snapshots it is about to resolve: a list reply reads the catalog once
-/// and answers a whole page out of the map, while a single-session reply
-/// asks for one id. Both hand the answer here so the rule itself exists in
-/// exactly one place — two copies would eventually disagree about the
-/// renamed case, which is the only one that needs a comparison rather than
-/// a presence test.
-///
-/// Returns the existence ALONE rather than a rebuilt `SourceProfile`: the
-/// identity half is already in the caller's hands, immutable, and having
-/// this hand back a fresh copy of it only ever meant cloning two strings to
-/// put them back where they came from.
-///
-/// Note what is NOT produced anywhere: the profile's current name. A
-/// session created from "Claude Code" was created from "Claude Code"
-/// whatever the profile is called today (SPEC.md's snapshot rule, and
-/// `SourceProfile`'s own docs on why carrying the live name would put a
-/// mutable copy of catalog state on every session row).
-pub(crate) fn source_profile_existence(
-    snapshotted_name: &str,
-    current_name: Option<&str>,
-) -> ProfileExistence {
-    match current_name {
-        None => ProfileExistence::Deleted,
-        Some(current) if current == snapshotted_name => ProfileExistence::Present,
-        Some(_) => ProfileExistence::Renamed,
-    }
-}
-
 /// One entry as a reply must describe it: the stored metadata plus the
 /// four fields that are NEVER stored as answers and are therefore
 /// recomputed on every reply — live-probed `status` (with its annotation),
-/// rediscovered `tabs`, a freshly derived `restart_offer`, and the source
-/// profile's existence.
+/// rediscovered `tabs`, a freshly derived `restart_offer`, and an unresolved
+/// source-profile marker for the helm to replace against its catalog.
 ///
 /// `last_activity_at` is refreshed here too, and is deliberately not one
 /// of those four: it IS stored, and this is a plain read of the entry's
@@ -428,18 +379,10 @@ pub(crate) fn source_profile_existence(
 /// an empty map is correct only for an entry with no terminal (the restart
 /// gap), whose status comes entirely from its recorded outcome.
 ///
-/// `profiles` must be the catalog as the caller read it for THIS reply —
-/// one read per reply, not one per entry, which is the batching
-/// `SourceProfile`'s docs ask for. An empty map is correct only when no
-/// entry being described has a source profile at all; it is not a safe
-/// default otherwise, because "absent from the catalog" is exactly how a
-/// DELETED profile reads (see the callers, which is why they fail a reply
-/// whose catalog read failed rather than passing an empty map).
 pub(crate) fn entry_info(
     entry: &SessionEntry,
     pane_states: &HashMap<String, PaneState>,
     sentinel: Option<&str>,
-    profiles: &ProfileNames,
 ) -> SessionInfo {
     let mut info = entry.info.clone();
     info.restart_offer = session_restart_offer(entry);
@@ -454,15 +397,11 @@ pub(crate) fn entry_info(
         .last_activity_at
         .load(std::sync::atomic::Ordering::Relaxed);
     // The entry carries the SNAPSHOT (id and name as recorded at creation);
-    // the existence beside it is a placeholder nothing reads, re-derived
-    // here against the catalog as it stands for this reply — which is what
-    // makes a profile renamed or deleted since creation show up without any
-    // session row ever being rewritten.
+    // the existence beside it is deliberately unresolved. The supervisor
+    // has no catalog that could answer it; the helm replaces this marker
+    // before the row reaches its cache or a browser.
     info.source_profile = info.source_profile.map(|snapshotted| SourceProfile {
-        existence: source_profile_existence(
-            &snapshotted.name,
-            profiles.get(&snapshotted.id).map(String::as_str),
-        ),
+        existence: ProfileExistence::Unresolved,
         ..snapshotted
     });
     // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this

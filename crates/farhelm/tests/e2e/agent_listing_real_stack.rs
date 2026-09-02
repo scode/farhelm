@@ -598,13 +598,12 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 /// `farhelm-helm`'s `agent_requests` tests drive the handler directly with
 /// a scripted supervisor on the far end; `tests/agent_cli.rs` drives the
 /// built CLI against a mock that answers whatever frame arrived. Neither
-/// one runs the shipped create path: the profile catalog is a real
-/// supervisor's, the profile-name resolution goes over a real connection,
-/// the create is a real launch, and `record_session` writes into a real
-/// helm.db. A regression in the wiring between those — the handler
-/// resolving a name against the wrong host's catalog, or a created session
-/// that is not routable until the next refresh — is invisible everywhere
-/// else and fails here loudly.
+/// one runs the shipped create path: the profile catalog is the real helm's,
+/// the resolved bundle goes over a real supervisor connection, the create is
+/// a real launch, and `record_session` writes into a real helm.db. A
+/// regression in the wiring between those — the handler resolving a name
+/// from the wrong catalog or a created session that is not routable until
+/// the next refresh — is invisible everywhere else and fails here loudly.
 ///
 /// ## Same host only, and why
 ///
@@ -646,9 +645,9 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
             .expect("the helm always has a local row")
     };
 
-    // A real profile in the real supervisor's catalog: this is what the
-    // agent's `--profile` is resolved against, and its id is minted over
-    // there rather than chosen here.
+    // This goes through the compatibility alias on purpose: the current UI
+    // still uses the host-shaped route, but the row must land in the helm's
+    // one shared catalog and resolve there for the agent verb below.
     let (status, body) = post(
         &client,
         &format!("{}/api/hosts/{local_host}/profiles", helm.base),
