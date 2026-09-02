@@ -187,7 +187,6 @@ test("clone reaches an archived row, pre-filling its raw invocation, and the arc
 
     await openFilterBar(page);
     await page.locator(".filter-include-archived").check();
-    await page.locator(".filter-apply").click();
     const archived = row(page, session.id);
     await expect(archived).toBeVisible({ timeout: 20_000 });
     await expect(archived).toHaveAttribute("data-session-archived", "true");

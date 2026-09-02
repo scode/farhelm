@@ -276,10 +276,10 @@ someone picks otherwise. No client keeps its own copy: every client reads the he
 authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the same
 session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
 different answers — is not wanted. A client that asks the helm for no particular order gets creation time. The filter
-controls open on demand rather than standing permanently above the list; while an applied filter's controls are closed,
-the list says visibly that a filter is in force, so a narrowed list can never masquerade as a small fleet. No mandatory
-hierarchy. Agent-spawned sessions (see below) carry a parent reference usable as a filter, but parentage does not nest
-the list and implies nothing about VCS state.
+controls open on demand rather than standing permanently above the list and apply as someone edits them; while an
+applied filter's controls are closed, the list says visibly that a filter is in force, so a narrowed list can never
+masquerade as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable
+as a filter, but parentage does not nest the list and implies nothing about VCS state.
 
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
 view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That

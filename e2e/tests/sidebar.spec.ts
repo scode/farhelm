@@ -877,11 +877,10 @@ test("an archived row's three-item menu navigates on its own length", async ({ p
     const archived = await request.post(`/api/sessions/${session.id}/archive`);
     expect(archived.ok(), await archived.text()).toBeTruthy();
     await page.goto("/");
-    // The filter bar is on-demand chrome; its checkbox is not in the DOM
-    // until the bar is open (see `openFilterBar`'s own doc).
+    // The filter popover is on-demand chrome; its checkbox is not in the DOM
+    // until it is open (see `openFilterBar`'s own doc).
     await openFilterBar(page);
     await page.locator(".filter-include-archived").check();
-    await page.locator(".filter-apply").click();
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsStripSettled(page);
@@ -1214,7 +1213,7 @@ test("a confirm prompt ignores the menu's keys and keeps its state", async ({ pa
  * dropping it on the document body.
  *
  * Escape is not the only way this menu closes. A sidebar scroll or
- * resize, the hosts panel or filter bar opening, the create form, and a
+ * resize, the hosts panel or filter popover opening, the create form, and a
  * refresh that reorders the row all close it through `ListView`, which
  * owns `menu_open` and does not consult the row at all. If an item held
  * focus, unmounting it leaves the user at the top of the document — one
@@ -1842,10 +1841,10 @@ test("the archive consequence wraps fully visible inside the panel", async ({
 });
 
 /**
- * The sidebar's resting chrome is rows-plus-create: the hosts panel and
- * the filter bar are closed until toggled, while the compact host strip
- * keeps SPEC.md's per-host connection state (name and phase word) on
- * screen the whole time.
+ * The sidebar's resting chrome keeps the compact host strip, two-row session
+ * header, session rows, and create control visible; the full hosts panel and
+ * filter popover are closed until toggled. The strip keeps SPEC.md's per-host
+ * connection state (name and phase word) on screen the whole time.
  *
  * This is the interviewed contents decision (BUGS_BURNDOWN.md issue 5)
  * plus the SPEC amendment's compact-indicator half stated as one test: a
@@ -1859,15 +1858,25 @@ test("hosts and filter live behind toggles while the compact strip keeps phases 
   // Resting state: neither surface mounted, both toggles present.
   await expect(page.locator(".hosts-toggle")).toBeVisible();
   await expect(page.locator(".filter-toggle")).toBeVisible();
+  // Session controls belong to the two-row list header, not the hosts-only
+  // top strip. DOM order matters here because the count explains the rows
+  // before the controls that can change them.
+  const header = page.locator(".list-header");
+  await expect(header.locator(":scope > .session-count")).toHaveCount(1);
+  await expect(header.locator(":scope > .list-header-controls")).toHaveCount(1);
+  await expect(header.locator(":scope > .list-header-controls .filter-toggle")).toHaveCount(1);
+  await expect(header.locator(":scope > .list-header-controls .sort-select")).toHaveCount(1);
+  await expect(page.locator(".sidebar-controls .filter-toggle")).toHaveCount(0);
+  await expect(page.locator(".sidebar-controls .sort-select")).toHaveCount(0);
   // The toggles SAY they are closed — the state assistive technology
   // reads, and the state openHostsPanel/openFilterBar key off.
   await expect(page.locator(".hosts-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
   // The hosts panel stays MOUNTED while collapsed (unmounting would
   // discard in-flight host work — see list.rs), so closed means hidden,
-  // not absent; the filter bar owns no tasks and really unmounts.
+  // not absent; the filter popover owns no tasks and really unmounts.
   await expect(page.locator(".hosts-panel")).toBeHidden();
-  await expect(page.locator(".session-filter")).toHaveCount(0);
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
   // The compact strip carries every host's name and phase chip — the
   // stack's local supervisor is connected, and the phase word is the
   // SAME vocabulary the full panel uses.
@@ -1884,43 +1893,30 @@ test("hosts and filter live behind toggles while the compact strip keeps phases 
 
   await openFilterBar(page);
   await page.locator(".filter-toggle").click();
-  await expect(page.locator(".session-filter")).toHaveCount(0);
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
 });
 
 /**
- * An applied filter announces itself beside the toggles while its bar is
- * closed.
- *
- * The note is what keeps the on-demand bar honest: without it, a filter
- * applied, then closed, silently narrows the list and the missing rows
- * read as a shrunken fleet rather than as a query in force.
+ * An applied filter remains visible in the count while its popover is closed.
  */
-test("a closed filter bar still announces an applied filter", async ({ page }) => {
-  // A query no title matches: the note must reflect the APPLIED query,
-  // and the banner proving zero matches is what ties the two together —
-  // a note that appeared without the query narrowing anything (or vice
-  // versa) fails one of the pair. No fixture session is needed; the
-  // shared stack's fleet, whatever it holds, matches nothing here.
+test("a closed filter popover still announces an applied filter", async ({ page }) => {
+  // No fixture is needed: a unique query proves that the committed count,
+  // rather than a separate status note, remains the closed-filter signal.
   const needle = `no-such-title-${Date.now()}`;
   await page.goto("/");
-  await expect(page.locator(".filter-active-note")).toHaveCount(0);
   await openFilterBar(page);
   await page.locator(".filter-title").fill(needle);
-  await page.locator(".filter-apply").click();
-  await expect(page.locator(".filter-active-note")).toHaveText("filtered", {
-    timeout: 20_000,
-  });
   await expect(page.locator(".session-count")).toContainText("0 matching", {
     timeout: 20_000,
   });
-  // Closing the bar keeps the note: the filter is still in force.
+  // Closing the popover keeps the committed filter in force.
   await page.locator(".filter-toggle").click();
-  await expect(page.locator(".session-filter")).toHaveCount(0);
-  await expect(page.locator(".filter-active-note")).toBeVisible();
-  // Reopening and clearing retires the note with the query.
+  await expect(page.locator(".filter-popover")).toHaveCount(0);
+  await expect(page.locator(".session-count")).toContainText("0 matching");
+  // Reopening and clearing restores the ordinary count wording.
   await openFilterBar(page);
   await page.locator(".filter-clear").click();
-  await expect(page.locator(".filter-active-note")).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/, { timeout: 20_000 });
 });
 
 /**
@@ -1961,7 +1957,6 @@ test("a filtered-out row's open menu stays closed when the row returns", async (
     // so an empty-fleet placeholder cannot mask a wrong result)...
     await openFilterBar(page);
     await page.locator(".filter-title").fill(`decoy-`);
-    await page.locator(".filter-apply").click();
     await expect(row(page, target.id)).toHaveCount(0, { timeout: 20_000 });
     await expect(row(page, decoy.id)).toBeVisible();
 
@@ -2784,7 +2779,7 @@ test("scrolling the sidebar closes an open row menu", async ({ page, request }) 
 
 /**
  * The sidebar's own on-demand toggles are layout causes too: opening the
- * hosts panel, the filter bar, or the create dialog each mounts a whole
+ * hosts panel, the filter popover, or the create dialog each mounts a whole
  * section above the rows (list.rs's `use_effect` near `show_create`), which
  * is exactly the kind of internal shift `layout_epoch` does NOT cover (that
  * counter is for the ancestor-owned scroll/resize listeners in lib.rs) —
@@ -2820,8 +2815,8 @@ test("opening the hosts panel closes an open row menu", async ({ page, request }
 });
 
 /** See "opening the hosts panel closes an open row menu" — same contract,
- * the filter bar's own toggle. */
-test("opening the filter bar closes an open row menu", async ({ page, request }) => {
+ * the filter popover's own toggle. */
+test("opening the filter popover closes an open row menu", async ({ page, request }) => {
   const session = await createSession(request, {
     title: `menu-filter-${Date.now()}`,
     cwd: "/tmp",
@@ -2835,12 +2830,84 @@ test("opening the filter bar closes an open row menu", async ({ page, request })
     await openRowMenu(target);
 
     await page.locator(".filter-toggle").click();
-    await expect(page.locator(".session-filter")).toBeVisible();
+    await expect(page.locator(".filter-popover")).toBeVisible();
 
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
   } finally {
     await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A fixed filter surface is only attached to the rect measured on open.
+ * Scrolling the sidebar moves that toggle, so the surface must dismiss rather
+ * than remain at stale viewport coordinates over unrelated content.
+ */
+test("scrolling the sidebar dismisses the filter popover after its toggle moves", async ({
+  page,
+  request,
+}) => {
+  const session = await createSession(request, {
+    title: `filter-scroll-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    // A short viewport is what makes the sidebar scroll at all: whether one
+    // session overflows the default 720px depends on how many rows other
+    // specs left on the shared stack, which this test must not depend on.
+    await page.setViewportSize({ width: 1280, height: 360 });
+    await page.goto("/");
+    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    const sidebar = page.locator(".app-sidebar");
+    await expect.poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1)).toBe(true);
+    await page.locator(".filter-toggle").click();
+    const before = await page.locator(".filter-toggle").boundingBox();
+    await sidebar.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await expect.poll(async () => (await page.locator(".filter-toggle").boundingBox())?.y).not.toBe(before?.y);
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
+    await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The list header is rendered in every listing state, not only after a
+ * successful read: filter and sort are the only way to change or clear a
+ * filter, and a slow or failing read is exactly when someone may need to.
+ * Holds the first listing request open and proves the controls are usable
+ * meanwhile.
+ */
+test("the session header controls are usable while the first listing read is pending", async ({
+  page,
+}) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let first = true;
+  await page.route(
+    (url) => url.pathname === "/api/sessions",
+    async (route) => {
+      if (first && route.request().method() === "GET") {
+        first = false;
+        await held;
+      }
+      await route.continue();
+    },
+  );
+  try {
+    await page.goto("/");
+    await expect(page.locator(".list-header-controls .filter-toggle")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".list-header-controls .sort-select")).toBeVisible();
+    await expect(page.locator(".session-count")).toHaveCount(0);
+    await page.locator(".filter-toggle").click();
+    await expect(page.locator(".filter-popover")).toBeVisible();
+  } finally {
+    release();
+    await page.unroute((url) => url.pathname === "/api/sessions");
   }
 });
 

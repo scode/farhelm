@@ -8,7 +8,7 @@
  * and deliberately separate from it: an order and a filter are different
  * dimensions of one request — a filter decides which sessions a listing
  * holds, an order decides in what sequence they arrive — and the control
- * under test here is specifically the one OUTSIDE the filter bar.
+ * under test here is specifically the one OUTSIDE the filter popover.
  *
  * ## What these tests are actually checking
  *
@@ -74,7 +74,7 @@ function row(page: Page, id: string) {
  * no test chose. A silent feed makes the list change exactly when a test
  * asks it to.
  *
- * Deliberately does NOT open the filter bar. The sort control's whole
+ * Deliberately does NOT open the filter popover. The sort control's whole
  * placement decision is that it is reachable without opening anything, and a
  * helper that opened the bar on the way in would hide a regression that put
  * the control back inside it.
@@ -304,9 +304,9 @@ test.describe("session list ordering", () => {
       expect(sort, "every listing read must name the order it wants").toBe("activity");
     }
     await expect(page.locator(".sort-select")).toHaveValue("activity");
-    // The control is reachable with the filter bar shut, which is the whole
+    // The control is reachable with the filter popover shut, which is the whole
     // reason it does not live inside it.
-    await expect(page.locator(".session-filter")).toHaveCount(0);
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
 
     // Newest first, and for these rows that is both the activity order and
     // the creation order (see the fixture's docstring).
@@ -511,8 +511,8 @@ test.describe("session list ordering", () => {
    *
    * One flow rather than four tests because the failures worth catching are
    * about the INTERACTION: a re-sort that dropped the applied filter would
-   * silently widen the list under a filter badge still claiming to be in
-   * force, and a filter apply that dropped the order would answer the user's
+   * silently widen the list while its count still reports matching rows, and
+   * a live filter edit that dropped the order would answer the user's
    * search in a sequence their control does not name. Both look like a
    * working list until someone reads the numbers.
    *
@@ -540,7 +540,6 @@ test.describe("session list ordering", () => {
 
     await openFilterBar(page);
     await page.locator(".filter-title").fill(search);
-    await page.locator(".filter-apply").click();
     await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
     await expect(page.locator(".session-row")).toHaveCount(3);
     expect(await orderOf(page, [ids.a, ids.m, ids.z])).toEqual([ids.a, ids.m, ids.z]);
@@ -556,7 +555,6 @@ test.describe("session list ordering", () => {
       .toEqual([ids.z, ids.m, ids.a]);
     await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
     await expect(page.locator(".session-row")).toHaveCount(3);
-    await expect(page.locator(".filter-active-note")).toHaveCount(1);
     const resorted = latestRead(reads);
     expect(resorted.searchParams.get("sort")).toBe("created");
     expect(
@@ -564,7 +562,9 @@ test.describe("session list ordering", () => {
       "changing the order must not clear the filter the list is under",
     ).toBe(search);
 
-    // Clearing the filter widens the list and leaves the order alone.
+    // Clearing the filter widens the list and leaves the order alone. Picking
+    // the sort moved focus out of the popover and closed it, so reopen first.
+    await openFilterBar(page);
     await page.locator(".filter-clear").click();
     await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/);
     await expect(page.locator(".sort-select")).toHaveValue("created");

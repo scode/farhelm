@@ -747,7 +747,7 @@ pub(crate) fn HostsPanel(
     // panel's own destructive `remove`.
     //
     // `ListView` closes both signals for the layout changes IT causes
-    // directly (the hosts panel or filter bar opening, the create form,
+    // directly (the hosts panel or create form opening, the compact strip
     // …) — see its own effect's doc — but `adding` is this component's
     // OWN private state, invisible to that effect, which is why this has
     // to be a second, narrower use_effect here rather than one more read

@@ -58,9 +58,11 @@ test("the row confirmation names every live thing and the toggle reveals the arc
     await target.locator(".confirm-archive").click();
 
     await expect(target).toHaveCount(0, { timeout: 20_000 });
+    // Focus left the popover for the row above (a row menu, a confirm), which
+    // closes it; reopen before touching its controls again.
+    await openFilterBar(page);
     const include = page.locator(".filter-include-archived");
     await include.check();
-    await page.locator(".filter-apply").click();
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, session.id)).toHaveAttribute("data-session-archived", "true");
     await expect(row(page, session.id).locator(".archived-badge")).toHaveText("archived");
@@ -114,10 +116,10 @@ async function unfilteredCount(page: Page): Promise<number> {
  * The row count is asserted alongside the number because that is the whole
  * claim — a denominator nobody can see is not the thing that was wrong.
  *
- * The "filtered" badge and the Clear button are pinned in the same test
- * because they read the switch differently ON PURPOSE, and only a rendered
- * page shows both answers at once: the switch earns no badge (it chose a
- * view, it narrowed nothing) while still being something Clear can undo.
+ * The count wording and Clear button are pinned in the same test because
+ * they read the switch differently ON PURPOSE, and only a rendered page
+ * shows both answers at once: the switch keeps ordinary count wording (it
+ * chose a view, it narrowed nothing) while still being something Clear can undo.
  * Collapsing the two is the natural-looking mistake in either direction.
  */
 test("the count banner counts the view the archive switch selects", async ({ page, request }) => {
@@ -128,10 +130,6 @@ test("the count banner counts the view the archive switch selects", async ({ pag
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
 
-    await expect(
-      page.locator(".filter-active-note"),
-      "the untouched list has no filter to announce",
-    ).toHaveCount(0);
     await expect(
       page.locator(".filter-clear"),
       "and nothing for Clear to undo either",
@@ -159,19 +157,16 @@ test("the count banner counts the view the archive switch selects", async ({ pag
     // The switch widens the view, so it widens the count with it — and the
     // wording stays unfiltered, because turning it on is not a narrowing
     // anybody applied.
+    // Focus left the popover for the row above (a row menu, a confirm), which
+    // closes it; reopen before touching its controls again.
+    await openFilterBar(page);
     await page.locator(".filter-include-archived").check();
-    await page.locator(".filter-apply").click();
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => unfilteredCount(page), { timeout: 20_000 }).toBe(before);
     await expect(page.locator(".session-row")).toHaveCount(before);
 
-    // The switch alone: no badge, because nothing was narrowed and the
-    // count beside the rows already moved with them — but Clear is live,
-    // because the switch is still a setting the user turned on.
-    await expect(
-      page.locator(".filter-active-note"),
-      "turning the archive switch on must not announce a filter nobody applied",
-    ).toHaveCount(0);
+    // The switch alone keeps the unfiltered count wording, but Clear is
+    // live because the switch is still a setting the user turned on.
     await expect(
       page.locator(".filter-clear"),
       "while Clear is the only way back to the default view",
@@ -233,7 +228,6 @@ test("an included row stays visible while its archive state changes", async ({ p
     await openFilterBar(page);
     const include = page.locator(".filter-include-archived");
     await include.check();
-    await page.locator(".filter-apply").click();
 
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
@@ -546,8 +540,10 @@ test("an external archive does not close an open rename editor", async ({ page, 
     // rather than "the first read had not landed yet".
     await page.waitForTimeout(6_000);
 
+    // Focus left the popover for the row above (a row menu, a confirm), which
+    // closes it; reopen before touching its controls again.
+    await openFilterBar(page);
     await page.locator(".filter-include-archived").check();
-    await page.locator(".filter-apply").click();
     const restored = row(page, session.id);
     await expect(restored).toBeVisible({ timeout: 20_000 });
 
