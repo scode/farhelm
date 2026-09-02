@@ -1,25 +1,14 @@
-//! Agent profiles as this UI handles them (PLAN_M6_75.md item 8): the
-//! per-host catalog read every profile surface shares, the hosts panel's
-//! profiles section (create, edit, delete), and the renderer-free rules the
-//! create dialog's picker is built from.
+//! Agent profiles as the UI handles the helm's one catalog: the shared
+//! feed-driven read, the sidebar popup that manages definitions, and the
+//! renderer-free rules the create dialog's picker uses.
 //!
-//! ## A catalog belongs to a HOST, and only ever to one
+//! ## One catalog, one reader
 //!
-//! Profiles are per-supervisor: an id minted on one machine names nothing on
-//! another, and every fresh supervisor seeds the same starter profiles, so an
-//! id carried across a host boundary does not merely go stale — it RESOLVES
-//! over there, against a profile the user never chose. That is why
-//! [`CatalogRead`] stores the host its answer describes and hands back
-//! [`CatalogLookup::Pending`] for any other one, why a catalog for a
-//! different host replaces rather than merges, and why the create dialog
-//! drops a profile choice when its target host moves. The enforcement is
-//! CLIENT-side and lives in [`HostTarget`]: a catalog is keyed to a registry
-//! row plus its install fingerprint, and an answer from a superseded target
-//! is discarded rather than shown. The helm's profile routes carry no
-//! counterpart check (profile writes are last-write-wins); the one
-//! server-side guard against acting across an install boundary is the
-//! session create's incarnation precondition, which protects the LAUNCH
-//! rather than the catalog.
+//! Profiles belong to the helm. Every host uses the same ids and definitions,
+//! so neither the catalog nor a chosen profile follows the create dialog's
+//! host selector. [`CatalogSurface`] is mounted once for the authenticated
+//! session-list page and stays active while that page is mounted. The picker
+//! and popup consume that same answer; neither owns a second request path.
 //!
 //! ## Ask, do not guess
 //!
@@ -37,175 +26,69 @@
 //! SPEC.md: editing or deleting a profile affects future sessions only. That
 //! promise is invisible unless something on screen keeps saying what a
 //! session was created FROM — so a row renders its snapshotted profile name
-//! ([`source_profile_label`]), marked when the catalog has since moved on,
-//! and the profiles section says out loud what an edit does and does not
-//! reach. Neither is decoration: without them a renamed profile looks like it
-//! rewrote history, and a deleted one looks like it took its sessions with
-//! it.
+//! ([`source_profile_label`]), marking a rename while treating a missing row
+//! as an ordinary historical label, and the profiles popup says out loud what
+//! an edit does and does not reach. Neither is decoration: without them a
+//! renamed profile looks like it rewrote history.
 //!
-//! ## One reader per surface, like everything else on this page
+//! ## The reader follows the fleet feed
 //!
-//! [`use_catalog_surface`] wires a catalog read into the same discipline the
+//! [`use_catalog_surface`] wires the catalog read into the same discipline the
 //! listing and hosts reads run under (`reader::SurfaceReader`): one read at a
 //! time, every trigger coalesced into a single follow-up, a failed read
-//! retried on its own. Its triggers are each ACTIVATION (the surface being
-//! pointed at something), every feed notification (a profile edited in
-//! another client must reach this one — PLAN_M6_75.md item 5 bumps the
-//! revision for exactly that), the documented fallback poll while the feed is
-//! unhealthy, and a mutation's own follow-up.
-//!
-//! What scopes these reads is the TARGET, not the mounting. Both hooks are
-//! called by `list::ListView`, so the tasks live as long as that page does;
-//! what makes a collapsed section and a closed dialog free is that every
-//! trigger is a no-op while the target is `None`, and `ListView` clears the
-//! target the moment the surface stops being shown. The two are worth telling
-//! apart, because only the second is something this module can promise.
-//!
-//! An ACTIVATION is a surface being pointed at something — including at the
-//! same host it held before. What it held then is not evidence about now (a
-//! remembered default can have moved, profiles can have come and gone), so a
-//! reopened surface reads as pending until its own read lands rather than
-//! presenting the old answer as current.
+//! retried on its own. Its triggers are mount, every feed notification, the
+//! documented fallback poll while the feed is unhealthy, and a mutation's own
+//! follow-up. Keeping the reader alive while both consumers are closed
+//! matters: another client's edit still advances the one answer the next
+//! popup or dialog will render.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use dioxus::prelude::*;
+use web_time::Instant;
 
 use crate::api::{
     self, ProfileCatalog, ProfileCommit, ProfileSpec, create_profile, delete_profile,
     update_profile,
 };
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
-use crate::hosts::host_incarnation;
 use crate::ops::{OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerLine, display_peer};
-use crate::reader::{SurfaceReader, Trigger, request_read};
-use crate::{ApiBase, Host, HostId, Profile, ProfileExistence, SourceProfile};
-
-// ---------------------------------------------------------------------
-// What a catalog belongs to
-// ---------------------------------------------------------------------
-
-/// The thing a profile catalog is ABOUT: a registry row together with its
-/// install identity.
-///
-/// A `HostId` alone is not enough, and the gap is not theoretical. A host id
-/// is a registry ROW that survives every edit made to it — a retarget points
-/// it at another address, an adopt binds it to another install — while
-/// profile ids are minted per supervisor AND every fresh supervisor seeds the
-/// same starter profiles. So an id-keyed catalog does not merely go stale
-/// when the row moves: the profile ids in it RESOLVE on the successor, to
-/// different profiles that happen to share an id. Keyed on the id alone, an
-/// open editor would save over the successor's starter profile, a delete
-/// confirmation would delete the successor's, and a create dialog would offer
-/// the predecessor's catalog for a launch on the new machine.
-///
-/// The profile routes carry no precondition (SPEC.md: profile edits are
-/// last-write-wins, and the remembered default is a bare id per registry
-/// row), so a retarget or an adopt is caught HERE, by keying the catalog on
-/// the fingerprint below and re-reading whenever it moves. A refusal from a
-/// profile route is shown as ordinary prose; nothing about it is parsed for
-/// staleness. The session CREATE is the one request that still names the
-/// connection it was prepared against — see `list::create_form`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct HostTarget {
-    pub(crate) host: HostId,
-    /// The registry row's own fingerprint (`hosts::host_incarnation`): the
-    /// destination, the install fields, the recorded identity — the same
-    /// value the create dialog's idempotency key is bound to, and for the
-    /// same reason. Compared, never parsed or displayed.
-    ///
-    /// This is what makes a retarget or an adopt re-activate the surface: a
-    /// host that is down has no connection to change, but a retarget while
-    /// it is unreachable still moves the fingerprint, and a stale catalog or
-    /// open editor must not survive that.
-    fingerprint: String,
-}
-
-impl HostTarget {
-    /// The target one registry row currently names.
-    pub(crate) fn of(host: &Host) -> HostTarget {
-        HostTarget {
-            host: host.id,
-            fingerprint: host_incarnation(host),
-        }
-    }
-
-    /// The target one create-dialog option currently names.
-    ///
-    /// Built from the option rather than re-derived from the registry because
-    /// the option already carries the fingerprint the create's key is bound
-    /// to, and two derivations of one value is one too many.
-    pub(crate) fn new(host: HostId, fingerprint: String) -> HostTarget {
-        HostTarget { host, fingerprint }
-    }
-
-    /// Whether two targets name the same INSTALL — the registry row and
-    /// everything about it that decides which machine and which binary
-    /// answer.
-    ///
-    /// The distinction exists for one rule that would otherwise be violated
-    /// quietly. A create's idempotency key must survive an ordinary
-    /// reconnection: the case the key is FOR is a request that was accepted
-    /// and whose reply was lost, and the most ordinary way to lose a reply is
-    /// the connection dropping — so rotating the key on a reconnect would make
-    /// the retry a second intended create, and the user would get two sessions
-    /// from one press. A retarget or an adoption is the opposite: same id,
-    /// different machine, and there the key MUST rotate, because replaying it
-    /// there dedups against nothing.
-    pub(crate) fn same_install(&self, other: &HostTarget) -> bool {
-        self.host == other.host && self.fingerprint == other.fingerprint
-    }
-}
+use crate::reader::{SurfaceReader, Trigger, finish_before, request_read, sleep_ms};
+use crate::{ApiBase, Profile, ProfileExistence, SourceProfile};
 
 // ---------------------------------------------------------------------
 // The catalog read, as four states
 // ---------------------------------------------------------------------
 
-/// What one surface currently knows about a host's profile catalog.
+/// What this client currently knows about the helm's profile catalog.
 ///
-/// The same four-state shape `hosts::HostsRead` carries, for the same reason
-/// — a failed refresh must not blank rows the user can still act on — plus
-/// two rules that are specific to profiles:
-///
-/// - The answer is tied to a [`HostTarget`], not to an id. A catalog read
-///   from a different install is not a stale answer to this question but an
-///   answer to another question entirely, and answering with it would offer
-///   profile ids that mean something else over here (see [`HostTarget`]).
-/// - The answer is tied to the ACTIVATION that asked for it. A surface that
-///   was closed and reopened on the same host is asking again, and what it
-///   held from last time may predate a change made in between — a remembered
-///   default moved by another client, a profile deleted from the panel. A
-///   reopened surface therefore reads as pending until its OWN read lands,
-///   rather than briefly presenting the old answer as current.
+/// The same four-state shape `hosts::HostsRead` carries, for the same reason:
+/// a failed refresh must not blank rows the user can still act on.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CatalogRead {
-    /// Which target, and which activation of it, the stored answer belongs
-    /// to. `None` before any read has completed.
-    answering: Option<(HostTarget, u64)>,
-    /// The last read that SUCCEEDED for `answering`, retained across later
-    /// failures.
+    /// The last read that succeeded, retained across later failures.
     catalog: Option<ProfileCatalog>,
-    /// Set when the most recent read for `answering` failed; cleared by the
-    /// next success.
+    /// Set when the most recent read failed; cleared by the next success.
     error: Option<String>,
 }
 
 impl CatalogRead {
-    /// Fold one completed read in.
+    /// Report whether recording this reply would change either rendered fact.
     ///
-    /// A read for a different target OR a different activation discards
-    /// everything held, and that discard is the load-bearing half: a retained
-    /// catalog would otherwise be rendered under the new question for as long
-    /// as its own read takes. Showing nothing for a moment is the honest
-    /// alternative.
-    fn record(
-        &mut self,
-        target: &HostTarget,
-        activation: u64,
-        outcome: Result<ProfileCatalog, String>,
-    ) {
-        self.rebind(target, activation);
+    /// Mutation replies are absorbed before their confirming read. Skipping an
+    /// identical confirmation keeps keyed profile controls mounted, which in
+    /// turn preserves the explicit focus the mutation just established.
+    fn differs_from(&self, outcome: &Result<ProfileCatalog, String>) -> bool {
+        match outcome {
+            Ok(catalog) => self.catalog.as_ref() != Some(catalog) || self.error.is_some(),
+            Err(error) => self.error.as_ref() != Some(error),
+        }
+    }
+
+    /// Fold one completed read into the shared answer.
+    fn record(&mut self, outcome: Result<ProfileCatalog, String>) {
         match outcome {
             Ok(catalog) => {
                 self.catalog = Some(catalog);
@@ -215,44 +98,22 @@ impl CatalogRead {
         }
     }
 
-    /// Drop whatever is held unless it already belongs to this question.
-    fn rebind(&mut self, target: &HostTarget, activation: u64) {
-        let current = self
-            .answering
-            .as_ref()
-            .is_some_and(|(held, held_activation)| {
-                held == target && *held_activation == activation
-            });
-        if !current {
-            *self = CatalogRead {
-                answering: Some((target.clone(), activation)),
-                ..CatalogRead::default()
-            };
-        }
-    }
-
     /// Fold a mutation this client PERFORMED into the held catalog.
     ///
     /// Not an optimization and not an optimistic paint: it closes a window
     /// where the page would otherwise hand out a definition it knows to be
-    /// superseded. A save answers with the profile as the supervisor now
+    /// superseded. A save answers with the profile as the helm now
     /// holds it, but the authoritative re-read is a round trip away — and in
     /// between, the operation token is released and the row can be reopened,
     /// seeding an editor from the PRE-EDIT definition. Saving that would undo
-    /// an update the supervisor already accepted, silently.
+    /// an update the helm already accepted, silently.
     ///
-    /// Applied only when the held answer is still the one this mutation was
-    /// made against; a surface that has since been re-pointed keeps its
-    /// pending state rather than gaining a row from another install.
-    fn absorb(&mut self, target: &HostTarget, activation: u64, change: CatalogChange) {
-        let current = self
-            .answering
-            .as_ref()
-            .is_some_and(|(held, held_activation)| {
-                held == target && *held_activation == activation
-            });
-        let Some(catalog) = self.catalog.as_mut().filter(|_| current) else {
-            return;
+    /// The result says whether a complete catalog was available to absorb
+    /// into. It does not say whether the change altered the catalog: removing
+    /// an already-absent id still returns `true` when a catalog was held.
+    fn absorb(&mut self, change: CatalogChange) -> bool {
+        let Some(catalog) = self.catalog.as_mut() else {
+            return false;
         };
         match change {
             CatalogChange::Upsert(profile) => {
@@ -263,7 +124,7 @@ impl CatalogRead {
                 {
                     Some(held) => *held = profile,
                     // A create lands at the end rather than in the
-                    // supervisor's own order; the authoritative read that
+                    // helm's own order; the authoritative read that
                     // follows restores that order, and until it does the
                     // profile is at least THERE.
                     None => catalog.profiles.push(profile),
@@ -273,27 +134,18 @@ impl CatalogRead {
                 catalog.profiles.retain(|held| held.id != id);
             }
         }
+        true
     }
 
-    /// Forget the held answer while staying bound to the same question, so the
-    /// surface reads as pending until its next read lands. See
-    /// [`CatalogSurface::invalidate`].
+    /// Forget the held answer so the surface reads as pending until its next
+    /// read lands. See [`CatalogSurface::invalidate`].
     fn forget(&mut self) {
         self.catalog = None;
         self.error = None;
     }
 
-    /// What can be said about the question `target`/`activation` asks.
-    fn answer_for(&self, target: Option<&HostTarget>, activation: u64) -> CatalogLookup<'_> {
-        let answers = match (&self.answering, target) {
-            (Some((held, held_activation)), Some(wanted)) => {
-                held == wanted && *held_activation == activation
-            }
-            _ => false,
-        };
-        if !answers {
-            return CatalogLookup::Pending;
-        }
+    /// What can be said about the helm catalog now.
+    pub(crate) fn answer(&self) -> CatalogLookup<'_> {
         match (&self.catalog, &self.error) {
             (Some(catalog), refresh_error) => CatalogLookup::Known {
                 catalog,
@@ -305,33 +157,20 @@ impl CatalogRead {
     }
 }
 
-/// The question a mutation was dispatched under, carried to its completion.
-///
-/// A value rather than two loose fields because every completion-side write
-/// checks the same pair, and a check that could be performed against only half
-/// of it would be no check at all.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CatalogLease {
-    pub(crate) target: HostTarget,
-    activation: u64,
-}
-
 /// One change this client made and has already been told succeeded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CatalogChange {
-    /// A profile as the supervisor now holds it — a create or an edit.
+    /// A profile as the helm now holds it — a create or an edit.
     Upsert(Profile),
     /// A profile that is gone, by id.
     Remove(String),
 }
 
-/// One host's catalog as a surface may currently describe it.
+/// The four states in which the shared catalog can be rendered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CatalogLookup<'a> {
-    /// Nothing has come back for THIS question yet — including the cases
-    /// where something has come back for a different target, for a different
-    /// install behind the same id, or for an earlier activation of this same
-    /// surface.
+    /// Nothing has come back yet, or an unreadable successful mutation made
+    /// the prior answer unsafe to keep serving.
     Pending,
     /// A catalog is in hand. `refresh_error` is set when the most recent read
     /// for it failed, so a surface can keep drawing rows while admitting they
@@ -348,8 +187,26 @@ pub(crate) enum CatalogLookup<'a> {
 // The reader
 // ---------------------------------------------------------------------
 
-/// One catalog surface: its target host, its answer, and the single-flight
-/// reader that keeps the two in step.
+/// Keep the strongest catalog trigger waiting for the page-owned driver.
+///
+/// A signal is a mailbox here, not a queue: several requests can arrive
+/// before the owning effect runs, and the existing single-flight reader will
+/// coalesce everything after that. Preserving the strongest trigger keeps an
+/// attended request from being replaced by a fallback tick that would stand
+/// down under build skew.
+fn strongest_catalog_trigger(standing: Option<Trigger>, arriving: Trigger) -> Trigger {
+    let strength = |trigger| match trigger {
+        Trigger::Scheduled => 0,
+        Trigger::Notice => 1,
+        Trigger::Explicit => 2,
+    };
+    match standing {
+        Some(current) if strength(current) >= strength(arriving) => current,
+        Some(_) | None => arriving,
+    }
+}
+
+/// The helm catalog's answer and the single-flight reader that keeps it fresh.
 ///
 /// `Copy` and made entirely of signals so it can be handed to a component as
 /// a prop and stay one surface — the alternative, each consumer holding its
@@ -363,95 +220,32 @@ pub(crate) enum CatalogLookup<'a> {
 pub(crate) struct CatalogSurface {
     /// The helm's origin, in a signal purely so this handle stays `Copy`.
     base: Signal<String>,
-    /// Whose catalog is wanted right now, or `None` for "nothing is showing
-    /// one" — the state a collapsed section and a closed dialog are in, and
-    /// the one in which this surface performs no profile requests at all.
-    ///
-    /// Derived by `list::ListView` from what is on screen INTERSECTED with
-    /// the registry as it currently stands, so a row that has been removed or
-    /// re-pointed at another install cannot leave this aimed at it.
-    target: Signal<Option<HostTarget>>,
-    /// Which ACTIVATION of that target is current: bumped every time the
-    /// surface is pointed at something, including at the same host it was
-    /// pointed at before. See [`CatalogRead`] for why a reopened surface must
-    /// not present what it held last time as current.
-    activation: Signal<u64>,
-    /// The answer every consumer renders from. Read through the guard and
-    /// then asked through [`CatalogSurface::lookup`], never interrogated
-    /// directly, so "which question does this answer" is decided in one
-    /// place.
+    /// The answer both consumers render from.
     pub(crate) catalog: Signal<CatalogRead>,
-    /// Per-REQUEST ordering, so a slow read for the previous target cannot
-    /// overwrite the current one's answer (`ops::ReadGate`).
+    /// Per-request ordering, so a slow read cannot overwrite a newer answer.
     gate: Signal<ReadGate>,
     /// The single-flight, retry-until-answered reader (`reader`).
     reader: Signal<SurfaceReader>,
+    /// The strongest trigger the page-owned driver has not dispatched yet.
+    pending: Signal<Option<Trigger>>,
 }
 
 impl CatalogSurface {
-    /// Ask for a read of whatever this surface is currently pointed at.
+    /// Ask the page-owned catalog driver for a refresh.
     ///
-    /// Cheap to call from anywhere and safe to call repeatedly: with no
-    /// target it does nothing, and with one it asks the surface reader, which
-    /// starts a read only if none is running and otherwise records the demand
-    /// as a single follow-up. The trigger classifies the demand's authority
-    /// (`reader::Trigger`): pointing a surface somewhere and a mutation's
-    /// follow-up are things a person did, feed notices and fallback ticks
-    /// are not, and the reader withdraws only the latter under build skew.
-    pub(crate) fn request(self, trigger: Trigger) {
-        // Read here rather than only inside the closure so that an untargeted
-        // surface never starts a reader at all — a reader that woke, found
-        // nothing to do and retired would be indistinguishable in the logs
-        // from one that read.
-        if self.target.peek().is_none() {
-            return;
-        }
-        request_read(self.reader, trigger, move || {
-            let mut surface = self;
-            // Sampled and CLAIMED synchronously, before any await, for
-            // `list::ListView`'s reason: the generation has to order requests
-            // by when they were asked for rather than by when their tasks
-            // happened to be polled. Re-sampled per call because the reader
-            // calls this again for a retry or a coalesced notice, and that
-            // later read is a new request against whatever the surface is
-            // asking then — target and activation alike.
-            let wanted = surface.target.peek().clone();
-            let activation = *surface.activation.peek();
-            let started = wanted.map(|target| (target, activation, surface.gate.write().start()));
-            let base = surface.base.peek().clone();
-            async move { surface.complete(started, base).await }
-        });
+    /// Consumer components only write this bounded mailbox. The driver lives
+    /// in [`use_catalog_surface`], so a popup or create form unmount cannot
+    /// cancel the shared reader it requested and leave its state claimed.
+    pub(crate) fn request(mut self, trigger: Trigger) {
+        let trigger = strongest_catalog_trigger(*self.pending.peek(), trigger);
+        self.pending.set(Some(trigger));
     }
 
     /// Perform one read and fold it in; the answer is whether the helm
     /// answered at all (`reader::SurfaceReader::finish`).
-    ///
-    /// A `None` target reports `true` — nothing was asked, so nothing is
-    /// owed. Reporting a failure instead would put the reader on its retry
-    /// ladder for a surface that has been closed, which is a loop nobody is
-    /// waiting on.
-    async fn complete(&mut self, started: Option<(HostTarget, u64, u64)>, base: String) -> bool {
-        let Some((target, activation, generation)) = started else {
-            return true;
-        };
-        // There is no precondition on the wire to carry any more — a host
-        // adopted mid-flight is instead caught by `HostTarget`'s fingerprint:
-        // a retarget or an adopt bumps it, which re-activates this surface and
-        // supersedes any read already in flight (see `asking` below). A
-        // refusal arrives as an ordinary failed read: the section says the
-        // catalog could not be read, and the next activation asks again.
-        let outcome = api::fetch_profiles(&base, target.host).await;
+    async fn complete(&mut self, generation: u64, base: String) -> bool {
+        let outcome = api::fetch_profiles(&base).await;
         let answered = outcome.is_ok();
-        // Superseded ACTIVATIONS are refused here, in addition to the
-        // ordinary generation gate below. The two catch different things: the
-        // gate orders reads that all answer the same question, while this
-        // rejects a reply to a question nobody is asking anymore — a surface
-        // that has been closed, re-pointed, or reopened since. Committing it
-        // would put an answer under a question it does not belong to, which
-        // for a catalog means offering profile ids from another install.
-        if !self.asking(&target, activation) {
-            return answered;
-        }
         // Successes and failures are gated differently, exactly as the hosts
         // read gates them: an older success describes a catalog that has
         // since been changed by something this client did, while a failure
@@ -461,42 +255,13 @@ impl CatalogSurface {
             Ok(_) => self.gate.write().accept_success(generation),
             Err(_) => self.gate.peek().accept_failure(generation),
         };
-        if accepted {
-            self.catalog.write().record(&target, activation, outcome);
+        if accepted && self.catalog.peek().differs_from(&outcome) {
+            self.catalog.write().record(outcome);
         }
         answered
     }
 
-    /// Whether this surface is still asking exactly that question.
-    fn asking(&self, target: &HostTarget, activation: u64) -> bool {
-        *self.activation.peek() == activation && self.target.peek().as_ref() == Some(target)
-    }
-
-    /// Take a LEASE on the question this surface is currently asking.
-    ///
-    /// Every mutation runs under one, and every completion-side write checks
-    /// it ([`CatalogSurface::holds`]) — not just the ones that touch the
-    /// catalog. The failure that makes the wider rule necessary is quiet: a
-    /// save dispatched before a cross-client adoption, answering after it,
-    /// would otherwise repopulate a warning line, a form error, or a per-row
-    /// refusal under the SUCCESSOR install — describing a machine nobody is
-    /// looking at, on a surface that has already discarded everything else
-    /// about the predecessor.
-    pub(crate) fn lease(&self) -> Option<CatalogLease> {
-        self.target.peek().clone().map(|target| CatalogLease {
-            target,
-            activation: *self.activation.peek(),
-        })
-    }
-
-    /// Whether a lease is still the question being asked. `false` means every
-    /// completion-side write belonging to it must be dropped.
-    pub(crate) fn holds(&self, lease: &CatalogLease) -> bool {
-        self.asking(&lease.target, lease.activation)
-    }
-
-    /// Drop the held catalog for `lease`, leaving the surface pending until
-    /// its next read lands.
+    /// Drop the held catalog, leaving the surface pending until its next read.
     ///
     /// For the one success this client cannot reconcile from: a 2xx whose body
     /// would not decode changed something the page cannot describe, so
@@ -504,112 +269,73 @@ impl CatalogSurface {
     /// seed from a definition that is known to be superseded and save it back.
     /// Showing nothing until the authoritative read arrives is the honest
     /// state, and the read is already on its way.
-    pub(crate) fn invalidate(mut self, lease: &CatalogLease) {
-        if !self.holds(lease) {
-            return;
-        }
+    pub(crate) fn invalidate(mut self) {
+        self.gate.write().fence();
         self.catalog.write().forget();
     }
 
-    /// The target this surface is pointed at right now, untracked — what a
-    /// HANDLER must consult before sending a mutation, so a click cannot be
-    /// routed by whatever the last render happened to draw.
-    ///
-    /// The residual race is stated rather than hidden: nothing can stop a
-    /// host from being adopted between this read and the request landing,
-    /// because the helm's profile routes take a host id and no incarnation.
-    /// What this closes is the much larger window — a surface that has
-    /// ALREADY been re-pointed still acting on the old catalog.
-    pub(crate) fn target(&self) -> Option<HostTarget> {
-        self.target.peek().clone()
-    }
-
-    /// The target as a TRACKED read, for a consumer that must reset its own
-    /// state when the surface is re-pointed (see `ProfilesSection`).
-    pub(crate) fn watch_target(&self) -> Option<HostTarget> {
-        (self.target)()
-    }
-
-    /// What this surface can say right now, given what it is asking.
-    ///
-    /// The only door onto the stored answer: consumers hold the guard and ask
-    /// through here, so the "does this answer the current question" rule lives
-    /// in one place rather than at each render site.
-    pub(crate) fn lookup<'a>(&self, read: &'a CatalogRead) -> CatalogLookup<'a> {
-        let target = self.target.peek().clone();
-        read.answer_for(target.as_ref(), *self.activation.peek())
-    }
-
     /// Fold a mutation this client just performed into the held catalog, so
-    /// the section stops handing out a definition it knows to be superseded
+    /// consumers stop receiving a definition known to be superseded
     /// (see [`CatalogRead::absorb`]). Called BEFORE the operation token is
     /// released, which is what makes the window it closes empty rather than
     /// merely short.
-    pub(crate) fn absorb_change(mut self, lease: &CatalogLease, change: CatalogChange) {
-        if !self.holds(lease) {
-            return;
-        }
-        self.catalog
-            .write()
-            .absorb(&lease.target, lease.activation, change);
+    ///
+    /// The result says whether an existing complete catalog received the
+    /// change, not whether applying the change altered its contents. `false`
+    /// therefore means a caller cannot yet assume the changed row is rendered.
+    pub(crate) fn absorb_change(mut self, change: CatalogChange) -> bool {
+        self.gate.write().fence();
+        self.catalog.write().absorb(change)
     }
 }
 
-/// Wire a catalog surface for whatever `target` names, with every trigger
-/// this page's reads run under.
+/// Wire the page's one catalog surface with every trigger its reads use.
 ///
-/// Called once, unconditionally, by `list::ListView`, which owns both catalog
-/// surfaces and derives both targets. That placement is deliberate and is NOT
-/// what scopes the reads: the hooks live on the page, so the tasks live as
-/// long as the page does. What makes a closed dialog and a collapsed section
-/// free is the TARGET — every trigger below is a no-op while it is `None`,
-/// and `ListView` clears it the moment the surface stops being shown.
+/// Called once by `list::ListView` and shared by the popup and picker. The
+/// mount read is deliberately unconditional: a closed consumer does not turn
+/// the helm catalog back into a surface-local resource.
 ///
-/// Four triggers, matching the session list's:
+/// Four triggers, matching the session list's reader discipline:
 ///
-/// - every ACTIVATION (the effect below): the surface being pointed at
-///   something, which includes being re-pointed at another install behind the
-///   same id, and being reopened on the same host it held before;
+/// - the page mount;
 /// - every feed notification, because a profile edited in another client
 ///   bumps the fleet revision and this surface is one of the things that
 ///   invalidates (PLAN_M6_75.md item 5 names the create dialog explicitly);
 /// - the documented fallback poll, which runs only while the feed is
 ///   unhealthy and no build mismatch has been latched;
 /// - a mutation's own follow-up, through [`CatalogSurface::request`].
-pub(crate) fn use_catalog_surface(target: Signal<Option<HostTarget>>) -> CatalogSurface {
+pub(crate) fn use_catalog_surface() -> CatalogSurface {
     let api_base = use_context::<ApiBase>().0;
-    let mut activation = use_signal(|| 0_u64);
-    let surface = CatalogSurface {
+    let mut surface = CatalogSurface {
         base: use_signal(|| api_base),
-        target,
-        activation,
         catalog: use_signal(CatalogRead::default),
         gate: use_signal(ReadGate::default),
         reader: use_signal(SurfaceReader::default),
+        pending: use_signal(|| None),
     };
 
-    // What the current activation was minted for. Compared rather than
-    // assumed, because this effect also re-runs for target changes that are
-    // no change at all (a hosts refresh that rebuilt an identical row).
-    let mut activated_for = use_signal(|| None::<HostTarget>);
-
-    // The ONE tracked read is the target itself, so this runs at mount and
-    // again whenever the surface is pointed somewhere else — never on an
-    // answer landing, which would be a read triggering itself.
+    // This is the only place a catalog reader task starts, so the task belongs
+    // to the page that owns the catalog rather than whichever short-lived
+    // consumer happened to ask. Clearing the mailbox before dispatch lets a
+    // request made by the dispatch itself schedule a later pass normally.
     use_effect(move || {
-        let wanted = target();
-        if *activated_for.peek() == wanted {
+        let Some(trigger) = (surface.pending)() else {
             return;
-        }
-        activated_for.set(wanted.clone());
-        if wanted.is_none() {
-            // Closing is not an activation and asks for nothing. What the
-            // surface still HOLDS stops being current at the next opening,
-            // because that opening mints a new activation — see
-            // `CatalogRead`.
-            return;
-        }
-        activation += 1;
+        };
+        surface.pending.set(None);
+        request_read(surface.reader, trigger, move || {
+            let mut surface = surface;
+            // Claimed synchronously so generations order requests by when
+            // they were asked for, not when their tasks happened to be polled.
+            let generation = surface.gate.write().start();
+            let base = surface.base.peek().clone();
+            async move { surface.complete(generation, base).await }
+        });
+    });
+
+    // Effects are not places to await round trips. Mark the initial demand;
+    // the shared reader owns retries and coalescing from here onward.
+    use_effect(move || {
         surface.request(Trigger::Explicit);
     });
 
@@ -638,8 +364,8 @@ pub(crate) fn use_catalog_surface(target: Signal<Option<HostTarget>>) -> Catalog
 // What a create dialog offers, and what it must ask about
 // ---------------------------------------------------------------------
 
-/// What a create would launch: a profile from the target host's catalog, or
-/// the command line typed into the form.
+/// What a create would launch: a profile from the helm catalog, or the command
+/// line typed into the form.
 ///
 /// The raw path survives alongside profiles deliberately (PLAN_M6_75.md item
 /// 4): it is what the API, the e2e harness, and anyone running something no
@@ -649,8 +375,8 @@ pub(crate) fn use_catalog_surface(target: Signal<Option<HostTarget>>) -> Catalog
 pub(crate) enum AgentChoice {
     /// The invocation typed into the form's own field.
     Command,
-    /// A profile, by id — always an id from the CURRENT target host, which is
-    /// why a host change clears the choice rather than carrying it over.
+    /// A helm profile by id. The choice survives target-host changes because
+    /// the same catalog applies to every host.
     Profile(String),
 }
 
@@ -659,10 +385,10 @@ pub(crate) enum AgentChoice {
 ///
 /// A sentinel is unavoidable (a `size=1` select always has exactly one option
 /// selected, so "nothing chosen" needs something to select), and this one is
-/// chosen to fail SAFE if a supervisor ever minted a profile id equal to it:
+/// chosen to fail SAFE if the helm ever minted a profile id equal to it:
 /// the picker would refuse to resolve that profile, blocking a submit, rather
 /// than launching something the user did not pick. The command path's empty
-/// value has the same property from the other side — a supervisor does not
+/// value has the same property from the other side — the helm does not
 /// mint an empty id, and an empty one would be unusable everywhere else too.
 pub(crate) const UNRESOLVED_VALUE: &str = "__unresolved__";
 
@@ -694,21 +420,20 @@ impl AgentChoice {
 /// Why a dialog is preselecting nothing, when there is a reason worth saying.
 ///
 /// Only ever produced for a profile that WAS available and is not anymore.
-/// The ordinary "nothing has ever been created from a profile on this host"
+/// The ordinary "nothing has ever been created from a profile on this helm"
 /// case yields no note at all, and that asymmetry is the point: a first-time
 /// dialog has nothing to explain, while a dialog that silently dropped a
 /// remembered choice would look like it had forgotten it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentNote {
-    /// The host's remembered last-used profile is gone from its catalog —
+    /// The helm's remembered last-used profile is gone from its catalog —
     /// SPEC.md's ask-don't-guess case, exactly.
     RememberedGone,
     /// A profile the user had explicitly picked left the catalog while the
-    /// dialog was open (deleted from another client, or from the panel right
-    /// beside it).
+    /// dialog was open (deleted from another client, or from the popup).
     ChoiceGone,
     /// A profile is chosen but this surface has no catalog to confirm it
-    /// against — before the first read of a target, or after one that failed.
+    /// against — before the first helm catalog read, or after one that failed.
     /// Transient by construction, unlike the two above, and still blocking:
     /// acting on a choice nothing has confirmed is the same guess in a
     /// shorter window.
@@ -724,15 +449,15 @@ impl AgentNote {
     pub(crate) fn text(self) -> &'static str {
         match self {
             AgentNote::RememberedGone => {
-                "the profile you last used on this host no longer exists, so nothing is selected \
+                "the profile you last used in this helm no longer exists, so nothing is selected \
                  — choose a profile, or choose \"custom command\" to run the command below"
             }
             AgentNote::ChoiceGone => {
-                "the profile you picked is no longer on this host, so nothing is selected — \
+                "the profile you picked is no longer in this helm, so nothing is selected — \
                  choose another, or choose \"custom command\" to run the command below"
             }
             AgentNote::ChoiceUnconfirmed => {
-                "this host's profiles have not been read yet, so the profile you picked cannot be \
+                "this helm's profiles have not been read yet, so the profile you picked cannot be \
                  confirmed — nothing is selected until they arrive"
             }
         }
@@ -752,46 +477,7 @@ pub(crate) struct AgentSelection {
     pub(crate) note: Option<AgentNote>,
 }
 
-/// Resolve the create dialog's agent selection: the user's explicit choice
-/// where there is one, the host's remembered default where there is not, and
-/// NOTHING — a blocked submit — rather than a substitute.
-///
-/// ## `seeded` is what makes the default a DECISION rather than a feed
-///
-/// The remembered default is consumed exactly once per target: the first
-/// catalog that answers a dialog's own question decides, and `seeded` says
-/// that has happened. Without it, "nothing chosen" would keep meaning "follow
-/// whatever the helm currently remembers" — so another client creating a
-/// session would move an open dialog's selection underneath whoever is filling
-/// it in, which is the same silent retarget this file exists to prevent, with
-/// a different cause.
-///
-/// ## Why a vanished profile is not the command path
-///
-/// It used to be: a chosen or remembered profile that had left the catalog
-/// resolved to `Command` with a note beside it. That looked like a graceful
-/// degradation and was a way to launch the wrong thing. The command field
-/// keeps whatever was typed into it earlier — a user who typed a command,
-/// switched to a profile, and then had that profile deleted under them would
-/// submit the stale command while the note on screen said nothing was
-/// selected. Blocking is the only answer that cannot mis-launch: the dialog
-/// asks, and every way out of it (pick another profile, pick the command
-/// path) is an act the user performs.
-///
-/// The distinction is against the ORDINARY unselected case, which is not a
-/// question at all: a host nothing has ever been created from with a profile
-/// has no forgotten choice to explain, so the command path is the honest
-/// default there and the dialog stays immediately usable. The same goes for
-/// everything before the first catalog read, where nothing is known either
-/// way — with one exception, `chosen` naming a profile: a choice that cannot
-/// be CONFIRMED must not be acted on either, and that state clears itself the
-/// moment the read lands.
-///
-/// The rule this function exists to keep is the negative one: no branch here
-/// may ever answer with a profile the user did not choose and the host did
-/// not remember, and no branch may answer with the command path unless the
-/// user asked for it or nothing was ever remembered.
-/// What the FIRST catalog to answer a dialog's own question decides, once.
+/// What the first catalog to answer a dialog's own question decides, once.
 ///
 /// The consumption half of SPEC.md's creation rule, split out from the
 /// component so the decision can be stated and tested without a runtime. Three
@@ -801,11 +487,12 @@ pub(crate) struct AgentSelection {
 /// - the remembered default still exists → that is the choice;
 /// - a default is remembered but is GONE → no choice, which leaves the dialog
 ///   blocked and asking (SPEC.md's ask-don't-guess);
-/// - nothing was ever remembered here → the command path, so a first create on
-///   a host is usable immediately and has nothing to explain.
+/// - nothing was ever remembered here → the command path, so the helm is
+///   usable immediately and has nothing to explain.
 ///
-/// Consulted once per target, whatever it answers — see `list::CreateSessionForm`
-/// for why "a choice exists" is not a usable record of that having happened.
+/// Consulted once per dialog, whatever it answers — see
+/// `list::CreateSessionForm` for why "a choice exists" is not a usable record
+/// of that having happened.
 pub(crate) fn seeded_choice(catalog: &ProfileCatalog) -> Option<AgentChoice> {
     match catalog.default_profile.as_deref() {
         Some(remembered) if catalog.profiles.iter().any(|p| p.id == remembered) => {
@@ -816,6 +503,13 @@ pub(crate) fn seeded_choice(catalog: &ProfileCatalog) -> Option<AgentChoice> {
     }
 }
 
+/// Resolve the create dialog's current agent choice without guessing.
+///
+/// An explicit choice wins. A chosen or remembered profile that is absent or
+/// unconfirmed blocks rather than falling back to the command field, whose
+/// retained text may describe a different intention. `seeded` makes the
+/// remembered default a one-time dialog decision instead of a value that an
+/// open form follows when another client changes it.
 pub(crate) fn resolve_agent(
     chosen: Option<&AgentChoice>,
     catalog: Option<&ProfileCatalog>,
@@ -853,7 +547,7 @@ pub(crate) fn resolve_agent(
         // Nothing chosen and nothing seeded yet: the catalog is still being
         // read, or could not be. Blocking here is the conservative reading of
         // SPEC.md's ask-don't-guess rule — this dialog does not yet know
-        // whether the host remembers a profile, so defaulting to the command
+        // whether the helm remembers a profile, so defaulting to the command
         // field would be answering a question nobody has asked yet, and the
         // field is not necessarily empty. It clears itself the moment the read
         // lands, and the user can always answer it directly.
@@ -869,7 +563,7 @@ pub(crate) fn resolve_agent(
 /// own spelling.
 ///
 /// Offered as a choice rather than typed, for `list::FILTERABLE_STATUSES`'s
-/// reason: the supervisor refuses a kind it does not know, and a select
+/// reason: the helm refuses a kind it does not know, and a select
 /// cannot produce a typo. `generic` is the explicit spelling of "no
 /// integration" and is listed rather than implied — an absent kind and a
 /// generic one would otherwise be two ways to say the same thing about a
@@ -1011,10 +705,10 @@ pub(crate) fn parse_resume(text: &str) -> Result<Option<Vec<String>>, String> {
 ///
 /// The NAME is always the snapshotted one — never the profile's current name,
 /// which this UI deliberately is not told (see [`SourceProfile`]) — and the
-/// qualifier is what keeps that from reading as a claim about the catalog as
-/// it stands today. Both halves say the same thing from different sides:
-/// SPEC.md's rule that editing or deleting a profile leaves existing sessions
-/// alone.
+/// rename qualifier keeps that case from reading as a claim about the catalog
+/// as it stands today. A missing row is intentionally plain: old sessions and
+/// sessions imported from another helm still have a useful immutable label,
+/// and absence from this helm is not a warning about the session.
 ///
 /// An existence this build does not know is qualified as unknown rather than
 /// silently rendered as `present`: claiming a profile is still there is a
@@ -1022,9 +716,8 @@ pub(crate) fn parse_resume(text: &str) -> Result<Option<Vec<String>>, String> {
 pub(crate) fn source_profile_label(source: &SourceProfile) -> String {
     let name = display_peer(&source.name);
     match source.existence {
-        ProfileExistence::Present => format!("profile: {name}"),
+        ProfileExistence::Present | ProfileExistence::Deleted => format!("profile: {name}"),
         ProfileExistence::Renamed => format!("profile: {name} (renamed since)"),
-        ProfileExistence::Deleted => format!("profile: {name} (deleted since)"),
         ProfileExistence::Unrecognized => format!("profile: {name} (state unknown to this build)"),
     }
 }
@@ -1047,10 +740,10 @@ pub(crate) fn existence_word(existence: ProfileExistence) -> &'static str {
 }
 
 // ---------------------------------------------------------------------
-// The panel
+// The popup
 // ---------------------------------------------------------------------
 
-/// Which profile the section's form is editing, if any.
+/// Which profile the popup's form is editing, if any.
 ///
 /// One form at a time, and one draft behind it — the same interaction the
 /// rename field and the host destination field keep, for the same reason: two
@@ -1063,12 +756,402 @@ enum Editing {
     Existing(String),
 }
 
+/// The control that should receive focus after a popup state transition.
+///
+/// Rows and forms mount and unmount as the state changes, so the destination
+/// is recorded as intent and resolved after Dioxus has committed the next DOM.
+/// Profile ids are compared as data in the generated script rather than
+/// interpolated into a selector, keeping peer text out of selector syntax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FocusDestination {
+    /// The stable entry point and fallback when no target row survives.
+    NewProfile,
+    /// The first field of the one open create or edit form.
+    FirstFormField,
+    /// The edit button belonging to a specific profile row.
+    Edit(String),
+    /// The safe way out of a specific row's delete confirmation.
+    DeleteCancel(String),
+}
+
+/// Wall-clock budget for a popup control created by a render to become usable.
+///
+/// Focus-out dismissal waits this whole budget plus
+/// [`FOCUS_TRANSIT_GRACE_MS`]. These constants describe one handoff and must
+/// be tuned together: dismissal may not conclude that `body` is the user's
+/// destination while the popup still owns a live placement request.
+pub(crate) const FOCUS_SETTLE_MS: u64 = 250;
+
+/// Extra time reserved for the final focus-out classification after placement.
+pub(crate) const FOCUS_TRANSIT_GRACE_MS: u64 = 120;
+
+/// Whether a focus request may replace the current active element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Replace {
+    /// Opening may replace its trigger or document transit, and nothing else.
+    Opening,
+    /// An internal transition may replace transit or focus still in the popup.
+    Internal,
+    /// Async completion has the internal boundary but yields to prior focus-out.
+    Completion,
+}
+
+/// One consumable request to place focus in the popup.
+#[derive(Debug, Clone, PartialEq)]
+struct FocusRequest {
+    destination: FocusDestination,
+    generation: u64,
+    may_replace: Replace,
+    /// Rust bounds every bridge await against this one request-wide budget.
+    rust_deadline: Instant,
+    /// JavaScript checks this immediately before its only focus side effect.
+    /// It never lies later than `rust_deadline` on the browser's clock (see
+    /// `request_focus` for how the two clocks are aligned), so a commit that
+    /// resumes after Rust gave up on the request cannot move focus.
+    browser_deadline_ms: f64,
+}
+
+/// One browser-side attempt to resolve and focus a rendered destination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusAttempt {
+    /// The target has not rendered yet, so the bounded worker should retry.
+    Missing,
+    /// The exact enabled node must survive one retry interval before focus.
+    Found,
+    /// Observation proved the same enabled node on consecutive attempts.
+    Ready,
+    /// The target accepted focus and the request is complete.
+    Focused,
+    /// The renderer reached the commit only after its absolute deadline.
+    Expired,
+    /// A deliberate active element is outside this request's replacement set.
+    Refused,
+    /// The renderer did not return evidence, so dismissal must not infer transit.
+    Unknown,
+}
+
+/// Page-lived coordination shared by the popup worker and its focus-out owner.
+///
+/// The popup-local request contains the destination; this handle exposes only
+/// invalidation and pending state so the app bar can wait for a render handoff
+/// without inspecting popup DOM or starting another focus worker.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct FocusCoordinator {
+    generation: Signal<u64>,
+    pending: Signal<bool>,
+    unknown: Signal<bool>,
+    /// The trusted outside obligation sequence mutation completion must yield to.
+    outside_obligation: Signal<Option<u64>>,
+}
+
+impl FocusCoordinator {
+    /// Build the page-lived half of the popup's focus state machine.
+    pub(crate) fn new(
+        generation: Signal<u64>,
+        pending: Signal<bool>,
+        unknown: Signal<bool>,
+        outside_obligation: Signal<Option<u64>>,
+    ) -> Self {
+        Self {
+            generation,
+            pending,
+            unknown,
+            outside_obligation,
+        }
+    }
+
+    /// Invalidate every older request and report the new generation.
+    pub(crate) fn advance(mut self) -> u64 {
+        self.generation += 1;
+        *self.generation.peek()
+    }
+
+    /// Invalidate outstanding work at an opening or closing boundary.
+    pub(crate) fn invalidate(mut self) {
+        self.advance();
+        self.pending.set(false);
+        self.unknown.set(false);
+        self.outside_obligation.set(None);
+    }
+
+    /// Whether focus-out must still allow a popup render to place focus.
+    pub(crate) fn pending(self) -> bool {
+        *self.pending.peek()
+    }
+
+    /// Whether the last consumed request ended without renderer evidence.
+    pub(crate) fn unknown(self) -> bool {
+        *self.unknown.peek()
+    }
+
+    /// Publish the trusted outside sequence currently owned by the app bar.
+    pub(crate) fn set_outside_obligation(mut self, sequence: Option<u64>) {
+        self.outside_obligation.set(sequence);
+    }
+
+    /// Clear an outside sequence only if the caller still owns that exact fact.
+    pub(crate) fn clear_outside_obligation(mut self, sequence: u64) {
+        if *self.outside_obligation.peek() == Some(sequence) {
+            self.outside_obligation.set(None);
+        }
+    }
+
+    /// Whether mutation completion must yield to a trusted outside choice.
+    fn outside_obligation_pending(self) -> bool {
+        self.outside_obligation.peek().is_some()
+    }
+
+    /// Sample ownership immediately before an asynchronous focus attempt.
+    fn generation_now(self) -> u64 {
+        *self.generation.peek()
+    }
+}
+
+/// Create one generation-tagged request with matching Rust and browser clocks.
+///
+/// `may_replace` separates opening, synchronous in-popup transitions, and
+/// asynchronous completion. Completion yields when the app bar has published
+/// a sequence-tagged trusted outside obligation; ordinary focus-out alone is
+/// not evidence that the user chose that destination. A failed or timed-out
+/// browser-clock guard consumes the request as `Unknown` before observation.
+fn request_focus(
+    mut focus_request: Signal<Option<FocusRequest>>,
+    mut coordinator: FocusCoordinator,
+    destination: FocusDestination,
+    may_replace: Replace,
+) {
+    if may_replace == Replace::Completion && coordinator.outside_obligation_pending() {
+        return;
+    }
+    let generation = coordinator.advance();
+    coordinator.pending.set(true);
+    coordinator.unknown.set(false);
+    focus_request.set(None);
+    spawn(async move {
+        let rust_deadline = Instant::now() + Duration::from_millis(FOCUS_SETTLE_MS);
+        let clock = document::eval(
+            "const test = window.__farhelmTestProfiles; \
+             if (test?.focusClockDelayMs > 0) \
+                 await new Promise((resolve) => setTimeout(resolve, test.focusClockDelayMs)); \
+             if (test?.focusClockErrors > 0) { \
+                 test.focusClockErrors -= 1; \
+                 throw new Error('held focus clock'); \
+             } \
+             return [performance.now(), test?.focusBrowserBudgetMs ?? null];",
+        );
+        let browser_deadline_ms =
+            match finish_before(rust_deadline, clock.join::<(f64, Option<f64>)>()).await {
+                // The browser deadline is derived from the Rust budget that is
+                // STILL LEFT when the sample arrives, not from a full budget
+                // added at sampling time: the sample was taken some unknown
+                // dispatch delay before this line runs, so `sample + remaining`
+                // can only fall at or before the moment the Rust deadline
+                // passes. That is what keeps a late commit from focusing after
+                // Rust has already consumed the request as unknown. A test may
+                // shrink the browser budget further; it can never widen it.
+                Some(Ok((sample, budget_override))) => {
+                    let remaining = rust_deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_secs_f64()
+                        * 1000.0;
+                    sample + budget_override.map_or(remaining, |budget| budget.min(remaining))
+                }
+                Some(Err(_)) | None => {
+                    if coordinator.generation_now() == generation {
+                        document::eval(
+                            "if (window.__farhelmTestProfiles) \
+                         window.__farhelmTestProfiles.focusSettled = 'unknown';",
+                        );
+                        coordinator.unknown.set(true);
+                        coordinator.pending.set(false);
+                    }
+                    return;
+                }
+            };
+        if coordinator.generation_now() != generation {
+            return;
+        }
+        focus_request.set(Some(FocusRequest {
+            destination,
+            generation,
+            may_replace,
+            rust_deadline,
+            browser_deadline_ms,
+        }));
+    });
+}
+
+/// Render the JavaScript expression for one popup-owned focus destination.
+///
+/// Profile ids are serialized as data before entering the expression, so peer
+/// text cannot change selector syntax in either observation or commit.
+fn focus_target_expression(destination: &FocusDestination) -> String {
+    match destination {
+        FocusDestination::NewProfile => "popup.querySelector('.new-profile-button')".to_string(),
+        FocusDestination::FirstFormField => {
+            "popup.querySelector('.profile-name-input')".to_string()
+        }
+        FocusDestination::Edit(id) => format!(
+            "[...popup.querySelectorAll('.profile-row')].find((row) => row.dataset.profileId === {})?.querySelector('.profile-edit')",
+            serde_json::to_string(&id).expect("a profile id always serializes as JSON")
+        ),
+        FocusDestination::DeleteCancel(id) => format!(
+            "[...popup.querySelectorAll('.profile-row')].find((row) => row.dataset.profileId === {})?.querySelector('.profile-cancel-delete')",
+            serde_json::to_string(&id).expect("a profile id always serializes as JSON")
+        ),
+    }
+}
+
+/// Observe one rendered destination without committing browser focus.
+///
+/// A browser evaluation failure is `Unknown`, not transit or refusal. The Rust
+/// worker can retry it without turning a renderer fault into dismissal evidence.
+/// `attempt` makes the stable-node handshake genuinely consecutive: an error
+/// or any skipped ordinal cannot reuse an older `Found` observation. This eval
+/// has no focus side effect, so a renderer that finishes after Rust's timeout
+/// can at worst leave an unusable generation-tagged candidate behind.
+async fn observe_focus_destination(request: &FocusRequest, attempt: u64) -> FocusAttempt {
+    let generation = request.generation;
+    let replace_mode = match request.may_replace {
+        Replace::Opening => "opening",
+        Replace::Internal => "internal",
+        Replace::Completion => "completion",
+    };
+    let target = focus_target_expression(&request.destination);
+    let script = format!(
+        "const test = window.__farhelmTestProfiles; \
+         if (test) {{ \
+             test.focusAttempts = (test.focusAttempts || 0) + 1; \
+             if (test.focusAttempts === 1) test.focusStartedAt = Date.now(); \
+             if (test.focusEvalDelayMs > 0) \
+                 await new Promise((resolve) => setTimeout(resolve, test.focusEvalDelayMs)); \
+         }} \
+         if (test?.focusEvalErrorAttempts?.includes({attempt}) || test?.focusEvalErrors > 0) {{ \
+             if (test?.focusEvalErrors > 0) test.focusEvalErrors -= 1; \
+             throw new Error('held focus evaluation'); \
+         }} \
+         if (test?.hideFocusTarget) return 'missing'; \
+         const popup = document.querySelector('.profiles-popover'); \
+         if (!popup) return 'refused'; \
+         const active = document.activeElement; \
+         const replaceable = '{replace_mode}' === 'opening' \
+             ? (!active || active === document.body || active === document.querySelector('.profiles-toggle')) \
+             : (!active || active === document.body || popup.contains(active)); \
+         if (!replaceable) return 'refused'; \
+         const target = {target}; \
+         if (!target || target.disabled) {{ \
+             if (window.__farhelmProfilesFocusCandidate?.generation === {generation}) \
+                 delete window.__farhelmProfilesFocusCandidate; \
+             return 'missing'; \
+         }} \
+         const candidate = window.__farhelmProfilesFocusCandidate; \
+         if (!candidate || candidate.generation !== {generation} || candidate.target !== target || \
+             candidate.attempt + 1 !== {attempt}) {{ \
+             window.__farhelmProfilesFocusCandidate = {{ generation: {generation}, target, attempt: {attempt} }}; \
+             return 'found'; \
+         }} \
+         candidate.attempt = {attempt}; \
+         return 'ready';"
+    );
+    match document::eval(&script).join::<String>().await.as_deref() {
+        Ok("missing") => FocusAttempt::Missing,
+        Ok("found") => FocusAttempt::Found,
+        Ok("ready") => FocusAttempt::Ready,
+        Ok("refused") => FocusAttempt::Refused,
+        Err(_) | Ok(_) => FocusAttempt::Unknown,
+    }
+}
+
+/// Commit a previously observed node only while both absolute deadlines hold.
+///
+/// Rust races this bridge call against the same request-wide budget. The
+/// renderer separately checks its absolute deadline immediately before
+/// `focus()`, because dropping an overdue eval future cannot stop JavaScript
+/// that has already started running.
+async fn commit_focus_destination(request: &FocusRequest, attempt: u64) -> FocusAttempt {
+    let generation = request.generation;
+    let replace_mode = match request.may_replace {
+        Replace::Opening => "opening",
+        Replace::Internal => "internal",
+        Replace::Completion => "completion",
+    };
+    let target = focus_target_expression(&request.destination);
+    let browser_deadline = serde_json::to_string(&request.browser_deadline_ms)
+        .expect("performance.now() returns a finite deadline");
+    let script = format!(
+        "const test = window.__farhelmTestProfiles; \
+         if (test) {{ \
+             test.focusCommitAttempts = (test.focusCommitAttempts || 0) + 1; \
+             if (test.focusCommitDelayMs > 0) \
+                 await new Promise((resolve) => setTimeout(resolve, test.focusCommitDelayMs)); \
+         }} \
+         if (test?.focusCommitErrors > 0) {{ \
+             test.focusCommitErrors -= 1; \
+             throw new Error('held focus commit'); \
+         }} \
+         const popup = document.querySelector('.profiles-popover'); \
+         if (!popup) return 'refused'; \
+         const active = document.activeElement; \
+         const replaceable = '{replace_mode}' === 'opening' \
+             ? (!active || active === document.body || active === document.querySelector('.profiles-toggle')) \
+             : (!active || active === document.body || popup.contains(active)); \
+         if (!replaceable) return 'refused'; \
+         const target = {target}; \
+         const candidate = window.__farhelmProfilesFocusCandidate; \
+         if (!target || target.disabled || !candidate || candidate.generation !== {generation} || \
+             candidate.target !== target || candidate.attempt !== {attempt}) return 'missing'; \
+         if (performance.now() > {browser_deadline}) {{ \
+             if (test) test.focusCommitExpired = true; \
+             return 'expired'; \
+         }} \
+         target.focus({{ preventScroll: true }}); \
+         if (document.activeElement === target && test) test.focusedAt = Date.now(); \
+         return document.activeElement === target ? 'focused' : 'missing';"
+    );
+    match document::eval(&script).join::<String>().await.as_deref() {
+        Ok("missing") => FocusAttempt::Missing,
+        Ok("focused") => FocusAttempt::Focused,
+        Ok("expired") => FocusAttempt::Expired,
+        Ok("refused") => FocusAttempt::Refused,
+        Err(_) | Ok(_) => FocusAttempt::Unknown,
+    }
+}
+
+/// Forget a stable-node observation after an attempt produced no evidence.
+///
+/// The attempt ordinal independently prevents reuse if this cleanup eval also
+/// fails, but removing the reference keeps the browser state honest and avoids
+/// retaining a detached control until the bounded worker finishes.
+async fn clear_focus_candidate(generation: u64) {
+    let _ = document::eval(&format!(
+        "if (window.__farhelmProfilesFocusCandidate?.generation === {generation}) \
+         delete window.__farhelmProfilesFocusCandidate;"
+    ))
+    .await;
+}
+
+/// Pick the row after a deleted profile in the catalog's stable order.
+///
+/// The id is captured before the local removal changes the list. Deleting the
+/// last row deliberately returns no target so focus falls back to the popup's
+/// stable `new profile` control instead of jumping backward.
+fn edit_target_after_delete(catalog: &ProfileCatalog, deleted: &str) -> Option<String> {
+    let index = catalog
+        .profiles
+        .iter()
+        .position(|profile| profile.id == deleted)?;
+    catalog
+        .profiles
+        .get(index + 1)
+        .map(|profile| profile.id.clone())
+}
+
 /// The editor's fields, plus what the resume field was seeded from.
 ///
-/// Owned by the SECTION rather than by the form component, the discipline
-/// `rename::RenameForm` records: this form is unmounted by re-renders the
-/// user did not cause (a catalog refresh landing, a host row rebuilding), and
-/// a draft owned by the form would be silently discarded with it.
+/// Owned by the popup rather than by the form component, the discipline
+/// `rename::RenameForm` records: a catalog refresh can replace the row that
+/// holds an editor, and a draft owned by that row would be silently discarded
+/// with it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ProfileDraft {
     /// The EDITING representations — what the fields show, which for a seeded
@@ -1157,8 +1240,8 @@ impl ProfileDraft {
     /// typed in, and the typed text for every field they did.
     ///
     /// `Err` is the resume field failing to parse — the only local validation
-    /// this form performs, and it is not a duplicate of a supervisor rule: the
-    /// far side receives argv, so a quoting mistake has to be caught on this
+    /// this form performs, and it is not a duplicate of a helm rule: the helm
+    /// receives argv, so a quoting mistake has to be caught on this
     /// side or the field would silently send something else. Everything else
     /// (names, sizes, the placeholder rule) is refused by the authority that
     /// owns it, whose sentence is what a user acts on.
@@ -1209,44 +1292,33 @@ pub(crate) fn submitted_field(text: &str, edited: bool, seed: Option<&str>) -> S
     }
 }
 
-/// One host's profiles, inside the hosts panel (PLAN_M6_75.md item 8).
+/// Manage the helm's profile catalog inside the sidebar popup.
 ///
-/// ## Why it lives here rather than on a page of its own
-///
-/// A profile belongs to a supervisor, and the hosts panel is where this UI
-/// talks about supervisors: the row that says whether a host is reachable is
-/// also the row whose catalog can only be read while it is. A separate page
-/// would have to re-state the host's identity and its connection state to be
-/// usable at all, and would leave a user reading two surfaces to answer one
-/// question.
+/// The popup takes no host because the catalog does not. It shares the same
+/// always-active [`CatalogSurface`] as the create picker, so a definition
+/// accepted here is the definition every host can use immediately.
 ///
 /// ## What it refuses to decide
 ///
 /// Everything about validity. Names, sizes, the catalog bound and the resume
-/// template's placeholder rule are the supervisor's, and its refusals are
-/// rendered as it wrote them (through `peer::PeerLine`, since a supervisor
-/// under `--ssh` is a machine this helm does not control).
+/// template's placeholder rule are the helm's, and its refusals are rendered
+/// as it wrote them through `peer::PeerLine`.
 ///
 /// `ops` is the page's live-operation token: every mutation claims it
 /// synchronously at handler entry, which excludes profile edits against each
-/// other AND against a host mutation or a create — a delete landing while a
-/// host is being removed under it is precisely the interleaving that token
-/// exists to prevent. See the `ops` module for why the `disabled` attributes
-/// are cosmetic and the claim is the guard.
+/// other and against every other page mutation. That keeps one accepted
+/// change and its catalog reconciliation from racing a second action through
+/// another surface. See the `ops` module for why the `disabled` attributes are
+/// cosmetic and the claim is the guard.
 #[component]
-pub(crate) fn ProfilesSection(
-    host: HostId,
-    /// The host's display name, for the delete prompt — a profile and a host
-    /// are both named things, and a confirmation that did not say which
-    /// machine it was about would be ambiguous on a fleet.
-    host_name: String,
+pub(crate) fn ProfilesPopup(
     surface: CatalogSurface,
     mut ops: OpLock,
+    focus_coordinator: FocusCoordinator,
 ) -> Element {
     // Held in a signal rather than as a captured `String` so every handler
-    // below stays `Copy` — the hosts panel clones its handlers into each row
-    // instead, and here they are reused by both the row's editor and the
-    // section's own form, where a clone per use would be noise.
+    // below stays `Copy`; the handle is reused by both row editors and the
+    // popup's new-profile form.
     let api_base = use_context::<ApiBase>().0;
     let base = use_signal(|| api_base);
     let mut editing = use_signal(|| None::<Editing>);
@@ -1270,31 +1342,111 @@ pub(crate) fn ProfilesSection(
     // from `form_error`, which belongs to a form that is still open and still
     // holding a draft.
     let mut notice = use_signal(|| None::<String>);
+    let mut focus_request = use_signal(|| None::<FocusRequest>);
 
-    // Everything above is bound to ONE install, and this is what enforces
-    // that. A registry row survives a retarget and an adopt, so the host id
-    // this section is mounted under can start naming a different machine
-    // without the section moving at all — and every piece of state here would
-    // then be about a catalog that no longer exists: an open editor would
-    // save its draft over whatever profile now holds that id (starter ids
-    // collide across installs by construction), a delete confirmation would
-    // delete the successor's, and an unread refusal would describe a machine
-    // nobody is looking at. Discarding all of it the moment the target moves
-    // is the only answer that cannot act on the wrong supervisor.
-    let mut bound_to = use_signal(|| None::<HostTarget>);
+    // Opening is itself a focus transition. Going through the same consumable
+    // request as every later transition prevents a mount-only special case
+    // from outliving a close and applying to a newer popup opening.
     use_effect(move || {
-        let current = surface.watch_target();
-        if *bound_to.peek() == current {
+        request_focus(
+            focus_request,
+            focus_coordinator,
+            FocusDestination::NewProfile,
+            Replace::Opening,
+        );
+    });
+
+    // This is the sole owner of browser focus placement. New requests and
+    // popup lifecycle changes advance the shared generation, so an older task
+    // can finish only by observing that it no longer owns the request.
+    use_effect(move || {
+        let Some(request) = focus_request.read().clone() else {
             return;
-        }
-        bound_to.set(current);
-        editing.set(None);
-        confirming.set(None);
-        draft.set(ProfileDraft::blank());
-        form_error.set(None);
-        errors.write().clear();
-        warning.set(None);
-        notice.set(None);
+        };
+        spawn(async move {
+            let mut attempt = 0_u64;
+            let last_attempt = loop {
+                if focus_coordinator.generation_now() != request.generation {
+                    return;
+                }
+                if request.may_replace == Replace::Completion
+                    && focus_coordinator.outside_obligation_pending()
+                {
+                    break FocusAttempt::Refused;
+                }
+                attempt += 1;
+                let mut outcome = finish_before(
+                    request.rust_deadline,
+                    observe_focus_destination(&request, attempt),
+                )
+                .await
+                .unwrap_or(FocusAttempt::Unknown);
+                if focus_coordinator.generation_now() != request.generation {
+                    return;
+                }
+                if outcome == FocusAttempt::Ready {
+                    if request.may_replace == Replace::Completion
+                        && focus_coordinator.outside_obligation_pending()
+                    {
+                        outcome = FocusAttempt::Refused;
+                    } else {
+                        outcome = finish_before(
+                            request.rust_deadline,
+                            commit_focus_destination(&request, attempt),
+                        )
+                        .await
+                        .unwrap_or(FocusAttempt::Unknown);
+                    }
+                    if focus_coordinator.generation_now() != request.generation {
+                        return;
+                    }
+                }
+                if matches!(outcome, FocusAttempt::Unknown | FocusAttempt::Expired) {
+                    let _ = finish_before(
+                        request.rust_deadline,
+                        clear_focus_candidate(request.generation),
+                    )
+                    .await;
+                    if focus_coordinator.generation_now() != request.generation {
+                        return;
+                    }
+                }
+                let remaining = request
+                    .rust_deadline
+                    .saturating_duration_since(Instant::now());
+                if matches!(outcome, FocusAttempt::Focused | FocusAttempt::Refused)
+                    || remaining.is_zero()
+                {
+                    break outcome;
+                }
+                let delay = remaining.as_millis().min(25) as u64;
+                if delay == 0 {
+                    break outcome;
+                }
+                sleep_ms(delay).await;
+            };
+            if focus_coordinator.generation_now() == request.generation {
+                let settled = match last_attempt {
+                    FocusAttempt::Focused => "focused",
+                    FocusAttempt::Refused => "refused",
+                    FocusAttempt::Unknown | FocusAttempt::Expired => "unknown",
+                    FocusAttempt::Missing | FocusAttempt::Found | FocusAttempt::Ready => "missing",
+                };
+                document::eval(&format!(
+                    "if (window.__farhelmProfilesFocusCandidate?.generation === {generation}) \
+                         delete window.__farhelmProfilesFocusCandidate; \
+                     if (window.__farhelmTestProfiles) \
+                         window.__farhelmTestProfiles.focusSettled = '{settled}';",
+                    generation = request.generation,
+                ));
+                focus_coordinator.unknown.set(matches!(
+                    last_attempt,
+                    FocusAttempt::Unknown | FocusAttempt::Expired
+                ));
+                focus_request.set(None);
+                focus_coordinator.pending.set(false);
+            }
+        });
     });
 
     let on_submit = move |_| {
@@ -1305,13 +1457,7 @@ pub(crate) fn ProfilesSection(
         if !ops.claim() {
             return;
         }
-        // Every mutation runs under a LEASE on the question this surface is
-        // asking — the target AND the activation — rather than merely against
-        // the id this component was rendered with. The lease is what the
-        // completion below checks before it writes anything at all, so a reply
-        // that arrives after a cross-client adoption cannot repopulate a form
-        // error, a warning, or a row refusal under the successor install.
-        let (Some(lease), Some(editing_now)) = (surface.lease(), editing.peek().clone()) else {
+        let Some(editing_now) = editing.peek().clone() else {
             ops.release();
             return;
         };
@@ -1336,37 +1482,42 @@ pub(crate) fn ProfilesSection(
         notice.set(None);
         spawn(async move {
             let sent = match &editing_now {
-                Editing::New => create_profile(&base, lease.target.host, &spec).await,
-                Editing::Existing(id) => update_profile(&base, lease.target.host, id, &spec).await,
+                Editing::New => create_profile(&base, &spec).await,
+                Editing::Existing(id) => update_profile(&base, id, &spec).await,
             };
-            // NOTHING below writes UI state unless this surface is still
-            // asking the question this mutation was dispatched for.
-            if !surface.holds(&lease) {
-                ops.release();
-                return;
-            }
-            match sent {
+            let destination = match sent {
                 Ok(ProfileCommit::Confirmed(profile)) => {
                     // Folded in BEFORE the token is released, which is what
                     // makes the window empty rather than merely short: until
                     // the authoritative re-read lands, reopening this row
                     // would otherwise seed the editor from the PRE-EDIT
                     // definition, and saving that would undo an update the
-                    // supervisor has already accepted.
-                    surface.absorb_change(&lease, CatalogChange::Upsert(profile));
+                    // helm has already accepted.
+                    let id = profile.id.clone();
+                    let absorbed = surface.absorb_change(CatalogChange::Upsert(profile));
                     editing.set(None);
                     surface.request(Trigger::Explicit);
+                    if absorbed {
+                        FocusDestination::Edit(id)
+                    } else {
+                        // A create form is available while the mount read is
+                        // pending. Until its follow-up supplies the first
+                        // catalog there is no row to focus, so use the popup's
+                        // stable entry point rather than leaving focus on body.
+                        FocusDestination::NewProfile
+                    }
                 }
                 Ok(ProfileCommit::Unvalidated(unread)) => {
                     // Accepted, and this build cannot say what it produced. The
                     // held catalog is therefore known to be superseded and
                     // cannot be reconciled from, so it is dropped rather than
                     // left to seed the next editor — the authoritative read
-                    // asked for below is what fills the section back in.
+                    // asked for below is what fills the popup back in.
                     warning.set(Some(unread));
-                    surface.invalidate(&lease);
+                    surface.invalidate();
                     editing.set(None);
                     surface.request(Trigger::Explicit);
+                    FocusDestination::NewProfile
                 }
                 // An ordinary refusal — the helm no longer distinguishes a
                 // stale precondition from any other conflict, so this is
@@ -1374,8 +1525,17 @@ pub(crate) fn ProfilesSection(
                 // in it: a refused name is usually one keystroke from an
                 // accepted one, and closing it would throw the draft away
                 // with the reason still on screen.
-                Err(refusal) => form_error.set(Some(refusal)),
-            }
+                Err(refusal) => {
+                    form_error.set(Some(refusal));
+                    FocusDestination::FirstFormField
+                }
+            };
+            request_focus(
+                focus_request,
+                focus_coordinator,
+                destination,
+                Replace::Completion,
+            );
             // Released on every path: a leaked token leaves the whole page
             // inert with nothing on screen to explain why.
             ops.release();
@@ -1393,36 +1553,46 @@ pub(crate) fn ProfilesSection(
         if !ops.claim() {
             return;
         }
-        let Some(lease) = surface.lease() else {
-            ops.release();
-            return;
-        };
-        confirming.set(None);
         errors.write().remove(&id);
         warning.set(None);
         notice.set(None);
+        let next_focus = {
+            let read = surface.catalog.peek();
+            match read.answer() {
+                CatalogLookup::Known { catalog, .. } => edit_target_after_delete(catalog, &id)
+                    .map(FocusDestination::Edit)
+                    .unwrap_or(FocusDestination::NewProfile),
+                CatalogLookup::Pending | CatalogLookup::Failed(_) => FocusDestination::NewProfile,
+            }
+        };
         let base = base.peek().clone();
         spawn(async move {
-            let sent = delete_profile(&base, lease.target.host, &id).await;
-            if !surface.holds(&lease) {
-                ops.release();
-                return;
-            }
-            match sent {
+            let sent = delete_profile(&base, &id).await;
+            let destination = match sent {
                 Ok(()) => {
                     // Same pre-unlock reconciliation as an edit's: the row is
                     // gone from this client's view of the catalog before
                     // anything else can act on it.
-                    surface.absorb_change(&lease, CatalogChange::Remove(id));
+                    surface.absorb_change(CatalogChange::Remove(id));
                     surface.request(Trigger::Explicit);
+                    next_focus
                 }
                 // An ordinary refusal, recorded per row (see the `errors` map
-                // above) exactly like any other operation this section can
+                // above) exactly like any other operation this popup can
                 // fail.
                 Err(refusal) => {
+                    let destination = FocusDestination::Edit(id.clone());
                     errors.write().insert(id, refusal);
+                    destination
                 }
-            }
+            };
+            confirming.set(None);
+            request_focus(
+                focus_request,
+                focus_coordinator,
+                destination,
+                Replace::Completion,
+            );
             ops.release();
         });
     };
@@ -1440,13 +1610,13 @@ pub(crate) fn ProfilesSection(
     // surface has to say out loud.
     use_effect(move || {
         let read = surface.catalog.read();
-        let CatalogLookup::Known { catalog, .. } = surface.lookup(&read) else {
+        let CatalogLookup::Known { catalog, .. } = read.answer() else {
             return;
         };
         let holds = |id: &str| catalog.profiles.iter().any(|profile| profile.id == id);
         // A per-row refusal belongs to a row. Once the row is gone there is
         // nothing left to render it under, so keeping the entry would grow
-        // this map for as long as the section stays open — on a surface whose
+        // this map for as long as the popup stays open — on a surface whose
         // whole point is to be left open while a fleet changes around it.
         errors.write().retain(|id, _| holds(id));
         let open_editor = match editing.peek().clone() {
@@ -1457,8 +1627,14 @@ pub(crate) fn ProfilesSection(
             && !holds(&id)
         {
             editing.set(None);
+            request_focus(
+                focus_request,
+                focus_coordinator,
+                FocusDestination::NewProfile,
+                Replace::Completion,
+            );
             notice.set(Some(
-                "the profile you were editing is no longer on this host, so the editor was \
+                "the profile you were editing is no longer in this helm, so the editor was \
                  closed — nothing was saved"
                     .to_string(),
             ));
@@ -1468,22 +1644,25 @@ pub(crate) fn ProfilesSection(
             && !holds(&id)
         {
             confirming.set(None);
+            request_focus(
+                focus_request,
+                focus_coordinator,
+                FocusDestination::NewProfile,
+                Replace::Completion,
+            );
             notice.set(Some(
-                "the profile you were about to delete is already gone from this host".to_string(),
+                "the profile you were about to delete is already gone from this helm".to_string(),
             ));
         }
     });
 
     let read = surface.catalog.read();
-    let lookup = surface.lookup(&read);
+    let lookup = read.answer();
     // Cosmetic only — every handler above claims the token for itself.
     let busy = ops.busy();
-    let shown_host = display_peer(&host_name);
-
     rsx! {
         section {
-            class: "profiles-section",
-            "data-profiles-host": "{host}",
+            class: "profiles-popup-content",
             div { class: "profiles-header",
                 span { class: "profiles-title", "profiles" }
                 button {
@@ -1502,6 +1681,12 @@ pub(crate) fn ProfilesSection(
                         form_error.set(None);
                         draft.set(ProfileDraft::blank());
                         editing.set(Some(Editing::New));
+                        request_focus(
+                            focus_request,
+                            focus_coordinator,
+                            FocusDestination::FirstFormField,
+                            Replace::Internal,
+                        );
                     },
                     "new profile"
                 }
@@ -1534,15 +1719,11 @@ pub(crate) fn ProfilesSection(
                 CatalogLookup::Pending => rsx! {
                     div { class: "status profiles-status", "loading profiles…" }
                 },
-                // A catalog read fails for the ordinary reason a host
-                // operation fails — the host is not connected — so the helm's
-                // own sentence, which names the phase, is strictly more
-                // useful than anything this side could compose.
                 CatalogLookup::Failed(error) => rsx! {
                     PeerLine {
                         class: "status error profiles-error",
                         parts: vec![
-                            DetailPart::text("this host's profiles could not be read: "),
+                            DetailPart::text("profiles could not be read: "),
                             DetailPart::peer(error),
                         ],
                     }
@@ -1565,8 +1746,8 @@ pub(crate) fn ProfilesSection(
                     }
                     if catalog.profiles.is_empty() {
                         div { class: "status profiles-empty",
-                            "this host has no profiles; sessions here are created from a typed \
-                             command until one is defined"
+                            "this helm has no profiles; sessions are created from a typed command \
+                             until one is defined"
                         }
                     }
                     div { class: "profile-list",
@@ -1580,7 +1761,6 @@ pub(crate) fn ProfilesSection(
                                 editing: *editing.read() == Some(Editing::Existing(profile.id.clone())),
                                 error: errors.read().get(&profile.id).cloned(),
                                 form_error: form_error.read().clone(),
-                                host_name: shown_host.clone(),
                                 draft,
                                 on_edit_start: move |profile: Profile| {
                                     if ops.busy_now() {
@@ -1591,6 +1771,12 @@ pub(crate) fn ProfilesSection(
                                     notice.set(None);
                                     draft.set(ProfileDraft::of(&profile));
                                     editing.set(Some(Editing::Existing(profile.id)));
+                                    request_focus(
+                                        focus_request,
+                                        focus_coordinator,
+                                        FocusDestination::FirstFormField,
+                                        Replace::Internal,
+                                    );
                                 },
                                 on_submit,
                                 on_cancel: move |_| {
@@ -1606,18 +1792,34 @@ pub(crate) fn ProfilesSection(
                                     if ops.busy_now() {
                                         return;
                                     }
+                                    let destination = match editing.peek().clone() {
+                                        Some(Editing::Existing(id)) => FocusDestination::Edit(id),
+                                        Some(Editing::New) | None => FocusDestination::NewProfile,
+                                    };
                                     editing.set(None);
                                     form_error.set(None);
+                                    request_focus(
+                                        focus_request,
+                                        focus_coordinator,
+                                        destination,
+                                        Replace::Internal,
+                                    );
                                 },
                                 on_delete_start: move |id: String| {
                                     if ops.busy_now() {
                                         return;
                                     }
                                     editing.set(None);
-                                    confirming.set(Some(id));
+                                    confirming.set(Some(id.clone()));
+                                    request_focus(
+                                        focus_request,
+                                        focus_coordinator,
+                                        FocusDestination::DeleteCancel(id),
+                                        Replace::Internal,
+                                    );
                                 },
                                 on_delete_confirm,
-                                on_delete_cancel: move |_| {
+                                on_delete_cancel: move |id: String| {
                                     // Same live-token guard: a cancel racing
                                     // the confirm it follows must not close a
                                     // prompt whose delete is already out.
@@ -1625,6 +1827,12 @@ pub(crate) fn ProfilesSection(
                                         return;
                                     }
                                     confirming.set(None);
+                                    request_focus(
+                                        focus_request,
+                                        focus_coordinator,
+                                        FocusDestination::Edit(id),
+                                        Replace::Internal,
+                                    );
                                 },
                                 profile,
                             }
@@ -1650,6 +1858,12 @@ pub(crate) fn ProfilesSection(
                         }
                         editing.set(None);
                         form_error.set(None);
+                        request_focus(
+                            focus_request,
+                            focus_coordinator,
+                            FocusDestination::NewProfile,
+                            Replace::Internal,
+                        );
                     },
                 }
             }
@@ -1657,14 +1871,13 @@ pub(crate) fn ProfilesSection(
     }
 }
 
-/// One profile: its definition, whether it is this host's remembered default,
+/// One profile: its definition, whether it is the helm's remembered default,
 /// and whichever of edit / delete / the open editor belongs there.
 ///
 /// Every user-supplied value renders through the peer discipline
-/// (`peer::display_peer` plus an isolated run), because a profile is written
-/// on a machine this helm does not control under `--ssh`: a name able to
-/// reorder the row around it could make a delete button appear to belong to a
-/// different profile than it does.
+/// (`peer::display_peer` plus an isolated run), because profiles are
+/// user-supplied text: a name able to reorder the row around it could make a
+/// delete button appear to belong to a different profile than it does.
 ///
 /// `data-profile-id` is the browser suite's handle, on the wrapper so a test
 /// can find a profile and then assert about anything inside it.
@@ -1677,19 +1890,16 @@ fn ProfileRow(
     editing: bool,
     error: Option<String>,
     /// The open form's refusal, passed down so an edit's error lands under
-    /// the fields it is about rather than at the bottom of the section. Only
+    /// the fields it is about rather than at the bottom of the popup. Only
     /// one form is ever open, so the rows that are not editing ignore it.
     form_error: Option<String>,
-    /// The host's name, ALREADY escaped by the section (every row shows the
-    /// same one, so escaping it once above beats escaping it per row).
-    host_name: String,
     draft: Signal<ProfileDraft>,
     on_edit_start: EventHandler<Profile>,
     on_submit: EventHandler<()>,
     on_cancel: EventHandler<()>,
     on_delete_start: EventHandler<String>,
     on_delete_confirm: EventHandler<String>,
-    on_delete_cancel: EventHandler<()>,
+    on_delete_cancel: EventHandler<String>,
 ) -> Element {
     let id = profile.id.clone();
     let shown_name = display_peer(&profile.name);
@@ -1703,7 +1913,7 @@ fn ProfileRow(
                 span { class: "profile-name peer-value", dir: "ltr", "{shown_name}" }
                 span { class: "profile-kind", "{profile.agent_kind}" }
                 // The remembered default is marked rather than sorted to the
-                // top: the catalog's order is the supervisor's and stays
+                // top: the catalog's order is the helm's and stays
                 // stable across renames, and a list that reordered itself
                 // after every create would move options out from under
                 // whoever was reading it.
@@ -1721,7 +1931,7 @@ fn ProfileRow(
                         "deleting a profile leaves every session already created from it running \
                          and unchanged; it only stops being offered for new ones on"
                     }
-                    span { class: "confirm-title peer-value", dir: "ltr", "\"{host_name}\"" }
+                    span { class: "confirm-title", "every host" }
                     button {
                         r#type: "button",
                         class: "btn confirm-delete profile-confirm-delete",
@@ -1735,12 +1945,10 @@ fn ProfileRow(
                     button {
                         r#type: "button",
                         class: "btn confirm-cancel profile-cancel-delete",
-                        // Focus lands on the way OUT of the destructive
-                        // action, through the plain HTML attribute rather
-                        // than a fallible `set_focus` whose discarded
-                        // `Result` could drop the safety behavior silently.
-                        autofocus: true,
-                        onclick: move |_| on_delete_cancel.call(()),
+                        onclick: {
+                            let id = id.clone();
+                            move |_| on_delete_cancel.call(id.clone())
+                        },
                         "cancel"
                     }
                 } else if !editing {
@@ -1798,7 +2006,7 @@ fn ProfileRow(
 /// (`api::update_profile`), so every field has to be present in both cases or
 /// saving would clear whatever was left out.
 ///
-/// The draft belongs to the section (see [`ProfileDraft`]); this component
+/// The draft belongs to the popup (see [`ProfileDraft`]); this component
 /// owns nothing but the layout and the submit.
 ///
 /// Every field opts out of browser text mangling for the create form's
@@ -1959,7 +2167,7 @@ fn ProfileForm(
                 },
                 "cancel"
             }
-            // The supervisor's own words — the name rule, the size cap, the
+            // The helm's own words — the name rule, the size cap, the
             // catalog bound, the placeholder rule — rendered through the same
             // escaping and isolation every peer string gets.
             if let Some(error) = error {
@@ -1975,6 +2183,25 @@ fn ProfileForm(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Requests waiting for the page-owned driver collapse to the strongest
+    /// authority, so background traffic cannot make a person's refresh stand
+    /// down under build skew before the reader sees it.
+    #[test]
+    fn pending_catalog_requests_keep_the_strongest_trigger() {
+        assert_eq!(
+            strongest_catalog_trigger(Some(Trigger::Scheduled), Trigger::Notice),
+            Trigger::Notice
+        );
+        assert_eq!(
+            strongest_catalog_trigger(Some(Trigger::Notice), Trigger::Explicit),
+            Trigger::Explicit
+        );
+        assert_eq!(
+            strongest_catalog_trigger(Some(Trigger::Explicit), Trigger::Scheduled),
+            Trigger::Explicit
+        );
+    }
 
     /// A profile with the given id and name; everything else is filler,
     /// because every assertion below is about identity or existence.
@@ -1996,122 +2223,20 @@ mod tests {
         }
     }
 
-    /// A target for the tests below: a host id plus a fingerprint, which is
-    /// what a catalog actually belongs to.
-    fn target(host: HostId, fingerprint: &str) -> HostTarget {
-        HostTarget::new(host, fingerprint.to_string())
-    }
-
-    /// A catalog read for one target says NOTHING about another, however
-    /// recent it is — and a HOST ID is not a target.
-    ///
-    /// The failure this pins is the expensive one, and the incarnation half is
-    /// the sharper of the two: profile ids are minted per supervisor and every
-    /// fresh supervisor seeds the same starters, so a row that has been
-    /// retargeted or adopted onto another install keeps its id while its
-    /// catalog becomes a different catalog with colliding ids. Answering the
-    /// new question with the old answer would offer profiles that RESOLVE over
-    /// there, to definitions nobody chose.
-    #[test]
-    fn a_catalog_answers_only_for_the_target_it_was_read_from() {
-        let first = target(1, "install-a");
-        let mut read = CatalogRead::default();
-        read.record(
-            &first,
-            1,
-            Ok(catalog(vec![profile("p-1", "Claude Code")], None)),
-        );
-
-        assert!(matches!(
-            read.answer_for(Some(&first), 1),
-            CatalogLookup::Known { .. }
-        ));
-        assert_eq!(
-            read.answer_for(Some(&target(2, "install-b")), 1),
-            CatalogLookup::Pending,
-            "another host's catalog is not a stale answer to this question; it is an answer to a \
-             different one"
-        );
-        assert_eq!(
-            read.answer_for(Some(&target(1, "install-b")), 1),
-            CatalogLookup::Pending,
-            "and the SAME registry row on another install is another question too — this is what \
-             a retarget or an adopt does, with the id unchanged"
-        );
-
-        // And re-pointing DISCARDS rather than merges: the previous install's
-        // profiles must not be on screen for even one frame under the new one.
-        let second = target(2, "install-b");
-        read.record(
-            &second,
-            2,
-            Err("host 2 is unreachable-reprobing".to_string()),
-        );
-        assert_eq!(
-            read.answer_for(Some(&second), 2),
-            CatalogLookup::Failed("host 2 is unreachable-reprobing")
-        );
-        assert_eq!(read.answer_for(Some(&first), 1), CatalogLookup::Pending);
-    }
-
-    /// A surface reopened on the SAME target reads as pending until its own
-    /// read lands.
-    ///
-    /// What it held is not evidence about now: a remembered default can have
-    /// moved (another client created from a different profile) and profiles
-    /// can have come and gone while this surface was closed. Presenting the
-    /// old answer for the moment before the new read lands is exactly long
-    /// enough for a create to be submitted against it.
-    #[test]
-    fn a_reopened_surface_does_not_present_what_it_held_as_current() {
-        let host = target(1, "install-a");
-        let mut read = CatalogRead::default();
-        read.record(
-            &host,
-            1,
-            Ok(catalog(vec![profile("p-1", "Codex")], Some("p-1"))),
-        );
-
-        assert_eq!(
-            read.answer_for(Some(&host), 2),
-            CatalogLookup::Pending,
-            "a later activation of the same target has not been answered yet"
-        );
-        // Nothing is lost by that: the activation's own read replaces it.
-        read.record(
-            &host,
-            2,
-            Ok(catalog(vec![profile("p-2", "Claude Code")], None)),
-        );
-        match read.answer_for(Some(&host), 2) {
-            CatalogLookup::Known { catalog, .. } => {
-                assert_eq!(catalog.profiles[0].id, "p-2");
-                assert_eq!(catalog.default_profile, None);
-            }
-            other => panic!("the new activation's read must land, got {other:?}"),
-        }
-    }
-
-    /// A failed refresh keeps the catalog on screen and says so; it does not
-    /// blank the section.
+    /// A failed refresh keeps the shared catalog on screen and says so; it
+    /// does not blank either consumer.
     ///
     /// The same choice the hosts panel makes about the registry, for the same
     /// reason: rows the user can still act on, marked as possibly out of
-    /// date, beat an empty box — and a profile section that emptied itself
-    /// whenever one read dropped would look like the host had lost its
-    /// profiles.
+    /// date, beat an empty box — and a popup that emptied itself whenever one
+    /// read dropped would look like the catalog had lost its profiles.
     #[test]
     fn a_failed_refresh_keeps_the_catalog_and_reports_itself() {
-        let host = target(1, "install-a");
         let mut read = CatalogRead::default();
-        read.record(
-            &host,
-            1,
-            Ok(catalog(vec![profile("p-1", "Codex")], Some("p-1"))),
-        );
-        read.record(&host, 1, Err("the helm did not answer".to_string()));
+        read.record(Ok(catalog(vec![profile("p-1", "Codex")], Some("p-1"))));
+        read.record(Err("the helm did not answer".to_string()));
 
-        match read.answer_for(Some(&host), 1) {
+        match read.answer() {
             CatalogLookup::Known {
                 catalog,
                 refresh_error,
@@ -2124,13 +2249,9 @@ mod tests {
 
         // And the next success clears the line rather than leaving a
         // permanent warning over rows that were just refreshed.
-        read.record(
-            &host,
-            1,
-            Ok(catalog(vec![profile("p-1", "Codex")], Some("p-1"))),
-        );
+        read.record(Ok(catalog(vec![profile("p-1", "Codex")], Some("p-1"))));
         assert!(matches!(
-            read.answer_for(Some(&host), 1),
+            read.answer(),
             CatalogLookup::Known {
                 refresh_error: None,
                 ..
@@ -2138,24 +2259,60 @@ mod tests {
         ));
     }
 
+    /// An equal confirming read is a no-op when no refresh error needs clearing.
+    ///
+    /// This distinction avoids a needless signal write and reconciliation;
+    /// the separate error assertion preserves the visible stale-state line's
+    /// contract even when the catalog contents themselves compare equal.
+    #[test]
+    fn an_identical_catalog_reply_needs_no_rendered_update() {
+        let held = catalog(vec![profile("p-1", "Codex")], Some("p-1"));
+        let mut read = CatalogRead::default();
+        read.record(Ok(held.clone()));
+
+        assert!(!read.differs_from(&Ok(held.clone())));
+        assert!(read.differs_from(&Err("the helm did not answer".to_string())));
+
+        read.record(Err("the helm did not answer".to_string()));
+        assert!(
+            read.differs_from(&Ok(held)),
+            "an equal successful catalog must still clear a held refresh error"
+        );
+    }
+
+    /// Catalog order participates in equality because it is observable UI
+    /// state and an authoritative read must be able to replace the temporary
+    /// append order produced by local create absorption.
+    #[test]
+    fn reordered_profiles_are_a_catalog_change() {
+        let first = profile("p-1", "First");
+        let second = profile("p-2", "Second");
+        let mut read = CatalogRead::default();
+        read.record(Ok(catalog(
+            vec![first.clone(), second.clone()],
+            Some("p-1"),
+        )));
+
+        assert!(read.differs_from(&Ok(catalog(vec![second, first], Some("p-1"),))));
+    }
+
     /// A mutation this client performed is folded into the held catalog at
-    /// once — and only into the catalog it was made against.
+    /// once, so both consumers stop serving the superseded definition.
     ///
     /// The window this closes is small and the failure inside it is durable: a
     /// save answers with the new definition, the operation token is released,
-    /// and until the authoritative re-read lands the section would otherwise
+    /// and until the authoritative re-read lands the popup would otherwise
     /// still seed an editor from the definition that was just replaced.
-    /// Saving THAT would undo an update the supervisor accepted, with nothing
+    /// Saving THAT would undo an update the helm accepted, with nothing
     /// on screen to suggest anything went wrong.
     #[test]
     fn a_committed_mutation_is_folded_in_before_the_authoritative_read() {
-        let host = target(1, "install-a");
         let mut read = CatalogRead::default();
-        read.record(&host, 1, Ok(catalog(vec![profile("p-1", "Before")], None)));
+        read.record(Ok(catalog(vec![profile("p-1", "Before")], None)));
 
-        read.absorb(&host, 1, CatalogChange::Upsert(profile("p-1", "After")));
-        read.absorb(&host, 1, CatalogChange::Upsert(profile("p-2", "Fresh")));
-        match read.answer_for(Some(&host), 1) {
+        assert!(read.absorb(CatalogChange::Upsert(profile("p-1", "After"))));
+        assert!(read.absorb(CatalogChange::Upsert(profile("p-2", "Fresh"))));
+        match read.answer() {
             CatalogLookup::Known { catalog, .. } => {
                 assert_eq!(
                     catalog.profiles[0].name, "After",
@@ -2166,28 +2323,40 @@ mod tests {
             other => panic!("the catalog must still be readable, got {other:?}"),
         }
 
-        read.absorb(&host, 1, CatalogChange::Remove("p-1".to_string()));
-        match read.answer_for(Some(&host), 1) {
+        assert!(read.absorb(CatalogChange::Remove("p-1".to_string())));
+        match read.answer() {
             CatalogLookup::Known { catalog, .. } => {
                 assert_eq!(catalog.profiles.len(), 1);
                 assert_eq!(catalog.profiles[0].id, "p-2");
             }
             other => panic!("the catalog must still be readable, got {other:?}"),
         }
+    }
 
-        // A change made against a question this surface is no longer asking
-        // is dropped rather than applied to whatever it holds now — the same
-        // rule the read path keeps, from the write side.
-        read.absorb(
-            &target(1, "install-b"),
-            1,
-            CatalogChange::Upsert(profile("p-9", "Elsewhere")),
-        );
-        read.absorb(&host, 2, CatalogChange::Upsert(profile("p-8", "Later")));
-        match read.answer_for(Some(&host), 1) {
-            CatalogLookup::Known { catalog, .. } => assert_eq!(catalog.profiles.len(), 1),
-            other => panic!("the catalog must be untouched, got {other:?}"),
-        }
+    /// A mutation cannot synthesize a complete catalog before the first read.
+    ///
+    /// Reporting that absence lets a successful create choose a stable focus
+    /// fallback instead of waiting on a row whose surrounding catalog has not
+    /// arrived yet.
+    #[test]
+    fn absorbing_without_a_catalog_reports_no_focusable_row() {
+        let mut read = CatalogRead::default();
+
+        assert!(!read.absorb(CatalogChange::Upsert(profile("p-1", "Codex"))));
+        assert_eq!(read.answer(), CatalogLookup::Pending);
+    }
+
+    /// An unreadable successful mutation invalidates the shared answer until
+    /// the authoritative read lands.
+    ///
+    /// Keeping the pre-mutation row would let either consumer act on a
+    /// definition the client already knows may have changed.
+    #[test]
+    fn invalidating_a_catalog_makes_it_pending_without_reusing_old_rows() {
+        let mut read = CatalogRead::default();
+        read.record(Ok(catalog(vec![profile("p-1", "Before")], None)));
+        read.forget();
+        assert_eq!(read.answer(), CatalogLookup::Pending);
     }
 
     /// The first catalog to answer decides, once — and a remembered default
@@ -2225,14 +2394,12 @@ mod tests {
     }
 
     /// Once a dialog has been seeded, "nothing chosen" means the ask —
-    /// permanently, until the user answers or the target moves.
+    /// permanently, until the user answers or closes the dialog.
     ///
-    /// The failure this pins is a silent retarget with a different cause than
-    /// the host ones: another client creating a session moves the helm's
-    /// remembered id, this page re-reads on the notification, and a dialog
-    /// that still consulted the default would change its selection under
-    /// whoever was filling it in. The latch is what makes the default a
-    /// decision this dialog made rather than a value it follows.
+    /// Another client creating a session moves the helm's remembered id. A
+    /// dialog that still consulted the default after the notification would
+    /// change its selection under whoever was filling it in; the latch makes
+    /// the default a decision this dialog made rather than a value it follows.
     #[test]
     fn a_seeded_dialog_never_follows_a_later_remembered_default() {
         let moved = catalog(
@@ -2283,10 +2450,10 @@ mod tests {
 
     /// A chosen profile that leaves the catalog BLOCKS the create, visibly.
     ///
-    /// A real race rather than a hypothetical: the profiles section sits
-    /// directly above this dialog, and the feed re-reads the catalog in both,
-    /// so a delete made in the panel — or in another browser — reaches an open
-    /// dialog within one notification. Two failures are ruled out at once: a
+    /// A real race rather than a hypothetical: the popup and picker share one
+    /// feed-driven catalog, so a delete made in the popup — or in another
+    /// browser — reaches an open dialog within one notification. Two failures
+    /// are ruled out at once: a
     /// picker still displaying a profile the create would not use, and a
     /// picker that silently reverts to the command field, which still holds
     /// whatever was typed there before the profile was chosen.
@@ -2310,7 +2477,7 @@ mod tests {
     /// a profile has been picked.
     ///
     /// SPEC.md's ask-don't-guess rule read conservatively: a dialog that has
-    /// not yet learned whether its host remembers a profile cannot honestly
+    /// not yet learned whether its helm remembers a profile cannot honestly
     /// default to the command field, which may already hold text typed for a
     /// different intention. The state is transient by construction (it clears
     /// when the read lands) and always escapable — choosing "custom command"
@@ -2324,7 +2491,7 @@ mod tests {
                 choice: None,
                 note: Some(AgentNote::ChoiceUnconfirmed),
             },
-            "before the catalog answers, this dialog does not know whether the host remembers a \
+            "before the catalog answers, this dialog does not know whether the helm remembers a \
              profile — so it asks rather than defaulting to a command field that may not be empty"
         );
         assert_eq!(
@@ -2536,15 +2703,14 @@ mod tests {
         );
     }
 
-    /// A row names the profile a session was created FROM, as snapshotted,
-    /// with what has since become of it said out loud.
+    /// A row names the profile a session was created FROM, as snapshotted.
     ///
     /// Both halves are SPEC.md's snapshot rule seen from the list: the name
     /// never changes under an existing session (so a rename cannot rewrite
-    /// history), and the qualifier is what stops that name from reading as a
-    /// claim about today's catalog. An unknown existence is qualified rather
-    /// than rounded to "present", because claiming a profile still exists is
-    /// a statement and a word this build cannot read is not grounds for it.
+    /// history). A rename is qualified because this helm still has the row
+    /// under a different name; a deleted row is plain because an immutable
+    /// historical label is not a warning. An unknown existence stays
+    /// qualified rather than being rounded to a state this build understands.
     #[test]
     fn a_snapshotted_profile_reads_as_a_snapshot() {
         let source = |existence| SourceProfile {
@@ -2562,7 +2728,7 @@ mod tests {
         );
         assert_eq!(
             source_profile_label(&source(ProfileExistence::Deleted)),
-            "profile: Claude Code (deleted since)"
+            "profile: Claude Code"
         );
         assert_eq!(
             source_profile_label(&source(ProfileExistence::Unrecognized)),
@@ -2581,6 +2747,27 @@ mod tests {
             source_profile_label(&hostile),
             "profile: Claude<U+202E>Code"
         );
+    }
+
+    /// Deleting a row focuses the following row in catalog order, while the
+    /// last row falls back to the stable new-profile control. This keeps a
+    /// keyboard user from being stranded when the focused row disappears.
+    #[test]
+    fn delete_focus_uses_the_following_row_or_the_new_profile_fallback() {
+        let catalog = catalog(
+            vec![
+                profile("p-1", "first"),
+                profile("p-2", "second"),
+                profile("p-3", "third"),
+            ],
+            None,
+        );
+        assert_eq!(
+            edit_target_after_delete(&catalog, "p-2"),
+            Some("p-3".to_string())
+        );
+        assert_eq!(edit_target_after_delete(&catalog, "p-3"), None);
+        assert_eq!(edit_target_after_delete(&catalog, "missing"), None);
     }
 
     /// The DOM's existence vocabulary is the WIRE's, one word per state and

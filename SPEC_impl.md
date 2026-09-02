@@ -225,6 +225,16 @@ steady state nothing. A classified status renders in at most one place: the head
 metadata band for a stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere
 at all for a session nothing has classified yet.
 
+The app-bar profiles popup has one explicit focus request at a time. Opening lands on `new profile`; opening an editor
+lands on its name field; closing a form returns to its row's edit control or to `new profile`; opening a delete prompt
+lands on cancel; and completing a save or delete chooses the surviving row control described by the catalog transition.
+Escape and layout invalidation close the popup and restore its toggle. Focus-out instead preserves the outside
+destination the user chose. A page operation may defer either dismissal while it keeps the popup mounted, but it never
+consumes the obligation: the popup closes once the operation is idle if focus or layout still requires it. A catalog
+refresh patches unchanged keyed profile rows in place, so it does not replay focus after locally absorbed mutations. A
+terminal whose retained output becomes visible while the popup is mounted does not take focus. Closing the popup does
+not hand focus to that terminal; the user can click it when they want to type there.
+
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel hangs below-LEFT of the toggle that opened it — its top-right corner
 at the toggle's bottom-left, clamped inside the viewport — so that the toggle COLUMN of every row below stays uncovered
@@ -263,28 +273,22 @@ live one: submitting a profile-backed clone resolves that id against whatever de
 moment, exactly like any other profile-backed create.
 
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
-`HostId` is a registry row that outlives a retarget or an adopt) before either the selector or the agent choice trusts
-it; a row whose install this client cannot currently confirm is left at the ordinary default with a note explaining why,
-rather than risking a stale command — or, worse, a colliding starter-profile id — landing on a successor install. That
-identity check is not a one-shot gate: `CloneHostState` (`list::create_form`) tracks it across renders so a clone opened
-before the FIRST hosts read lands keeps retrying once the registry answers, instead of giving up permanently because the
-form's separate text-field reseed only ever runs once per clone generation; and a clone whose host DID pass the check is
-re-checked on every later pass, withdrawing the selection back to the ordinary default the instant a retarget or an
-adopt changes the installation behind it while the form stays open. A row that names no host at all (a session from a
-helm too old to report one) is treated as permanently unconfirmable rather than retried: its agent is left unresolved
-with its own note, since there is no install to check at all and applying a raw command or a profile id sight-unseen
-onto whatever host the ordinary default picks could run it on a machine the row never named. An explicit host or agent
-interaction takes the decision away from all of this automatic reconciliation outright, for the rest of that clone
-generation.
+`HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this
+client cannot currently confirm is left at the ordinary host default with a note explaining why, rather than risking a
+stale command landing on a successor install. That identity check is not a one-shot gate: `CloneHostState`
+(`list::create_form`) tracks it across renders so a clone opened before the FIRST hosts read lands keeps retrying once
+the registry answers, instead of giving up permanently because the form's separate text-field reseed only ever runs once
+per clone generation. A clone whose host DID pass the check is re-checked on every later pass, withdrawing only the host
+selection back to the ordinary default the instant a retarget or adopt changes the installation behind it while the form
+stays open. A row that names no host at all (a session from a helm too old to report one) is permanently unconfirmable
+rather than retried. An explicit host interaction takes the host decision away from automatic reconciliation for the
+rest of that clone generation.
 
-A cross-host clone that DOES pass the identity check still cannot select its host and apply its agent choice in the same
-render: the form's own profile catalog is scoped to the LIST VIEW's chosen-host effect, which only catches up one render
-pass after the clone moves `chosen_host`. The agent choice is queued (bound to the target's full install fingerprint,
-not merely its host id, so a retarget landing during the wait cannot be mistaken for the install the choice was actually
-queued for) and applied the instant the catalog's target matches it — on the SAME render when the clone's own host was
-already current, and on a later one otherwise. Because that handoff spans a render the user can act inside of, any
-explicit host or agent interaction cancels a still-queued choice outright, so an answer given before the handoff catches
-up is never silently overwritten once it does.
+Agent seeding is separate. The form reads the source choice against the one helm-owned catalog, which applies to every
+host: a `Present` profile is selected once the live catalog confirms its id, while every other source state falls back
+to the source session's raw invocation. A delayed or unconfirmable host does not suppress that choice, and later host
+binding or withdrawal does not change it. An explicit agent or command interaction is authoritative for the rest of the
+clone generation, so neither a late catalog read nor a late host read can overwrite it.
 
 A clone's working directory, invocation and title are peer-relayed text (SPEC.md's clone rule copies them off another
 session, and a remote supervisor under `--ssh` is the one this client does not control) going into editable controls, so

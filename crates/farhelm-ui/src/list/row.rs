@@ -1173,13 +1173,11 @@ pub(super) fn SessionRow(
                         // badge (`compact_invocation`). Either way the full
                         // command line is on the `title`.
                         //
-                        // The profile case keeps the qualifier that the
-                        // panel's chip carries — in the tooltip and in
-                        // `data-profile-existence`, which is what the
-                        // color and the browser suite key off — because a
-                        // bare snapshotted name on a row would read as a
-                        // claim about the catalog as it stands today, and
-                        // SPEC.md's snapshot rule says it is not one.
+                        // The profile case keeps the same existence data as
+                        // the panel chip. Renames and unknown states use it
+                        // for their qualifier and warning color; deletion is
+                        // deliberately plain because a historical snapshot is
+                        // not evidence that the session itself is unhealthy.
                         if let Some(source) = &session.source_profile {
                             span {
                                 class: "session-invocation peer-value",
@@ -1724,15 +1722,13 @@ pub(super) fn SessionRow(
                             // it snapshotted the name — moved here from the
                             // row proper (the interviewed row contents drop
                             // the chip) so SPEC.md's snapshot rule keeps a
-                            // visible surface: the name never moves under
-                            // an existing session, and the qualifier
-                            // (`profiles::source_profile_label`) keeps that
-                            // from reading as a claim about today's
-                            // catalog. `data-profile-existence` remains the
-                            // browser suite's handle on the half that does
-                            // change. A SIBLING of the menu above, never a
-                            // child of it: it is a fact about the session,
-                            // not a fifth thing to do to it.
+                            // visible surface: the name never moves under an
+                            // existing session. Renames stay qualified, while
+                            // a deleted row remains a plain historical label.
+                            // `data-profile-existence` remains the browser
+                            // suite's handle on the derived state. A SIBLING
+                            // of the menu above, never a child of it: it is a
+                            // fact about the session, not a fifth thing to do.
                             if let Some(source) = &session.source_profile {
                                 span {
                                     class: "session-profile peer-value",

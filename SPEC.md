@@ -299,13 +299,14 @@ recorded. Exactly how a row lays out its lines and pixels is an implementation c
 than here.
 
 Per-host connection state is always visible, as a compact per-host indicator naming each host with its current phase;
-the full hosts panel — retry, retargeting, removal, profiles — opens on demand rather than occupying the session list
-permanently. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm
-restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are refused
-with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
-directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
-one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
-clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
+the full hosts panel — retry, retargeting, removal — opens on demand rather than occupying the session list permanently.
+Profiles are managed from the sidebar's own popup. Sessions on an unreachable host stay in the list from the helm's
+last-known knowledge (which survives helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations
+against an unreachable host are refused with a clear error; nothing queues for later delivery in v1. Opening such a
+session shows its metadata — title, directory, last-known status — behind a clear host-unreachable notice; there is no
+terminal to show and no pretense of one. Changes made from any client — creates, renames, stops, deletes, status
+transitions — appear in all other connected clients automatically; the agent-spawn behavior below is one instance of
+this general rule, not a special case.
 
 ### Status
 

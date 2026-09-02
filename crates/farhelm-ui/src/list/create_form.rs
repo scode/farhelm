@@ -5,12 +5,12 @@
 
 use dioxus::prelude::*;
 
-use crate::api::{self, CreateAgent, create_session, mint_intent_key};
+use crate::api::{self, CreateAgent, ProfileCatalog, create_session, mint_intent_key};
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{
-    AgentChoice, CatalogLookup, CatalogSurface, HostTarget, UNRESOLVED_VALUE, resolve_agent,
-    seeded_choice, submitted_field,
+    AgentChoice, CatalogLookup, CatalogSurface, UNRESOLVED_VALUE, resolve_agent, seeded_choice,
+    submitted_field,
 };
 use crate::reader::Trigger;
 use crate::{ApiBase, HostId, ProfileExistence, Session};
@@ -28,6 +28,25 @@ use super::shared::{
 /// spinning is a worse answer than saying so.
 const MINT_ATTEMPTS: usize = 3;
 
+/// The host installation a create intent is bound to.
+///
+/// Profile ids are helm-wide now, but the idempotency key and clone target are
+/// still installation-specific: a registry row can be retargeted or adopted
+/// while retaining its numeric id. This value keeps that safety boundary out
+/// of the catalog model it no longer belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CreateTarget {
+    pub(crate) host: HostId,
+    fingerprint: String,
+}
+
+impl CreateTarget {
+    /// Bind a registry row to the installation fingerprint the form observed.
+    pub(crate) fn new(host: HostId, fingerprint: String) -> CreateTarget {
+        CreateTarget { host, fingerprint }
+    }
+}
+
 /// What one create would actually LAUNCH.
 ///
 /// The two creation modes are mutually exclusive on the wire (PLAN_M6_75.md
@@ -41,7 +60,7 @@ const MINT_ATTEMPTS: usize = 3;
 enum LaunchIntent {
     /// The invocation as typed into the form.
     Command(String),
-    /// A profile from the target host's catalog, by id.
+    /// A profile from the helm catalog, by id.
     Profile(String),
 }
 
@@ -103,34 +122,30 @@ impl IntentBinding {
     }
 }
 
-/// Whether the catalog surface's target still describes the selected row —
-/// the SAME registry row AND the same install fingerprint. The submit
-/// handler refuses to send when this is false.
+/// Whether the create target still describes the selected row — the same
+/// registry row and installation fingerprint.
 ///
 /// Comparing the row id alone is not enough, and the gap is the documented
 /// one-render lag: after a retarget or an adoption the `hosts` snapshot can
-/// already describe the successor install while the catalog surface still
-/// holds the predecessor's catalog under the same row id. A profile id
-/// resolved against that catalog would then be launched on the successor,
-/// where the same id names a different profile (every fresh supervisor seeds
-/// the same starters) — and because the connection token would also be read
-/// from the successor's row, the helm's own create precondition would pass.
-/// The full-target comparison is what closes that window client-side.
+/// already describe the successor install while the derived target signal
+/// still describes its predecessor. The full-target comparison keeps the
+/// request's idempotency and connection claims bound to one installation.
 ///
 /// Both sides absent is a match on purpose: the hostless refusal downstream
 /// owns that case and says something more useful than "the target changed".
-/// A selected row missing from the snapshot is a mismatch — whatever catalog
-/// is held, it cannot be shown to describe a row that no longer exists.
-fn catalog_matches_selection(
+/// A selected row missing from the snapshot is a mismatch: no installation
+/// target can describe a row that no longer exists.
+fn target_matches_selection(
     selected: Option<HostId>,
     hosts: &[HostOption],
-    target: Option<&HostTarget>,
+    target: Option<&CreateTarget>,
 ) -> bool {
     match (selected, target) {
         (None, None) => true,
-        (Some(id), Some(target)) => hosts.iter().find(|host| host.id == id).is_some_and(|host| {
-            HostTarget::new(host.id, host.incarnation.clone()).same_install(target)
-        }),
+        (Some(id), Some(target)) => hosts
+            .iter()
+            .find(|host| host.id == id)
+            .is_some_and(|host| CreateTarget::new(host.id, host.incarnation.clone()) == *target),
         _ => false,
     }
 }
@@ -178,11 +193,11 @@ fn connection_claim(hosts: &[HostOption], host: HostId) -> Option<u64> {
 /// Trusting the id at all, even under `Present`, is still a SNAPSHOT
 /// decision, not a live one: once a profile-backed clone is applied and the
 /// user submits, the request names the id and nothing else, and the
-/// supervisor resolves it against whatever definition the catalog holds AT
-/// SUBMIT TIME — an edit landing between the clone click and the submit
+/// helm resolves it against whatever definition the catalog holds AT SUBMIT
+/// TIME — an edit landing between the clone click and the submit
 /// changes what the cloned session launches, exactly as it would for any
 /// other profile-backed create, and a deletion in that window is refused by
-/// `resolve_agent` the same way a live picker's own vanished choice is.
+/// either the refreshed picker or the helm rather than falling back.
 ///
 /// Not [`LaunchIntent`] reused, even though the two-mode split is
 /// identical: `LaunchIntent::Command(String)` pairs its variant with the
@@ -237,10 +252,8 @@ pub(super) struct CreatePrefill {
     /// `Option` contract. This is what lets the reseed effect tell a row
     /// whose host still fronts the SAME install apart from one that has
     /// since been retargeted or adopted onto a successor: accepting the
-    /// latter's host id at face value would send this clone's command or
-    /// profile id to a machine the row no longer actually names (a raw
-    /// command executes there; a profile id can collide with a different,
-    /// deterministically-numbered starter profile there) — exactly the
+    /// latter's host id at face value would send this clone's launch to a
+    /// machine the row no longer actually names — exactly the
     /// #156-style residual `shared::matching_host_option` already closes
     /// for the ordinary create default, reused here for the same question.
     pub(super) host_identity: Option<Option<String>>,
@@ -283,15 +296,15 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
 }
 
 // ---------------------------------------------------------------------
-// A clone's own host+agent binding, resolved independently of its text
-// fields (item2-review2.md's F1/F2/F3/F4)
+// A clone's host and agent choices, reconciled on independent lifecycles
 // ---------------------------------------------------------------------
 
-/// What has become of the CURRENT clone generation's own host+agent
-/// binding — tracked separately from `prefill_applied` (the text fields)
-/// because, unlike them, this decision cannot always be made in the same
-/// render pass a clone arrives in, and it can be TAKEN BACK later by
-/// events the text fields do not care about at all.
+/// What has become of the current clone generation's host binding.
+///
+/// Host identity remains installation-specific even though the agent catalog
+/// is helm-wide. Keeping this state about the host alone prevents a delayed
+/// registry answer or later retarget from owning an agent choice that remains
+/// valid on every host.
 ///
 /// Four states rather than a bool, because three different questions later
 /// code needs answered would otherwise collapse into one flag that cannot
@@ -309,8 +322,7 @@ enum CloneHostState {
     /// send this generation through the ordinary reseed branch again), or
     /// this pass is the first chance to check a registry that already had.
     Waiting,
-    /// `chosen_host` (and whatever agent choice is applied or queued in
-    /// `pending_choice`) currently hold THIS generation's own pick.
+    /// `chosen_host` currently holds this generation's own pick.
     /// Re-checked every pass: the moment `matching_host_option` stops
     /// confirming the source installation — a retarget or an adopt lands
     /// while the form stays open — the binding is withdrawn back to
@@ -322,15 +334,14 @@ enum CloneHostState {
     /// (legacy) row, whose install can never be confirmed at all
     /// (item2-review2.md F4); a hostful row whose identity check failed
     /// once the registry had a chance to answer; or a `Bound` binding that
-    /// was just withdrawn. `chosen_host` and the agent picker are left to
-    /// their ordinary, non-clone rules from here — for the REST of this
+    /// was just withdrawn. `chosen_host` is left to its ordinary, non-clone
+    /// rules from here — for the REST of this
     /// generation's lifetime, since only a fresh clone (a new generation)
     /// re-seeds `Waiting`.
     Unconfirmable,
     /// An explicit host interaction (the selector's own `onchange`) has
     /// taken this generation's host decision away from automatic handling
-    /// entirely (item2-review2.md F6's spirit, applied to the binding
-    /// itself rather than only to `pending_choice`): the user picked a
+    /// entirely (item2-review2.md F6's spirit): the user picked a
     /// host with their own hand, so a later retarget of the CLONE's row
     /// must not silently pull the rug out from under a choice the clone
     /// had nothing to do with anymore. Ordinary (non-clone) retarget
@@ -352,27 +363,19 @@ enum CloneHostState {
 enum CloneHostAction {
     /// Nothing to do this pass — the caller's signals are untouched.
     Hold,
-    /// Apply the clone's own choice onto `target`, the same one-render-late
-    /// queue a fresh cross-host clone always uses (`pending_choice`): the
-    /// caller sets `chosen_host` to `target.host` immediately and stashes
-    /// `choice` for the catalog-target effect to consume once it catches
-    /// up, whether that catching-up takes zero extra passes (same host
-    /// already effective) or one (a cross-host jump).
-    Bind {
-        target: HostTarget,
-        choice: AgentChoice,
-    },
-    /// Undo a binding this generation had previously made: `chosen_host`,
-    /// whatever agent choice is applied, and `pending_choice` may all
-    /// currently describe it, and the caller must clear all three.
+    /// Apply the clone's confirmed host installation.
+    Bind(CreateTarget),
+    /// Undo a binding this generation had previously made.
     Withdraw,
 }
 
-/// Resolve one pass of a clone's own host+agent binding — a pure decision,
-/// so item2-review2.md's F1 (retry once the registry loads), F3 (withdraw
-/// the instant a bound installation stops matching) and F4 (a hostless
-/// clone never resolves an agent) are each one deterministic case here,
-/// checkable without mounting a component or an effect.
+/// Resolve one pass of a clone's host binding as a pure decision.
+///
+/// This keeps item2-review2.md's F1 (retry once the registry loads), F3
+/// (withdraw the instant a bound installation stops matching), and F4 (a
+/// hostless clone never invents a host) deterministic and checkable without
+/// mounting a component or an effect. Agent seeding is deliberately absent;
+/// [`resolve_clone_agent`] owns its independent helm-catalog lifecycle.
 ///
 /// `chosen_host_is_bound_host` is only consulted in the `Bound` state: it
 /// is how the caller reports that `chosen_host` has moved away from this
@@ -385,7 +388,6 @@ fn resolve_clone_host(
     state: CloneHostState,
     prefill_host: Option<HostId>,
     prefill_identity: &Option<Option<String>>,
-    prefill_agent: &PrefillAgent,
     hosts_loaded: bool,
     hosts: &[HostOption],
     chosen_host_is_bound_host: bool,
@@ -413,15 +415,8 @@ fn resolve_clone_host(
             };
             match matching_host_option(&open, hosts) {
                 Some(option) => {
-                    let target = HostTarget::new(option.id, option.incarnation.clone());
-                    let choice = match prefill_agent {
-                        PrefillAgent::Command => AgentChoice::Command,
-                        PrefillAgent::Profile { id } => AgentChoice::Profile(id.clone()),
-                    };
-                    (
-                        CloneHostState::Bound,
-                        CloneHostAction::Bind { target, choice },
-                    )
+                    let target = CreateTarget::new(option.id, option.incarnation.clone());
+                    (CloneHostState::Bound, CloneHostAction::Bind(target))
                 }
                 // The registry has answered and this row's install cannot
                 // be confirmed — permanently, for the rest of this
@@ -459,6 +454,53 @@ fn resolve_clone_host(
         }
         CloneHostState::Unconfirmable | CloneHostState::UserTookOver => {
             (state, CloneHostAction::Hold)
+        }
+    }
+}
+
+/// Whether a clone may still seed its agent choice automatically.
+///
+/// Unlike host reconciliation, this is one-shot. The helm-wide catalog can
+/// confirm a profile without knowing anything about the source host, and no
+/// later host event may withdraw or replace the result. An explicit picker or
+/// command interaction permanently takes authority for this clone generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloneAgentState {
+    /// The source choice has not yet been applied, normally because its
+    /// profile still needs confirmation from the first catalog answer.
+    Waiting,
+    /// The source choice was applied once and must not be replayed.
+    Seeded,
+    /// A person chose the agent and automatic seeding must stand down.
+    UserTookOver,
+}
+
+/// Resolve one pass of clone-agent seeding against the helm catalog.
+///
+/// Raw commands need no catalog evidence and seed immediately. A profile id
+/// waits for a catalog, uses the profile only while that catalog still holds
+/// it, and otherwise falls back to the source session's raw command. Terminal
+/// states return no action so unrelated renders cannot overwrite the choice.
+fn resolve_clone_agent(
+    state: CloneAgentState,
+    prefill: &PrefillAgent,
+    catalog: Option<&ProfileCatalog>,
+) -> (CloneAgentState, Option<AgentChoice>) {
+    if state != CloneAgentState::Waiting {
+        return (state, None);
+    }
+    match prefill {
+        PrefillAgent::Command => (CloneAgentState::Seeded, Some(AgentChoice::Command)),
+        PrefillAgent::Profile { id } => {
+            let Some(catalog) = catalog else {
+                return (CloneAgentState::Waiting, None);
+            };
+            let choice = if catalog.profiles.iter().any(|profile| profile.id == *id) {
+                AgentChoice::Profile(id.clone())
+            } else {
+                AgentChoice::Command
+            };
+            (CloneAgentState::Seeded, Some(choice))
         }
     }
 }
@@ -588,16 +630,11 @@ fn reseed_cloned_field(
 ///
 /// ## The agent picker (PLAN_M6_75.md item 8)
 ///
-/// The dialog offers the TARGET host's profiles and defaults to the one a
-/// session was last created from there, asking rather than guessing when that
-/// profile is gone — `profiles::resolve_agent` owns both halves of that rule
-/// and is where the reasoning lives. Two consequences show up here:
-///
-/// - Changing the host CLEARS the profile choice. A profile id is minted per
-///   supervisor and every fresh supervisor seeds the same starters, so an id
-///   carried across would not merely go stale — it would resolve over there,
-///   against a profile nobody chose.
-/// - The command field is disabled while a profile is selected, because the
+/// The dialog offers the helm's whole catalog on every host and defaults to
+/// the helm-wide last-used profile, asking rather than guessing when that
+/// profile is gone. `profiles::resolve_agent` owns both halves of that rule.
+/// Changing the host leaves an explicit choice intact. The command field is
+/// disabled while a profile is selected, because the
 ///   two creation modes are mutually exclusive on the wire and a body naming
 ///   both is refused. Disabling it is also what keeps the intent binding
 ///   honest: a field the user cannot reach cannot change what the key stands
@@ -614,25 +651,30 @@ fn reseed_cloned_field(
 /// `prefill` set instead of building a second, immediate-create path — see
 /// `CreatePrefill`'s own doc for what it carries and why. The one wrinkle it
 /// adds to the agent picker: a prefilled profile choice must WIN over the
-/// target host's remembered default on the render right after the clone,
+/// helm's remembered default on the render right after the clone,
 /// which is the opposite of the ordinary "nothing chosen yet, seed from the
 /// remembered default" rule two paragraphs up. The reseed effect (below)
 /// gets this for free rather than as a special case, because it sets
 /// `chosen_profile` before the remembered-default seeding runs, and that
-/// seeding already backs off the moment a choice already exists.
+/// seeding already backs off the moment a choice already exists. Profile
+/// confirmation is independent of host reconciliation: the one helm catalog
+/// applies everywhere, so a delayed or unconfirmable host cannot suppress a
+/// valid source profile, and a later host answer cannot overwrite a person's
+/// explicit agent choice.
 ///
 /// The host is not accepted at face value. A `HostId` is a registry row
 /// that survives a retarget or an adopt while the machine behind it
 /// changes, so the reseed effect runs the cloned row's `host` and
 /// `host_identity` through `shared::matching_host_option` — the exact
 /// install comparison `default_create_host` already applies to SPEC.md's
-/// ordinary creation default — before selecting it or trusting the choice
-/// that came with it (`resolve_clone_host`, and `CloneHostState`'s own doc
-/// for the states that comparison moves between). A row whose install
+/// ordinary creation default — before selecting it (`resolve_clone_host`, and
+/// `CloneHostState`'s own doc for the states that comparison moves between).
+/// A row whose install
 /// cannot be confirmed — hostless entirely, or mismatched once the
 /// registry has had a chance to answer — is left unselected: the selector
-/// falls through to its ordinary default, no agent is carried over with
-/// it, and `clone_agent_note` (below) is what tells the user why, reusing
+/// falls through to its ordinary default, while the agent is still seeded
+/// from the helm catalog; `clone_host_note` (below) tells the user why the
+/// host changed, reusing
 /// the same host-note slot `choice_vanished` already renders through.
 /// Unconfirmed is not the same as unchecked, though: a clone opened before
 /// the FIRST `hosts` read lands is retried once the registry answers
@@ -644,14 +686,9 @@ fn reseed_cloned_field(
 /// silently continuing to name a machine the clone was never actually
 /// taken from (F3). An explicit host pick takes the decision away from
 /// this reconciliation entirely, permanently, for the rest of the
-/// generation (`CloneHostState::UserTookOver`). A CROSS-host clone that
-/// DOES pass the install check still cannot be applied immediately —
-/// `pending_choice` is the queue for the one render this form's own
-/// catalog target needs to catch up with a host `chosen_host` just moved
-/// to (see that field's own doc for the exact handoff and the fingerprint
-/// it is bound to) — and any explicit host or agent interaction cancels a
-/// still-queued choice outright, so a user who answers before the handoff
-/// catches up is never overwritten by it arriving late (F6).
+/// generation (`CloneHostState::UserTookOver`). The derived target may catch
+/// up one render after `chosen_host`, but it gates host identity and
+/// idempotency only; it does not scope the catalog or clear the agent choice.
 #[component]
 pub(super) fn CreateSessionForm(
     hosts: Vec<HostOption>,
@@ -669,13 +706,13 @@ pub(super) fn CreateSessionForm(
     /// [`effective_create_host`]'s answer, recomputed per render against the
     /// hosts that exist right now.
     ///
-    /// `ListView`'s signal rather than this form's, because the profile
-    /// catalog is read for whatever this names and the reads on that page go
-    /// through readers it owns (see `ListView`).
+    /// `ListView`'s signal rather than this form's so the same effective-host
+    /// derivation also binds the idempotency key and connection claim.
     mut chosen_host: Signal<Option<HostId>>,
-    /// The target host's profile catalog, read by `ListView` and rendered
-    /// here. Pointed at [`effective_create_host`]'s answer, so the picker and
-    /// the create can never describe different machines.
+    /// The installation currently selected for the create. This is separate
+    /// from the helm-wide catalog and exists only for host safety checks.
+    create_target: Signal<Option<CreateTarget>>,
+    /// The helm-wide profile catalog shared with the profiles popup.
     catalog: CatalogSurface,
     /// The page's live-operation token. Claimed at submit, released when the
     /// request completes — the exclusion against every host mutation, and
@@ -721,7 +758,7 @@ pub(super) fn CreateSessionForm(
     let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     // The agent this dialog is going to use, once anything has decided it —
-    // the user picking, or the host's remembered default being CONSUMED (see
+    // the user picking, or the helm's remembered default being CONSUMED (see
     // the effect below). `None` means nobody has decided yet.
     let mut chosen_profile = use_signal(|| None::<AgentChoice>);
     // Whether an explicit choice has been overtaken by reality. Derived per
@@ -730,15 +767,19 @@ pub(super) fn CreateSessionForm(
     // (a re-added destination) silently reinstates the user's choice.
     let choice_vanished =
         chosen_host().is_some_and(|chosen| !hosts.iter().any(|host| host.id == chosen));
-    // What has become of the CURRENT clone generation's own host+agent
-    // binding — see `CloneHostState`'s own doc for the four states and why
+    // What has become of the current clone generation's host binding — see
+    // `CloneHostState`'s own doc for the four states and why
     // a bool cannot stand in for them. Reseeded to `Waiting` (or, for a
     // hostless clone, straight to `Unconfirmable`) every time a new
     // generation arrives, and otherwise updated only by the reseed effect
     // below (`resolve_clone_host`) and by an explicit host pick.
     let mut clone_host_state = use_signal(|| CloneHostState::Unconfirmable);
-    // Why this clone's own host+agent portion is not (or is no longer) in
-    // play, when there is something worth telling the user about it — read
+    // Whether this clone generation may still apply its source agent. Kept
+    // separate from the host state because one helm catalog applies to every
+    // host and explicit agent interaction must remain authoritative.
+    let mut clone_agent_state = use_signal(|| CloneAgentState::Seeded);
+    // Why this clone's own host is not (or is no longer) in play, when there
+    // is something worth telling the user about it — read
     // straight off `clone_host_state` every render, never cached, so a
     // mismatch that resolves later (the registry catching up, an identity-
     // mismatch phase clearing) stops being reported the instant it stops
@@ -746,16 +787,16 @@ pub(super) fn CreateSessionForm(
     // is open, this generation is still `Waiting` on the registry (F1 says
     // nothing yet rather than guessing), and `Bound`/`UserTookOver`, where
     // there is nothing to explain.
-    let clone_agent_note = prefill
+    let clone_host_note = prefill
         .as_ref()
         .and_then(|prefill| match *clone_host_state.read() {
             CloneHostState::Unconfirmable if prefill.host.is_none() => Some(
-                "the session you cloned predates host tracking, so its agent could not be \
-                 confirmed on any host and was not carried over here — check the agent below",
+                "the session you cloned predates host tracking, so its host could not be \
+                 confirmed and the ordinary host default is used — check the host below",
             ),
             CloneHostState::Unconfirmable => Some(
-                "the session you cloned reports a different installation now, so its host and \
-                 agent were not carried over here — check the host and agent below",
+                "the session you cloned reports a different installation now, so its host was \
+                 not carried over here — check the host below",
             ),
             CloneHostState::Waiting | CloneHostState::Bound | CloneHostState::UserTookOver => None,
         });
@@ -767,32 +808,19 @@ pub(super) fn CreateSessionForm(
     let mut intent_key = use_signal(|| None::<(String, IntentBinding)>);
     let busy = ops.busy();
 
-    // The agent choice is bound to an INSTALL, and this is what binds it.
-    //
-    // Two rules, and both are about not letting a decision outlive the thing
-    // it was made about:
-    //
-    // - A target change — the user picking another host, a chosen host
-    //   leaving the registry and the default taking over, or the SAME row
-    //   being retargeted or adopted — discards the choice and the intent
-    //   key. A profile id means nothing on another supervisor, and because
-    //   every fresh supervisor seeds the same starters, carrying one across
-    //   does not fail loudly: it resolves, to a profile nobody picked. A
-    //   mere RECONNECTION is deliberately not a target change (`HostTarget`
-    //   carries no connection token): a reconnect is precisely when a reply
-    //   gets lost, and rotating the key there would turn the user's retry
-    //   into a second intended create.
-    // - The remembered default is CONSUMED ONCE per target, and `seeded_for`
-    //   is what records that it has been. Tracking consumption by "a choice
-    //   exists" is not enough and the gap is reachable: a first catalog with
-    //   NO remembered default, or one whose default was already deleted,
-    //   leaves no choice behind — so a later refresh would seed from whatever
-    //   the helm remembers BY THEN, and another client's create would move the
-    //   selection under an open dialog. Latching the first answer, whatever it
-    //   was, is what makes the default a decision this dialog made rather than
-    //   a value it follows.
-    let mut bound_target = use_signal(|| None::<HostTarget>);
-    let mut seeded_for = use_signal(|| None::<HostTarget>);
+    // Mounting this component is the create surface's closed-to-open
+    // transition. An explicit request is allowed through a latched build skew
+    // and coalesces with any read the page-owned surface already has in flight.
+    use_effect(move || catalog.request(Trigger::Explicit));
+
+    // Host binding and profile seeding now have different lifecycles. A host
+    // installation change rotates the idempotency key and any host-specific
+    // refusal, but the explicit profile choice survives because every host
+    // consumes the same helm catalog. The remembered default is consumed once
+    // for the dialog, whatever its first answer was, so a later feed refresh
+    // cannot move the selection under someone filling in the form.
+    let mut bound_target = use_signal(|| None::<CreateTarget>);
+    let mut seeded_for = use_signal(|| false);
     // Which prefill GENERATION (`CreatePrefill`) this form has already
     // applied. Compared by generation rather than by mere presence in the
     // effect below, because `prefill` stays populated at its latest
@@ -800,37 +828,6 @@ pub(super) fn CreateSessionForm(
     // reseed on every unrelated rerun of that effect (a host reconnect, a
     // catalog refresh) for as long as a clone is on screen.
     let mut prefill_applied = use_signal(|| None::<u64>);
-    // A prefilled agent CHOICE whose target host has not yet been PROVEN
-    // to be the effective one, held here until it has — or dropped, when
-    // the clone's own host never earns that proof at all.
-    //
-    // Two different reasons queue a choice here rather than applying it on
-    // the spot, and both matter for what "proven" has to mean:
-    //
-    // - Cross-host: the reseed effect below writes `chosen_host` the
-    //   instant a clone names a different host, but the catalog surface
-    //   that decides `catalog.watch_target()` is `ListView`'s
-    //   (`create_target`/`create_catalog`), derived from `chosen_host`
-    //   through an effect on THAT component — so it only catches up on a
-    //   LATER render pass, not this one.
-    // - Same host, but not yet TRUSTED: `shared::matching_host_option`
-    //   (the same install comparison `default_create_host` runs for an
-    //   ordinary create) needs `hosts` to have loaded before it can tell a
-    //   row whose host still fronts the same install apart from one
-    //   retargeted or adopted onto a successor — see `CreatePrefill::
-    //   host_identity`'s own doc for why trusting it early would be able
-    //   to run a stale command, or resolve a profile id, on the wrong
-    //   machine. Until `hosts_loaded`, nothing here is proven either way.
-    //
-    // Consumed — applied, then cleared — the moment a target update's host
-    // matches AND that install check passes; until then `resolve_agent`
-    // simply sees no chosen profile and blocks, the same as it would for
-    // any other host switch still in flight. Bound to the target's full
-    // `HostTarget` (fingerprint included, via `HostTarget::same_install`)
-    // rather than to a bare host id, so a retarget of the SAME row landing
-    // during this wait cannot be mistaken for the install this choice was
-    // actually queued for.
-    let mut pending_choice = use_signal(|| None::<(HostTarget, AgentChoice)>);
     // Cloned rather than borrowed into the effect below: `hosts` is this
     // component's own prop (not a `Signal`, so it cannot be `Copy`-captured
     // the way the surrounding signals are), and the render body further
@@ -841,11 +838,11 @@ pub(super) fn CreateSessionForm(
         (&prefill.as_ref().map(|prefill| prefill.generation),),
         move |_| {
             let hosts = &hosts_for_reseed;
-            let target = catalog.watch_target();
+            let target = create_target();
             let read = catalog.catalog.read();
             let previous = bound_target.peek().clone();
 
-            // Applied BEFORE the host+agent resolution below, and in the
+            // Applied BEFORE the host and agent resolutions below, and in the
             // SAME effect invocation rather than a separate one: a clone
             // aimed at a different host is itself what moves
             // `chosen_host`, and these fields must seed exactly once
@@ -883,22 +880,22 @@ pub(super) fn CreateSessionForm(
                 error.set(None);
 
                 // item2-review2.md F2: every new generation starts its OWN
-                // host+agent binding from a clean slate, cleared BEFORE any
+                // host and agent decisions from a clean slate, cleared BEFORE any
                 // attempt to resolve it — otherwise a clone whose own host
                 // cannot be confirmed (rejected below, or hostless) could
                 // silently inherit whatever a PREVIOUS generation (or an
                 // earlier manual pick) had left in these three signals.
                 chosen_host.set(None);
                 chosen_profile.set(None);
-                pending_choice.set(None);
+                clone_agent_state.set(CloneAgentState::Waiting);
                 clone_host_state.set(match prefill.host {
                     None => CloneHostState::Unconfirmable, // F4: nothing to resolve safely
                     Some(_) => CloneHostState::Waiting,
                 });
             }
 
-            // Resolve (or re-resolve) THIS generation's own host+agent
-            // binding. Deliberately NOT gated on the generation transition
+            // Resolve (or re-resolve) THIS generation's own host binding and
+            // one-shot agent seed. Deliberately NOT gated on the generation transition
             // above — it runs on every pass this effect fires, reading
             // whatever `clone_host_state` currently holds, which is what
             // makes both F1's retry (once the registry answers a clone that
@@ -912,7 +909,6 @@ pub(super) fn CreateSessionForm(
                     *clone_host_state.peek(),
                     prefill.host,
                     &prefill.host_identity,
-                    &prefill.agent,
                     hosts_loaded,
                     hosts,
                     prefill.host.is_some() && chosen_host.peek().as_ref() == prefill.host.as_ref(),
@@ -920,119 +916,45 @@ pub(super) fn CreateSessionForm(
                 clone_host_state.set(next_state);
                 match action {
                     CloneHostAction::Hold => {}
-                    CloneHostAction::Bind { target, choice } => {
+                    CloneHostAction::Bind(target) => {
                         chosen_host.set(Some(target.host));
-                        // Cleared HERE, not left to whatever this form
-                        // held before the clone: a queued choice must not
-                        // leave a PREVIOUS selection visible to
-                        // `resolve_agent` while this one waits for the
-                        // catalog to catch up, since that previous choice
-                        // names a different install's profile — see
-                        // `pending_choice`'s own doc for why the guard
-                        // that actually blocks submission during the wait
-                        // is the host/catalog mismatch check, not this
-                        // clear, which exists so a blocked dialog reads as
-                        // "nothing chosen yet" rather than "still showing
-                        // the previous pick" while aimed at a new host.
-                        chosen_profile.set(None);
-                        pending_choice.set(Some((target, choice)));
                     }
                     CloneHostAction::Withdraw => {
                         chosen_host.set(None);
-                        chosen_profile.set(None);
-                        pending_choice.set(None);
                     }
                 }
-            }
-            // A `resolve_clone_host` outcome of `Unconfirmable` (a hostless
-            // row, or one whose install could not be confirmed) leaves the
-            // selector unselected: `clone_agent_note` (rendered above) is
-            // what tells the user why, and the selector falls through to
-            // its ordinary default (`effective_create_host`) instead of a
-            // host this clone can no longer vouch for. The profile choice
-            // stays dropped with it — a profile id is only as good as the
-            // install it was minted on, and applying it against whatever
-            // host ends up being the default would risk resolving a
-            // deterministically-numbered starter profile that belongs to a
-            // different machine.
 
-            // A queued choice is applied the instant its OWN install
-            // becomes the effective target, whether or not the target
-            // moved on THIS pass — a fresh clone whose host is already
-            // current (the ordinary "clone again without closing the
-            // form" case) needs this to run in the SAME pass that queued
-            // it, since the target-change branch below only fires when
-            // `previous != target`. Bound once and consumed here, rather
-            // than peeked twice, so there is exactly one place that reads
-            // it and exactly one that decides whether it matched.
-            let pending_for_target = pending_choice.peek().clone().filter(|(pending, _)| {
-                target.as_ref().is_some_and(|now| pending.same_install(now))
-            });
-            let caught_up = pending_for_target.is_some();
-            if let Some((_, choice)) = pending_for_target {
-                chosen_profile.set(Some(choice));
-                pending_choice.set(None);
+                let offered = match read.answer() {
+                    CatalogLookup::Known { catalog, .. } => Some(catalog),
+                    CatalogLookup::Pending | CatalogLookup::Failed(_) => None,
+                };
+                let (next_agent_state, choice) =
+                    resolve_clone_agent(*clone_agent_state.peek(), &prefill.agent, offered);
+                clone_agent_state.set(next_agent_state);
+                if let Some(choice) = choice {
+                    chosen_profile.set(Some(choice));
+                }
             }
+            // An unconfirmable clone host leaves the selector at its ordinary
+            // default. Agent seeding above is deliberately unaffected: the
+            // source profile belongs to the helm, not to that installation.
 
             if previous != target {
                 bound_target.set(target.clone());
-                // The catalog must be re-seeded whenever the TARGET moved —
-                // an install change (another row picked, or the same row
-                // retargeted or adopted), never a mere reconnection, which
-                // does not change `HostTarget` at all. What was held so far
-                // describes the previous install, and treating it as an
-                // answer about this one would offer profile ids that
-                // resolve to something else over here.
-                seeded_for.set(None);
-                // The CHOICE and the KEY, however, rotate only when the
-                // INSTALL changes. A reconnection to the same machine is
-                // precisely when a reply gets lost, and that is the case
-                // the idempotency key exists for — rotating it there would
-                // turn the user's retry into a second intended create and
-                // hand them two sessions for one press. A retarget or an
-                // adoption is the opposite and must rotate: the id now
-                // means another machine, where the key dedups against
-                // nothing and the profile id resolves to something else.
-                let same_install = match (&previous, &target) {
-                    (Some(before), Some(now)) => before.same_install(now),
-                    // Opening the dialog (None -> Some) and closing it are
-                    // not reconnections; a fresh dialog starts fresh.
-                    _ => false,
-                };
-                // `caught_up`, computed above, is what keeps this branch
-                // from undoing the choice a fresh clone just applied (or
-                // just consumed from `pending_choice`) on the very same
-                // pass this target change is itself part of — see
-                // `pending_choice`'s own doc for the concrete case
-                // (F2-shaped: a clone into a freshly mounted form, whose
-                // source host is already the child's effective target)
-                // this guards against.
-                if !caught_up && !same_install {
-                    chosen_profile.set(None);
-                    intent_key.set(None);
-                    // A refusal belongs to the host it came from. Left
-                    // standing, host A's "directory does not exist" would
-                    // sit under a form now aimed at host B, where it may
-                    // not even be true.
-                    error.set(None);
-                }
+                // Equality already compares the row and installation
+                // fingerprint, so every target change here is a new intent.
+                intent_key.set(None);
+                // A refusal belongs to the host it came from. Left standing,
+                // host A's refusal could be shown for host B.
+                error.set(None);
             }
-            // Consumption is only meaningful once there IS a target: on the
-            // first render both are `None`, and reading that equality as
-            // "already seeded" would make an unread catalog
-            // indistinguishable from a deleted remembered profile — the
-            // dialog would open claiming something was gone before it had
-            // asked anything.
-            if target.is_some() && *seeded_for.peek() == target {
+            if *seeded_for.peek() {
                 return;
             }
-            // Only a catalog that answers the CURRENT question may seed a
-            // choice — `lookup` is what refuses one belonging to a previous
-            // activation or another install.
-            let CatalogLookup::Known { catalog: held, .. } = catalog.lookup(&read) else {
+            let CatalogLookup::Known { catalog: held, .. } = read.answer() else {
                 return;
             };
-            seeded_for.set(target);
+            seeded_for.set(true);
             // The user (or a clone prefill, applied above) may have
             // answered while the read was in flight; an answer outranks a
             // default.
@@ -1050,19 +972,14 @@ pub(super) fn CreateSessionForm(
         },
     ));
 
-    // What the picker may offer: this surface's catalog, and nothing at all
-    // until one has been read for the question it is asking right now
-    // (`CatalogSurface::lookup` refuses anything else, which is what stops
-    // one install's profiles being offered for a create aimed at another).
+    // What the picker may offer: the shared helm catalog once its read lands.
     let catalog_read = catalog.catalog.read();
-    let held = catalog.lookup(&catalog_read);
+    let held = catalog_read.answer();
     let offered = match &held {
         CatalogLookup::Known { catalog, .. } => Some(*catalog),
         _ => None,
     };
-    // Seeded only once a concrete target has been answered — see the effect
-    // above for why `None == None` must not read as consumption.
-    let seeded = bound_target.read().is_some() && *seeded_for.read() == *bound_target.read();
+    let seeded = *seeded_for.read();
     let agent = resolve_agent(chosen_profile.read().as_ref(), offered, seeded);
     let by_profile = matches!(agent.choice, Some(AgentChoice::Profile(_)));
     // Owned, because the picker's options compare against it inside a loop
@@ -1099,11 +1016,11 @@ pub(super) fn CreateSessionForm(
     // result, held across the minting await (see the submit path).
     let resolve_now = move || {
         let read = catalog.catalog.peek();
-        let offered = match catalog.lookup(&read) {
+        let offered = match read.answer() {
             CatalogLookup::Known { catalog, .. } => Some(catalog),
             _ => None,
         };
-        let seeded = bound_target.peek().is_some() && *seeded_for.peek() == *bound_target.peek();
+        let seeded = *seeded_for.peek();
         resolve_agent(chosen_profile.peek().as_ref(), offered, seeded).choice
     };
 
@@ -1167,18 +1084,12 @@ pub(super) fn CreateSessionForm(
                 // one turn reaches this handler before any re-render, and a
                 // captured host would send the create to the PREVIOUS machine
                 // while the selector on screen names another.
-                let target_now = catalog.target();
+                let target_now = create_target.peek().clone();
                 let selected_now =
                     effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref());
-                // And the catalog the agent was just resolved against has to
-                // be the catalog OF that host — the same row AND the same
-                // install fingerprint, not merely the same id. When they
-                // disagree the target effect has not caught up yet — a window
-                // of one render, which a retarget or an adoption can also
-                // open on an UNCHANGED selection — and a profile id resolved
-                // against the old install's catalog would be sent to the new
-                // one, where it means something else or nothing.
-                if !catalog_matches_selection(selected_now, &hosts, target_now.as_ref()) {
+                // The host target must have caught up with the selector before
+                // the request can bind its idempotency and connection claims.
+                if !target_matches_selection(selected_now, &hosts, target_now.as_ref()) {
                     error.set(Some(
                         "the target host changed while this create was being submitted, so                          nothing was sent — check the agent and press create again"
                             .to_string(),
@@ -1228,9 +1139,9 @@ pub(super) fn CreateSessionForm(
                 // the same hosts snapshot the target match above just
                 // vouched for: the helm refuses the create if the host has
                 // been retargeted or adopted onto another install by the
-                // time it routes, which is what keeps a profile id chosen
-                // from THIS catalog from resolving on a successor's starter
-                // of the same id. `None` — a vanished row, or one that has
+                // time it routes, which keeps any launch intent from reaching
+                // a successor installation the form never selected. `None` —
+                // a vanished row, or one that has
                 // never connected — means no claim (see `connection_claim`).
                 let expected_incarnation = connection_claim(&hosts, binding.host);
                 error.set(None);
@@ -1340,7 +1251,18 @@ pub(super) fn CreateSessionForm(
                     .await
                     {
                         Ok(session) => {
-                            // Released BEFORE navigating: `on_created`
+                            // A profile-backed create changes the helm's
+                            // remembered default. Drop the old paired answer
+                            // before this form closes so an immediate reopen
+                            // stays pending until an authoritative read lands;
+                            // writing the submitted id locally would pretend
+                            // the helm's best-effort preference write is known
+                            // to have succeeded.
+                            if matches!(&bound.agent, LaunchIntent::Profile(_)) {
+                                catalog.invalidate();
+                                catalog.request(Trigger::Explicit);
+                            }
+                            // Released before navigating: `on_created`
                             // unmounts this component, and a token released
                             // afterwards would be released by a task nobody
                             // is left to run.
@@ -1358,21 +1280,19 @@ pub(super) fn CreateSessionForm(
                             // has since been re-pointed at host B, where it
                             // would describe a machine the user is not looking
                             // at and may not even be true.
-                            if catalog.target() == target_now {
+                            if create_target.peek().as_ref() == target_now.as_ref() {
                                 let (stale, prose) = api::precondition_of(&e);
                                 if stale {
                                     // The world moved between preparing this
                                     // create and routing it — the id now
                                     // reaches another install, where the
-                                    // profile id would have resolved to
-                                    // something else. The key goes with it (a
+                                    // connection claim no longer describes the
+                                    // selected installation. The key goes with it (a
                                     // retry must be a NEW intent, not a replay
                                     // aimed at a machine that never saw the
                                     // first) and the catalog is re-read, which
                                     // is what supersedes this message.
                                     intent_key.set(None);
-                                    chosen_profile.set(None);
-                                    catalog.request(Trigger::Explicit);
                                 }
                                 // The key otherwise deliberately SURVIVES a
                                 // failure: a failure whose cause was an
@@ -1424,19 +1344,8 @@ pub(super) fn CreateSessionForm(
                     value: selected.map(|id| id.to_string()).unwrap_or_default(),
                     onchange: move |evt| {
                         chosen_host.set(evt.value().parse::<HostId>().ok());
-                        // A profile id belongs to ONE supervisor, so a choice
-                        // cannot follow the user to another host: carrying it
-                        // over would either name nothing there or — because
-                        // every fresh supervisor seeds the same starters —
-                        // resolve to a profile they never chose. Cleared
-                        // rather than remembered, so the new host's own
-                        // remembered default takes over.
-                        chosen_profile.set(None);
-                        // item2-review2.md F6: an explicit host pick must not
-                        // be silently overwritten by a cross-host clone
-                        // handoff that is still in flight — the choice made
-                        // just now is newer than anything queued before it.
-                        pending_choice.set(None);
+                        // The agent choice deliberately survives: every host
+                        // consumes the same helm catalog.
                         // And it takes this generation's clone-derived
                         // binding off automatic handling for good
                         // (`CloneHostState::UserTookOver`): the user is now
@@ -1482,16 +1391,16 @@ pub(super) fn CreateSessionForm(
             // The clone-specific reconciliation, in the same voice and the
             // same slot: the row this form was cloned from could not be
             // confirmed as the install it was cloned from (mismatched, or
-            // predating host tracking entirely — see `clone_agent_note`'s
-            // own doc), so its host and agent were not carried over, and
+            // predating host tracking entirely — see `clone_host_note`'s
+            // own doc), so its host was not carried over, and
             // the selector below shows its ordinary default instead. Says
             // nothing while a hostful clone is still `Waiting` on the
             // registry (F1) — that is not yet a fact worth reporting.
-            if let Some(note) = clone_agent_note {
+            if let Some(note) = clone_host_note {
                 div { class: "create-session-host-note", "{note}" }
             }
-            // The agent, offered from the TARGET host's catalog and defaulting
-            // to what a session was last created from there (SPEC.md's
+            // The agent, offered from the helm catalog and defaulting
+            // to what a session was last created from on this helm (SPEC.md's
             // creation rule; `profiles::resolve_agent`). The empty option is
             // the raw command path below rather than "no agent" — a create
             // always launches something, and this select is which of the two
@@ -1509,12 +1418,7 @@ pub(super) fn CreateSessionForm(
                     value: "{chosen_agent}",
                     onchange: move |evt| {
                         chosen_profile.set(AgentChoice::from_value(&evt.value()));
-                        // item2-review2.md F6: an explicit agent pick is
-                        // newer than any cross-host clone handoff still
-                        // queued behind it, and must win outright rather
-                        // than being overwritten once that handoff catches
-                        // up on a later render.
-                        pending_choice.set(None);
+                        clone_agent_state.set(CloneAgentState::UserTookOver);
                         // A different agent is a different intended create,
                         // exactly as a different directory is.
                         intent_key.set(None);
@@ -1575,24 +1479,32 @@ pub(super) fn CreateSessionForm(
             }
             // SPEC.md's ask-don't-guess fallback, said out loud. It appears
             // only when a profile that WAS available is not anymore — a first
-            // create on a host has nothing to explain — and the thing it
+            // create in a helm has nothing to explain — and the thing it
             // rules out is the silent substitution: another profile quietly
             // preselected under the label of a remembered preference.
             if let Some(note) = agent.note {
                 div { class: "create-session-profile-note", "{note.text()}" }
             }
             // A catalog that could not be READ is a third state, and it must
-            // not look like a host with no profiles: the usual cause is a
-            // host that is not connected, and the picker offering only the
-            // command path with nothing said would leave a user wondering
-            // where their profiles went — and then hitting the same refusal
-            // from the create itself. The helm's sentence names the phase,
-            // so it is printed as written.
+            // not look like an empty catalog. Offering only the command path
+            // with nothing said would leave a user wondering where their
+            // profiles went, so the helm's failure is printed as written.
             if let CatalogLookup::Failed(error) = &held {
                 PeerLine {
                     class: "create-session-profile-error".to_string(),
                     parts: vec![
-                        DetailPart::text("this host's profiles could not be read: "),
+                        DetailPart::text("this helm's profiles could not be read: "),
+                        DetailPart::peer(*error),
+                    ],
+                }
+            }
+            if let CatalogLookup::Known { refresh_error: Some(error), .. } = &held {
+                PeerLine {
+                    class: "create-session-profile-refresh-error".to_string(),
+                    parts: vec![
+                        DetailPart::text(
+                            "showing the last catalog this client read; the refresh failed: ",
+                        ),
                         DetailPart::peer(*error),
                     ],
                 }
@@ -1674,10 +1586,7 @@ pub(super) fn CreateSessionForm(
                         // just typed on screen but unused. The user said what
                         // they want by typing it.
                         chosen_profile.set(Some(AgentChoice::Command));
-                        // item2-review2.md F6: this is an explicit agent
-                        // choice too, and must not be overwritten by a
-                        // cross-host clone handoff still queued behind it.
-                        pending_choice.set(None);
+                        clone_agent_state.set(CloneAgentState::UserTookOver);
                         // An edit makes the next submit a DIFFERENT
                         // intent, so the key the last one used stops
                         // applying here (this component's docs carry the
@@ -1745,7 +1654,7 @@ mod tests {
     use super::super::row::row_specimen;
     use super::super::shared::tests::{open, option};
     use super::*;
-    use crate::SourceProfile;
+    use crate::{Profile, SourceProfile};
 
     /// An intent is a command, in a directory, on one INCARNATION of a host
     /// — so a binding must differ whenever any of those does, and the
@@ -1837,26 +1746,26 @@ mod tests {
     /// the form refuses locally instead of sending, because a hostless body
     /// would be silently defaulted by the helm to a machine the user was
     /// never shown.
-    /// Submission refuses when the catalog target and the selected row
+    /// Submission refuses when the create target and the selected row
     /// disagree about the INSTALL, not merely about the row id.
     ///
     /// This is the rule-level pin of the one-render-lag regression: after a
     /// retarget or an adoption the hosts snapshot describes the successor
-    /// while the catalog surface still holds the predecessor's catalog under
-    /// the same row id. The component-level version (staging the submit
+    /// while the derived target still holds the predecessor's fingerprint.
+    /// The component-level version (staging the submit
     /// handler mid-lag) is not stageable in this harness — the handler lives
     /// inside the dioxus closure — so the comparison is extracted and pinned
     /// here instead.
     #[test]
-    fn submission_requires_the_catalog_to_match_the_selected_install() {
+    fn submission_requires_the_target_to_match_the_selected_install() {
         let hosts = vec![option(1, "this machine", true)];
-        let current = HostTarget::new(1, "incarnation-1".to_string());
-        assert!(catalog_matches_selection(Some(1), &hosts, Some(&current)));
+        let current = CreateTarget::new(1, "incarnation-1".to_string());
+        assert!(target_matches_selection(Some(1), &hosts, Some(&current)));
         assert!(
-            !catalog_matches_selection(
+            !target_matches_selection(
                 Some(1),
                 &hosts,
-                Some(&HostTarget::new(
+                Some(&CreateTarget::new(
                     1,
                     "incarnation-before-retarget".to_string()
                 )),
@@ -1864,15 +1773,15 @@ mod tests {
             "the same row id under a moved install fingerprint is the lag window, not a match"
         );
         assert!(
-            !catalog_matches_selection(Some(2), &hosts, Some(&current)),
-            "a selected row absent from the snapshot cannot vouch for any catalog"
+            !target_matches_selection(Some(2), &hosts, Some(&current)),
+            "a selected row absent from the snapshot cannot vouch for any target"
         );
         assert!(
-            catalog_matches_selection(None, &hosts, None),
+            target_matches_selection(None, &hosts, None),
             "no selection and no target fall through to the hostless refusal downstream"
         );
-        assert!(!catalog_matches_selection(Some(1), &hosts, None));
-        assert!(!catalog_matches_selection(None, &hosts, Some(&current)));
+        assert!(!target_matches_selection(Some(1), &hosts, None));
+        assert!(!target_matches_selection(None, &hosts, Some(&current)));
     }
 
     /// A never-connected host yields NO connection claim, and a connected
@@ -1911,14 +1820,12 @@ mod tests {
     }
 
     /// The effective create target is the user's choice while it exists and
-    /// the local row otherwise — one answer, used by both the dialog that
-    /// renders it and the reader that follows it.
+    /// the local row otherwise — one answer used by the dialog and create
+    /// request validation.
     ///
     /// The middle case is why this is a function rather than two expressions:
-    /// a chosen host leaving the registry moves the target, and if the picker
-    /// and the catalog reader disagreed about when, the dialog would offer
-    /// one host's profiles for a create aimed at another — an id that names
-    /// nothing over there, or worse, a starter profile that resolves.
+    /// a chosen host leaving the registry moves the create target, and every
+    /// field that binds the request must agree about that move.
     #[test]
     fn the_effective_create_target_follows_a_choice_until_it_is_gone() {
         let hosts = vec![
@@ -2076,8 +1983,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------
-    // `resolve_clone_host` (item2-review2.md F1/F3/F4): the pure decision
-    // behind a clone's own host+agent binding, checkable without mounting
+    // `resolve_clone_host`: the pure decision behind a clone's host binding
     // a component or an effect.
     // -------------------------------------------------------------
 
@@ -2096,7 +2002,6 @@ mod tests {
             CloneHostState::Waiting,
             Some(1),
             &identity,
-            &PrefillAgent::Command,
             false, // hosts_loaded
             &hosts,
             false,
@@ -2109,9 +2014,6 @@ mod tests {
             CloneHostState::Waiting,
             Some(1),
             &identity,
-            &PrefillAgent::Profile {
-                id: "p-1".to_string(),
-            },
             true,
             &hosts,
             false,
@@ -2119,10 +2021,7 @@ mod tests {
         assert_eq!(state, CloneHostState::Bound);
         assert_eq!(
             action,
-            CloneHostAction::Bind {
-                target: HostTarget::new(1, "incarnation-1".to_string()),
-                choice: AgentChoice::Profile("p-1".to_string()),
-            }
+            CloneHostAction::Bind(CreateTarget::new(1, "incarnation-1".to_string()))
         );
     }
 
@@ -2137,7 +2036,6 @@ mod tests {
             CloneHostState::Waiting,
             Some(1),
             &stale_identity,
-            &PrefillAgent::Command,
             true,
             &hosts,
             false,
@@ -2146,25 +2044,16 @@ mod tests {
         assert_eq!(action, CloneHostAction::Hold);
     }
 
-    /// F4: a hostless clone never resolves an agent, however this function
-    /// is reached — the caller starts such a clone straight in
+    /// A hostless clone never resolves a host, however this function is
+    /// reached — the caller starts such a clone straight in
     /// `Unconfirmable` (see the reseed effect's generation-transition
     /// branch), and this pins the same guarantee at the function level too:
     /// `Waiting` with no host to check never produces a `Bind`.
     #[test]
     fn resolve_clone_host_never_binds_a_hostless_clone() {
         let hosts = vec![option(1, "remote", false)];
-        let (state, action) = resolve_clone_host(
-            CloneHostState::Waiting,
-            None,
-            &None,
-            &PrefillAgent::Profile {
-                id: "p-1".to_string(),
-            },
-            true,
-            &hosts,
-            false,
-        );
+        let (state, action) =
+            resolve_clone_host(CloneHostState::Waiting, None, &None, true, &hosts, false);
         assert_eq!(state, CloneHostState::Unconfirmable);
         assert_eq!(action, CloneHostAction::Hold);
     }
@@ -2184,7 +2073,6 @@ mod tests {
             CloneHostState::Bound,
             Some(1),
             &identity,
-            &PrefillAgent::Command,
             true,
             &retargeted,
             true, // chosen_host is still this generation's own pick
@@ -2204,7 +2092,6 @@ mod tests {
             CloneHostState::Bound,
             Some(1),
             &identity,
-            &PrefillAgent::Command,
             true,
             &hosts,
             true,
@@ -2227,7 +2114,6 @@ mod tests {
             CloneHostState::Bound,
             Some(1),
             &identity,
-            &PrefillAgent::Command,
             true,
             &hosts,
             false, // chosen_host no longer names this generation's host
@@ -2245,18 +2131,118 @@ mod tests {
         let hosts = vec![option(1, "remote", false)];
         let identity = Some(Some("install-1".to_string()));
         for terminal in [CloneHostState::Unconfirmable, CloneHostState::UserTookOver] {
-            let (state, action) = resolve_clone_host(
-                terminal,
-                Some(1),
-                &identity,
-                &PrefillAgent::Command,
-                true,
-                &hosts,
-                true,
-            );
+            let (state, action) =
+                resolve_clone_host(terminal, Some(1), &identity, true, &hosts, true);
             assert_eq!(state, terminal);
             assert_eq!(action, CloneHostAction::Hold);
         }
+    }
+
+    /// A live helm catalog confirms a clone's profile even while the host
+    /// registry is still delayed. This matters because a later host bind must
+    /// not own or overwrite the agent choice anymore.
+    #[test]
+    fn clone_agent_seeds_while_host_reconciliation_is_waiting() {
+        let hosts = vec![option(1, "remote", false)];
+        let identity = Some(Some("install-1".to_string()));
+        let (host_state, host_action) = resolve_clone_host(
+            CloneHostState::Waiting,
+            Some(1),
+            &identity,
+            false,
+            &hosts,
+            false,
+        );
+        assert_eq!(host_state, CloneHostState::Waiting);
+        assert_eq!(host_action, CloneHostAction::Hold);
+
+        let catalog = ProfileCatalog {
+            profiles: vec![Profile {
+                id: "p-1".to_string(),
+                name: "profile".to_string(),
+                invocation: "agent".to_string(),
+                agent_kind: "generic".to_string(),
+                resume_template: None,
+            }],
+            default_profile: None,
+        };
+        let (agent_state, action) = resolve_clone_agent(
+            CloneAgentState::Waiting,
+            &PrefillAgent::Profile {
+                id: "p-1".to_string(),
+            },
+            Some(&catalog),
+        );
+        assert_eq!(agent_state, CloneAgentState::Seeded);
+        assert_eq!(action, Some(AgentChoice::Profile("p-1".to_string())));
+    }
+
+    /// An unconfirmable source host changes only the host result. A profile
+    /// confirmed by the helm catalog still seeds because it is valid across
+    /// every host that helm manages.
+    #[test]
+    fn clone_agent_seeds_when_the_source_host_is_unconfirmable() {
+        let hosts = vec![option(1, "remote", false)];
+        let stale_identity = Some(Some("superseded-install".to_string()));
+        let (host_state, host_action) = resolve_clone_host(
+            CloneHostState::Waiting,
+            Some(1),
+            &stale_identity,
+            true,
+            &hosts,
+            false,
+        );
+        assert_eq!(host_state, CloneHostState::Unconfirmable);
+        assert_eq!(host_action, CloneHostAction::Hold);
+
+        let catalog = ProfileCatalog {
+            profiles: vec![Profile {
+                id: "p-1".to_string(),
+                name: "profile".to_string(),
+                invocation: "agent".to_string(),
+                agent_kind: "generic".to_string(),
+                resume_template: None,
+            }],
+            default_profile: None,
+        };
+        let (_, action) = resolve_clone_agent(
+            CloneAgentState::Waiting,
+            &PrefillAgent::Profile {
+                id: "p-1".to_string(),
+            },
+            Some(&catalog),
+        );
+        assert_eq!(action, Some(AgentChoice::Profile("p-1".to_string())));
+    }
+
+    /// Once a person overrides the seeded agent, later host reconciliation
+    /// cannot produce any agent action. This pins the post-bind race that used
+    /// to replace an explicit command when a delayed host answer landed.
+    #[test]
+    fn explicit_agent_override_survives_later_host_reconciliation() {
+        let catalog = ProfileCatalog {
+            profiles: Vec::new(),
+            default_profile: None,
+        };
+        let (state, action) = resolve_clone_agent(
+            CloneAgentState::UserTookOver,
+            &PrefillAgent::Command,
+            Some(&catalog),
+        );
+        assert_eq!(state, CloneAgentState::UserTookOver);
+        assert_eq!(action, None);
+
+        let hosts = vec![option(1, "remote", false)];
+        let (host_state, host_action) = resolve_clone_host(
+            CloneHostState::Waiting,
+            Some(1),
+            &Some(Some("install-1".to_string())),
+            true,
+            &hosts,
+            false,
+        );
+        assert_eq!(host_state, CloneHostState::Bound);
+        assert!(matches!(host_action, CloneHostAction::Bind(_)));
     }
 
     /// item2-review2.md F5's untouched-vs-edited submission rule, exercised

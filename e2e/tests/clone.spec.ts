@@ -55,14 +55,13 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
   page,
   request,
 }) => {
-  const local = await localHostId(request);
   const invocationA = FAKE_AGENT;
   const invocationB = FAKE_AGENT.replace("--script basic", "--script altscreen");
-  const profileA = await createProfile(request, local, {
+  const profileA = await createProfile(request, {
     name: `clone-profile-a-${Date.now()}`,
     invocation: invocationA,
   });
-  const profileB = await createProfile(request, local, {
+  const profileB = await createProfile(request, {
     name: `clone-profile-b-${Date.now()}`,
     invocation: invocationB,
   });
@@ -74,9 +73,9 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     profile_id: profileA.id,
   });
   // A THROWAWAY session created from a DIFFERENT profile afterwards, purely
-  // to move the host's remembered default onto B while the row this test
+  // to move the helm's remembered default onto B while the row this test
   // clones still names A. Without this, "the row's own profile" and "the
-  // host's remembered default" would be the same id, and a broken
+  // helm's remembered default" would be the same id, and a broken
   // implementation that discards the clone's own choice and seeds only
   // from the remembered default would select the identical profile — the
   // exact regression this fixture exists to distinguish from the correct
@@ -99,7 +98,7 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await expect(form).toBeVisible();
     await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(originalCwd);
     await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(title);
-    // The row's OWN profile (A) wins the picker over the host's remembered
+    // The row's OWN profile (A) wins the picker over the helm's remembered
     // default (B, moved there by the throwaway session above) — see that
     // fixture's own comment for why the two must differ for this
     // assertion to mean anything.
@@ -159,8 +158,8 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     if (cloneId) await cleanupSession(request, cloneId);
     await cleanupSession(request, rememberedDefaultShift.id);
     await cleanupSession(request, original.id);
-    await cleanupProfile(request, local, profileA.id);
-    await cleanupProfile(request, local, profileB.id);
+    await cleanupProfile(request, profileA.id);
+    await cleanupProfile(request, profileB.id);
   }
 });
 

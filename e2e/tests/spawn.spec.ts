@@ -20,7 +20,6 @@ import {
   createSession,
   listProfiles,
   listSessions,
-  localHostId,
   openFilterBar,
   type ProfileRow,
   type SessionRow,
@@ -84,7 +83,6 @@ test("a fake agent spawns children that appear without refreshing the observer",
   // Setup is inside the cleanup boundary; each optional records only the
   // resource this test actually acquired before a partial failure.
   let root: string | undefined;
-  let host: number | undefined;
   let olderProfile: ProfileRow | undefined;
   let olderSession: SessionRow | undefined;
   let profile: ProfileRow | undefined;
@@ -100,8 +98,7 @@ test("a fake agent spawns children that appear without refreshing the observer",
     const parentedDir = path.join(root, "parented-child");
     fs.mkdirSync(unparentedDir);
     fs.mkdirSync(parentedDir);
-    host = await localHostId(request);
-    olderProfile = await createProfile(request, host, {
+    olderProfile = await createProfile(request, {
       name: `Older spawn fixture ${stamp}`,
       invocation: SPAWN_AGENT,
     });
@@ -110,7 +107,7 @@ test("a fake agent spawns children that appear without refreshing the observer",
       cwd: root,
       profile_id: olderProfile.id,
     });
-    profile = await createProfile(request, host, {
+    profile = await createProfile(request, {
       name: `Spawn fixture ${stamp}`,
       invocation: SPAWN_AGENT,
     });
@@ -159,8 +156,8 @@ test("a fake agent spawns children that appear without refreshing the observer",
     if (unparented) await cleanupSession(request, unparented.id);
     if (parent) await cleanupSession(request, parent.id);
     if (olderSession) await cleanupSession(request, olderSession.id);
-    if (host !== undefined && profile) await cleanupProfile(request, host, profile.id);
-    if (host !== undefined && olderProfile) await cleanupProfile(request, host, olderProfile.id);
+    if (profile) await cleanupProfile(request, profile.id);
+    if (olderProfile) await cleanupProfile(request, olderProfile.id);
     if (root) fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -199,11 +196,10 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
   try {
     scratch = stackScratchDir(`farhelm-real-spawn-${stamp}-`);
     workspace = path.join(scratch, "spawned-workspace");
-    const host = await localHostId(request);
-    const claude = (await listProfiles(request, host)).profiles.find(
+    const claude = (await listProfiles(request)).profiles.find(
       (profile) => profile.name === "claude",
     );
-    if (!claude) throw new Error("the local supervisor has no exact `claude` starter profile");
+    if (!claude) throw new Error("the helm has no exact `claude` starter profile");
     parent = await createSession(request, {
       title: `real-spawn-parent-${stamp}`,
       cwd: repository,

@@ -89,8 +89,12 @@
 //! while the feed is unhealthy; what it does here is ASK, weakly — see
 //! [`Trigger::Scheduled`] — instead of spawning a walk of its own.
 
+use std::future::Future;
+
 use dioxus::core::Task;
 use dioxus::prelude::*;
+use futures_util::future::{Either, select};
+use web_time::Instant;
 
 use crate::reconnect::{PROBE_INTERVAL_MS, RETRY_LADDER_MS};
 use crate::skew;
@@ -527,6 +531,33 @@ pub(crate) async fn sleep_ms(millis: u64) {
     gloo_timers::future::TimeoutFuture::new(millis as u32).await;
     #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+}
+
+/// Return a future's answer only when it arrives before one monotonic deadline.
+///
+/// This bounds Rust's ownership of renderer bridge calls on both targets. It
+/// does not claim to cancel JavaScript already running in the renderer; callers
+/// with a late side effect must also guard that commit in the script itself.
+pub(crate) async fn finish_before<T>(
+    deadline: Instant,
+    future: impl Future<Output = T>,
+) -> Option<T> {
+    let remaining = deadline.checked_duration_since(Instant::now())?;
+    if remaining.is_zero() {
+        return None;
+    }
+    let whole_millis = remaining.as_millis().min(u128::from(u64::MAX)) as u64;
+    let timeout_ms = if remaining.subsec_nanos() % 1_000_000 == 0 {
+        whole_millis
+    } else {
+        whole_millis.saturating_add(1)
+    };
+    let work = Box::pin(future);
+    let timeout = Box::pin(sleep_ms(timeout_ms));
+    match select(work, timeout).await {
+        Either::Left((answer, _)) => Some(answer),
+        Either::Right(((), _)) => None,
+    }
 }
 
 /// Ask `state`'s surface for a read, starting the reader if it is idle.

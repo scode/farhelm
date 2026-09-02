@@ -213,10 +213,9 @@
                              sidebar under it are both --bg-1 now, so a separator borrowing a
                              surface value would be invisible against what it separates */
   --border-nested: #434a55; /* the rule marking an indented sub-section subordinate to the row
-                                above it — host profile nesting (.profiles-section) and host
-                                provisioning (.provisioning-panel) are the same idiom under two
-                                class names. A surface value used to do this job and stopped
-                                working the moment the surfaces moved */
+                                above it — host provisioning (.provisioning-panel). A surface
+                                value used to do this job and stopped working the moment the
+                                surfaces moved */
 
   /* Semantic states. `ok` is the healthy/live family, `warn` the
      attention-but-not-broken family (see `.status-badge.interrupted` and
@@ -390,10 +389,8 @@ samp {
 
 /* ===== Sidebar chrome ============================================= */
 
-/* The app-level identity readout stays in the sidebar's existing chrome
-   surface. Its empty leading space is intentional: a later profiles trigger
-   will own that side, while the current version remains right-aligned without
-   adding placeholder content. Sticky, because `.app-sidebar` is the scroll
+/* The app-level identity readout and helm-wide profiles trigger stay in the
+   sidebar's existing chrome surface. Sticky, because `.app-sidebar` is the scroll
    container for the whole session list and an ordinary first child would
    scroll away with the rows — the point of the readout is that it is always
    there. Sticky content paints over what scrolls under it, so the bar carries
@@ -1782,14 +1779,12 @@ samp {
   background: var(--chip-bg);
 }
 
-/* A profile-named badge that is NOT KNOWN to be present under that name
-   carries the same amber the panel's chip does, for the same reason: the
-   name is a SNAPSHOT, and the catalog may have moved under it. Kept in
-   step with `.session-profile`'s rule below rather than folded into it,
-   because the two live on different surfaces (a row line and a menu
-   panel) and only the color is shared. */
+/* A renamed or unrecognized profile-named badge carries the same amber the
+   panel's chip does. A deleted catalog row stays plain: the snapshotted name
+   is useful history, not a warning about the session. Kept in step with
+   `.session-profile`'s rule below rather than folded into it, because the two
+   live on different surfaces and only the color is shared. */
 .session-invocation[data-profile-existence="renamed"],
-.session-invocation[data-profile-existence="deleted"],
 .session-invocation[data-profile-existence="unrecognized"] {
   color: var(--warn);
 }
@@ -1828,17 +1823,14 @@ samp {
   border-top: 1px solid var(--border-dim);
 }
 
-/* A profile that is NOT KNOWN to be present under this name: renamed since,
-   deleted since, or in a state this build cannot read. The group is that
-   negative on purpose — it is what the three share, and describing it as
-   "gone" would misdescribe the renamed case (still there, under another
-   label) and the unrecognized one (nothing is claimed either way).
+/* A profile renamed since the snapshot, or in a state this build cannot read.
+   Deleted rows are deliberately omitted: their immutable names render like
+   present ones so sessions from old or foreign catalogs do not look broken.
 
    Amber rather than red for the stale badge's reason: nothing has failed —
    the session is unaffected and still runs what it snapshotted — but the
    name beside it is no longer a statement about today's catalog. */
 .session-profile[data-profile-existence="renamed"],
-.session-profile[data-profile-existence="deleted"],
 .session-profile[data-profile-existence="unrecognized"] {
   color: var(--warn);
 }
@@ -2364,14 +2356,9 @@ samp {
    left rule makes the long action list subordinate to the row without making
    it look page-blocking — it is not; OpLock ends at acceptance. */
 .provisioning-panel {
-  /* The same rule weight `.profiles-section` uses for the same idiom — an
-     indented block subordinate to the host row above it — and, since this
-     fixup, the same TOKEN too. This used `--border` instead of
-     `--border-nested` until now, which is exactly the kind of drift
-     `--border-nested`'s own :root comment warns about: a surface value
-     doing a border's job stops working the moment the surfaces move, and
-     nothing catches it happening independently to two rules that are
-     supposed to be the same idiom. */
+  /* A rule token keeps this subordinate block visible when surface colors
+     move; borrowing a background token for a border made the rule disappear
+     when the two surfaces converged. */
   border-left: 2px solid var(--border-nested);
   margin: 5px 0 1px 10px;
   padding: 3px 0 3px 10px;
@@ -2478,22 +2465,29 @@ samp {
   margin-top: 4px;
 }
 
-/* ===== Host profiles ============================================== */
+/* ===== Profiles popup ============================================= */
 
-/* One host's profiles, expanded inside its own row (PLAN_M6_75.md item 8).
+/* The catalog belongs to the helm rather than a host row, so its management
+   surface floats from the app bar. Viewport bounds mirror the filter popup:
+   the inline geometry variables clamp the anchor, and overflow keeps every
+   profile reachable on a short window. */
+.profiles-popover {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 20;
+  width: 320px;
+  overflow: auto;
+  padding: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-menu);
+}
 
-   Indented and ruled on the left rather than boxed: it belongs to the row
-   above it, and on a fleet a panel that looked free-standing would leave the
-   reader guessing which host's profiles they are editing. */
-.profiles-section {
+.profiles-popup-content {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 6px 0 8px 12px;
-  padding-left: 10px;
-  /* A rule, drawn with a rule token: this was a surface value doing a
-     border's job, which stopped working the moment the surfaces moved. */
-  border-left: 2px solid var(--border-nested);
 }
 
 .profiles-header {

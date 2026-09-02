@@ -13,13 +13,14 @@ use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, archive_session, delete_session,
     fetch_hosts, fetch_session, fetch_sessions, rename_session, stop_session,
 };
+use crate::app_bar::AppBar;
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead, phase_class, phase_label};
 use crate::menu_panel::{PanelPlacement, measurement_outcome};
 use crate::ops::{OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerLine, display_peer};
-use crate::profiles::{HostTarget, use_catalog_surface};
+use crate::profiles::use_catalog_surface;
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner, listing_is_complete,
@@ -27,7 +28,7 @@ use crate::rows::{
 };
 use crate::{ApiBase, HostId, Session};
 
-use super::create_form::{CreatePrefill, CreateSessionForm, prefill_from};
+use super::create_form::{CreatePrefill, CreateSessionForm, CreateTarget, prefill_from};
 use super::row::SessionRow;
 use super::shared::{
     DeleteTarget, HostOption, OpenHost, RowState, effective_create_host, host_options,
@@ -361,27 +362,13 @@ fn clone_is_refused(
 /// terminal is open" is deliberately retired along with the page swap
 /// that implied it.
 ///
-/// ## Two more reads, on demand (PLAN_M6_75.md item 8)
+/// ## One more read, shared (PLAN_M6_75.md item 8)
 ///
-/// Profiles add two further surfaces, each with its own reader under exactly
-/// the same discipline (`profiles::use_catalog_surface`): the catalog behind
-/// the hosts panel's expanded profiles section, and the catalog behind the
-/// create dialog's agent picker. They are separate because they answer
-/// different questions at the same time — one is about the host whose row is
-/// expanded, the other about the host the dialog would create on — and each
-/// performs NO PROFILE REQUEST while its target is `None`, which is the state
-/// a collapsed section and a closed dialog are in. The surfaces themselves
-/// live as long as this page does (their hooks are here); what makes them free
-/// is the target, not the mounting.
-///
-/// Both targets are decided HERE and are `profiles::HostTarget`s — a registry
-/// row AND the install behind it — derived against the registry as it
-/// currently stands rather than taken from what the user last clicked. That is
-/// what makes a mutable host id safe to build on: a retarget or an adopt
-/// changes the incarnation, so the target changes, so every surface pointed at
-/// it is re-activated instead of continuing to act on a catalog that now
-/// belongs to a different supervisor. A removed row clears the target (and
-/// folds its section away) rather than leaving a reader retrying a dead id.
+/// Profiles add one always-active reader under exactly the same discipline
+/// (`profiles::use_catalog_surface`). The app-bar popup and create picker
+/// consume its answer together because profiles belong to the helm, not the
+/// selected host. Keeping the reader mounted with this page also means feed
+/// invalidations advance the answer while both consumers are closed.
 ///
 /// ## Filtering is a query, not a render pass (PLAN_M6_75.md item 7)
 ///
@@ -552,12 +539,12 @@ pub(crate) fn ListView(
     // update disabling it is not synchronous with the click handler
     // itself.
     let mut pending = use_signal(HashSet::<String>::new);
-    // The two on-demand sidebar sections: the hosts panel and the filter
-    // popover. Both default closed and stay unpersisted; the count line,
-    // rather than a second status note, says when the committed list is
-    // narrowed while the filter controls are closed.
+    // The on-demand sidebar surfaces default closed and stay unpersisted.
+    // Their open state lives together here so every floating surface can
+    // enforce the page-wide one-popover-at-a-time contract.
     let mut hosts_open = use_signal(|| false);
     let mut filter_open = use_signal(|| false);
+    let mut profiles_open = use_signal(|| false);
     // The fixed popover needs the same measured-rect race handling as a row
     // menu. Its toggle lives in this component, so unlike a row-local menu
     // the geometry state belongs here beside the open state.
@@ -616,11 +603,10 @@ pub(crate) fn ListView(
     // mutual exclusion explicit instead of overloading one flag with an
     // action kind that every handler would then have to decode.
     let mut confirming_archive = use_signal(HashSet::<String>::new);
-    // At most one row's actions menu is open, and this parent owns which —
-    // the hosts panel's `profiles_open` shape (see that component), copied
-    // for the same reason: a per-row boolean would let two menus fight,
-    // and the parent is the only place "opening yours closes mine" can
-    // live. Defined up here with the other row-scoped UI state because
+    // At most one row's actions menu is open, and this parent owns which.
+    // A per-row boolean would let two menus fight, and the parent is the
+    // only place "opening yours closes mine" can live. Defined up here with
+    // the other row-scoped UI state because
     // `commit_listing` reconciles it (a menu whose row left the listing
     // must not reappear, already open, when the row comes back).
     let mut menu_open = use_signal(|| None::<String>);
@@ -783,19 +769,47 @@ pub(crate) fn ListView(
         if filter_open() {
             menu_open.set(None);
             host_menu_open.set(None);
+            if *profiles_open.peek() && ops.busy_now() {
+                // A busy profile popup cannot be dismissed: the response
+                // needs its mounted form. Refuse the newer surface instead
+                // of briefly allowing two fixed panels to overlap.
+                filter_open.set(false);
+            } else {
+                profiles_open.set(false);
+            }
         }
     });
-    // The create dialog's explicit host choice, and which host row has its
-    // profiles section expanded (PLAN_M6_75.md item 8).
-    //
-    // Both live HERE rather than in the surfaces that show them, and for the
-    // same reason: each one decides which host a profile CATALOG is read for,
-    // and the reads on this page go through readers this component owns. A
-    // choice held inside the dialog would be invisible to the reader that has
-    // to follow it, and the two would drift into a picker offering one host's
-    // profiles for a create aimed at another.
+    // Opening the profile popup takes every other floating surface down. Its
+    // own busy guard is enforced by `AppBar`, so a mutation cannot strand the
+    // form by letting another surface replace it mid-request.
+    use_effect(move || {
+        if profiles_open() {
+            filter_open.set(false);
+            menu_open.set(None);
+            host_menu_open.set(None);
+        }
+    });
+    // Row menus are the remaining entry points into the same mutual-
+    // exclusion set. They can be opened from child components, so an effect
+    // is the single place that also covers keyboard and pointer activation.
+    use_effect(move || {
+        if menu_open().is_some() || host_menu_open().is_some() {
+            if *profiles_open.peek() && ops.busy_now() {
+                // Row menus remain ordinary transient surfaces while the
+                // profile mutation owns the page. Closing the attempted menu
+                // preserves both the one-popover rule and the busy form.
+                menu_open.set(None);
+                host_menu_open.set(None);
+            } else {
+                profiles_open.set(false);
+            }
+        }
+    });
+
+    // The create dialog's explicit host choice is separate from the catalog:
+    // it names the installation used for creation idempotency, while every
+    // host now sees the same helm-owned profiles.
     let mut chosen_host = use_signal(|| None::<HostId>);
-    let mut profiles_open = use_signal(|| None::<HostId>);
     // A "clone" click's seed for the create form (`create_form::
     // CreatePrefill`), or `None` for the ordinary blank-form open. Lives
     // HERE rather than inside the form for the same reason `chosen_host`
@@ -831,56 +845,15 @@ pub(crate) fn ListView(
     let listing_surface = use_signal(SurfaceReader::default);
     let hosts_surface = use_signal(SurfaceReader::default);
 
-    // The two PROFILE catalogs this page can be showing, each with its own
-    // one-door reader (`profiles::use_catalog_surface`, which wires the same
-    // mount / feed / fallback / retarget triggers the reads above run under).
-    //
-    // Two surfaces rather than one, because they answer different questions
-    // at the same time: the hosts panel's section is about the host whose row
-    // is expanded, and the create dialog's picker is about the host that
-    // dialog would create on. Collapsing them would make opening a profiles
-    // section silently re-point the picker beside it. Neither performs any
-    // profile request while its target is `None`, which is the state a
-    // collapsed section and a closed dialog are in.
-    //
-    // Both targets are `profiles::HostTarget`s — a registry row AND the
-    // install behind it — and both are DERIVED here, against the registry as
-    // it currently stands, rather than taken from what the user last clicked.
-    // That is the whole answer to a host id being mutable: a retarget or an
-    // adopt changes the incarnation, the target changes with it, and every
-    // surface pointed at it is re-activated instead of continuing to act on a
-    // catalog that belongs to another machine.
-    let mut panel_target = use_signal(|| None::<HostTarget>);
-    use_effect(move || {
-        let open = profiles_open();
-        let read = hosts.read();
-        let registry = read.hosts();
-        let wanted = open.and_then(|id| {
-            registry
-                .unwrap_or_default()
-                .iter()
-                .find(|host| host.id == id)
-                .map(HostTarget::of)
-        });
-        // A row that has LEFT the registry takes its section with it. Nothing
-        // else would: the id is dead, so every read against it 404s forever
-        // and the section would sit under a row that is not there, retrying.
-        // Only acted on once a registry is actually in hand — a first read
-        // that has not landed is not evidence that anything was removed.
-        if open.is_some() && wanted.is_none() && registry.is_some() {
-            profiles_open.set(None);
-        }
-        if *panel_target.peek() != wanted {
-            panel_target.set(wanted);
-        }
-    });
-    let host_profiles = use_catalog_surface(panel_target);
+    // One always-active reader feeds both the management popup and the create
+    // picker. Mounting it with the list preserves a last-known catalog across
+    // either surface closing and gives feed/fallback refreshes one door.
+    let profiles = use_catalog_surface();
 
-    // Which install the create dialog's picker is about. Derived rather than
-    // chosen: it follows `effective_create_host`, so a chosen host leaving
-    // the registry re-points this too — and it is `None` whenever the dialog
-    // is closed, which is what stops it reading.
-    let mut create_target = use_signal(|| None::<HostTarget>);
+    // Which installation the create request is about. This follows
+    // `effective_create_host`, but changing it deliberately leaves the
+    // helm-wide profile choice untouched.
+    let mut create_target = use_signal(|| None::<CreateTarget>);
     // `use_reactive` because `open_host` is a plain prop, not a signal:
     // without it the effect would capture the value it saw on first run
     // and an open form would keep offering the OLD session's host and
@@ -895,21 +868,18 @@ pub(crate) fn ListView(
                 options
                     .into_iter()
                     .find(|host| Some(host.id) == effective)
-                    // The fingerprint comes off the OPTION rather than being
-                    // re-derived, so the catalog the picker offers and the
-                    // machine the create's idempotency key names cannot
-                    // disagree — one derivation, shared.
-                    .map(|host| HostTarget::new(host.id, host.incarnation))
+                    // The fingerprint comes off the option rather than being
+                    // re-derived, so request validation and the selected
+                    // machine share one registry snapshot.
+                    .map(|host| CreateTarget::new(host.id, host.incarnation))
             })
             .flatten();
-        // Compared before writing so an unrelated hosts refresh — the common
-        // case, several times a minute on a live fleet — does not restart the
-        // catalog read for a target that has not moved.
+        // Compared before writing so an unrelated hosts refresh does not
+        // rotate the create request's idempotency key.
         if *create_target.peek() != wanted {
             create_target.set(wanted);
         }
     }));
-    let create_catalog = use_catalog_surface(create_target);
 
     // Everything that happens to a listing reply once it is BACK, in one
     // place: decide whether this read still speaks for the view, reconcile
@@ -2183,6 +2153,12 @@ pub(crate) fn ListView(
     let created_base = base.clone();
 
     rsx! {
+        AppBar {
+            profiles_open,
+            profiles,
+            ops,
+            layout_epoch,
+        }
         // The sidebar's top strip is host management only. Session-list
         // controls sit beside the count that explains the rows they affect.
         // The compact strip below keeps SPEC.md's per-host visibility promise
@@ -2201,12 +2177,6 @@ pub(crate) fn ListView(
                 onclick: move |_| {
                     let opening = !hosts_open();
                     hosts_open.set(opening);
-                    // A closed panel takes its profiles section with it:
-                    // leaving `profiles_open` set would keep that host's
-                    // catalog surface reading behind an invisible panel.
-                    if !opening {
-                        profiles_open.set(None);
-                    }
                 },
                 "hosts"
             }
@@ -2218,8 +2188,8 @@ pub(crate) fn ListView(
         // host, named, with the SAME phase word and color category the
         // full panel's chip uses (`hosts::phase_label`/`phase_class`), so
         // the two surfaces can never call one state two things.
-        // Management (retry, edit, remove, profiles) stays in the full
-        // panel behind the toggle.
+        // Management (retry, edit, remove) stays in the full panel behind
+        // the toggle. Profiles are helm-wide and live in the app bar popup.
         div { class: "hosts-compact",
             // The strip mirrors `HostsRead`'s four states, not just its
             // happy path: this is the surface SPEC.md's always-visible
@@ -2276,10 +2246,8 @@ pub(crate) fn ListView(
                 ops,
                 mutation_busy_hosts,
                 provisioning_busy_hosts,
-                profiles_open,
                 host_menu_open,
                 session_menu_open: menu_open,
-                profiles: host_profiles,
                 on_changed: refresh_hosts,
             }
         }
@@ -2577,9 +2545,10 @@ pub(crate) fn ListView(
                     if !opening {
                         // Closing the dialog discards its host choice with
                         // every other draft it holds. The signal lives up here
-                        // (the catalog reader has to follow it), which is
-                        // exactly why it would otherwise be the one piece of
-                        // form state that survived a cancel — and SPEC.md's
+                        // because target identity and idempotency are shared
+                        // with the list's create wiring; it would otherwise be
+                        // the one piece of form state that survived a cancel.
+                        // SPEC.md's
                         // creation default is about a FRESH dialog, not about
                         // where the last one was pointed.
                         chosen_host.set(None);
@@ -2600,7 +2569,8 @@ pub(crate) fn ListView(
                 open_host,
                 hosts_loaded: hosts.read().hosts().is_some(),
                 chosen_host,
-                catalog: create_catalog,
+                create_target,
+                catalog: profiles,
                 ops,
                 prefill: clone_prefill(),
                 on_created: move |session: Session| {

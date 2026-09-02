@@ -1867,6 +1867,7 @@ dependencies = [
  "dioxus",
  "farhelm-helm",
  "farhelm-supervisor",
+ "futures-util",
  "gloo-timers",
  "mime_guess",
  "percent-encoding",
@@ -1880,6 +1881,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "web-sys",
+ "web-time",
 ]
 
 [[package]]

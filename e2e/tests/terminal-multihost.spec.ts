@@ -831,7 +831,6 @@ test.describe("multi-host", () => {
     // to, applied here to the whole item set this phase's menu offers (no
     // `.host-adopt`: this phase carries no identity to adopt).
     for (const item of [
-      row.locator(".host-profiles-toggle"),
       row.locator(".host-retry"),
       row.locator(".host-edit"),
       row.locator(".host-remove"),
@@ -890,7 +889,7 @@ test.describe("multi-host", () => {
   // headlessly, but nothing before this proved `HostRow` wired them to real
   // DOM elements — every other host-menu test drives it by pointer click and
   // finds items by class alone. An adoptable ssh host is used deliberately:
-  // it is the one state offering all five actions, so the separator's
+  // it is the one state offering all four actions, so the separator's
   // position and the wrap boundary are both exercised on the full list
   // rather than a shorter one.
   test("host-menu-keyboard-contract: role=menu, every item reachable, wraps, Escape/Tab restore focus", async ({
@@ -928,12 +927,11 @@ test.describe("multi-host", () => {
     const menu = row.locator(".host-row-menu-items");
     await expect(menu).toHaveAttribute("role", "menu");
 
-    const profiles = row.locator(".host-profiles-toggle");
     const retry = row.locator(".host-retry");
     const adopt = row.locator(".host-adopt");
     const edit = row.locator(".host-edit");
     const remove = row.locator(".host-remove");
-    for (const item of [profiles, retry, adopt, edit, remove]) {
+    for (const item of [retry, adopt, edit, remove]) {
       await expect(item).toHaveAttribute("role", "menuitem");
     }
 
@@ -942,8 +940,6 @@ test.describe("multi-host", () => {
     await toggle.focus();
     await expect(toggle).toBeFocused();
 
-    await page.keyboard.press("ArrowDown");
-    await expect(profiles).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(retry).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -954,12 +950,12 @@ test.describe("multi-host", () => {
     await expect(remove, "the separator is not a stop on the way to remove").toBeFocused();
     // Both wrap boundaries, in the two directions that reach them.
     await page.keyboard.press("ArrowDown");
-    await expect(profiles).toBeFocused();
+    await expect(retry).toBeFocused();
     await page.keyboard.press("ArrowUp");
     await expect(remove).toBeFocused();
 
     await page.keyboard.press("Home");
-    await expect(profiles).toBeFocused();
+    await expect(retry).toBeFocused();
     await page.keyboard.press("End");
     await expect(remove).toBeFocused();
 
@@ -976,7 +972,7 @@ test.describe("multi-host", () => {
     await openHostMenu(row);
     await toggle.focus();
     await page.keyboard.press("ArrowDown");
-    await expect(profiles).toBeFocused();
+    await expect(retry).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
     await expect(toggle).toBeFocused();
@@ -1037,7 +1033,7 @@ test.describe("multi-host", () => {
 
   // F14/TEST-BUSY-GUARDS: `aria-disabled`, unlike a native `disabled`
   // attribute, does not stop a click or a keyboard activation from
-  // reaching the button — each of the five item handlers has to refuse
+  // reaching the button — each of the four item handlers has to refuse
   // busy on its OWN. Existing tests check only the disabled APPEARANCE.
   // This holds one operation open on the (always-present) local host, then
   // arrows through every item of an UNRELATED, fully adoptable host's menu
@@ -1061,7 +1057,7 @@ test.describe("multi-host", () => {
       await route.continue();
     });
     // Everything addressed to this host, under BOTH shapes its endpoints
-    // take: the sub-resources (`/profiles`, `/retry`, `/adopt`,
+    // take: the sub-resources (`/retry`, `/adopt`,
     // `/destination`) and the host resource itself, which is what a
     // removal's `DELETE` targets (api.rs). A glob covering only the
     // sub-resources would make `remove`'s guard unobservable here.
@@ -1077,7 +1073,7 @@ test.describe("multi-host", () => {
     // run (`provisioning.rs`) on mount, on every feed notice, and on a
     // fallback poll. It is background traffic with no relationship to the
     // menu, it arrives at times this test does not control, and none of
-    // the five item handlers would ever issue it — so it is named and
+    // the four item handlers would ever issue it — so it is named and
     // excluded here rather than allowed to stand in for the guards this
     // test is actually about.
     const backgroundProvisioningRead = "GET /api/hosts/9013/provisioning";
@@ -1126,12 +1122,11 @@ test.describe("multi-host", () => {
       await source.locator(".host-retry").click();
 
       await openHostMenu(target);
-      const profiles = target.locator(".host-profiles-toggle");
       const retry = target.locator(".host-retry");
       const adopt = target.locator(".host-adopt");
       const edit = target.locator(".host-edit");
       const remove = target.locator(".host-remove");
-      const items = [profiles, retry, adopt, edit, remove];
+      const items = [retry, adopt, edit, remove];
       for (const item of items) {
         await expect(item).toHaveAttribute("aria-disabled", "true");
       }
@@ -1170,14 +1165,11 @@ test.describe("multi-host", () => {
       }
 
       // Nothing opened…
-      await expect(page.locator(".profiles-section")).toHaveCount(0);
       await expect(target.locator(".host-destination-input")).toHaveCount(0);
       await expect(target.locator(".host-confirm-remove")).toHaveCount(0);
       await expect(target.locator(".host-row-menu-panel")).toBeVisible();
       // …and nothing the menu could have caused reached this host's own
-      // endpoints (its profiles GET included: a toggle guard that failed
-      // open would still have to read the catalog before the section could
-      // render).
+      // endpoints.
       expect(menuAttributableHits()).toEqual([]);
     } finally {
       releaseLocalRetry();
@@ -1537,10 +1529,8 @@ test.describe("multi-host", () => {
   // cloning a row that lives on the SECOND host, while the create
   // dialog's ordinary default points at the FIRST, must still land the
   // create on the row's own host with the row's own profile — not on
-  // wherever the dialog would otherwise have defaulted, and not on a
-  // profile id that happens to collide with one on the wrong machine
-  // (profile ids are per-supervisor, and every fresh supervisor seeds the
-  // same starters).
+  // wherever the dialog would otherwise have defaulted. The profile comes
+  // from the helm-wide catalog, so changing hosts must preserve it.
   test("clone-cross-host: a remote row's clone carries its own host and profile across the handoff", async ({
     page,
     request,
@@ -1549,7 +1539,7 @@ test.describe("multi-host", () => {
     const info = stackInfo();
     const remote = await apiRemoteHost(request);
 
-    const profile = await createProfile(request, remote.id, {
+    const profile = await createProfile(request, {
       name: `clone-remote-profile-${Date.now()}`,
     });
     const title = `clone-remote-source-${Date.now()}`;
@@ -1621,33 +1611,26 @@ test.describe("multi-host", () => {
       if (cloneId) await cleanupSession(request, cloneId);
       await cleanupSession(request, anchor.id);
       await cleanupSession(request, source.id);
-      await cleanupProfile(request, remote.id, profile.id);
+      await cleanupProfile(request, profile.id);
     }
   });
 
-  // The other half of the cross-host handoff above: `pending_choice` cannot
-  // apply the clone's own agent choice in the SAME render that moves
-  // `chosen_host` (the profile catalog only catches up a render pass later),
-  // and item2-review2.md's F6 requires that an explicit pick made anywhere
-  // in that window wins outright rather than being silently overwritten
-  // once the queued choice finally lands. The pick below is fired
-  // immediately after the clone click, without first waiting for the
-  // picker to settle on the cloned profile — Playwright's own auto-waiting
-  // on `selectOption` is what gives this a real (if not perfectly pinned)
-  // chance of landing INSIDE the handoff; either way the fix's guarantee is
-  // that the FINAL request reflects the explicit pick, whichever side of
-  // the queue's own consumption it happens to land on.
-  test("clone-cross-host-explicit-pick: an agent chosen during the handoff wins over the queued clone", async ({
+  // Clone host reconciliation can remain Waiting while the helm-wide catalog
+  // has already made every agent option usable. The hosts GET is deliberately
+  // held below so the explicit pick is made inside that state, then released:
+  // the later host Bind may select the source installation, but it must never
+  // reclaim ownership of an agent choice the user already made.
+  test("clone-cross-host-explicit-pick: an agent chosen while hosts are pending survives bind", async ({
     page,
     request,
   }) => {
     requireFleet();
     const remote = await apiRemoteHost(request);
 
-    const clonedProfile = await createProfile(request, remote.id, {
+    const clonedProfile = await createProfile(request, {
       name: `clone-remote-cloned-${Date.now()}`,
     });
-    const explicitProfile = await createProfile(request, remote.id, {
+    const explicitProfile = await createProfile(request, {
       name: `clone-remote-explicit-${Date.now()}`,
     });
     const title = `clone-remote-explicit-source-${Date.now()}`;
@@ -1663,6 +1646,18 @@ test.describe("multi-host", () => {
     // the clone has to MOVE the selector away from wherever it opened.
     const anchorTitle = `clone-remote-explicit-anchor-${Date.now()}`;
     const anchor = await createSession(request, { title: anchorTitle, cwd: "/tmp" });
+
+    let releaseHosts: (() => void) | undefined;
+    const heldHosts = new Promise<void>((resolve) => {
+      releaseHosts = resolve;
+    });
+    await page.route(
+      (url) => url.pathname === "/api/hosts",
+      async (route: Route) => {
+        if (route.request().method() === "GET") await heldHosts;
+        await route.continue();
+      },
+    );
 
     let cloneId: string | undefined;
     try {
@@ -1681,7 +1676,12 @@ test.describe("multi-host", () => {
 
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
+      await expect(form.locator(".create-session-host")).toHaveValue("");
+      await expect(form.locator(`.create-session-profile option[value="${explicitProfile.id}"]`))
+        .toHaveCount(1, { timeout: 20_000 });
       await form.locator(".create-session-profile").selectOption(explicitProfile.id);
+
+      releaseHosts!();
 
       // The host still followed the clone across the handoff — only the
       // agent was overridden.
@@ -1714,8 +1714,8 @@ test.describe("multi-host", () => {
       if (cloneId) await cleanupSession(request, cloneId);
       await cleanupSession(request, anchor.id);
       await cleanupSession(request, source.id);
-      await cleanupProfile(request, remote.id, clonedProfile.id);
-      await cleanupProfile(request, remote.id, explicitProfile.id);
+      await cleanupProfile(request, clonedProfile.id);
+      await cleanupProfile(request, explicitProfile.id);
     }
   });
 
@@ -2366,8 +2366,8 @@ test.describe("multi-host", () => {
       const form = page.locator(".create-session-form");
       await form.locator(".create-session-host").selectOption(String(down));
       // Command mode explicitly, as `fillCreateForm` does and for the same
-      // reason — and here it also has to follow the host change, which clears
-      // any agent choice (a profile id means nothing on another supervisor).
+      // reason. A host change now preserves any profile choice, so this reset
+      // states that the test is intentionally exercising a typed command.
       await form.locator(".create-session-profile").selectOption("");
       await form.locator('input[type="text"]').nth(0).fill("/tmp");
       await form.locator('input[type="text"]').nth(1).fill(FAKE_AGENT_INVOCATION);
@@ -2583,17 +2583,10 @@ test.describe("multi-host", () => {
         )
         .toContain("identity-after-the-move");
 
-      // The retarget did not just rotate the intent key — it also discarded
-      // the form's agent choice (`list::CreateSessionForm`: a moved host is
-      // another machine, so the dialog re-asks rather than carrying an answer
-      // across). What the re-ask resolves to depends on suite history: in a
-      // full run the profile tests leave the host's remembered default
-      // pointing at a deleted profile, so the dialog blocks with nothing
-      // selected and the submit button is DISABLED — clicking it would wait
-      // forever. Answering "custom command" again is what a user in front of
-      // that dialog does, and it makes the second submit reachable in every
-      // state instead of only in a targeted run.
-      await form.locator(".create-session-profile").selectOption("");
+      // The picker must remain in command mode without dispatching another
+      // change event. Re-selecting it here would rotate the key itself and let
+      // broken retarget invalidation pass this test.
+      await expect(form.locator(".create-session-profile")).toHaveValue("");
 
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
