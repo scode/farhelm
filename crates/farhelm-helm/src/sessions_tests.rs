@@ -1717,12 +1717,7 @@ async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
     let before = harness.manager.events().revision();
     super::remember_default_profile(&harness.state, local, "p-favorite", &session).await;
     assert_eq!(
-        harness
-            .store
-            .remembered_profile(local)
-            .await
-            .unwrap()
-            .as_deref(),
+        harness.store.remembered_profile().await.unwrap().as_deref(),
         Some("p-favorite"),
         "the default is a registry-row write and must land regardless of the claim"
     );

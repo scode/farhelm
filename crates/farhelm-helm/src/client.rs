@@ -2610,7 +2610,7 @@ impl SupervisorClient {
     ///
     /// Unpaginated, and that is the protocol's arithmetic rather than this
     /// method's optimism: the catalog's size and each profile's text are
-    /// both capped (`MAX_PROFILES_PER_HOST`, `PROFILE_FIELD_CAP`), so one
+    /// both capped (`MAX_PROFILES`, `PROFILE_FIELD_CAP`), so one
     /// reply always fits. There is deliberately no cursor to thread here.
     pub async fn list_profiles(&self) -> anyhow::Result<Vec<Profile>> {
         let req_id = self.req_id();

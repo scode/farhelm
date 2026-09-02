@@ -58,10 +58,10 @@
 //!   matches beyond the cut while reporting a count that included them.
 //!   Both counts are taken from the same in-memory view the rows come
 //!   from, in the same request. [`profiles`] is the other half of that
-//!   surface: profile CRUD proxied to the owning supervisor, with the one
-//!   profile fact the helm owns — the remembered default per host — served
-//!   beside the catalog, and identity-bound so one install's preference can
-//!   never resolve on another's.
+//!   surface: the helm-owned profile catalog is served at `/api/profiles`,
+//!   while the existing host-scoped profile routes remain supervisor proxies
+//!   during the migration. The helm also remembers one raw default id for
+//!   the catalog.
 //!
 //! M1's argv session flags (`--ssh`, `--cwd`, `--agent`, `--title`,
 //! `--remote-farhelm`, `--remote-state-dir`) are gone in this same PR: the
@@ -708,11 +708,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/retry",
             axum::routing::post(hosts::retry_host),
         )
-        // Profiles hang off the HOST they belong to rather than sitting at
-        // a top-level `/api/profiles` (PLAN_M6_75.md item 5): a profile id
-        // only means anything on the supervisor that minted it, so a route
-        // that did not name a host would be one whose ids collide across the
-        // fleet with nothing to disambiguate them.
+        // The catalog migration is deliberately split: host routes still
+        // proxy supervisor catalogs while top-level routes serve helm.db.
+        // Session resolution moves in the following part, so both surfaces
+        // remain visible during this temporary ownership boundary.
         .route(
             "/api/hosts/{id}/profiles",
             get(profiles::list_profiles).post(profiles::create_profile),
@@ -720,6 +719,15 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/hosts/{id}/profiles/{profile_id}",
             axum::routing::post(profiles::update_profile).delete(profiles::delete_profile),
+        )
+        .route(
+            "/api/profiles",
+            get(profiles::list_catalog_profiles).post(profiles::create_catalog_profile),
+        )
+        .route(
+            "/api/profiles/{profile_id}",
+            axum::routing::post(profiles::update_catalog_profile)
+                .delete(profiles::delete_catalog_profile),
         )
         // The shared client preference (SPEC.md, Session list). An ordinary
         // protected route with no CORS wrapper — see `preferences.rs` for
