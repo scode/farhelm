@@ -34,16 +34,6 @@ Within a bucket, no order.
   raw invocation off-screen as the seed for a later switch to custom), and make the label state the contract outright.
   Observed 2026-08-31 in live use of the new clone action, immediately after its first release into the stable install.
 
-- Show the missing-or-too-old-tmux refusal in a native window, not just on stderr. `farhelm-desktop`'s tmux preflight
-  now prints one plain message and exits (see `desktop.rs`'s `run_tmux_preflight_or_exit`), but a Finder launch has no
-  terminal for stderr to land in, so that message currently reaches nobody there. No longer just theory: verified
-  2026-09-01 on a real Mac while trialing a hand-rolled Farhelm.app — a launch that dies pre-window looks like nothing
-  happened at all. The same silence covers every pre-window exit, not just the tmux preflight (the unusable-state-dir
-  bootstrap failure exits the same way), so the fix should sit on the common refusal path. Keep the stderr line exactly
-  as it is — the desktop-smoke gate asserts on it — and add a macOS-side surface next to it: a native alert before
-  exiting, or at minimum an os_log line so Console shows the reason. Gains urgency with the planned .app bundle, which
-  makes Finder and Spotlight launches the normal path rather than the exception.
-
 - Stop terminal-query replies leaking into the shell as typed garbage. Symptom: after a short-lived command that probes
   the terminal — `sprite list` is a reliable case, and anything on lipgloss/termenv, vim's `t_RV`, or a bare `CSI 6n`
   will do — the pane shows `^[]11;rgb:0000/0000/0000^[\^[[2;1R` on its own line and the next prompt has

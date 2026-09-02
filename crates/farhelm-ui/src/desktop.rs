@@ -52,9 +52,9 @@ const PRINT_ASSETS_FLAG: &str = "--print-assets";
 ///
 /// Blocks for the app's whole lifetime. The `Ok(())` is reached only after
 /// the event loop returns, i.e. once the last window closed; a bootstrap
-/// failure panics rather than returning, because there is no window yet in
-/// which to show an error and a silently-exiting GUI process is worse than a
-/// crash report.
+/// failure uses [`refuse_and_exit`] rather than returning, because there
+/// is no window yet in which to show an error and the refusal needs both its
+/// stable stderr line and its launcher-visible macOS surface.
 pub fn run() -> anyhow::Result<()> {
     // Ahead of the tracing subscriber and the bootstrap both: this mode
     // must start nothing, bind no port, and touch no state directory. It is
@@ -68,11 +68,11 @@ pub fn run() -> anyhow::Result<()> {
     // it starts begins emitting the moment it does.
     init_tracing();
 
-    // A panic here prints a Rust backtrace hint ahead of what is, for every
-    // failure this can actually produce, an operator-facing startup refusal
-    // rather than a programming bug — someone staring at a GUI app that
-    // just quit gets "thread 'main' panicked ... run with RUST_BACKTRACE=1"
-    // when what they need is one plain sentence. ONLY the two specialized
+    // A panic here would print a Rust backtrace hint ahead of what is, for
+    // every failure this can actually produce, an operator-facing startup
+    // refusal rather than a programming bug. Someone staring at a GUI app
+    // that just quit needs one plain sentence and, on macOS, a native
+    // surface (`refuse_and_exit`). ONLY the two specialized
     // tmux refusals (missing, below floor) print their own exact message
     // and exit inside `start`'s preflight (see `run_tmux_preflight_or_exit`)
     // without ever returning an `Err`; every other tmux-probe failure this
@@ -84,8 +84,7 @@ pub fn run() -> anyhow::Result<()> {
     let desktop = match DesktopBootstrap::start() {
         Ok(desktop) => desktop,
         Err(error) => {
-            eprintln!("farhelm-desktop: {error:#}");
-            std::process::exit(1);
+            refuse_and_exit(&format!("farhelm-desktop: {error:#}"));
         }
     };
 
@@ -588,12 +587,18 @@ impl DesktopBootstrap {
             .spawn(move || {
                 let completion = helm.join();
                 if !monitor_expected.load(Ordering::Acquire) {
-                    match completion {
-                        Ok(Err(error)) => eprintln!("embedded helm stopped: {error:#}"),
-                        Ok(Ok(())) => eprintln!("embedded helm stopped unexpectedly"),
-                        Err(_) => eprintln!("embedded helm panicked after readiness"),
-                    }
-                    std::process::exit(1);
+                    let message = match completion {
+                        Ok(Err(error)) => format!("embedded helm stopped: {error:#}"),
+                        Ok(Ok(())) => "embedded helm stopped unexpectedly".to_string(),
+                        Err(_) => "embedded helm panicked after readiness".to_string(),
+                    };
+                    // Readiness comes well before the window (the rest of
+                    // bootstrap still has to run), so this can fire while
+                    // nothing is on screen yet; the common refusal path gives
+                    // a launcher launch its native surface either way, and an
+                    // alert after the window has vanished is still the right
+                    // outcome for a helm that died under it.
+                    refuse_and_exit(&message);
                 }
             })
             .context("starting embedded helm monitor")?;
@@ -1378,19 +1383,79 @@ fn run_tmux_preflight_or_exit(
             std::env::var_os("PATH").as_deref(),
         );
         let override_in_force = ambient_tmux.filter(|value| !value.is_empty()).is_some();
-        eprintln!(
-            "{}",
-            tmux_refusal_message(
-                refusal,
-                &display_program,
-                platform,
-                &probed,
-                override_in_force
-            )
+        let message = tmux_refusal_message(
+            refusal,
+            &display_program,
+            platform,
+            &probed,
+            override_in_force,
         );
-        std::process::exit(1);
+        refuse_and_exit(&message);
     }
     Ok(())
+}
+
+/// Report a fatal refusal — a startup failure before any window exists, or the
+/// embedded helm dying out from under one — then terminate with the historical
+/// status and stderr contract.
+///
+/// Finder and Spotlight launches have no terminal, so stderr alone makes a
+/// failed GUI launch look like nothing happened. On macOS this adds the two
+/// native facilities already provided by the operating system — `osascript`
+/// for a critical alert and `logger` for Console — without adding a crate or
+/// changing the app's startup dependencies. Both children are deliberately
+/// fire-and-forget: the alert must remain visible after this process exits,
+/// and neither helper's completion can affect the refusal. Their standard
+/// streams are null so helper diagnostics can never alter this process's
+/// stderr. The exact stderr output (several lines, for the tmux refusals)
+/// remains the primary contract because `scripts/desktop-smoke.sh` compares
+/// it byte-for-byte.
+fn refuse_and_exit(message: &str) -> ! {
+    eprintln!("{message}");
+
+    if cfg!(target_os = "macos") {
+        for argv in native_refusal_commands(message) {
+            let mut command = Command::new(&argv[0]);
+            command
+                .args(&argv[1..])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let _ = command.spawn();
+        }
+    }
+
+    std::process::exit(1)
+}
+
+/// Build the detached macOS helper invocations for a pre-window refusal.
+///
+/// The logger gets one single-line representation because Console's message
+/// field is line-oriented. The alert keeps literal newlines, but escapes only
+/// backslashes and double quotes so the refusal remains the text the operator
+/// would have seen in a terminal. Keeping this pure lets every host test the
+/// exact macOS argv without requiring either macOS helper to be installed.
+///
+/// Both helpers are named by absolute path: a GUI launch's `PATH` is not the
+/// shell's, and an ambient lookup could either miss `/usr/bin` entirely or
+/// resolve to whatever a writable directory ahead of it happens to hold.
+fn native_refusal_commands(message: &str) -> Vec<Vec<String>> {
+    let logger_message = message.replace('\n', " ");
+    let alert_message = message.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        "display alert \"farhelm-desktop cannot start\" message \"{alert_message}\" as critical"
+    );
+
+    vec![
+        vec![
+            "/usr/bin/logger".to_string(),
+            "-t".to_string(),
+            "farhelm-desktop".to_string(),
+            "--".to_string(),
+            logger_message,
+        ],
+        vec!["/usr/bin/osascript".to_string(), "-e".to_string(), script],
+    ]
 }
 
 fn desktop_state_dir() -> anyhow::Result<PathBuf> {
@@ -2210,6 +2275,31 @@ mod tests {
         assert_eq!(
             tmux_probe_targets(Some(std::ffi::OsStr::new("")), &prefixes),
             tmux_probe_targets(None, &prefixes)
+        );
+    }
+
+    /// The macOS refusal surface must preserve the multiline diagnostic in
+    /// its alert while making the Console record one line, and must quote
+    /// shell-looking text without changing either command's fixed argv.
+    #[test]
+    fn native_refusal_commands_escape_each_surface_exactly() {
+        let message = "quote \"here\"\\path\nnext line";
+        assert_eq!(
+            native_refusal_commands(message),
+            vec![
+                vec![
+                    "/usr/bin/logger".to_string(),
+                    "-t".to_string(),
+                    "farhelm-desktop".to_string(),
+                    "--".to_string(),
+                    "quote \"here\"\\path next line".to_string(),
+                ],
+                vec![
+                    "/usr/bin/osascript".to_string(),
+                    "-e".to_string(),
+                    "display alert \"farhelm-desktop cannot start\" message \"quote \\\"here\\\"\\\\path\nnext line\" as critical".to_string(),
+                ],
+            ]
         );
     }
 

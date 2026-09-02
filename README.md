@@ -128,8 +128,8 @@ Linux" below).
   managed supervisor, `farhelm-desktop` checks the tmux it is about to hand that supervisor against the version floor
   itself; without an acceptable one it refuses immediately with one plain message on its own stderr and quits, rather
   than opening a window and letting the managed supervisor fail later — see the tmux NOTE below. Launched from a
-  terminal, that message is right there; launched from Finder there is no terminal for it to reach, which is the
-  remaining gap TODO.md records.
+  terminal, that message is right there; launched from Finder or Spotlight, where there is no terminal, the same text
+  also appears in a critical alert and lands in Console under the `farhelm-desktop` tag.
 - Start `farhelm-desktop` (double-click it in Finder, or run `~/.local/bin/farhelm-desktop` from a terminal). It starts
   its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when the app exits.
   The window shows the web UI at `http://127.0.0.1:7433/`. If another process owns that port, the app refuses to start
