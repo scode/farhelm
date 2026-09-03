@@ -123,6 +123,13 @@ everything not yet sorted, which carries no implication either way. Within a buc
   full-binary run on a 4-vCPU sandbox ("a consumed sentinel is deleted once its Error outcome commits durably"),
   untouched by whatever else was in that tree at the time, and passed cleanly reproduced alone immediately after. One
   sighting, no hypothesis beyond "load-sensitive". Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box.
+- Deflake `tests::sweep_never_reaps_a_held_lock` (crates/farhelm-teststate/src/lib.rs): on 2026-09-03, in 1 of 2
+  full-workspace `cargo test` runs at `--test-threads=4` on a 4-vCPU sandbox, the test's SECOND assertion failed
+  (`left: []`, `right: ["/tmp/.tmp…/fh-it.live01"]`) — after the test releases its own flock, `sweep` failed to reap the
+  now-genuinely-dead directory. Never reproduced alone (5 solo repetitions) or under the crate's own parallel suite (3
+  runs at `--test-threads=4`) — only the full-workspace run, where every crate's test binaries compete for real `/tmp`
+  and process-table activity at once, has shown it. No hypothesis yet beyond that shape; start at rung 4 of
+  `.agents/narrow-tests.md` (the full workspace, repeated) since rungs 1-3 already came back clean.
 - Put the tmux e2e suite back into the release gate, and un-ignore the two load-flaky tests still ignored, once the
   deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
   every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or
@@ -134,14 +141,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   un-ignored in #355 and #357; the invalid-byte test joined the list after its stall was localized to the input path and
   failed 3 of 9 GitHub runs of this stack in one day). The suite still runs in CI's `test` job on every ready PR and
   before a stack lands, so the gap is at tag time only. Reversing both is the definition of done for the deflake work.
-- Show the session dot as plainly grey when the agent is idle and its last output has been seen. Today the idle state
-  can pass for the dim phase of the pulsing green, so "idle" is not obvious at a glance. Plan:
-  `plans/session-dot-read-state.md` (medium; one plan for this and the two entries below, which share the seen state).
-- Add a blue dot state: the agent is idle but has produced output since the session was last looked at. Distinct from
-  grey (idle, seen) and from the pulsing green (active). Plan: `plans/session-dot-read-state.md` (medium).
-- Add "mark unread" and "mark read": toggle the dot between blue and grey by clicking the dot itself, and from the
-  session row's popup menu, where the item reads "mark read" or "mark unread" depending on the current state. Plan:
-  `plans/session-dot-read-state.md` (medium).
 - Add "replace" on sessions: like clone, but the new session takes the old one's place instead of duplicating it. A
   fresh session and a fresh agent process, with the same directory, host, and the rest of the settings. Plan:
   `plans/replace-session.md` (medium).
