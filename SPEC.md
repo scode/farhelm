@@ -298,15 +298,15 @@ available on the row (a tooltip on the web and desktop clients); an abbreviation
 recorded. Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather
 than here.
 
-Per-host connection state is always visible, as a compact per-host indicator naming each host with its current phase;
-the full hosts panel — retry, retargeting, removal — opens on demand rather than occupying the session list permanently.
-Profiles are managed from the sidebar's own popup. Sessions on an unreachable host stay in the list from the helm's
-last-known knowledge (which survives helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations
-against an unreachable host are refused with a clear error; nothing queues for later delivery in v1. Opening such a
-session shows its metadata — title, directory, last-known status — behind a clear host-unreachable notice; there is no
-terminal to show and no pretense of one. Changes made from any client — creates, renames, stops, deletes, status
-transitions — appear in all other connected clients automatically; the agent-spawn behavior below is one instance of
-this general rule, not a special case.
+Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
+it. Host actions open on demand from the row menu, and one global details control reveals the version, identity, session
+count, remedies, diagnostics, and provisioning progress under every row. Profiles are managed from the sidebar's own
+popup. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm
+restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are refused
+with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
+directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
+one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
+clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
 
 ### Status
 
@@ -607,9 +607,9 @@ worktree, workspace, or branch as part of spawning — if the agent wants a `jj 
   persistence is best-effort, failures are logged but silent because losing next-launch convenience must not turn a
   choice that already took effect into a failed current operation, and a helm that lost the preference falls back to the
   defaults.
-- Connection state per host is always visible — at minimum as the session list's compact per-host indicator, with the
-  full hosts panel a toggle away; reconnection uses bounded retries followed by periodic low-frequency re-probing, so a
-  host that comes back overnight resurfaces by itself. The UI shows which phase it is in either way.
+- Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
+  low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
+  while the global details disclosure shows the evidence and remedies behind the phase.
 - Logs are available for: the helm, each supervisor, session creation, process/PTY lifecycle, attachment transfer,
   reconnection, and resume attempts.
 - Long-lived input/output/paste paths have health checks, so "typing goes nowhere" is detected and reported rather than

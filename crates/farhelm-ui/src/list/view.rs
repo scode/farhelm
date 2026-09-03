@@ -16,11 +16,11 @@ use crate::api::{
 use crate::app_bar::AppBar;
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
-use crate::hosts::{HostsPanel, HostsRead, phase_class, phase_label};
+use crate::hosts::{HostsPanel, HostsRead};
 use crate::menu_panel::{PanelPlacement, measurement_outcome};
 use crate::ops::{OpLock, ReadGate};
-use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::use_catalog_surface;
+use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner, listing_is_complete,
@@ -539,10 +539,10 @@ pub(crate) fn ListView(
     // update disabling it is not synchronous with the click handler
     // itself.
     let mut pending = use_signal(HashSet::<String>::new);
-    // The on-demand sidebar surfaces default closed and stay unpersisted.
-    // Their open state lives together here so every floating surface can
-    // enforce the page-wide one-popover-at-a-time contract.
-    let mut hosts_open = use_signal(|| false);
+    // The on-demand sidebar popovers default closed and stay unpersisted.
+    // Their state lives together here so every floating surface can enforce
+    // the page-wide one-popover-at-a-time contract. The host list itself is
+    // always mounted; its global details disclosure belongs to HostsPanel.
     let mut filter_open = use_signal(|| false);
     let mut profiles_open = use_signal(|| false);
     // The fixed popover needs the same measured-rect race handling as a row
@@ -663,21 +663,24 @@ pub(crate) fn ListView(
     // would leave two vocabularies for one number.
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
-    // A shape signature for `.hosts-compact` (below) — how many host chips
-    // it renders, plus whether its loading note or refresh-error line show
-    // — the exact three things that can change how tall that ALWAYS-
-    // mounted strip is. A `use_memo`, not a plain read of `hosts` inside
-    // the effect below: `hosts` rewrites on every fleet poll even when the
-    // strip's rendered SHAPE has not moved (a phase word flipping color at
-    // the same length, say), and closing the menu on every poll — several
-    // times a working minute on a live fleet — would make it unusable.
-    // `use_memo` only notifies when the computed tuple actually changes.
-    let hosts_strip_shape = use_memo(move || {
+    let provisioning_trace_shapes = use_signal(HashMap::<HostId, ProvisioningTraceShape>::new);
+    // A shape signature for the always-mounted host list. A memo prevents
+    // ordinary phase-only polls and progress-step churn from closing fixed
+    // surfaces while still catching every rendered trace transition and the
+    // count or read-state changes that move rows below the host list.
+    let hosts_list_shape = use_memo(move || {
         let read = hosts.read();
+        let mut traces = provisioning_trace_shapes
+            .read()
+            .iter()
+            .map(|(host, shape)| (*host, shape.operation, shape.status))
+            .collect::<Vec<_>>();
+        traces.sort_by_key(|(host, _, _)| *host);
         (
             read.hosts().map(<[_]>::len).unwrap_or(0),
             read.is_loading(),
             read.refresh_error().is_some(),
+            traces,
         )
     });
     // Closes any open actions-menu panel — a SESSION row's or a HOST row's,
@@ -694,20 +697,19 @@ pub(crate) fn ListView(
     //   `layout_epoch`, a counter `AppBody` owns and bumps from listeners
     //   this component cannot host itself (see that prop's own doc for
     //   why).
-    // - INTERNAL layout shifts this component causes directly: opening or
-    //   closing the hosts panel mounts or collapses a whole section above
-    //   the rows, the create form does the same, and the always-visible
-    //   compact host strip can change its own shape the instant an async
-    //   host read lands (`hosts_strip_shape`, just above). None of these go
+    // - INTERNAL layout shifts this component causes directly: the create
+    //   form and host-list read state can change the content above the
+    //   session rows. None of these go
     //   through `layout_epoch` — they are this component's own renders, not
     //   an ancestor's scroll or resize — so each is read directly here
     //   instead. The fixed filter popover does not shift a row, so opening it
     //   is handled separately as mutual exclusion rather than geometry.
     //
-    // Reruns on every write any of these six reads subscribes to,
-    // including the initial mount: that first run is a no-op (`menu_open`
-    // and `host_menu_open` both start `None`), so there is no
-    // special-casing needed to skip it.
+    // The three dependencies are deliberate: `layout_epoch` aggregates
+    // ancestor scroll and resize events, `show_create` covers the create
+    // form, and `hosts_list_shape` covers host count/read-state and collapsed
+    // provisioning-trace transitions. The initial run is a no-op because
+    // both row-menu signals start empty.
     //
     // NOT exhaustive — a same-INDEX height change on a row already above
     // the open one (a per-row error line appearing, say) moves the open
@@ -723,18 +725,17 @@ pub(crate) fn ListView(
     //
     // The host row accepts the identical same-index-height-change residual
     // as the session row above, for the identical reason: it is covered by
-    // NEITHER a reorder guard nor any of the six signals this effect
-    // watches, and a host row's OWN detail/remedy/warning/error text
-    // growing or shrinking is exactly the shape of change that can move an
-    // open host menu without tripping any of them. Chasing it would mean
+    // NEITHER a reorder guard nor the three consolidated dependencies above,
+    // and a host row's OWN detail/remedy/warning/error text growing or
+    // shrinking is exactly the shape of change that can move an open host
+    // menu without tripping any of them. Chasing it would mean
     // watching every open row's own measured height, which is the same
     // trade `commit_listing`'s doc already declines for the rarer
     // reordering case, made again here for a residual judged rarer still.
     use_effect(move || {
         layout_epoch();
-        hosts_open();
         show_create();
-        hosts_strip_shape();
+        hosts_list_shape();
         if menu_open.peek().is_some() {
             menu_open.set(None);
         }
@@ -751,13 +752,12 @@ pub(crate) fn ListView(
             filter_open.set(false);
         }
     });
-    // Hosts and create surfaces move the header itself. Unlike a listing
-    // count update, these are deliberate layout transitions, so a fixed
+    // Host-list and create-form shape changes move the header itself. Unlike
+    // a listing count update, these are layout transitions, so a fixed
     // snapshot is no longer a trustworthy attachment to its toggle.
     use_effect(move || {
-        hosts_open();
         show_create();
-        hosts_strip_shape();
+        hosts_list_shape();
         if *filter_open.peek() {
             filter_open.set(false);
         }
@@ -794,6 +794,7 @@ pub(crate) fn ListView(
     // is the single place that also covers keyboard and pointer activation.
     use_effect(move || {
         if menu_open().is_some() || host_menu_open().is_some() {
+            filter_open.set(false);
             if *profiles_open.peek() && ops.busy_now() {
                 // Row menus remain ordinary transient surfaces while the
                 // profile mutation owns the page. Closing the attempted menu
@@ -1286,7 +1287,7 @@ pub(crate) fn ListView(
 
     // An immediate re-read after a host mutation, instead of waiting for the
     // helm's own notification. Every host verb changes state this side
-    // cannot predict — an add's chip is whatever the connection finds, a
+    // cannot predict — an add's status is whatever the connection finds, a
     // retarget's is a fresh active-retry window, an adopt's is a reconnect —
     // so there is nothing honest to paint optimistically, and the fastest
     // truthful answer is the server's. The feed will say so too, a moment
@@ -2159,97 +2160,19 @@ pub(crate) fn ListView(
             ops,
             layout_epoch,
         }
-        // The sidebar's top strip is host management only. Session-list
-        // controls sit beside the count that explains the rows they affect.
-        // The compact strip below keeps SPEC.md's per-host visibility promise
-        // while the full host panel is closed.
-        div { class: "sidebar-controls",
-            // Closing NEVER unmounts the panel (it collapses via CSS, see
-            // the holder below), so the toggle needs no busy guard: every
-            // in-flight discovery, plan, or host mutation keeps its
-            // component — and therefore its reply handling — alive behind
-            // the collapsed surface, and provisioning-busy state survives
-            // a close/reopen instead of flashing controls re-enabled.
-            button {
-                r#type: "button",
-                class: "btn hosts-toggle",
-                aria_expanded: hosts_open(),
-                onclick: move |_| {
-                    let opening = !hosts_open();
-                    hosts_open.set(opening);
-                },
-                "hosts"
-            }
-        }
-        // The always-visible compact form of the hosts panel: SPEC.md
-        // requires per-host connection state (and the retry phase behind
-        // it) to stay visible, and the interviewed redesign relaxed that
-        // from the full management panel to this strip — one entry per
-        // host, named, with the SAME phase word and color category the
-        // full panel's chip uses (`hosts::phase_label`/`phase_class`), so
-        // the two surfaces can never call one state two things.
-        // Management (retry, edit, remove) stays in the full panel behind
-        // the toggle. Profiles are helm-wide and live in the app bar popup.
-        div { class: "hosts-compact",
-            // The strip mirrors `HostsRead`'s four states, not just its
-            // happy path: this is the surface SPEC.md's always-visible
-            // promise now rests on, and a strip that renders only
-            // `hosts()` would show a failed first read as an empty fleet
-            // and a failed REFRESH as confidently current chips. The
-            // wording mirrors the full panel's own loading/error lines.
-            if hosts.read().is_loading() {
-                span { class: "hosts-compact-note", "loading hosts…" }
-            }
-            for host in hosts.read().hosts().unwrap_or_default() {
-                span {
-                    key: "{host.id}",
-                    class: "hosts-compact-entry",
-                    span { class: "hosts-compact-name peer-value", dir: "ltr",
-                        "{display_peer(&host.name)}"
-                    }
-                    span {
-                        class: "host-chip {phase_class(&host.state)}",
-                        "{phase_label(&host.state)}"
-                    }
-                }
-            }
-            // A failed refresh demotes everything above to last-known —
-            // said HERE, where the chips are, not only inside the closed
-            // panel. The helm's own words ride along like every other
-            // peer string.
-            if let Some(err) = hosts.read().refresh_error().map(str::to_string) {
-                PeerLine {
-                    class: "hosts-compact-error".to_string(),
-                    parts: vec![
-                        DetailPart::Text(
-                            if hosts.read().hosts().is_some() {
-                                "shown as of last successful read; refresh failed: ".to_string()
-                            } else {
-                                "hosts could not be read: ".to_string()
-                            },
-                        ),
-                        DetailPart::Peer(err),
-                    ],
-                }
-            }
-        }
-        // Mounted permanently, collapsed via CSS: an unmounted panel
-        // would take every in-flight add-host discovery, provisioning
-        // plan, and host mutation task down with it (their replies
-        // silently discarded, a claimed token stranded), and would
-        // forget `provisioning_busy_hosts` so a reopen briefly offered
-        // mutations on a host mid-provisioning.
-        div {
-            class: if hosts_open() { "hosts-panel-holder" } else { "hosts-panel-holder collapsed" },
-            HostsPanel {
-                hosts,
-                ops,
-                mutation_busy_hosts,
-                provisioning_busy_hosts,
-                host_menu_open,
-                session_menu_open: menu_open,
-                on_changed: refresh_hosts,
-            }
+        // The host list is one permanent surface. Keeping the component
+        // mounted is a lifecycle requirement, not only a layout choice:
+        // discovery, planning, and mutation replies must retain their owner.
+        HostsPanel {
+            hosts,
+            ops,
+            mutation_busy_hosts,
+            provisioning_busy_hosts,
+            provisioning_trace_shapes,
+            host_menu_open,
+            session_menu_open: menu_open,
+            filter_open,
+            on_changed: refresh_hosts,
         }
         // The filter is a viewport-fixed popover rather than an in-flow bar:
         // it follows the same overflow-escaping geometry as row menus without

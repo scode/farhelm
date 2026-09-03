@@ -21,7 +21,6 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   cleanupSession,
   createSession,
-  openHostsPanel,
   openRowMenu,
   pinAutoSelect,
 } from "./helpers/fleet";
@@ -74,6 +73,8 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
 
     const accentFill = await resolveToken(page, "--accent-fill");
     const accentEdge = await resolveToken(page, "--accent-edge");
+    const accent = await resolveToken(page, "--accent");
+    const pressedFill = await resolveToken(page, "--control-hover-bg");
     const danger = await resolveToken(page, "--danger");
 
     // `toHaveCSS` (polling) rather than a one-shot `getComputedStyle`
@@ -121,15 +122,24 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
     await expect(page.locator(".create-session-form")).toHaveCount(0);
 
     // --- Primary #3: the "add a host" dialog's own submit.
-    await openHostsPanel(page);
     await page.getByRole("button", { name: "add host" }).click();
     await expect(page.locator(".add-host-form")).toBeVisible();
     await expectPrimary(".add-host-submit");
-    // Closing never unmounts `.hosts-panel` (view.rs's own comment on the
-    // toggle: it collapses via CSS so in-flight host operations keep their
-    // component alive behind it) — `toHaveCount(0)` would never pass here.
-    await page.locator(".hosts-toggle").click();
-    await expect(page.locator(".hosts-panel")).not.toBeVisible();
+    // The list never unmounts. Close the add form through its own toggle so
+    // the following row-menu samples start from the resting layout.
+    await page.getByRole("button", { name: "add host" }).click();
+    await expect(page.locator(".add-host-form")).toHaveCount(0);
+
+    // A disclosure is ghost at rest and takes the shared pressed accent only
+    // while the content named by `aria-expanded` is visible.
+    const details = page.locator(".host-details-toggle");
+    await expect(details).toHaveCSS("background-color", GHOST);
+    await details.click();
+    await expect(details).toHaveAttribute("aria-expanded", "true");
+    await expect(details).toHaveCSS("background-color", pressedFill);
+    await expect(details).toHaveCSS("color", accent);
+    await details.click();
+    await expect(details).toHaveAttribute("aria-expanded", "false");
 
     // --- Ghost sample #1 (row-menu item) and the destructive item, both
     // read straight out of the row's open actions menu without clicking

@@ -771,21 +771,31 @@ export async function forgetAutoSelect(page: Page): Promise<void> {
 }
 
 /**
- * Open the sidebar's hosts panel if it is not already open.
+ * Ensure the permanent host list's global details disclosure is open.
  *
- * The sidebar redesign (BUGS_BURNDOWN.md issue 5) collapsed the hosts
- * panel behind a toggle — only the compact per-host strip is permanent —
- * so any test that manages hosts (add, retry, retarget, or remove) opens the
- * panel first through this helper. Idempotent like
- * `openRowMenu`, and it awaits the panel itself so callers can go
- * straight for its controls.
+ * The list itself is always mounted, so this helper preserves the useful
+ * contract older call sites relied on: after it returns, evidence, remedies,
+ * and provisioning state are available for inspection.
  */
 export async function openHostsPanel(page: Page): Promise<void> {
-  const toggle = page.locator(".hosts-toggle");
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click();
-  }
   await expect(page.locator(".hosts-panel")).toBeVisible();
+  const toggle = page.locator(".host-details-toggle");
+  // Polled rather than a single read-then-click: the page opens details on
+  // its own when automatic local setup needs a person (a plan, a manual
+  // remedy, a probe error), and that reveal can land between this helper's
+  // read and its click, turning the click into a CLOSE. Each poll clicks
+  // only while the disclosure reads closed, so a reveal that raced the
+  // first click is simply observed on the next look.
+  await expect
+    .poll(
+      async () => {
+        const expanded = await toggle.getAttribute("aria-expanded");
+        if (expanded !== "true") await toggle.click();
+        return toggle.getAttribute("aria-expanded");
+      },
+      { timeout: 20_000, intervals: [250, 500, 1000] },
+    )
+    .toBe("true");
 }
 
 /**

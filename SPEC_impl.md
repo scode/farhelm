@@ -235,6 +235,15 @@ refresh patches unchanged keyed profile rows in place, so it does not replay foc
 terminal whose retained output becomes visible while the popup is mounted does not take focus. Closing the popup does
 not hand focus to that terminal; the user can click it when they want to type there.
 
+Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
+Its two-row header gives the known host count first and then one unpersisted global details disclosure beside the
+add-host control. Every row always shows its name, phase dot, and muted actions toggle in the same trailing gutter as
+session-row status; connected spends no visible word, while other phases use humanized prose and retain the stable wire
+token in their data attribute. The disclosure reveals every row's evidence and diagnostics together. Provisioning
+commands live in the row menu, but their confirmation and active or retained progress stay under the row because that
+lifecycle owns more context than a floating menu can safely hold. Starting one of those commands opens details before
+planning, while a running or failed retained run leaves one short trace when details are closed.
+
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel hangs below-LEFT of the toggle that opened it — its top-right corner
 at the toggle's bottom-left, clamped inside the viewport — so that the toggle COLUMN of every row below stays uncovered
@@ -243,20 +252,19 @@ and clickable. The tidier flush-under-the-toggle placement was written and rejec
 destructive action on this one. Because the panel therefore floats over rows that look just like its own, ownership is
 carried by three cues instead of by proximity alone — the toggle holds a pressed accent state, its row holds a tint, and
 the panel is a raised surface with a shadow. **One at a time:** at most one row's menu is open, and it closes on any
-layout change that could have moved the row it was measured against (a sidebar scroll or resize, the hosts panel or
-create form opening, compact-host-strip shape changes, the row reordering under a refresh), because the panel's
-coordinates are a one-time snapshot. Opening the fixed filter popover also closes a row menu, but that is mutual
-exclusion between floating surfaces rather than a geometry event: opening the popover does not reflow the rows.
-**Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands
-focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a
-single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
-that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body.
-An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather than
-going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the user
-would otherwise swallow every navigation key. **Confirm in place:** a destructive item swaps the panel's own contents
-for the consequence line and a confirm/cancel pair with focus on cancel, rather than opening a second surface; that
-sub-state is a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it
-deliberately does not answer Escape.
+layout change that could have moved the row it was measured against (a sidebar scroll or resize, the host list's shape
+changing, the create form opening, the row reordering under a refresh), because the panel's coordinates are a one-time
+snapshot. Opening the fixed filter popover also closes a row menu, but that is mutual exclusion between floating
+surfaces rather than a geometry event: opening the popover does not reflow the rows. **Keyboard:** it is a real
+`role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands focus on the first command and
+ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a single tab stop via roving
+`tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close that took the menu away from
+a focused item hands focus back to the toggle rather than dropping it on the document body. An item made inert by an
+in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather than going natively `disabled`,
+because a browser cannot focus a disabled control and a menu that went busy under the user would otherwise swallow every
+navigation key. **Confirm in place:** a destructive item swaps the panel's own contents for the consequence line and a
+confirm/cancel pair with focus on cancel, rather than opening a second surface; that sub-state is a `role="dialog"`
+inside the same positioned box, and it survives the panel closing, which is why it deliberately does not answer Escape.
 
 Clone (the row menu's newest item) reuses the create form rather than a second submit path: the click builds a
 `CreatePrefill` snapshot of the row's `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic

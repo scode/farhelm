@@ -219,7 +219,7 @@
 
   /* Semantic states. `ok` is the healthy/live family, `warn` the
      attention-but-not-broken family (see `.status-badge.interrupted` and
-     `.host-chip.unreachable` for why several things are amber rather
+     `.host-status.unreachable` for why several things are amber rather
      than red), `danger` the destructive-or-failed family. */
   --ok: #7fd88f; /* running, connected, step completed */
   --ok-dim: #5f8f6b; /* the same family, one notch quieter: live but idle */
@@ -348,10 +348,9 @@ samp {
 .app-sidebar {
   width: 340px;
   flex-shrink: 0;
-  /* x is clipped, y scrolls (shorthand order: x then y). Session rows
-   * stack and ellipsize per line, while the on-demand full hosts panel can
-   * still lay out wide non-wrapping lines that would otherwise widen the
-   * page. The filter controls are fixed outside this clipping context. */
+  /* x is clipped, y scrolls (shorthand order: x then y). Session and host
+   * rows stack and ellipsize per line; their fixed menus escape this
+   * clipping context. The filter controls do too. */
   overflow: hidden auto;
   /* The sidebar is CHROME, not content: it sits one level above the
      ground the terminal shares with the page, which is the single
@@ -420,20 +419,6 @@ samp {
   font-size: 12px;
 }
 
-/* The sidebar's top chrome is host management only. Session-list controls
-   belong in the list header with the count whose committed rows they change. */
-.sidebar-controls {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 8px 12px 4px;
-}
-
-.sidebar-controls .btn {
-  font-size: 12px;
-  padding: 2px 8px;
-}
-
 /* The count remains its own element for the committed-list contract, while
    the wrapper makes it a two-row header with controls that affect those rows. */
 .list-header {
@@ -457,41 +442,6 @@ samp {
   color: var(--fg-0);
   font: 12px var(--font-ui);
   padding: 1px 4px;
-}
-
-/* The hosts panel's permanent mount, collapsed rather than unmounted when
-   toggled shut: removal would tear down in-flight discovery/plan/mutation
-   tasks (silently discarding their replies) and forget provisioning-busy
-   state — see the holder's comment in list.rs. */
-.hosts-panel-holder.collapsed {
-  display: none;
-}
-
-/* The compact per-host strip that keeps SPEC.md's connection-state
-   visibility while the full panel is closed: name plus the SAME
-   phase-worded, phase-colored chip the panel uses. One host per line —
-   names are user data with no length bound, so each ellipsizes alone
-   rather than fighting its neighbors for one line. */
-.hosts-compact {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0 12px 6px;
-  font-size: 12px;
-}
-
-.hosts-compact-entry {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.hosts-compact-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }
 
 /* ===== Main pane titlebar ========================================= */
@@ -1090,9 +1040,10 @@ samp {
    tracks the open button's top padding so the toggle sits on the title
    line rather than floating above or below it.
 
-   Hidden at rest via `opacity`, not `display`/`visibility`, until one of
-   the reveal conditions below applies — rather than sitting as one of
-   eight identical "⋯" boxes down the whole visible list at once. `opacity`
+   The session control is hidden at rest via `opacity`, not
+   `display`/`visibility`, until one of the reveal conditions below applies —
+   rather than sitting as one of eight identical "⋯" boxes down the whole
+   visible list at once. `opacity`
    specifically because the toggle must stay in the tab order and stay
    clickable at `opacity: 0`: Playwright's actionability checks (`click()`
    included) do not treat `opacity: 0` as hidden, only `display`/
@@ -1103,8 +1054,10 @@ samp {
    by `click()` rather than a visibility assertion for exactly this
    reason: a hidden-at-rest target is equally clickable either way, so
    `click()` is not a shortcut here, it is the only check that means
-   anything. This rule only changes what a SIGHTED mouse user sees at
-   rest. */
+   anything. This rule only changes what a SIGHTED mouse user sees at rest.
+
+   The host control stays at full opacity because host rows have no selected
+   state that would otherwise reveal where their management actions live. */
 .session-row-menu,
 .host-row-menu {
   flex: 0 0 auto;
@@ -1113,13 +1066,20 @@ samp {
   padding: 0 8px;
   font-size: 14px;
   line-height: 1.4;
-  opacity: 0;
   transition:
     opacity 100ms,
     background-color 100ms;
 }
 
-/* Revealed by hover, by keyboard focus anywhere in the row (including on
+.session-row-menu {
+  opacity: 0;
+}
+
+.host-row-menu {
+  opacity: 1;
+}
+
+/* Session controls are revealed by hover or keyboard focus in the row (including on
    the toggle itself, via `:focus-within` on its own ancestor — no separate
    `:focus` selector needed), by the row being the current selection, or by
    the toggle's OWN menu being open — for as long as it stays open, not
@@ -1133,17 +1093,13 @@ samp {
    whatever keeps the toggle visible after that falls to the other three
    conditions above.
 
-   The host row's own three conditions follow directly below, minus the
-   "current selection" clause: a host row has no `.selected` counterpart
-   (there is no notion of "the current host" the way there is a current
-   session), so hover/focus-within/expanded are its whole reveal set. */
+   Host controls do not participate in this reveal rule. Their muted toggle
+   is always visible because a host has no selected-row state to make the
+   action discoverable later. */
 .session-row:hover .session-row-menu,
 .session-row:focus-within .session-row-menu,
 .session-row.selected .session-row-menu,
-.session-row-menu[aria-expanded="true"],
-.host-row:hover .host-row-menu,
-.host-row:focus-within .host-row-menu,
-.host-row-menu[aria-expanded="true"] {
+.session-row-menu[aria-expanded="true"] {
   opacity: 1;
 }
 
@@ -1167,7 +1123,8 @@ samp {
    the selection nothing — one glyph of accent text cannot compete with a
    whole row's accent fill. */
 .session-row-menu[aria-expanded="true"],
-.host-row-menu[aria-expanded="true"] {
+.host-row-menu[aria-expanded="true"],
+.host-details-toggle[aria-expanded="true"] {
   background: var(--control-hover-bg);
   color: var(--accent);
 }
@@ -1187,8 +1144,7 @@ samp {
    which is what determines whether touch is a real path to this control,
    not merely "which pointer is primary right now". */
 @media (hover: none), (any-pointer: coarse) {
-  .session-row-menu,
-  .host-row-menu {
+  .session-row-menu {
     opacity: 1;
   }
 }
@@ -1424,8 +1380,9 @@ samp {
 /* ===== Row actions and confirmations ============================== */
 
 /* The items of either row's actions menu (up to four on an active session
-   row, two on an archived one; up to five on an adoptable ssh host, down to
-   two on the reserved local row — see `hosts::host_menu_order`). Full-width
+   row and two on an archived one). Host rows conditionally offer Retry,
+   Adopt, Re-run, Automatic setup, Update, Edit destination, and Remove; see
+   `hosts::host_menu_order`. Full-width
    rows that light up edge to edge on hover, not a stack of small centered
    boxes: with a border and a padded box each, they read as unrelated
    buttons that happened to land in the same rectangle, which is the
@@ -1780,7 +1737,7 @@ samp {
 }
 
 /* A renamed or unrecognized profile-named badge carries the same amber the
-   panel's chip does. A deleted catalog row stays plain: the snapshotted name
+   host status does. A deleted catalog row stays plain: the snapshotted name
    is useful history, not a warning about the session. Kept in step with
    `.session-profile`'s rule below rather than folded into it, because the two
    live on different surfaces and only the color is shared. */
@@ -2040,7 +1997,7 @@ samp {
    knowledge rather than a live report. Amber marks last-known metadata:
    staleness covers EVERY non-connected phase — unreachable, skew, an
    identity decision, duplicate, retired — so the color must not imply any
-   one of them. The badge's phase story lives on the host chip; this only
+   one of them. The badge's phase story lives on the host status; this only
    says "what you see was true at last contact."
 
    NOT `opacity` on the whole button (an earlier revision of this rule):
@@ -2071,10 +2028,9 @@ samp {
   color: var(--fg-1);
 }
 
-/* Shared shape for the two small status capsules; their meaning lives in
-   their colors below. */
-.stale-badge,
-.host-chip {
+/* The stale-session capsule keeps its own shape. Host state now uses the
+   same dot-plus-word vocabulary as session rows rather than a chip. */
+.stale-badge {
   font-size: 12px;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
@@ -2088,35 +2044,42 @@ samp {
 
 /* ===== Hosts panel ================================================ */
 
-/* The hosts panel (PLAN_M6.md item 6): the on-demand evidence and
-   management surface behind the sidebar's "hosts" toggle. SPEC.md's
-   always-visible connection state now lives in the compact strip (see
-   .hosts-compact); this panel adds the evidence behind each phase and
-   the actions (add/retry/retarget/remove/adopt/profiles). Mounted
-   permanently but collapsed while closed — see .hosts-panel-holder. */
+/* One permanent host list, directly above the session list. Its header uses
+   the same two-row count/control rhythm, and per-row evidence stays behind
+   one global disclosure without unmounting any async owner. */
 .hosts-panel {
   /* Same story as `.session-row`'s separator: the panel and the sidebar
      around it share --bg-1, so the foot has to be drawn with a rule. */
   border-bottom: 1px solid var(--border-row);
-  padding: 8px 14px;
+  padding: 0;
 }
 
-.hosts-panel-header {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+.hosts-header {
+  background: var(--bg-1);
 }
 
-.hosts-panel-title {
-  font-size: 12px;
+.host-count {
+  background: var(--bg-2);
   color: var(--fg-1);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  padding: 4px 10px;
 }
 
+.hosts-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.host-details-toggle,
 .add-host-button {
   font-size: 12px;
   padding: 2px 8px;
+}
+
+.add-host-button {
+  margin-left: auto;
 }
 
 .hosts-status {
@@ -2126,22 +2089,31 @@ samp {
 .host-row {
   display: flex;
   flex-direction: column;
-  padding: 4px 0;
+  border-bottom: 1px solid var(--border-row);
+  padding: 0;
+  transition: background-color 100ms;
+}
+
+.host-row:hover,
+.host-row:focus-within {
+  background: var(--bg-2);
 }
 
 .host-row-main {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  min-height: 32px;
+  padding: 4px 0 4px 12px;
   /* `nowrap`, deliberately, and load-bearing rather than the default left
      alone (F2/COR-HOST-MENU-OFFSCREEN): this line holds the row's header —
-     the name, the phase chip, and (outside the confirm/edit branches) the
-     "⋯" toggle — and `.host-name`'s own ellipsis floor just below is what
+     the name, the phase status, and the always-present "⋯" toggle — and
+     `.host-name`'s own ellipsis floor just below is what
      is supposed to absorb any width pressure. `wrap` was tried here once,
      to let the removal confirmation drop onto its own line without a
      second container, and it broke the ordinary case instead: the longest
-     real phase word (`unreachable-reprobing`) plus the toggle's own fixed
-     width can exceed one line even at `.host-name`'s floor, and a WRAPPING
+     phase wording plus the toggle's own fixed width can exceed one line even
+     at `.host-name`'s floor, and a WRAPPING
      row sends the "⋯" onto a line of its own starting at the row's LEFT
      edge — dragging its `position: fixed` floating menu (anchored off the
      toggle's measured rect) off the sidebar's left edge with it. The
@@ -2154,7 +2126,7 @@ samp {
 
 /* Same shrink discipline as the session row's fields: an ssh destination
    is user data of unbounded length, and without a floor plus ellipsis it
-   would push `.host-row-main`'s other two children — the phase chip and
+   would push `.host-row-main`'s other two children — the phase status and
    the "⋯" toggle — off the viewport. That used to be the live version of
    this hazard (TODO.md's near-term entry this row's menu closes): with
    `edit`/`remove`/`adopt`/`retry`/`profiles` all inline, a long
@@ -2168,7 +2140,7 @@ samp {
 
    The floor itself was lowered from 8em (F2/COR-HOST-MENU-OFFSCREEN,
    follow-up): with `.host-row-main`'s `nowrap` above, an 8em name floor
-   plus the longest real phase word (`unreachable-reprobing`)'s chip, the
+   plus the longest displayed phase wording, the
    "⋯" toggle, and the row's own margins and gaps needed roughly 318px —
    a few pixels more than the sidebar's ~312px content area — so the
    toggle still clipped at the right edge for exactly that phase. The name
@@ -2203,25 +2175,31 @@ samp {
   unicode-bidi: isolate;
 }
 
-/* The chip carries the helm's own phase word; its COLOR is the coarse
-   category (see `hosts::phase_class`), grouping the phases by what a
-   person should do about them rather than by what they are: nine colors
-   would be noise next to a label that already says exactly which state this
-   is. Shape is shared with `.stale-badge` above. */
+/* Host state uses the session list's status grammar: a fixed-size dot, then
+   words only when the state needs saying. The whole group is the trailing
+   gutter, so names give up width before statuses move. */
+.host-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  color: var(--fg-1);
+  font-size: 12px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 
-.host-chip.connected {
+.host-status.connected {
   color: var(--ok);
 }
 
-.host-chip.connecting {
-  color: var(--fg-1);
+.host-status.connecting {
   font-style: italic;
 }
 
 /* Amber, not red: an unreachable host is being re-probed forever and
    recovers on its own, so it is something to know about rather than
    something that failed. */
-.host-chip.unreachable {
+.host-status.unreachable {
   color: var(--warn);
 }
 
@@ -2229,9 +2207,9 @@ samp {
    states, duplicate, retired, and a state this build does not recognize all
    sit exactly where they are until a person does something. What that
    something IS differs per phase — upgrade a binary, decide between two
-   identities, edit or remove an entry, press retry — which is why the chip
+   identities, edit or remove an entry, press retry — which is why the status
    groups them by "needs attention" while the words beside it say which. */
-.host-chip.needs-attention {
+.host-status.needs-attention {
   color: var(--danger-strong);
 }
 
@@ -2264,7 +2242,7 @@ samp {
 .host-remedy {
   font-size: 12px;
   color: var(--fg-1);
-  padding: 1px 0 0;
+  padding: 1px 12px 0;
 }
 
 .host-remedy {
@@ -2272,7 +2250,7 @@ samp {
 }
 
 .host-error {
-  padding: 2px 0 0;
+  padding: 2px 12px 0;
 }
 
 .host-destination-form {
@@ -2281,6 +2259,7 @@ samp {
   gap: 6px;
   flex: 2 1 0;
   min-width: 0;
+  margin: 2px 12px;
 }
 
 .host-destination-input {
@@ -2351,10 +2330,11 @@ samp {
 
 /* ===== Host provisioning ========================================== */
 
-/* Provisioning stays inside its host row because execution state and progress
-   reads are host-scoped. Acceptance also refreshes the global registry. A
-   left rule makes the long action list subordinate to the row without making
-   it look page-blocking — it is not; OpLock ends at acceptance. */
+/* Provisioning stays inside its host row because confirmation, diagnostics,
+   execution state, and progress reads are host-scoped. Commands live in the
+   row menu instead. Acceptance also refreshes the global registry. A left
+   rule keeps this state surface subordinate to the row without making it look
+   page-blocking — it is not; OpLock ends at acceptance. */
 .provisioning-panel {
   /* A rule token keeps this subordinate block visible when surface colors
      move; borrowing a background token for a border made the rule disappear
@@ -2364,7 +2344,10 @@ samp {
   padding: 3px 0 3px 10px;
 }
 
-.provisioning-actions,
+.provisioning-panel:empty {
+  display: none;
+}
+
 .provisioning-confirm-actions,
 .provisioning-run-header {
   display: flex;
@@ -2372,8 +2355,6 @@ samp {
   gap: 7px;
 }
 
-.provisioning-update,
-.provisioning-rerun,
 .provisioning-confirm,
 .provisioning-cancel {
   font-size: 12px;
@@ -2405,7 +2386,8 @@ samp {
 }
 
 .provisioning-status,
-.provisioning-planning {
+.provisioning-planning,
+.provisioning-trace {
   color: var(--fg-1);
   font-size: 12px;
 }
