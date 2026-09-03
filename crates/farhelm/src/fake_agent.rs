@@ -1323,20 +1323,35 @@ fn altscreen() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Emit a byte that is invalid UTF-8, then remain alive for streaming.
+/// Emit a byte that is invalid UTF-8 ON REQUEST, then exit.
 ///
 /// This script exists because terminal output is bytes, not text. A
 /// lossy conversion in the live control path would replace 0xff and
 /// still leave every ordinary fake-agent test green. Capture replay is
 /// deliberately outside this contract: tmux may canonicalize invalid
 /// source bytes when it stores the terminal grid.
+///
+/// The invalid byte is held back until a line arrives on stdin rather than
+/// written at startup, because the test that reads it attaches AFTER
+/// creating the session. Under load the fixture used to win that race,
+/// the byte landed in the attach snapshot (where tmux is allowed to
+/// canonicalize it) instead of the live stream, and the assertion that
+/// the live stream preserved it failed with nothing actually wrong. Output
+/// caused by input sent through an attachment is live by construction.
 fn binary() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
-    out.write_all(b"\xffBINARY-MARKER\r\nFAKE-AGENT READY\r\n")?;
+    out.write_all(b"FAKE-AGENT READY\r\n")?;
     out.flush()?;
 
     let mut line = String::new();
-    std::io::stdin().lock().read_line(&mut line)?;
+    // EOF reads as `Ok(0)`, and a closed stdin is not a request: emitting
+    // the marker then would let a torn-down pane "prove" that input crossed
+    // an attachment that never sent any.
+    if std::io::stdin().lock().read_line(&mut line)? == 0 {
+        return Ok(());
+    }
+    out.write_all(b"\xffBINARY-MARKER\r\n")?;
+    out.flush()?;
     Ok(())
 }
 
