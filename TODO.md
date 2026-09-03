@@ -51,6 +51,27 @@ Within a bucket, no order.
   enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
   backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Start at rung 3 of
   `.agents/narrow-tests.md` on a 4-vCPU box.
+- Deflake `a keyboard-focused selected tab keeps its accent fill instead of the neutral hover tint`
+  (e2e/tests/terminal-tabs.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, `toHaveCSS` read the hover
+  tint (`rgb(27, 48, 84)`) where the accent fill (`rgb(22, 41, 74)`) was expected, for 5 s. The pointer was presumably
+  still over the tab from the click that selected it, so hover won the cascade; whether that is the test's sequencing or
+  a real precedence bug is the first thing to settle, with the rule that keyboard focus on a selected tab must show the
+  accent even under hover. The tab styles were untouched by the stack that surfaced it.
+- Deflake `session_lifecycle::delete_fails_closed_when_a_launch_artifact_cannot_be_removed` (crates/farhelm/tests/e2e).
+  Failed once in the v0.3.0-rc.2 release gate (GitHub-hosted runner, the full suite at `--test-threads=4`, run
+  33700275724) with `delete must fail closed when a launch artifact cannot be removed: ()`, i.e. the delete SUCCEEDED;
+  it passed the three rc.1 gate runs on the same runner type, a 4-vCPU sandbox, and locally. The test waits for the
+  launch shim to consume the session's spec, plants a replacement, makes the launch directory read-only, and expects
+  delete to fail on the artifact it cannot remove. Under load the shim can plausibly consume the PLANTED spec before
+  delete runs, leaving nothing to fail on. First step: pin the spec so the shim cannot take it (or assert the planted
+  file still exists right before the delete), then decide whether the race is the test's or the shim's.
+- Deflake `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e). Same
+  release-gate run as the entry above:
+  `timed out waiting for FLOOD-000000; 11619657 bytes seen, last records:
+  [799999, 799998, 799997]` from the shared
+  wait at terminal_backpressure.rs:289 — the same wait the `a_paused_replay_detaches…` sibling above timed out in on
+  2026-09-02. Two members of this file failing at the same line under load says the wait's budget, not either test's
+  logic, is the first thing to look at.
 
 ## Maybe later
 
