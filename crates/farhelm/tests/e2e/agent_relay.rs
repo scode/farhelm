@@ -288,6 +288,19 @@ impl SessionPeer {
         self.send(asking_as, request).await;
         self.answer().await
     }
+
+    /// Send a raw restricted-control message and read its correlated reply.
+    ///
+    /// Spawn uses `CreateSession` directly rather than the `AgentRequest`
+    /// envelope used by `farhelm agent`. Keeping this seam raw is what lets
+    /// the forgery regression submit provenance the typed CLI never emits.
+    async fn control(&mut self, request: ControlMsg) -> ControlMsg {
+        self.writer
+            .write_control(&request)
+            .await
+            .expect("send the restricted control request");
+        self.answer().await
+    }
 }
 
 /// The outcome of an `AgentResponse` correlated with the peer's own
@@ -693,5 +706,204 @@ async fn a_deleted_session_cannot_ask_on_a_connection_it_already_opened() {
     assert!(
         handler.asked.lock().unwrap().is_empty(),
         "no request may reach the helm after the credential is gone"
+    );
+}
+
+/// A direct session-authenticated `ResolveProfile` request is refused at the
+/// supervisor and never reaches the attached helm.
+///
+/// The resolved bundle contains the full invocation and resume template,
+/// which ordinary agent-facing listings intentionally redact. The same wire
+/// verb remains available to the supervisor's internal named-spawn path; the
+/// sibling test below proves that path still reaches the scripted helm.
+#[tokio::test]
+async fn a_session_cannot_call_the_internal_profile_resolver_directly() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let token = credential_for(&h, &session.id).await;
+
+    let handler = ScriptedHandler::answering(AgentReply::ResolvedProfile {
+        invocation: "secret-agent --token hidden".to_string(),
+        agent_kind: farhelm_proto::AgentKind::Generic,
+        resume_template: None,
+        source_profile: farhelm_proto::ProfileSnapshot {
+            id: "secret-profile".to_string(),
+            name: "Secret profile".to_string(),
+        },
+    });
+    let helm = connect_helm(&h.sup, handler.clone()).await;
+    let (_channel, _stream) = helm
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("the helm attaches");
+
+    let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
+    match outcome_of(
+        peer.ask(
+            &session.id,
+            AgentVerb::ResolveProfile {
+                name: "Secret profile".to_string(),
+            },
+        )
+        .await,
+    ) {
+        AgentOutcome::Err { kind, message } => {
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert_eq!(message, "profile resolution is not available to sessions");
+        }
+        other => panic!("the internal resolver must be refused, got {other:?}"),
+    }
+    assert!(
+        handler.asked.lock().unwrap().is_empty(),
+        "a refused direct resolution must not reach the helm"
+    );
+}
+
+/// A named spawn resolves through the attached helm and stores the exact
+/// bundle the helm returned.
+///
+/// This is the protocol-15 path no component-level test covers alone: the
+/// restricted `CreateSession` enters `resolve_create_selector`, the
+/// supervisor sends an internal `ResolveProfile` up the attachment-owning
+/// connection, and the resulting invocation, integration settings, resume
+/// template, and immutable snapshot become the child's durable launch data.
+#[tokio::test]
+async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
+    let h = harness().await;
+    let (session, work) = basic_session(&h).await;
+    let token = credential_for(&h, &session.id).await;
+    let snapshot = farhelm_proto::ProfileSnapshot {
+        id: "profile-scripted".to_string(),
+        name: "Scripted agent".to_string(),
+    };
+    let resume_template = vec![
+        "codex".to_string(),
+        "resume".to_string(),
+        "{conversation}".to_string(),
+    ];
+    let handler = ScriptedHandler::answering(AgentReply::ResolvedProfile {
+        invocation: "sh -c 'sleep 60'".to_string(),
+        agent_kind: farhelm_proto::AgentKind::Codex,
+        resume_template: Some(resume_template.clone()),
+        source_profile: snapshot.clone(),
+    });
+    let helm = connect_helm(&h.sup, handler.clone()).await;
+    let (_channel, _stream) = helm
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("the helm attaches");
+
+    let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
+    let reply = peer
+        .control(ControlMsg::CreateSession {
+            req_id: 81,
+            parent: Some(session.id.clone()),
+            cwd: work.path().to_string_lossy().into_owned(),
+            invocation: None,
+            profile_name: Some("Scripted agent".to_string()),
+            title: Some("resolved child".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("resolved-spawn".to_string()),
+            agent_kind: None,
+            resume_template: None,
+            source_profile: None,
+        })
+        .await;
+    let ControlMsg::SessionCreated {
+        req_id,
+        session: child,
+    } = reply
+    else {
+        panic!("the resolved spawn must succeed: {reply:?}");
+    };
+    assert_eq!(req_id, 81);
+    assert_eq!(
+        *handler.asked.lock().unwrap(),
+        vec![(
+            session.id.clone(),
+            AgentVerb::ResolveProfile {
+                name: "Scripted agent".to_string(),
+            },
+        )],
+        "the supervisor must issue the internal resolution under the asking session"
+    );
+
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the supervisor's store");
+    let stored = store
+        .session(&child.id)
+        .await
+        .expect("read the child")
+        .expect("the child exists");
+    assert_eq!(stored.invocation, "sh -c 'sleep 60'");
+    assert_eq!(stored.agent_kind, farhelm_proto::AgentKind::Codex);
+    assert_eq!(stored.resume_template, Some(resume_template));
+    assert_eq!(
+        stored
+            .source_profile
+            .map(|profile| (profile.id, profile.name)),
+        Some((snapshot.id, snapshot.name))
+    );
+}
+
+/// A raw restricted create cannot forge the profile provenance attached to
+/// its invocation.
+///
+/// The request is sent as literal protocol vocabulary because the shipped
+/// spawn CLI never constructs this hostile shape. Refusal must happen before
+/// reservation or launch work, leaving no child behind under the supplied
+/// key.
+#[tokio::test]
+async fn a_restricted_create_cannot_supply_source_profile() {
+    let h = harness().await;
+    let (session, work) = basic_session(&h).await;
+    let token = credential_for(&h, &session.id).await;
+    let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
+
+    let reply = peer
+        .control(ControlMsg::CreateSession {
+            req_id: 82,
+            parent: Some(session.id.clone()),
+            cwd: work.path().to_string_lossy().into_owned(),
+            invocation: Some("sh -c 'sleep 60'".to_string()),
+            profile_name: None,
+            title: Some("forged child".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("forged-provenance".to_string()),
+            agent_kind: Some(farhelm_proto::AgentKind::Generic),
+            resume_template: None,
+            source_profile: Some(farhelm_proto::ProfileSnapshot {
+                id: "starter-codex".to_string(),
+                name: "codex".to_string(),
+            }),
+        })
+        .await;
+    let ControlMsg::Error {
+        req_id,
+        kind,
+        message,
+    } = reply
+    else {
+        panic!("forged provenance must be refused: {reply:?}");
+    };
+    assert_eq!(req_id, 82);
+    assert_eq!(kind, ErrorKind::InvalidRequest);
+    assert!(message.contains("source_profile"));
+
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the supervisor's store");
+    assert_eq!(store.reservation("forged-provenance").await.unwrap(), None);
+    assert!(
+        store
+            .load_all()
+            .await
+            .expect("load sessions")
+            .into_iter()
+            .all(|row| row.id == session.id),
+        "the hostile request must not create a child"
     );
 }

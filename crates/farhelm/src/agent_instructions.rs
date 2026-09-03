@@ -115,9 +115,9 @@ fn render(agent: &Command) -> String {
          environment, so the lines above ARE complete command lines. An omitted optional is a\n\
          DEFAULT, not \"not needed\": no --session on rename/stop/archive means THIS session,\n\
          and no --host on create/clone means the host you are on. --host takes a name from\n\
-         the hosts listing; create's --profile is resolved by NAME on the target host, and so\n\
-         is a clone's agent when you clone ONTO ANOTHER host (a clone onto your own host keeps\n\
-         the exact profile). A name that is not there is refused rather than guessed at.\n\
+         the hosts listing; create's --profile is resolved by NAME in the helm's one catalog.\n\
+         A clone follows this session's snapshotted profile id on every host. A name or\n\
+         snapshot that is not in that catalog is refused rather than guessed at.\n\
          \n\
          A self-stop kills this command too, if it runs from the agent rather than a terminal\n\
          tab; stop leaves the session listed, archive keeps it listed as archived.\n\
@@ -449,9 +449,9 @@ mod tests {
     /// here would tell a model the directory is optional and it would
     /// dutifully omit it. `--host <NAME>` must say NAME rather than HOST,
     /// because the value is a name from the hosts listing and not a host
-    /// id. And both must show `--profile <NAME>`, never `--profile-id`,
-    /// since an id would resolve on the wrong host's catalog (see
-    /// `farhelm-helm`'s `agent_requests`).
+    /// id. And both must show `--profile <NAME>`, never `--profile-id`:
+    /// agents see profile names in the helm's catalog, while opaque profile
+    /// ids are an internal identity rather than a CLI handle.
     ///
     /// Both lines exceed [`MAX_USAGE_WIDTH`], so this also pins what an
     /// over-wide verb looks like in the REAL text rather than only in
@@ -482,17 +482,12 @@ mod tests {
     /// new session's id on stdout (so an agent can capture it and report it
     /// back, and knows the sentence it also sees is on stderr); that
     /// `--host` takes a NAME out of the hosts listing rather than an
-    /// identifier of some other kind; that a profile is resolved on the
-    /// TARGET host, which is what tells an agent to read the target's
-    /// catalog rather than its own; and that a name with no match is
-    /// REFUSED rather than approximated, which is the difference between a
-    /// model retrying with a better name and a model accepting a session
-    /// running something nobody asked for.
-    ///
-    /// The profile needles are worded to keep the SAME-HOST exception
-    /// intact: a clone onto the session's own host follows the snapshotted
-    /// id, and prose flattened into "clones always resolve by name" would
-    /// describe an implementation this one deliberately is not.
+    /// identifier of some other kind; that names resolve in one helm-owned
+    /// catalog; that clones follow the snapshotted id on every host; and
+    /// that a missing name or snapshot is REFUSED rather than approximated.
+    /// The last clause is the difference between a model retrying with a
+    /// valid selection and accepting a session running something nobody
+    /// asked for.
     ///
     /// Losing any of them in a prose rewrite is the exact failure the
     /// sibling test on the older conventions
@@ -506,9 +501,9 @@ mod tests {
         for needle in [
             "new session's id on stdout",
             "--host takes a name from",
-            "resolved by NAME on the target host",
-            "clone onto your own host keeps",
-            "refused rather than guessed at",
+            "resolved by NAME in the helm's one catalog",
+            "snapshotted profile id on every host",
+            "not in that catalog is refused rather than guessed at",
         ] {
             assert!(
                 text.contains(needle),

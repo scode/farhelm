@@ -59,9 +59,9 @@
 //!   Both counts are taken from the same in-memory view the rows come
 //!   from, in the same request. [`profiles`] is the other half of that
 //!   surface: the helm-owned profile catalog is served at `/api/profiles`,
-//!   while the existing host-scoped profile routes remain supervisor proxies
-//!   during the migration. The helm also remembers one raw default id for
-//!   the catalog.
+//!   while the existing host-scoped profile routes are temporary aliases of
+//!   the same handlers. The helm also remembers one raw default id for the
+//!   catalog.
 //!
 //! M1's argv session flags (`--ssh`, `--cwd`, `--agent`, `--title`,
 //! `--remote-farhelm`, `--remote-state-dir`) are gone in this same PR: the
@@ -168,8 +168,8 @@ mod precondition;
 /// `/api/preferences` — the one client preference (list order, last
 /// selection) the helm remembers for every client at once.
 mod preferences;
-/// `/api/hosts/{id}/profiles` — agent profile CRUD, proxied to the owning
-/// supervisor, plus the helm-owned remembered default served beside it.
+/// Helm-owned agent profile CRUD, with temporary host-scoped route aliases
+/// for the unchanged UI.
 mod profiles;
 
 /// The session REST surface — the list, the owner-lookup routing behind
@@ -425,43 +425,6 @@ struct AppState {
     /// counter instead of against the endpoint, which is the half that can
     /// actually forget to admit.
     event_subscriber_cap: usize,
-    /// Serializes each host's catalog MUTATIONS — the read-compare-forward
-    /// edit ([`profiles::update_profile`]) and the delete that would otherwise
-    /// land inside one ([`profiles::delete_profile`]).
-    ///
-    /// Keyed by host and created on demand, because the interesting case is
-    /// two clients editing the SAME host's catalog; edits to different hosts
-    /// have nothing to serialize against each other.
-    ///
-    /// Entries are never removed, including for a host that is later
-    /// forgotten. That is only a bound because a lock is allocated exclusively
-    /// for a host the registry currently holds — see [`Self::profile_edit_lock`],
-    /// whose contract is what keeps a caller-supplied path id from minting
-    /// entries. Each entry is an empty mutex, so reclaiming them would cost a
-    /// lifetime rule (who may drop a lock another request is queued on?) to
-    /// save nothing measurable.
-    profile_edits:
-        std::sync::Mutex<std::collections::HashMap<store::HostId, Arc<tokio::sync::Mutex<()>>>>,
-    /// How many requests are currently BLOCKED waiting for some host's
-    /// profile-mutation lock, across the whole fleet.
-    ///
-    /// Instrumentation, and the only reason it exists is that the property it
-    /// exposes is otherwise untestable: "the second edit reached the queue
-    /// before the first released it" is the entire content of the
-    /// serialization contract, and without an observable for it a test can
-    /// only sleep and hope — which passes just as happily against a helm that
-    /// serializes nothing. A `tokio::sync::Mutex` publishes no waiter count of
-    /// its own, so this is counted where the wait happens
-    /// ([`Self::enter_profile_edit`]).
-    ///
-    /// The COUNTING is compiled in every build, for the reason
-    /// `store::HelmStore::counting_passes` records: a hook that exists only in
-    /// the test build lets the shape it guards drift in the build nobody
-    /// tests. Two atomic operations per mutation cost nothing beside a round
-    /// trip to a supervisor. Only the reader is `cfg(test)`, because
-    /// `AppState` is private to this crate and production has no question this
-    /// number answers.
-    profile_edit_queue: std::sync::atomic::AtomicUsize,
     /// The one in-flight provisioning authority shared by every browser.
     provisioning: Arc<provisioning::ProvisioningService>,
     /// The shared fixed-window accept budget behind `POST /api/client-log`
@@ -492,22 +455,6 @@ struct AppState {
 /// tokio worker thread; implementations own whatever platform threading
 /// their pasteboard requires.
 pub type ClipboardSink = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
-
-/// Decrements [`AppState::profile_edit_queue`] however its waiter leaves —
-/// acquired, cancelled, or unwound.
-///
-/// A drop guard rather than a matching `fetch_sub`, because the wait it
-/// counts is exactly the thing an axum handler's cancellation interrupts: a
-/// client disconnecting mid-queue would otherwise leave the counter high for
-/// the life of the process, and an instrument that only ever climbs is worse
-/// than none.
-struct QueuedEdit<'a>(&'a std::sync::atomic::AtomicUsize);
-
-impl Drop for QueuedEdit<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
-}
 
 impl AppState {
     /// The shared state as production builds it: the two halves of the
@@ -547,65 +494,12 @@ impl AppState {
             store: store.clone(),
             auth: auth::AuthState::new(store),
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
-            profile_edits: std::sync::Mutex::new(std::collections::HashMap::new()),
-            profile_edit_queue: std::sync::atomic::AtomicUsize::new(0),
             provisioning,
             client_log_rate: std::sync::Mutex::new(client_log::RateWindow::new(
                 std::time::Instant::now(),
             )),
             clipboard_sink: None,
         }
-    }
-
-    /// The lock that makes one host's profile mutations a queue rather than a
-    /// race. See [`Self::profile_edits`].
-    ///
-    /// CALLERS MUST HAVE ESTABLISHED THAT `host` EXISTS. The map is documented
-    /// as bounded by the registry, and nothing here can enforce that: the id
-    /// arrives as a path segment, so calling this before routing turns any
-    /// stream of made-up ids into permanent entries — a compromised
-    /// authenticated device growing this process's memory one `i64` at a time. Every
-    /// call site therefore routes first (`sessions::host_client`) and takes the
-    /// lock afterwards, then re-routes under it, because a host can be
-    /// forgotten while a request waits its turn.
-    fn profile_edit_lock(&self, host: store::HostId) -> Arc<tokio::sync::Mutex<()>> {
-        let mut locks = self
-            .profile_edits
-            .lock()
-            .expect("profile edit lock map poisoned");
-        Arc::clone(locks.entry(host).or_default())
-    }
-
-    /// Wait this request's turn to mutate `host`'s profile catalog, counting
-    /// the wait while it lasts (see [`Self::profile_edit_queue`]).
-    ///
-    /// The handler holds the guard for exactly the span of its forward, so
-    /// one host's mutations reach the supervisor in the order this helm
-    /// accepted them; a handler cancelled mid-flight releases it with
-    /// its edit possibly still landing on the supervisor, which is accepted
-    /// (see the `profiles` module docs on cancelled requests). Owned rather
-    /// than borrowed is a leftover of the detached commit task that used to
-    /// carry the guard past the handler's lifetime; nothing needs the owned
-    /// form now, and it is kept only to avoid churning every call site.
-    ///
-    /// Callers must have routed `host` first; see [`Self::profile_edit_lock`].
-    async fn enter_profile_edit(&self, host: store::HostId) -> tokio::sync::OwnedMutexGuard<()> {
-        let serialized = self.profile_edit_lock(host);
-        self.profile_edit_queue
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let _queued = QueuedEdit(&self.profile_edit_queue);
-        serialized.lock_owned().await
-    }
-
-    /// How many requests are queued on a profile-mutation lock right now.
-    ///
-    /// The observable the concurrency tests wait on instead of sleeping. The
-    /// counting itself ships in every build; only this reader is test-only —
-    /// see [`Self::profile_edit_queue`].
-    #[cfg(test)]
-    fn queued_profile_edits(&self) -> usize {
-        self.profile_edit_queue
-            .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -708,10 +602,9 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/retry",
             axum::routing::post(hosts::retry_host),
         )
-        // The catalog migration is deliberately split: host routes still
-        // proxy supervisor catalogs while top-level routes serve helm.db.
-        // Session resolution moves in the following part, so both surfaces
-        // remain visible during this temporary ownership boundary.
+        // The host-shaped routes remain temporary aliases for the current UI.
+        // Their handlers parse but otherwise ignore `id`; both route families
+        // operate on the one helm-owned catalog below.
         .route(
             "/api/hosts/{id}/profiles",
             get(profiles::list_profiles).post(profiles::create_profile),

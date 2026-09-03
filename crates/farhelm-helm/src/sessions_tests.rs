@@ -3,9 +3,42 @@
 //! `#[path]` keeps this as `sessions::tests`, preserving private-item access without widening
 //! production visibility.
 
-use super::{resolve_owner, store};
+use super::{resolve_owner, resolve_session_profiles_from_store, store};
 use crate::rest_harness::{self, WsTestClient, silent_supervisor};
 use std::time::Duration;
+
+/// Raw session rows do not read or decode the profile catalog.
+///
+/// The store's public writers reject malformed profiles, so this fixture
+/// plants one through SQLite as a damaged database could. A catalog read
+/// would fail on its unknown agent kind; successful resolution therefore
+/// proves the raw-only early return happens before any store access.
+#[tokio::test]
+async fn raw_only_profile_resolution_ignores_a_corrupt_catalog_row() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("helm.db");
+    let store = store::HelmStore::open(&db).await.expect("open store");
+    {
+        let conn = rusqlite::Connection::open(&db).expect("open corruption fixture");
+        conn.execute(
+            "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
+             VALUES ('corrupt-profile', 'broken', 'agent', 'unknown', NULL)",
+            [],
+        )
+        .expect("plant corrupt profile");
+    }
+    assert!(
+        store.profiles().await.is_err(),
+        "the fixture must fail a real catalog read"
+    );
+
+    let mut sessions = vec![rest_harness::session("raw", 1)];
+    sessions[0].source_profile = None;
+    resolve_session_profiles_from_store(&store, &mut sessions)
+        .await
+        .expect("raw rows do not need the catalog");
+    assert_eq!(sessions[0].source_profile, None);
+}
 
 /// `POST /api/sessions` end to end through the real axum handler and
 /// middleware stack, with a scripted supervisor peer standing in for
@@ -60,7 +93,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
             // a profile selection alongside the invocation — the
             // ambiguous request the supervisor refuses — with this test
             // still green.
-            profile_id,
+            source_profile,
             title,
             cols,
             rows,
@@ -83,14 +116,12 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         // non-optional fields during deserialization.)
         assert_eq!((cols, rows), (80, 24), "serde defaults must be 80x24");
         assert_eq!(cwd, "/some/dir");
-        // The RAW create mode, spelled out: the helm has no profile
-        // catalog of its own, so every create it forwards names an
-        // invocation and no profile (PLAN_M6_75.md item 3's
-        // exclusivity — a request naming both is refused).
+        // The raw mode has no source snapshot. Profile-backed creates are
+        // resolved by the helm and carry both an invocation and snapshot.
         assert_eq!(invocation, Some("some-agent".to_string()));
         assert_eq!(
-            profile_id, None,
-            "the raw mode names no profile — a request naming both is refused outright"
+            source_profile, None,
+            "the raw mode must not claim catalog provenance"
         );
         assert_eq!(title, None);
         assert_eq!(agent_kind, None);
@@ -1544,14 +1575,9 @@ async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
 /// [`crate::precondition::INCARNATION_MARKER`], forwarded nowhere; the same
 /// body naming the current connection is created normally.
 ///
-/// Profile mode is the case with teeth. A profile id means something only
-/// on the supervisor that minted it, and every fresh supervisor seeds the
-/// same starter profiles — so a create aimed at a profile the user picked
-/// on one install does not FAIL when the host has been retargeted or
-/// adopted underneath it. It resolves over there, launches something else,
-/// and then records that as the user's remembered default. The client
-/// checks before it sends; the window it cannot close is between its check
-/// and this routing, which is what the precondition travels for.
+/// Profile ids are helm-wide, but the action still names one installation.
+/// The client checks before it sends so a retarget or adoption cannot launch
+/// the resolved bundle on a successor host the user did not choose.
 ///
 /// "Reaches no supervisor" is asserted by ORDER rather than by a timeout:
 /// the peer asserts on the FIRST create it is sent, and a forwarded stale
@@ -1571,16 +1597,23 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
-            req_id, profile_id, ..
+            req_id,
+            source_profile,
+            invocation,
+            ..
         } = request
         else {
             panic!("expected CreateSession, got {request:?}");
         };
         assert_eq!(
-            profile_id,
-            Some("p-favorite".to_string()),
-            "the only create that may reach a supervisor is the one whose precondition held"
+            source_profile,
+            Some(farhelm_proto::ProfileSnapshot {
+                id: "starter-claude".to_string(),
+                name: "claude".to_string(),
+            }),
+            "the only create that may reach a supervisor carries the resolved profile"
         );
+        assert_eq!(invocation.as_deref(), Some("claude"));
         writer
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
@@ -1618,7 +1651,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "profile_id": "p-favorite",
+            "profile_id": "starter-claude",
             "expected_incarnation": current - 1,
         }),
     )
@@ -1637,7 +1670,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "profile_id": "p-favorite",
+            "profile_id": "starter-claude",
             "expected_incarnation": current,
         }),
     )
@@ -3363,6 +3396,232 @@ async fn lifecycle_mutations_reach_the_list_without_waiting_for_a_refresh() {
     peer.abort();
 }
 
+/// Every session mutation reads the catalog before it asks the supervisor.
+///
+/// A corrupt catalog must not turn a completed create, restart, rename, or
+/// archive into an error reply. This test keeps routing healthy while making
+/// only profile decoding fail, then proves all four handlers refuse without
+/// sending a mutation frame. The profile-backed create also pins that its
+/// otherwise necessary bundle lookup shares this preflight read.
+#[tokio::test]
+async fn catalog_failure_precedes_every_session_mutation() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let leaked = tokio::time::timeout(Duration::from_secs(2), reader.read_frame()).await;
+        assert!(
+            !matches!(leaked, Ok(Ok(Some(_)))),
+            "catalog failure must happen before any supervisor mutation, but one arrived: \
+             {leaked:?}"
+        );
+    });
+
+    let harness = rest_harness::spliced_helm_listing(
+        client_side,
+        vec![rest_harness::session("profile-order", 500)],
+    )
+    .await;
+    harness
+        .store
+        .plant_invalid_profile_for_test()
+        .await
+        .expect("plant corrupt catalog row");
+    assert!(
+        harness.store.profiles().await.is_err(),
+        "the fixture must make the mutation preflight fail"
+    );
+
+    for (path, body) in [
+        (
+            "/api/sessions",
+            serde_json::json!({
+                "cwd": "/tmp",
+                "profile_id": "starter-claude",
+            }),
+        ),
+        (
+            "/api/sessions/profile-order/restart",
+            serde_json::json!({ "mode": "fresh" }),
+        ),
+        (
+            "/api/sessions/profile-order/rename",
+            serde_json::json!({ "title": "not-applied" }),
+        ),
+        ("/api/sessions/profile-order/archive", serde_json::json!({})),
+    ] {
+        let (status, response) = post_text(&harness, path, body).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "{path} must fail on the catalog preflight: {response}"
+        );
+    }
+    peer.await.unwrap();
+}
+
+/// Create, detail, restart, rename, and archive never expose `Unresolved`.
+///
+/// The supervisor deliberately reports only immutable profile provenance;
+/// the helm owns the current existence verdict. This test returns the
+/// supervisor-only marker from every live reply shape and checks the public
+/// JSON after a catalog rename and deletion, covering all three public
+/// verdicts without relying on a periodic refresh to rewrite the rows first.
+#[tokio::test]
+async fn every_live_session_reply_resolves_profile_existence_before_json() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ProfileExistence, SessionInfo, SourceProfile};
+
+    /// Build the supervisor's provenance-only view of the profiled session.
+    ///
+    /// Reconstructing it for every mutation ensures no earlier helm verdict
+    /// can accidentally make a later assertion pass through cached state.
+    fn unresolved_profiled_session(archived: bool) -> SessionInfo {
+        SessionInfo {
+            archived,
+            source_profile: Some(SourceProfile {
+                id: "starter-claude".to_string(),
+                name: "claude".to_string(),
+                existence: ProfileExistence::Unresolved,
+            }),
+            ..rest_harness::session("profile-live", 500)
+        }
+    }
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        loop {
+            let Ok(Some(frame)) = reader.read_frame().await else {
+                return;
+            };
+            match parse_control(&frame) {
+                Ok(ControlMsg::CreateSession {
+                    req_id,
+                    source_profile,
+                    ..
+                }) => {
+                    let snapshot = source_profile.expect("profile create carries a snapshot");
+                    writer
+                        .write_control(&ControlMsg::SessionCreated {
+                            req_id,
+                            session: SessionInfo {
+                                source_profile: Some(SourceProfile {
+                                    id: snapshot.id,
+                                    name: snapshot.name,
+                                    existence: ProfileExistence::Unresolved,
+                                }),
+                                ..rest_harness::session("profile-created", 600)
+                            },
+                        })
+                        .await
+                        .unwrap();
+                }
+                Ok(ControlMsg::RestartSession { req_id, .. }) => writer
+                    .write_control(&ControlMsg::SessionRestarted {
+                        req_id,
+                        session: unresolved_profiled_session(false),
+                    })
+                    .await
+                    .unwrap(),
+                Ok(ControlMsg::RenameSession { req_id, .. }) => writer
+                    .write_control(&ControlMsg::SessionRenamed {
+                        req_id,
+                        session: unresolved_profiled_session(false),
+                    })
+                    .await
+                    .unwrap(),
+                Ok(ControlMsg::ArchiveSession { req_id, .. }) => writer
+                    .write_control(&ControlMsg::SessionArchived {
+                        req_id,
+                        session: unresolved_profiled_session(true),
+                    })
+                    .await
+                    .unwrap(),
+                other => panic!("unexpected supervisor request: {other:?}"),
+            }
+        }
+    });
+
+    let harness =
+        rest_harness::spliced_helm_listing(client_side, vec![unresolved_profiled_session(false)])
+            .await;
+
+    let (status, created) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({ "cwd": "/tmp", "profile_id": "starter-codex" }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{created}");
+    let created: serde_json::Value = serde_json::from_str(&created).unwrap();
+    assert_eq!(created["source_profile"]["existence"], "present");
+
+    let mut profile = harness
+        .store
+        .profiles()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.id == "starter-claude")
+        .expect("starter profile");
+    profile.name = "claude-renamed".to_string();
+    harness
+        .store
+        .update_profile(profile)
+        .await
+        .unwrap()
+        .expect("profile still exists");
+
+    let (status, detail) = get_json(&harness, "/api/sessions/profile-live").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(detail["source_profile"]["existence"], "renamed");
+
+    for path in [
+        "/api/sessions/profile-live/restart",
+        "/api/sessions/profile-live/rename",
+    ] {
+        let body = if path.ends_with("restart") {
+            serde_json::json!({ "mode": "fresh" })
+        } else {
+            serde_json::json!({ "title": "renamed session" })
+        };
+        let (status, response) = post_text(&harness, path, body).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{response}");
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["source_profile"]["existence"], "renamed");
+    }
+
+    assert!(
+        harness
+            .store
+            .delete_profile("starter-claude")
+            .await
+            .unwrap()
+    );
+    let (status, archived) = post_text(
+        &harness,
+        "/api/sessions/profile-live/archive",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{archived}");
+    let archived: serde_json::Value = serde_json::from_str(&archived).unwrap();
+    assert_eq!(archived["source_profile"]["existence"], "deleted");
+    peer.abort();
+}
+
 /// A mutation reply that says `Unknown` must not erase a status the
 /// helm already knew.
 ///
@@ -3590,8 +3849,10 @@ async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
 /// directory, last-known status — behind a clear host-unreachable
 /// notice". Refusing here would leave the UI nothing to draw behind
 /// that notice, so the read is served from the cache and marked
-/// `stale`, while every mutating route on the same session still
-/// refuses (pinned above).
+/// `stale`, while every mutating route on the same session still refuses
+/// (pinned above). The source profile is deleted after the cache write so
+/// this also pins that detail replies re-read the helm catalog instead of
+/// leaking the cache's older existence verdict.
 #[tokio::test]
 async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
     let (builder, host) = rest_harness::FleetBuilder::new()
@@ -3603,6 +3864,11 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
                 sessions: vec![farhelm_proto::SessionInfo {
                     title: "the work in progress".to_string(),
                     cwd: "/home/user/project".to_string(),
+                    source_profile: Some(farhelm_proto::SourceProfile {
+                        id: "starter-claude".to_string(),
+                        name: "claude".to_string(),
+                        existence: farhelm_proto::ProfileExistence::Unresolved,
+                    }),
                     ..rest_harness::session("owned", 100)
                 }],
                 ..rest_harness::HostScript::default()
@@ -3611,6 +3877,13 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
         .await;
     let harness = builder.start().await;
     harness.await_refreshed(host).await;
+    assert!(
+        harness
+            .store
+            .delete_profile("starter-claude")
+            .await
+            .expect("delete the cached session's profile")
+    );
     harness.fleet.take_down(host);
     harness
         .await_state(host, |state| state.phase() == "unreachable-reprobing")
@@ -3621,6 +3894,7 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
     assert_eq!(value["title"], "the work in progress");
     assert_eq!(value["cwd"], "/home/user/project");
     assert_eq!(value["host"], host);
+    assert_eq!(value["source_profile"]["existence"], "deleted");
     assert_eq!(
         value["stale"], true,
         "the metadata is last-known knowledge and must say so"
@@ -3667,8 +3941,8 @@ fn filterable(
 ///
 /// `existence` is a PARAMETER rather than a fixed `Present`, and the
 /// reason is the property these fixtures exist to pin: a session's
-/// snapshot (`id` and `name`) is durable and never rewritten, while
-/// existence is DERIVED fresh by the supervisor on every reply. So a
+/// snapshot (`id` and `name`) is durable and never rewritten, while the
+/// helm derives existence from its catalog before serving a row. So a
 /// cached row can legitimately carry `Deleted` beside a name no catalog
 /// holds any more — which is exactly the row the profile filter must
 /// still match, by that name. Fixing this field at `Present` would make

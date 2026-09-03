@@ -11,15 +11,14 @@
 //!
 //! [`list_all`] is the seam `handle_list_sessions` sits behind. It does the
 //! whole of what a list request DOES — snapshot, order, cut, probe tmux,
-//! witness exits, read the profile catalog — and none of how it answers:
+//! and witness exits — and none of how it answers:
 //! no reply channel, no transport, no `req_id`. That is what lets the
 //! listing be reasoned about, and tested, without a socket in sight.
 
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
 use super::status::{entry_info, observe_entry};
-use crate::store::{LastOutcome, ProfileNames, Transition};
-use anyhow::Context;
+use crate::store::{LastOutcome, Transition};
 use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -74,11 +73,8 @@ pub(crate) struct ListReply {
 /// Answer `ListSessions`: snapshot the session map, order and cap it, and
 /// describe every entry that survived.
 ///
-/// Two of this pass's reads are BATCHED — taken once for the whole list
-/// rather than once per entry — and both are cut that way on purpose: one
-/// tmux probe for liveness, and (only when some listed session names a
-/// profile) one read of the profile catalog, from which every
-/// source-profile existence is derived. That is a statement about those
+/// The tmux probe is BATCHED — taken once for the whole list rather than
+/// once per entry. That is a statement about the
 /// two reads and not a count of everything this function does: the
 /// observation loop below still reads a launch sentinel per entry that
 /// has one, and commits its transitions in one batched write.
@@ -274,28 +270,6 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             ),
         }
     }
-    // ONE catalog read for the whole list (`farhelm_proto::SourceProfile`'s
-    // note on per-snapshot lookup cost), and only when a session in it
-    // actually names a profile — the overwhelmingly common fleet, where
-    // every session is raw-created, pays nothing at all.
-    //
-    // A failed read FAILS the request rather than degrading to an empty
-    // catalog, and the asymmetry is the point: an empty catalog is
-    // indistinguishable from "every profile was deleted", so degrading
-    // would make a transient database error render as a list of sessions
-    // whose profiles are all gone. A failed list is retried in a second;
-    // that lie is not correctable by anything.
-    let profiles = if entries
-        .iter()
-        .any(|entry| entry.info.source_profile.is_some())
-    {
-        sup.store
-            .profile_names()
-            .await
-            .context("reading the profile catalog to describe these sessions' source profiles")?
-    } else {
-        ProfileNames::new()
-    };
     let sessions: Vec<SessionInfo> = entries
         .iter()
         .map(|entry| {
@@ -303,7 +277,6 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
                 entry,
                 &pane_states,
                 sentinel_hits.get(&entry.info.id).map(String::as_str),
-                &profiles,
             )
         })
         .collect();

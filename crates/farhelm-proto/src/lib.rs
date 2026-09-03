@@ -112,7 +112,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// accepting one drain interval of status staleness; the push problem M6.75
 /// solves is the CLIENT edge, where the helm coalesces revisions it would
 /// have had to build regardless. Also absent: remembered profile defaults,
-/// which the helm owns in helm.db and resolves into a concrete `profile_id`
+/// which the helm owns in helm.db and resolves into a concrete launch bundle
 /// before it ever sends a create — there is nothing for this protocol to
 /// carry.
 ///
@@ -138,7 +138,16 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// this product is for is tens of sessions, and no layer is to paginate,
 /// cursor, stream, or index the list on the server's side.
 ///
-/// `protocol_version_is_pinned_at_14` (renamed at every bump since `_at_4`)
+/// Version 15 removes the supervisor-owned profile CRUD vocabulary and the
+/// `CreateSession::profile_id` selector. Creates now carry the helm-resolved
+/// launch bundle, including a snapshot of the profile identity when one was
+/// selected. It also adds [`ProfileExistence::Unresolved`]: supervisors emit
+/// that placeholder because only a helm has the catalog needed to derive the
+/// browser-facing state. [`AgentVerb::ResolveProfile`] and
+/// [`AgentReply::ResolvedProfile`] add the upward relay used when
+/// `farhelm spawn --agent` asks an attached helm to resolve a name.
+///
+/// `protocol_version_is_pinned_at_15` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -150,7 +159,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -822,12 +831,6 @@ pub struct SessionInfo {
     /// implements (an immutable snapshot plus one derived existence state)
     /// and for why the profile's CURRENT name is deliberately not here.
     ///
-    /// Absent from EVERY session in the build that introduced it: the
-    /// supervisor's profile catalog is PLAN_M6_75.md's step 5, so at this
-    /// bump every session is raw-created and this field is `None`
-    /// everywhere on the wire. That is the same vocabulary-first shape
-    /// version 8 shipped `Hello::host_identity` under, and it makes the
-    /// absent case the one every current consumer must handle correctly.
     pub source_profile: Option<SourceProfile>,
 }
 
@@ -889,8 +892,7 @@ impl std::fmt::Debug for SessionAuth {
     }
 }
 
-/// Which profile a session was created from, as the session itself
-/// remembers it (PLAN_M6_75.md item 3).
+/// The profile snapshot a session remembers plus its current catalog state.
 ///
 /// ## The snapshot rule: immutable identity, derived existence
 ///
@@ -902,17 +904,17 @@ impl std::fmt::Debug for SessionAuth {
 ///   describe what the user chose at the moment they chose it, so a session
 ///   list stays stable — and filterable — under any later edit. Nothing
 ///   MUTABLE lives in the snapshot.
-/// - `existence` is DERIVED when a reply is built, by one catalog lookup on
-///   `id`. Absent from the catalog means the profile was deleted; present
-///   under a different name means it was renamed.
+/// - `existence` is DERIVED by the helm, by one catalog lookup on `id` per
+///   supervisor reply. The supervisor sends `Unresolved` because it has no
+///   catalog. Absent from the helm catalog means the profile was deleted;
+///   present under a different name means it was renamed.
 ///
 /// The alternative — rewriting every historical session's row on a profile
 /// delete — was rejected: it destroys the record of what the session was
 /// actually created from, it is O(sessions) work on a user action that
 /// should be O(1), and it can half-fail. Deriving on read costs one catalog
-/// lookup per SNAPSHOT resolved (so a page of sessions costs one per
-/// profile-created row on it, not one for the reply) and cannot get out of
-/// step with the catalog, because it IS the catalog.
+/// read per REPLY and cannot get out of step with the catalog,
+/// because it IS the catalog.
 ///
 /// ## Why the CURRENT name is not carried
 ///
@@ -937,6 +939,20 @@ pub struct SourceProfile {
     pub existence: ProfileExistence,
 }
 
+/// Immutable profile identity attached to a resolved create request.
+///
+/// The helm snapshots only the identity here because the invocation and
+/// integration values beside it are already the resolved launch bundle. The
+/// supervisor persists this value with the session and never consults a
+/// profile catalog: that catalog belongs to the helm.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileSnapshot {
+    /// Helm-wide profile identity selected for this launch.
+    pub id: String,
+    /// Profile name as it was when the helm resolved this launch.
+    pub name: String,
+}
+
 /// What became of the profile a session was created from, derived fresh on
 /// every reply that carries a [`SourceProfile`] (PLAN_M6_75.md item 3).
 ///
@@ -951,6 +967,10 @@ pub struct SourceProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileExistence {
+    /// The supervisor cannot derive profile existence because it deliberately
+    /// has no catalog. A helm must resolve this before serializing browser
+    /// JSON or caching a row.
+    Unresolved,
     /// The profile still exists under the snapshotted name: what the
     /// session says it came from is what the catalog still holds.
     Present,
@@ -968,18 +988,12 @@ pub enum ProfileExistence {
     Deleted,
 }
 
-/// How many profiles one catalog store may hold (PLAN_M6_75.md items 3 and
-/// 4).
+/// How many profiles one helm catalog may hold.
 ///
-/// The bound is what makes [`ControlMsg::ListProfiles`]'s unpaginated reply
-/// SAFE rather than merely convenient: together with
-/// [`PROFILE_FIELD_CAP`] it puts a hard ceiling on `ProfileList`'s encoded
-/// size, so a catalog can never grow into a reply too large to send. That
-/// failure would be unrecoverable in the worst way — the listing is also
-/// how a client would find the profile it needs to DELETE, so a catalog
-/// that outgrew the frame limit could never be listed and therefore never
-/// be trimmed back. `profile_bounds_keep_a_full_catalog_sendable` pins the
-/// arithmetic.
+/// Together with [`PROFILE_FIELD_CAP`], the bound keeps the helm's
+/// unpaginated `/api/profiles` JSON response predictably sized. A catalog
+/// too large to list would also be impossible to trim through the same API,
+/// so bounding the response is part of the storage contract.
 ///
 /// 128 is far past any hand-curated set (SPEC.md's starter catalog is two,
 /// and a profile is something a person writes by hand), which is the point:
@@ -988,12 +1002,9 @@ pub enum ProfileExistence {
 /// the session list is served whole ([`LIST_SESSIONS_CAP`]): a picker that
 /// must show every option to be usable gains nothing from pages.
 ///
-/// Each current catalog store enforces this bound at its create boundary: a
-/// create past it is refused with
-/// [`ErrorKind::InvalidRequest`] naming the limit, the same shape the
-/// supervisor's other caller-supplied bounds use. This bump only fixes the
-/// number both sides reason about — like [`DETACH_REASON_STALLED`] before
-/// its emitters existed.
+/// The helm store enforces the count transactionally. Keeping the constant
+/// in this shared crate lets profile vocabulary and its HTTP representation
+/// use one limit without putting the catalog back on the supervisor wire.
 pub const MAX_PROFILES: usize = 128;
 
 /// Combined byte cap on one profile's caller-supplied text — [`Profile`]'s
@@ -1009,11 +1020,9 @@ pub const MAX_PROFILES: usize = 128;
 /// design: a session's fields are bounded because ONE reply carries them,
 /// while a profile's are multiplied by the catalog bound before they ever
 /// reach a reply. 8 KiB is still three orders of magnitude beyond a real
-/// profile (`claude --resume {conversation}` is 30 bytes), and the product
-/// with `MAX_PROFILES` leaves `ProfileList` an order of magnitude
-/// of headroom under [`MAX_FRAME_LEN`] — pinned, by encoding an actual
-/// worst-case catalog rather than by multiplying, in
-/// `profile_bounds_keep_a_full_catalog_sendable`.
+/// profile (`claude --resume {conversation}` is 30 bytes), while keeping the
+/// largest possible catalog near one MiB before JSON escaping and envelope
+/// overhead.
 pub const PROFILE_FIELD_CAP: usize = 8 * 1024;
 
 /// Maximum number of argv elements in a resume template.
@@ -1150,16 +1159,15 @@ fn validate_resume_template(template: &[String]) -> Result<(), String> {
     ensure_no_cwd_program("resume template", template)
 }
 
-/// One agent profile as a catalog store holds it (PLAN_M6_75.md items 3 and
-/// 4): a named, editable definition of how to launch an agent, and how to
-/// resume one.
+/// One agent profile in the helm-owned catalog: a named, editable definition
+/// of how to launch an agent and how to resume one.
 ///
-/// SPEC.md's "a fresh supervisor is not empty" makes profiles the ordinary
+/// SPEC.md's "a fresh helm is not empty" makes profiles the ordinary
 /// way sessions get created — a user picks a profile rather than typing a
 /// command line — while the raw invocation path stays for the API, the e2e
 /// harness, and anyone who wants to run something a profile does not
-/// describe. Catalog stores mint opaque stable ids; a host-scoped create is
-/// minted by its supervisor, while a helm-owned create is minted by helm.db.
+/// describe. Profiles are helm-wide, so one profile id has the same meaning
+/// on every host that helm manages.
 ///
 /// Deliberately NOT carrying an initial prompt: automatic prompt delivery is
 /// post-v1 and PLAN_M6_75.md keeps the field out of the schema on purpose,
@@ -1167,11 +1175,10 @@ fn validate_resume_template(template: &[String]) -> Result<(), String> {
 /// pre-empted by a field nothing fills.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
-    /// Supervisor-minted opaque identity, stable across every rename. This
-    /// is what a create names ([`ControlMsg::CreateSession::profile_id`])
-    /// and what a session's [`SourceProfile`] snapshots; clients echo it
-    /// back and never parse it. Distinct from `name` on purpose: a name is
-    /// the user's label and changes, an id is the reference and does not.
+    /// Helm-minted opaque identity, stable across every rename. A resolved
+    /// create snapshots it in [`ProfileSnapshot`]; clients echo it back and
+    /// never parse it. Distinct from `name` on purpose: a name is the user's
+    /// label and changes, an id is the reference and does not.
     pub id: String,
     /// The user's label for this profile, shown in pickers and in the
     /// session list. Mutable — an edit changes it, and every session
@@ -1565,16 +1572,18 @@ pub enum AgentVerb {
         /// `None` for the asking session; see the enum's own docs.
         session_id: Option<String>,
     },
+    /// Resolve a spawn-only profile name against the helm catalog. The
+    /// supervisor relays this because it no longer owns that catalog.
+    ResolveProfile { name: String },
     /// Create a session on any host in the fleet — SPEC.md's creation verb
     /// reached from inside a session. Answered with [`AgentReply::Created`].
     ///
     /// The agent selector is EXACTLY ONE of `profile_name` and
     /// `invocation`, or neither. Naming both is refused rather than
     /// arbitrated (a profile already says what to run, so there is no
-    /// honest merge), and naming neither falls back to the target host's
-    /// remembered default profile — the same "no `--agent`" behavior
-    /// `farhelm spawn` has, so an agent that just wants another session
-    /// like the ones already there does not have to name anything.
+    /// honest merge), and naming neither falls back to the helm's one
+    /// remembered default profile. `farhelm spawn` differs: its selectorless
+    /// form reuses the asking session's own stored bundle.
     Create {
         /// The target host's display NAME, or `None` for the asking
         /// session's own host. See the enum's docs for why a name.
@@ -1583,13 +1592,7 @@ pub enum AgentVerb {
         /// directory, and inheriting the asking session's would make
         /// `create` a silent `clone`.
         cwd: String,
-        /// A profile NAME resolved against the TARGET host's own catalog.
-        ///
-        /// A name, never an id: profile ids are minted per supervisor and
-        /// every fresh install seeds the same starter ids, so an id
-        /// carried across hosts does not fail — it RESOLVES, onto a
-        /// profile nobody chose. See [`AgentVerb::Clone`] for the same
-        /// rule stated as a resolution order.
+        /// A profile name resolved exactly against the helm-wide catalog.
         profile_name: Option<String>,
         /// A raw command line, the other half of the mutually exclusive
         /// selector.
@@ -1615,22 +1618,10 @@ pub enum AgentVerb {
     /// AGENT RESOLUTION is the whole substance of this verb, and it has no
     /// silent fallback:
     ///
-    /// - Same host, source came from a profile: by ID, ALWAYS — whatever
-    ///   became of that profile since. The id is exact and it is the thing
-    ///   being followed, so a rename does not change it and neither does a
-    ///   delete: a deleted id is sent anyway and comes back as the target's
-    ///   ordinary "no such profile" refusal. Falling back to the
-    ///   snapshotted NAME here would be the one substitution that silently
-    ///   launches the wrong thing — a profile created since under the old
-    ///   name would answer to it — so the refusal is deliberate, and the
-    ///   agent can name a profile itself with a `Create`.
-    /// - Another host, source came from a profile: by that profile's NAME
-    ///   against the TARGET host's catalog, since ids are minted per
-    ///   supervisor and mean nothing there. No match is a refusal naming
-    ///   the host and the name — never a quiet downgrade to the source's
-    ///   raw invocation, which on another machine may point at a binary
-    ///   that is not there, or is a different build, or takes different
-    ///   flags.
+    /// - A source created from a profile follows that helm-wide profile ID
+    ///   on every host. A rename does not change the selection; a deleted id
+    ///   is refused before a target call, with no fallback to the old name
+    ///   or raw invocation.
     /// - A source with no profile: its raw invocation, run on the target.
     Clone {
         /// The target host's display NAME, or `None` for the asking
@@ -1668,7 +1659,9 @@ impl AgentVerb {
     /// the whole point of centralizing it.
     pub fn is_mutating(&self) -> bool {
         match self {
-            AgentVerb::Hosts {} | AgentVerb::Sessions {} => false,
+            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::ResolveProfile { .. } => {
+                false
+            }
             // The creating verbs sit on this side for a stronger reason
             // than the lifecycle three: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
@@ -1778,6 +1771,13 @@ pub enum AgentReply {
     /// would be a second, nearly-identical shape to keep true.
     Created {
         session: AgentSession,
+    },
+    /// A launch bundle resolved from the helm-wide profile catalog.
+    ResolvedProfile {
+        invocation: String,
+        agent_kind: AgentKind,
+        resume_template: Option<Vec<String>>,
+        source_profile: ProfileSnapshot,
     },
 }
 
@@ -1989,26 +1989,19 @@ pub enum ControlMsg {
     /// the M1 CLI flags and any future UI dialog both land here
     /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
     ///
-    /// ## Three launch selectors, exactly one per request
+    /// ## Resolved launch bundle, or a spawn name
     ///
-    /// PLAN_M7.md item 2 adds name-based profile selection to the raw and
-    /// profile-id selectors version 10 already carried:
-    ///
-    /// - **Raw**: `invocation` names a command line, and `agent_kind` /
-    ///   `resume_template` optionally override what would be derived from
-    ///   it. Both profile selectors are `None`.
-    /// - **Profile id**: `profile_id` names one of the target host's profiles
-    ///   and the SUPERVISOR resolves every launch-shaping value from it.
-    /// - **Profile name**: `profile_name` carries spawn's human-facing
-    ///   `--agent` value. PLAN_M7.md item 4 resolves it inside creation,
-    ///   before reserving or launching anything, so a restricted peer
-    ///   needs no catalog-read authority and cannot race a list result.
+    /// `invocation` with its accompanying integration values is a resolved
+    /// launch bundle. A profile-backed bundle also carries `source_profile`;
+    /// a raw bundle does not. `profile_name` is spawn-only and asks an
+    /// attached helm to resolve that name. A session-authenticated spawn may
+    /// omit both to copy its asking session's stored bundle.
     ///
     /// **A request naming more than one selector is refused with
     /// [`ErrorKind::InvalidRequest`].** A full-authority peer naming none is
     /// refused too. A session-authenticated peer is the sole exception:
-    /// omitting all three means derive the host's last-used profile, which
-    /// is the `farhelm spawn --cwd ...` default. The exclusivity is stated
+    /// omitting both selectors means copy the asking session's stored launch
+    /// bundle, which is the `farhelm spawn --cwd ...` default. The exclusivity is stated
     /// here and enforced by the supervisor's create handler rather than
     /// made structurally impossible by the type, deliberately: a hybrid —
     /// a profile plus a hand-written override —
@@ -2019,16 +2012,10 @@ pub enum ControlMsg {
     /// it explicitly also means the refusal has a MESSAGE, which a type
     /// that simply could not express the request would not.
     ///
-    /// The chosen selector and its value join the idempotency fingerprint
-    /// (`intent_key` below), as does `parent`: a retry that changes any of
-    /// them is refused as key reuse rather than silently launching a
-    /// different child.
-    ///
-    /// A profile-mode create names a profile that may have been deleted
-    /// between the picker read and the submit — a real race, not a
-    /// theoretical one — and that is a visible failure with no session
-    /// created, never a silent fall back to some other profile
-    /// (PLAN_M6_75.md item 4, checked before launch).
+    /// The resolved bundle joins the idempotency fingerprint (`intent_key`
+    /// below), as does `parent`: a retry after a profile edit is a changed
+    /// request and is refused as key reuse rather than replaying an outcome
+    /// under different launch settings.
     CreateSession {
         req_id: u64,
         /// The spawning session, when this create came from `farhelm
@@ -2045,9 +2032,9 @@ pub enum ControlMsg {
         /// never where. SPEC.md's session identity is an agent in a
         /// directory, and the directory is always the caller's choice.
         cwd: String,
-        /// The agent command line under the raw selector. `None` means one
-        /// of the profile selectors supplies it — see this variant's own
-        /// exclusivity contract. A word equal to `{cwd}` in full is
+        /// The resolved agent command line. `None` is valid only for a
+        /// spawn profile-name lookup or selectorless spawn — see this
+        /// variant's own exclusivity contract. A word equal to `{cwd}` in full is
         /// replaced at launch with the directory that launch hands tmux,
         /// under the same whole-element rule `{conversation}` obeys in
         /// `resume_template` below; it is for launchers that take the
@@ -2077,23 +2064,9 @@ pub enum ControlMsg {
         /// handshake is what keeps the unsafe direction from happening at
         /// all.
         invocation: Option<String>,
-        /// The profile to create from, in PROFILE mode — a [`Profile::id`]
-        /// belonging to the supervisor being asked (profiles are
-        /// per-host and never synced, so an id from another host means
-        /// nothing here). `None` means another selector was chosen.
-        ///
-        /// A REMEMBERED default profile is not on this wire and never will
-        /// be: the helm owns per-host last-used defaults in helm.db and
-        /// resolves one into a concrete id before sending, so the
-        /// supervisor only ever sees a definite choice. That keeps
-        /// defaulting policy — including SPEC.md's ask-don't-guess rule
-        /// when the remembered profile is gone — in the one component that
-        /// can actually ask the user.
-        profile_id: Option<String>,
-        /// A human-facing profile name selected by `farhelm spawn`.
-        /// Exactly one of `invocation`, `profile_id`, or `profile_name` is
-        /// present. PLAN_M7.md item 4 resolves the name atomically inside
-        /// creation before reserving or launching anything.
+        /// A human-facing profile name selected only by `farhelm spawn`.
+        /// The supervisor relays it to its attached helm; no supervisor
+        /// catalog lookup is permitted.
         profile_name: Option<String>,
         title: Option<String>,
         cols: u16,
@@ -2103,10 +2076,11 @@ pub enum ControlMsg {
         /// every session-shaping field (this struct's fields below
         /// included, but never `cols`/`rows` — those shape the
         /// attachment, not the session) replays the original outcome
-        /// instead of launching a second process. The selected launch
-        /// selector and value join the fingerprint, and version 11 adds
-        /// `parent`; a retry cannot change any of them under cover of the
-        /// same key. `None` preserves
+        /// instead of launching a second process. The resolved launch bundle
+        /// joins the fingerprint, and version 11 adds `parent`; a retry cannot
+        /// change any of them under cover of the same key. Profile-name and
+        /// selectorless spawn forms are resolved before that fingerprint is
+        /// built. `None` preserves
         /// pre-M3 behavior exactly: every request is its own create, with
         /// no deduplication — the safe default for raw API callers (curl,
         /// an older UI build) that never learned this field exists, so
@@ -2123,17 +2097,17 @@ pub enum ControlMsg {
         /// docs for why that direction needs an explicit value rather
         /// than reusing absence.
         ///
-        /// RAW MODE ONLY. A profile already states its kind
-        /// ([`Profile::agent_kind`], where `Generic` is the explicit "no
-        /// kind" spelling), so this field alongside either profile
-        /// selector is one of the ambiguous requests refused as invalid — see this
-        /// variant's own docs.
+        /// A helm-resolved profile bundle always carries `Some`, including
+        /// `Some(Generic)` for an explicitly non-integrated profile. This
+        /// field must be absent with `profile_name` or selectorless spawn,
+        /// because those forms have not been resolved yet.
         agent_kind: Option<AgentKind>,
         /// Explicit override of the resume invocation template PLAN_M3.md
         /// item 7 would otherwise default from `invocation`'s first
-        /// token. RAW MODE ONLY, for `agent_kind`'s reason directly above:
-        /// a profile carries its own [`Profile::resume_template`], and
-        /// naming both is a refused request rather than an override.
+        /// token. A helm-resolved profile bundle carries the profile's value
+        /// here. This field must be absent with `profile_name` or
+        /// selectorless spawn, for the same unresolved-selector reason as
+        /// `agent_kind` above.
         /// Structured as an argv vector, not a shell string, so a
         /// path containing spaces survives without quoting heroics, and
         /// `{conversation}` substitutes into its own argv slot rather
@@ -2167,6 +2141,9 @@ pub enum ControlMsg {
         /// exact-equality wording is what keeps that future validator from
         /// having to guess which reading was intended.
         resume_template: Option<Vec<String>>,
+        /// Profile identity the helm resolved with this invocation. It is
+        /// absent for raw creates and accompanies an invocation only.
+        source_profile: Option<ProfileSnapshot>,
     },
     /// Success reply to `CreateSession`. The session and terminal exist,
     /// but this does not establish that the agent's later `exec`
@@ -2500,96 +2477,6 @@ pub enum ControlMsg {
     /// echoing the rest of it stale would hand the caller a `SessionInfo`
     /// that lies about everything but the one field this request changed.
     SessionRenamed { req_id: u64, session: SessionInfo },
-    /// Every profile this supervisor holds (PLAN_M6_75.md item 3), ordered
-    /// by [`Profile::id`] ASCENDING.
-    ///
-    /// The order is stated rather than left to whatever the storage layer
-    /// happens to return: a contract-free order is one clients depend on
-    /// anyway and a query plan changes underneath them. By id rather than
-    /// by name because ids are immutable — the list does not reshuffle when
-    /// a profile is renamed — and a client wanting the user's alphabet
-    /// sorts locally, where it knows the locale.
-    ///
-    /// Unpaginated, unlike `ListSessions`, and that is arithmetic rather
-    /// than optimism: [`MAX_PROFILES`] and [`PROFILE_FIELD_CAP`]
-    /// together cap what this reply can encode to, far below
-    /// [`MAX_FRAME_LEN`], so one page is ALWAYS enough. See
-    /// `MAX_PROFILES`'s own docs for why pagination would be the
-    /// wrong trade for a hand-curated catalog, and for what an unbounded
-    /// one would cost: a catalog too large to list is also too large to
-    /// trim, since the listing is how a client finds what to delete.
-    ListProfiles { req_id: u64 },
-    /// Reply to `ListProfiles`.
-    ProfileList { req_id: u64, profiles: Vec<Profile> },
-    /// Define a new profile. The supervisor mints its [`Profile::id`] —
-    /// which is why this carries the fields rather than a whole [`Profile`]
-    /// with a placeholder id — exactly as `CreateSession` lets the
-    /// supervisor mint a session id.
-    ///
-    /// `name` is caller data and gets `RenameSession`'s treatment, for
-    /// `RenameSession`'s reasons: a control character is refused rather
-    /// than sanitized, and the field is capped. Names are NOT required to
-    /// be unique — two profiles may share a name, since `id` is what
-    /// anything actually references, and refusing a duplicate name would
-    /// turn a cosmetic collision into a workflow dead end.
-    ///
-    /// TWO BOUNDS apply here and to `UpdateProfile`, and both are refused
-    /// with [`ErrorKind::InvalidRequest`] naming the limit: this record's
-    /// own text against [`PROFILE_FIELD_CAP`], and — for a create, which is
-    /// the only verb that grows the catalog — the catalog's size against
-    /// [`MAX_PROFILES`]. They are what keep `ProfileList`
-    /// sendable; see that variant's docs for why an unbounded catalog is a
-    /// trap rather than merely untidy.
-    CreateProfile {
-        req_id: u64,
-        name: String,
-        invocation: String,
-        agent_kind: AgentKind,
-        resume_template: Option<Vec<String>>,
-    },
-    /// Success reply to `CreateProfile`, carrying the profile as stored —
-    /// including the id the supervisor just minted, which the caller has no
-    /// other way to learn.
-    ProfileCreated { req_id: u64, profile: Profile },
-    /// Replace a profile's definition wholesale, keyed by
-    /// [`Profile::id`]. Every field except the id is mutable; the id is
-    /// what makes this an edit rather than a create, and a `profile` naming
-    /// an id the catalog does not hold is `NotFound`.
-    ///
-    /// A FULL replacement rather than a patch of changed fields: a profile
-    /// is small, a client editing one already holds all of it, and
-    /// per-field optionality would make "clear the resume template" and
-    /// "leave the resume template alone" the same request.
-    ///
-    /// Concurrent edits are last-write-wins with no version token, exactly
-    /// as `RenameSession` is and for the same reason — see that variant's
-    /// docs. **Nothing about an edit touches sessions already created from
-    /// this profile**: their launch and resume snapshots are their own
-    /// (SPEC.md's snapshot rule), and their [`SourceProfile`] keeps the
-    /// name it snapshotted, reporting [`ProfileExistence::Renamed`] once
-    /// this edit changes the name out from under it.
-    UpdateProfile { req_id: u64, profile: Profile },
-    /// Success reply to `UpdateProfile`, carrying the profile as stored.
-    /// Echoed back rather than acknowledged bare for `SessionRenamed`'s
-    /// reason: the caller gets the authoritative answer instead of an ack
-    /// it must follow with a read.
-    ProfileUpdated { req_id: u64, profile: Profile },
-    /// Remove a profile from the catalog. Deleting a profile NEVER touches
-    /// the sessions created from it — they keep running, keep their durable
-    /// launch and resume snapshots, and keep filtering under the name they
-    /// snapshotted; what changes is that their [`SourceProfile::existence`]
-    /// starts reporting [`ProfileExistence::Deleted`].
-    ///
-    /// Deleting an unknown id is `NotFound` rather than a silent success:
-    /// unlike `StopSession`'s "make sure nothing is running", there is no
-    /// weaker reading of "delete this profile" that an absent profile
-    /// already satisfies for the caller — a client asking to delete
-    /// something that is not there is working from a stale catalog and
-    /// should be told.
-    DeleteProfile { req_id: u64, profile_id: String },
-    /// Acknowledges `DeleteProfile`: the profile is gone from the catalog.
-    /// Carries no profile — there is nothing left to describe.
-    ProfileDeleted { req_id: u64 },
     /// Open a terminal tab: a plain shell in the session's working
     /// directory, as a new window on the session's tmux session
     /// (PLAN_M4.md item 2). Refused — with the session untouched — when
@@ -3095,10 +2982,6 @@ impl ControlMsg {
             | ControlMsg::SessionRestarted { req_id, .. }
             | ControlMsg::ConversationReported { req_id, .. }
             | ControlMsg::SessionRenamed { req_id, .. }
-            | ControlMsg::ProfileList { req_id, .. }
-            | ControlMsg::ProfileCreated { req_id, .. }
-            | ControlMsg::ProfileUpdated { req_id, .. }
-            | ControlMsg::ProfileDeleted { req_id, .. }
             | ControlMsg::Attached { req_id, .. }
             | ControlMsg::TabOpened { req_id, .. }
             | ControlMsg::TabClosed { req_id, .. }
@@ -3123,10 +3006,6 @@ impl ControlMsg {
             | ControlMsg::RestartSession { .. }
             | ControlMsg::ReportConversation { .. }
             | ControlMsg::RenameSession { .. }
-            | ControlMsg::ListProfiles { .. }
-            | ControlMsg::CreateProfile { .. }
-            | ControlMsg::UpdateProfile { .. }
-            | ControlMsg::DeleteProfile { .. }
             | ControlMsg::OpenTab { .. }
             | ControlMsg::CloseTab { .. }
             | ControlMsg::Attach { .. }
@@ -3167,10 +3046,6 @@ impl ControlMsg {
             | ControlMsg::RestartSession { req_id, .. }
             | ControlMsg::ReportConversation { req_id, .. }
             | ControlMsg::RenameSession { req_id, .. }
-            | ControlMsg::ListProfiles { req_id, .. }
-            | ControlMsg::CreateProfile { req_id, .. }
-            | ControlMsg::UpdateProfile { req_id, .. }
-            | ControlMsg::DeleteProfile { req_id, .. }
             | ControlMsg::OpenTab { req_id, .. }
             | ControlMsg::CloseTab { req_id, .. }
             | ControlMsg::Attach { req_id, .. }
@@ -3189,10 +3064,6 @@ impl ControlMsg {
             | ControlMsg::SessionRestarted { .. }
             | ControlMsg::ConversationReported { .. }
             | ControlMsg::SessionRenamed { .. }
-            | ControlMsg::ProfileList { .. }
-            | ControlMsg::ProfileCreated { .. }
-            | ControlMsg::ProfileUpdated { .. }
-            | ControlMsg::ProfileDeleted { .. }
             | ControlMsg::Attached { .. }
             | ControlMsg::TabOpened { .. }
             | ControlMsg::TabClosed { .. }
@@ -3250,14 +3121,6 @@ impl ControlMsg {
             ControlMsg::ConversationReported { .. } => "ConversationReported",
             ControlMsg::RenameSession { .. } => "RenameSession",
             ControlMsg::SessionRenamed { .. } => "SessionRenamed",
-            ControlMsg::ListProfiles { .. } => "ListProfiles",
-            ControlMsg::ProfileList { .. } => "ProfileList",
-            ControlMsg::CreateProfile { .. } => "CreateProfile",
-            ControlMsg::ProfileCreated { .. } => "ProfileCreated",
-            ControlMsg::UpdateProfile { .. } => "UpdateProfile",
-            ControlMsg::ProfileUpdated { .. } => "ProfileUpdated",
-            ControlMsg::DeleteProfile { .. } => "DeleteProfile",
-            ControlMsg::ProfileDeleted { .. } => "ProfileDeleted",
             ControlMsg::OpenTab { .. } => "OpenTab",
             ControlMsg::TabOpened { .. } => "TabOpened",
             ControlMsg::CloseTab { .. } => "CloseTab",
@@ -3966,8 +3829,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[test]
-    fn protocol_version_is_pinned_at_14() {
-        assert_eq!(PROTOCOL_VERSION, 14);
+    fn protocol_version_is_pinned_at_15() {
+        assert_eq!(PROTOCOL_VERSION, 15);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -5336,8 +5199,8 @@ mod tests {
     /// `CreateSession`'s three PLAN_M3.md additions (`intent_key`,
     /// `agent_kind`, `resume_template`) golden-pinned with every one of
     /// them present, matching the treatment every other message shape in
-    /// this file gets — now in the RAW mode `PROTOCOL_VERSION` 10 named,
-    /// with `profile_id` explicitly null beside a present `invocation`.
+    /// this file gets — now in the raw resolved-bundle shape with no source
+    /// profile beside the invocation.
     #[test]
     fn create_session_snapshot_override_fields_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
@@ -5346,7 +5209,6 @@ mod tests {
             profile_name: None,
             cwd: "/some/dir".to_string(),
             invocation: Some("/opt/bin/claude".to_string()),
-            profile_id: None,
             title: None,
             cols: 80,
             rows: 24,
@@ -5357,6 +5219,7 @@ mod tests {
                 "--resume".to_string(),
                 "{conversation}".to_string(),
             ]),
+            source_profile: None,
         };
         assert_eq!(
             serde_json::to_value(&msg).unwrap(),
@@ -5367,22 +5230,20 @@ mod tests {
                 "profile_name": null,
                 "cwd": "/some/dir",
                 "invocation": "/opt/bin/claude",
-                "profile_id": null,
                 "title": null,
                 "cols": 80,
                 "rows": 24,
                 "intent_key": "intent-abc",
                 "agent_kind": "claude",
                 "resume_template": ["/opt/bin/claude", "--resume", "{conversation}"],
+                "source_profile": null,
             })
         );
     }
 
-    /// The PROFILE mode of the same message (PLAN_M6_75.md item 3),
-    /// golden-pinned as its own shape because it is the one this bump
-    /// actually introduces: `profile_id` present, and `invocation`,
-    /// `agent_kind` and `resume_template` all null — the request a client
-    /// sends when the user picked a profile rather than typing a command.
+    /// A profile-backed resolved bundle, golden-pinned as its own shape
+    /// because version 15 replaces the supervisor-side profile selector
+    /// with these launch values and the immutable source snapshot.
     ///
     /// Pinned in both directions against the golden value, since a
     /// profile-mode create is the shape with no legacy sender to have
@@ -5395,14 +5256,17 @@ mod tests {
             parent: None,
             profile_name: None,
             cwd: "/some/dir".to_string(),
-            invocation: None,
-            profile_id: Some("prof-7".to_string()),
+            invocation: Some("claude".to_string()),
             title: Some("demo".to_string()),
             cols: 80,
             rows: 24,
             intent_key: Some("intent-abc".to_string()),
-            agent_kind: None,
+            agent_kind: Some(AgentKind::Claude),
             resume_template: None,
+            source_profile: Some(ProfileSnapshot {
+                id: "prof-7".to_string(),
+                name: "Claude Code".to_string(),
+            }),
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5410,14 +5274,14 @@ mod tests {
             "parent": null,
             "profile_name": null,
             "cwd": "/some/dir",
-            "invocation": null,
-            "profile_id": "prof-7",
+            "invocation": "claude",
             "title": "demo",
             "cols": 80,
             "rows": 24,
             "intent_key": "intent-abc",
-            "agent_kind": null,
+            "agent_kind": "claude",
             "resume_template": null,
+            "source_profile": {"id": "prof-7", "name": "Claude Code"},
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         let golden_frame = Frame {
@@ -5428,9 +5292,9 @@ mod tests {
         assert_eq!(crate::io::parse_control(&golden_frame).unwrap(), msg);
     }
 
-    /// PLAN_M7.md item 2's spawn selector and parent reference, pinned in
-    /// both directions. Together with the raw and profile-id goldens above,
-    /// this covers every selector present once and null twice.
+    /// PLAN_M7.md item 2's named-spawn selector and parent reference, pinned
+    /// in both directions. The selectorless-spawn golden below completes the
+    /// valid protocol-15 create shapes.
     #[test]
     fn create_session_profile_name_and_parent_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
@@ -5438,7 +5302,6 @@ mod tests {
             parent: Some("parent-1".to_string()),
             cwd: "/some/dir".to_string(),
             invocation: None,
-            profile_id: None,
             profile_name: Some("Claude Code".to_string()),
             title: None,
             cols: 80,
@@ -5446,6 +5309,7 @@ mod tests {
             intent_key: Some("spawn-key".to_string()),
             agent_kind: None,
             resume_template: None,
+            source_profile: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5453,7 +5317,6 @@ mod tests {
             "parent": "parent-1",
             "cwd": "/some/dir",
             "invocation": null,
-            "profile_id": null,
             "profile_name": "Claude Code",
             "title": null,
             "cols": 80,
@@ -5461,6 +5324,49 @@ mod tests {
             "intent_key": "spawn-key",
             "agent_kind": null,
             "resume_template": null,
+            "source_profile": null,
+        });
+        assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+        assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
+    }
+
+    /// A selectorless session-authenticated spawn has its own literal wire
+    /// golden because both selectors being null is meaningful in protocol
+    /// 15: the supervisor copies the asking session's stored launch bundle.
+    ///
+    /// Full-authority creates still refuse this shape in their handler. The
+    /// codec cannot make that authority distinction, so it must preserve the
+    /// request for the restricted dispatcher to interpret.
+    #[test]
+    fn create_session_selectorless_spawn_json_shape_is_pinned() {
+        let msg = ControlMsg::CreateSession {
+            req_id: 4,
+            parent: Some("parent-1".to_string()),
+            cwd: "/some/dir".to_string(),
+            invocation: None,
+            profile_name: None,
+            title: Some("child".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("spawn-copy".to_string()),
+            agent_kind: None,
+            resume_template: None,
+            source_profile: None,
+        };
+        let expected = serde_json::json!({
+            "type": "create_session",
+            "req_id": 4,
+            "parent": "parent-1",
+            "cwd": "/some/dir",
+            "invocation": null,
+            "profile_name": null,
+            "title": "child",
+            "cols": 80,
+            "rows": 24,
+            "intent_key": "spawn-copy",
+            "agent_kind": null,
+            "resume_template": null,
+            "source_profile": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
@@ -5476,26 +5382,25 @@ mod tests {
     /// place: a decoder that rejected this shape would move the refusal
     /// from a correlated `InvalidRequest` a client can display into a
     /// decode error that tears down the whole connection, taking every
-    /// unrelated session on it along. Same for the names-NEITHER shape.
+    /// unrelated session on it along. The neither-selector case is a
+    /// full-authority handler refusal only; the selectorless-spawn golden
+    /// above pins its valid restricted meaning.
     #[test]
     fn a_create_naming_both_modes_or_neither_still_decodes_for_the_handler_to_refuse() {
-        for (invocation, profile_id) in [
-            (Some("agent".to_string()), Some("prof-7".to_string())),
-            (None, None),
-        ] {
+        for invocation in [Some("agent".to_string()), None] {
             let msg = ControlMsg::CreateSession {
                 req_id: 3,
                 parent: None,
                 profile_name: None,
                 cwd: "/some/dir".to_string(),
                 invocation,
-                profile_id,
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: None,
                 agent_kind: None,
                 resume_template: None,
+                source_profile: None,
             };
             let json = serde_json::to_value(&msg).unwrap();
             let decoded: ControlMsg = serde_json::from_value(json)
@@ -5537,7 +5442,6 @@ mod tests {
         let ControlMsg::CreateSession {
             parent,
             invocation,
-            profile_id,
             profile_name,
             intent_key,
             agent_kind,
@@ -5552,19 +5456,13 @@ mod tests {
         assert_eq!(resume_template, None, "an old sender never had this field");
         assert_eq!(parent, None, "a v10 create has no spawn parent");
         assert_eq!(profile_name, None, "a v10 create cannot select by name");
-        // Version 10's mode selection read against a request that predates
-        // it: a bare `invocation` with no `profile_id` key IS the raw mode,
-        // which is what keeps every pre-10 caller meaning exactly what it
-        // always meant rather than becoming an ambiguous names-neither
-        // request the handler would refuse.
+        // A bare invocation remains a raw create. Version negotiation keeps
+        // incompatible peers apart, while serde defaults preserve the old
+        // request's meaning inside this decoder.
         assert_eq!(
             invocation,
             Some("some-agent".to_string()),
             "a required-then-optional field must still carry the value it always did"
-        );
-        assert_eq!(
-            profile_id, None,
-            "an absent profile_id selects raw mode, the only mode an older sender knows"
         );
     }
 
@@ -5601,7 +5499,6 @@ mod tests {
             // this decode outright — which is a version-10 skew hazard the
             // handshake closes, not a tolerance this test may claim.
             invocation: Some("/opt/bin/claude".to_string()),
-            profile_id: None,
             title: Some("demo".to_string()),
             cols: 80,
             rows: 24,
@@ -5612,6 +5509,7 @@ mod tests {
                 "--resume".to_string(),
                 "{conversation}".to_string(),
             ]),
+            source_profile: None,
         };
         let json = serde_json::to_value(&new_msg).unwrap();
 
@@ -5687,13 +5585,13 @@ mod tests {
             profile_name: None,
             cwd: "/some/dir".to_string(),
             invocation: Some("agent".to_string()),
-            profile_id: None,
             title: None,
             cols: 80,
             rows: 24,
             intent_key: None,
             agent_kind: None,
             resume_template: None,
+            source_profile: None,
         };
         let LegacyV9ControlMsg::CreateSession { invocation, .. } =
             serde_json::from_value(serde_json::to_value(&raw).unwrap())
@@ -5709,13 +5607,13 @@ mod tests {
             profile_name: None,
             cwd: "/some/dir".to_string(),
             invocation: None,
-            profile_id: Some("prof-7".to_string()),
             title: None,
             cols: 80,
             rows: 24,
             intent_key: None,
             agent_kind: None,
             resume_template: None,
+            source_profile: None,
         };
         serde_json::from_value::<LegacyV9ControlMsg>(serde_json::to_value(&profile_mode).unwrap())
             .expect_err(
@@ -6214,12 +6112,10 @@ mod tests {
 
     /// A profile with every field populated, for the golden tests below.
     ///
-    /// A helper rather than a repeated literal because the CRUD family
-    /// carries the same record through four messages, and a fixture that
-    /// differed between them would let a golden test pass while the shapes
-    /// disagreed. `resume_template` is `Some` here deliberately: its `None`
-    /// half is pinned separately, since an absent template is what a
-    /// generic profile normally has.
+    /// A helper rather than a repeated literal because several JSON contract
+    /// tests need the same browser-facing shape. `resume_template` is `Some`
+    /// here deliberately: its `None` half is pinned separately, since an
+    /// absent template is what a generic profile normally has.
     fn a_profile() -> Profile {
         Profile {
             id: "prof-7".to_string(),
@@ -6230,179 +6126,24 @@ mod tests {
         }
     }
 
-    /// The complete profile CRUD vocabulary (PLAN_M6_75.md item 3),
-    /// golden-pinned the way the tab-lifecycle and upload families below
-    /// are: every variant's exact JSON, since a serde attribute drift on
-    /// any one of them would compile and round-trip cleanly while quietly
-    /// producing bytes an unmodified peer cannot parse.
+    /// Profile JSON remains shared vocabulary even though the catalog no
+    /// longer crosses the supervisor wire.
     ///
-    /// Each row is checked in BOTH directions against the golden value —
-    /// encode must produce it, and the LITERAL golden bytes must parse back
-    /// through `parse_control` — plus one pass through the real frame
-    /// codec, matching `replay_complete_and_rename_json_shapes_are_pinned`'s
-    /// discipline and for its reason: a re-serialization would only prove
-    /// self-agreement, and a value-level assertion cannot see a framing
-    /// drift.
+    /// This pins the shape the helm's HTTP API serves so removing the wire
+    /// messages cannot accidentally rename a browser-facing field.
     #[test]
-    fn profile_crud_json_shapes_are_pinned() {
-        let profile_json = serde_json::json!({
+    fn profile_json_shape_is_pinned() {
+        let expected = serde_json::json!({
             "id": "prof-7",
             "name": "Claude Code",
             "invocation": "claude",
             "agent_kind": "claude",
             "resume_template": ["claude", "{conversation}"],
         });
-        for (msg, expected) in [
-            (
-                ControlMsg::ListProfiles { req_id: 60 },
-                serde_json::json!({
-                    "type": "list_profiles",
-                    "req_id": 60,
-                }),
-            ),
-            (
-                ControlMsg::ProfileList {
-                    req_id: 60,
-                    profiles: vec![a_profile()],
-                },
-                serde_json::json!({
-                    "type": "profile_list",
-                    "req_id": 60,
-                    "profiles": [profile_json],
-                }),
-            ),
-            (
-                ControlMsg::CreateProfile {
-                    req_id: 61,
-                    name: "Claude Code".to_string(),
-                    invocation: "claude".to_string(),
-                    agent_kind: AgentKind::Claude,
-                    resume_template: Some(vec!["claude".to_string(), "{conversation}".to_string()]),
-                },
-                serde_json::json!({
-                    "type": "create_profile",
-                    "req_id": 61,
-                    "name": "Claude Code",
-                    "invocation": "claude",
-                    "agent_kind": "claude",
-                    "resume_template": ["claude", "{conversation}"],
-                }),
-            ),
-            (
-                ControlMsg::ProfileCreated {
-                    req_id: 61,
-                    profile: a_profile(),
-                },
-                serde_json::json!({
-                    "type": "profile_created",
-                    "req_id": 61,
-                    "profile": profile_json,
-                }),
-            ),
-            (
-                ControlMsg::UpdateProfile {
-                    req_id: 62,
-                    profile: a_profile(),
-                },
-                serde_json::json!({
-                    "type": "update_profile",
-                    "req_id": 62,
-                    "profile": profile_json,
-                }),
-            ),
-            (
-                ControlMsg::ProfileUpdated {
-                    req_id: 62,
-                    profile: a_profile(),
-                },
-                serde_json::json!({
-                    "type": "profile_updated",
-                    "req_id": 62,
-                    "profile": profile_json,
-                }),
-            ),
-            (
-                ControlMsg::DeleteProfile {
-                    req_id: 63,
-                    profile_id: "prof-7".to_string(),
-                },
-                serde_json::json!({
-                    "type": "delete_profile",
-                    "req_id": 63,
-                    "profile_id": "prof-7",
-                }),
-            ),
-            (
-                ControlMsg::ProfileDeleted { req_id: 63 },
-                serde_json::json!({
-                    "type": "profile_deleted",
-                    "req_id": 63,
-                }),
-            ),
-        ] {
-            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
-            let golden_frame = Frame {
-                kind: FrameKind::Control,
-                channel: 0,
-                body: expected.to_string().into_bytes(),
-            };
-            assert_eq!(crate::io::parse_control(&golden_frame).unwrap(), msg);
-            let mut wire = Vec::new();
-            Frame::control(&msg).encode(&mut wire).unwrap();
-            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
-            assert_eq!(used, wire.len());
-            assert_eq!(
-                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
-                msg
-            );
-        }
-    }
-
-    /// The bound that makes `ListProfiles` safe to leave unpaginated
-    /// (PLAN_M6_75.md item 3): a catalog at BOTH limits — the maximum
-    /// number of profiles, each at the maximum field size — must still
-    /// encode to a sendable frame, with real headroom rather than a
-    /// technical fit.
-    ///
-    /// Built as an actual `ProfileList` and actually encoded, not as
-    /// arithmetic over the constants: JSON escaping, field names, the
-    /// per-record braces and the frame header are all real bytes, and a
-    /// hand-multiplied estimate is exactly the kind of reasoning that is
-    /// wrong by a factor nobody notices until a user's catalog stops
-    /// listing. The headroom assertion mirrors `upload_consts_are_pinned`'s
-    /// treatment of `UPLOAD_CHUNK_BYTES` for the same reason: a bound that
-    /// only just fits leaves nothing for a future field on `Profile`.
-    ///
-    /// The worst case is deliberately absurd (16 MiB of text spread over
-    /// 256 profiles), which is the point of a bound: it holds for a catalog
-    /// no user would ever author, so it holds for every catalog they would.
-    #[test]
-    fn profile_bounds_keep_a_full_catalog_sendable() {
-        // Every byte of the per-profile allowance spent on `name`, the one
-        // field with no shape of its own to limit it.
-        let fattest = |id: usize| Profile {
-            id: format!("prof-{id}"),
-            name: "x".repeat(PROFILE_FIELD_CAP),
-            invocation: String::new(),
-            agent_kind: AgentKind::Generic,
-            resume_template: None,
-        };
-        let full = ControlMsg::ProfileList {
-            req_id: 1,
-            profiles: (0..MAX_PROFILES).map(fattest).collect(),
-        };
-        let frame = Frame::control(&full);
-        assert!(
-            !frame.exceeds_max_len(),
-            "a catalog at both bounds must still be sendable, got {} bytes against a \
-             {MAX_FRAME_LEN}-byte limit",
-            frame.encoded_len()
-        );
-        assert!(
-            frame.encoded_len() < MAX_FRAME_LEN as usize / 2,
-            "the bounds must leave real headroom for future Profile fields, not merely fit: \
-             {} bytes",
-            frame.encoded_len()
+        assert_eq!(serde_json::to_value(a_profile()).unwrap(), expected);
+        assert_eq!(
+            serde_json::from_value::<Profile>(expected).unwrap(),
+            a_profile()
         );
     }
 
@@ -6452,11 +6193,13 @@ mod tests {
     #[test]
     fn session_info_source_profile_json_shapes_are_pinned() {
         for existence in [
+            ProfileExistence::Unresolved,
             ProfileExistence::Present,
             ProfileExistence::Renamed,
             ProfileExistence::Deleted,
         ] {
             let expected_existence = match existence {
+                ProfileExistence::Unresolved => "unresolved",
                 ProfileExistence::Present => "present",
                 ProfileExistence::Renamed => "renamed",
                 ProfileExistence::Deleted => "deleted",
@@ -6591,10 +6334,8 @@ mod tests {
         );
     }
 
-    /// The absent case — which is EVERY session at this bump, since the
-    /// supervisor's profile catalog is a later step and nothing is
-    /// profile-created yet (see the field's own docs). Two spellings must
-    /// mean the same thing: an explicit `null` (what this crate's encoder
+    /// A raw-created session has no source profile. Two spellings must mean
+    /// the same thing: an explicit `null` (what this crate's encoder
     /// produces) and a key that never appears at all (what a sender
     /// predating the field produces).
     ///
@@ -6640,50 +6381,15 @@ mod tests {
         );
     }
 
-    /// Version 10's additive rule for FIELDS, both directions, applied to
-    /// the profile family — mirroring
-    /// `rename_session_with_future_extra_field_decodes_through_parse_control`
-    /// and `current_rename_session_decodes_under_a_future_v7_decoder_with_defaults`
-    /// for version 7's vocabulary, and pinned on ONE representative variant
-    /// for their reason: unknown-field tolerance is a property of the
-    /// enum's derive (no `deny_unknown_fields` anywhere on this path), not
-    /// of any single variant.
-    ///
-    /// `UpdateProfile` is the representative because it nests a whole
-    /// [`Profile`], which makes this cover the nesting level too — the
-    /// thing `session_list_with_unknown_field_inside_session_decodes_through_parse_control`
-    /// had to be written separately to cover for `SessionInfo`.
+    /// Profile JSON tolerates future fields even though it no longer nests
+    /// inside a supervisor control message.
     #[test]
-    fn profile_messages_tolerate_unknown_fields_in_both_directions() {
-        // Future sender -> current decoder, with the unknown field nested
-        // inside the `Profile` object rather than beside it.
-        let frame = Frame {
-            kind: FrameKind::Control,
-            channel: 0,
-            body: serde_json::json!({
-                "type": "update_profile",
-                "req_id": 70,
-                "profile": {
-                    "id": "prof-7",
-                    "name": "Claude Code",
-                    "invocation": "claude",
-                    "agent_kind": "claude",
-                    "resume_template": ["claude", "{conversation}"],
-                    "initial_prompt": "value from tomorrow",
-                },
-                "dry_run": true,
-            })
-            .to_string()
-            .into_bytes(),
-        };
-        let msg = crate::io::parse_control(&frame)
-            .expect("unknown fields, nested or not, must decode rather than error");
+    fn profile_json_tolerates_unknown_fields_in_both_directions() {
+        let mut future = serde_json::to_value(a_profile()).unwrap();
+        future["initial_prompt"] = serde_json::json!("value from tomorrow");
         assert_eq!(
-            msg,
-            ControlMsg::UpdateProfile {
-                req_id: 70,
-                profile: a_profile(),
-            }
+            serde_json::from_value::<Profile>(future).unwrap(),
+            a_profile()
         );
 
         // Current sender -> future decoder: a later build that grew an
@@ -6695,17 +6401,8 @@ mod tests {
             #[serde(default)]
             shared_with_hosts: Option<Vec<String>>,
         }
-        let mut wire = Vec::new();
-        Frame::control(&ControlMsg::ProfileCreated {
-            req_id: 71,
-            profile: a_profile(),
-        })
-        .encode(&mut wire)
-        .unwrap();
-        let (frame, _) = Frame::decode(&wire).unwrap().unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&frame.body).unwrap();
-        assert_eq!(value["type"], "profile_created");
-        let decoded: FutureProfile = serde_json::from_value(value["profile"].clone()).unwrap();
+        let decoded: FutureProfile =
+            serde_json::from_value(serde_json::to_value(a_profile()).unwrap()).unwrap();
         assert_eq!(decoded.id, "prof-7");
         assert_eq!(decoded.name, "Claude Code");
         assert_eq!(
@@ -6714,78 +6411,29 @@ mod tests {
         );
     }
 
-    /// The profile family's own version-skew half: a decoder shaped like a
-    /// genuine v9 peer — which knew no profile messages at all — must FAIL
-    /// on every one of them rather than ignoring it, exactly as
-    /// `unknown_control_message_tag_fails_decode` pins for any unrecognized
-    /// tag. This is what makes "eight new tagged variants earn the bump" a
-    /// tested claim rather than a stated one; a tolerated no-op here would
-    /// mean a v9 supervisor silently swallowing profile CRUD and answering
-    /// nothing, hanging the caller.
+    /// Version 15 rejects every profile-catalog control tag removed from the
+    /// supervisor wire.
     ///
-    /// The POSITIVE CONTROL comes first, and it is what makes the rest of
-    /// this test mean anything: a shadow decoder that rejected everything —
-    /// a typo in its `rename_all`, a wrong tag name — would satisfy every
-    /// `expect_err` below while proving nothing at all. So the fixture is
-    /// first shown to decode a message the modelled peer DID know, with its
-    /// `req_id` read back out, before being asked to refuse the ones it did
-    /// not.
+    /// This matters because accepting one as an ignored request would leave
+    /// an old caller waiting forever instead of failing at the protocol
+    /// boundary.
     #[test]
-    fn profile_messages_fail_under_a_decoder_that_predates_them() {
-        // Scoped to this test and named for what it models: a decoder that
-        // knows the v9 message set and nothing else. Distinct from the
-        // module-level `LegacyV9ControlMsg`, which models the same peer's
-        // view of ONE message's fields rather than of the message set.
-        #[derive(Debug, Deserialize)]
-        #[serde(tag = "type", rename_all = "snake_case")]
-        enum V9MessageSet {
-            SessionStopped { req_id: u64 },
-        }
-
-        let known = serde_json::to_value(ControlMsg::SessionStopped { req_id: 99 }).unwrap();
-        let V9MessageSet::SessionStopped { req_id } = serde_json::from_value(known)
-            .expect("control: this decoder must accept a message the v9 peer really knew");
-        assert_eq!(
-            req_id, 99,
-            "and must read its fields, not merely match the tag — a decoder that accepted the \
-             shape while losing the contents would pass the refusals below just as vacuously"
-        );
-
-        for msg in [
-            ControlMsg::ListProfiles { req_id: 1 },
-            ControlMsg::ProfileList {
-                req_id: 1,
-                profiles: vec![a_profile()],
-            },
-            ControlMsg::CreateProfile {
-                req_id: 2,
-                name: "n".to_string(),
-                invocation: "i".to_string(),
-                agent_kind: AgentKind::Generic,
-                resume_template: None,
-            },
-            ControlMsg::ProfileCreated {
-                req_id: 2,
-                profile: a_profile(),
-            },
-            ControlMsg::UpdateProfile {
-                req_id: 3,
-                profile: a_profile(),
-            },
-            ControlMsg::ProfileUpdated {
-                req_id: 3,
-                profile: a_profile(),
-            },
-            ControlMsg::DeleteProfile {
-                req_id: 4,
-                profile_id: "prof-7".to_string(),
-            },
-            ControlMsg::ProfileDeleted { req_id: 4 },
+    fn removed_profile_control_tags_fail_decode() {
+        for tag in [
+            "list_profiles",
+            "profile_list",
+            "create_profile",
+            "profile_created",
+            "update_profile",
+            "profile_updated",
+            "delete_profile",
+            "profile_deleted",
         ] {
-            let json = serde_json::to_value(&msg).unwrap();
-            serde_json::from_value::<V9MessageSet>(json).expect_err(
-                "a decoder predating the profile vocabulary must reject it, not ignore it",
-            );
+            serde_json::from_value::<ControlMsg>(serde_json::json!({
+                "type": tag,
+                "req_id": 1,
+            }))
+            .expect_err("a removed profile-catalog tag must fail decoding");
         }
     }
 
@@ -7176,10 +6824,6 @@ mod tests {
         );
         assert_eq!(ControlMsg::TabClosed { req_id: 9 }.reply_req_id(), Some(9));
         assert_eq!(
-            ControlMsg::ProfileDeleted { req_id: 10 }.reply_req_id(),
-            Some(10)
-        );
-        assert_eq!(
             ControlMsg::UploadStarted {
                 req_id: 11,
                 channel: 1
@@ -7209,9 +6853,10 @@ mod tests {
                 req_id: 11,
                 channel: 1,
             },
-            ControlMsg::DeleteProfile {
+            ControlMsg::RenameSession {
                 req_id: 10,
-                profile_id: "prof-7".to_string(),
+                session_id: "s1".to_string(),
+                title: "renamed".to_string(),
             },
         ] {
             assert_eq!(
@@ -7319,7 +6964,7 @@ mod tests {
     /// built programs have to agree on it — the `farhelm agent` CLI encodes
     /// it, the supervisor decodes and re-encodes it, and the helm decodes
     /// it — and only one of those three is exercised by any single crate's
-    /// tests. Two builds sharing protocol version 13 must interoperate, so
+    /// tests. Two builds sharing protocol version 15 must interoperate, so
     /// the shape is frozen inside the version rather than only across
     /// bumps.
     ///
@@ -7366,6 +7011,59 @@ mod tests {
                 "req_id": 2,
                 "session_id": "s1",
                 "request": { "verb": "hosts" },
+            })
+        );
+
+        let resolve_request = ControlMsg::AgentRequest {
+            req_id: 3,
+            session_id: "s1".to_string(),
+            request: AgentVerb::ResolveProfile {
+                name: "Claude Code".to_string(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&resolve_request).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 3,
+                "session_id": "s1",
+                "request": { "verb": "resolve_profile", "name": "Claude Code" },
+            })
+        );
+
+        let resolved_reply = ControlMsg::AgentResponse {
+            req_id: 3,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::ResolvedProfile {
+                    invocation: "claude --model opus".to_string(),
+                    agent_kind: AgentKind::Claude,
+                    resume_template: Some(vec![
+                        "claude".to_string(),
+                        "--resume".to_string(),
+                        "{conversation}".to_string(),
+                    ]),
+                    source_profile: ProfileSnapshot {
+                        id: "prof-7".to_string(),
+                        name: "Claude Code".to_string(),
+                    },
+                },
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&resolved_reply).unwrap(),
+            serde_json::json!({
+                "type": "agent_response",
+                "req_id": 3,
+                "outcome": {
+                    "result": "ok",
+                    "reply": {
+                        "reply": "resolved_profile",
+                        "invocation": "claude --model opus",
+                        "agent_kind": "claude",
+                        "resume_template": ["claude", "--resume", "{conversation}"],
+                        "source_profile": {"id": "prof-7", "name": "Claude Code"},
+                    },
+                },
             })
         );
 

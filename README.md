@@ -138,10 +138,10 @@ Linux" below).
   with your existing passwordless SSH configuration and inspects the host. A supervisor already running for your user is
   registered as-is; on a host without one, Farhelm shows the exact file-and-unit plan and does nothing until you confirm
   it. No root is involved at any point.
-- Create a session: "new session", pick the host, pick an agent profile — every fresh supervisor ships with editable
-  starters for Claude Code and Codex. The working directory starts at `~`, which expands once against that host's home
-  at creation; any other directory must be an existing absolute path on that host — plain relative paths are rejected,
-  and `~user` forms and variables never expand. Submitting drops you straight into the agent's terminal.
+- Create a session: "new session", pick the host, pick an agent profile — every fresh helm ships with editable starters
+  for Claude Code and Codex, shared by every host. The working directory starts at `~`, which expands once against that
+  host's home at creation; any other directory must be an existing absolute path on that host — plain relative paths are
+  rejected, and `~user` forms and variables never expand. Submitting drops you straight into the agent's terminal.
 - If you start agents through a launcher that wants the directory as an argument (`my-wrapper run <dir> claude`), write
   `{cwd}` where the directory goes and set the profile's agent kind — see
   [docs/agent-wrappers.md](docs/agent-wrappers.md).
@@ -317,18 +317,14 @@ farhelm agent clone [--host <name>] [--cwd <dir>] [--title <t>] [--idempotency-k
 agent — which is the "start another one of these over on the build box" that used to mean walking to the UI. `--host`
 takes a name straight out of `farhelm agent hosts`; leave it off and you get the host you are already on. Both print the
 new session's id on stdout and nothing else, with the confirmation on stderr, so
-`id=$(farhelm agent clone --host builder)` works. `--idempotency-key` is what makes an ambiguous retry safe: re-running
-with the same key returns the session the first attempt made instead of creating a second one, provided the retry names
-the same selector.
+`id=$(farhelm agent clone --host builder)` works. `--idempotency-key` binds a retry to the resolved launch bundle:
+re-running with the same key returns the session the first attempt made, while editing the selected profile can make the
+same textual selector conflict because it now resolves to different settings.
 
-The agent is resolved by profile NAME on the target host, and this is the part worth understanding: profile ids are
-minted per machine, so a clone onto ANOTHER host looks up a profile with the same NAME in that host's own catalog. No
-such name there is a refusal saying so, never a quiet fall back to running the source's command line on a machine that
-may not have that binary. A clone onto your OWN host is the exception and needs no lookup: it follows the source
-session's exact profile, even if that profile has since been renamed or deleted (deleted gives you a refusal rather than
-whatever now carries the old name). A session you created from a raw command line has no profile name to resolve and
-clones as that command line. A `create` naming neither `--profile` nor `--invocation` uses the target host's last-used
-profile, the same default the create dialog offers.
+The helm resolves profile names from its one catalog, which applies to every host it manages. A clone follows its source
+session's snapshotted profile when that profile still exists in the helm catalog; it otherwise refuses rather than
+guessing. A session created from a raw command line has no profile to resolve and clones as that invocation. A `create`
+naming neither `--profile` nor `--invocation` uses the helm-wide last-used profile.
 
 The failure worth knowing about is `no helm is attached to this session`. The relay reaches the helm that currently
 holds the session open, so a session no client is looking at has no route to ask: open the session in the Farhelm UI and

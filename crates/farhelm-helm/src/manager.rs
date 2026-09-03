@@ -3473,7 +3473,7 @@ impl HostActor {
         let epoch_before = self.seed_epoch.load(std::sync::atomic::Ordering::Acquire);
         let drained = tokio::time::timeout(self.cadence.refresh_timeout, drain_sessions(client));
         let SessionListing {
-            sessions: entries,
+            sessions: mut entries,
             truncated,
         } = match drained.await {
             Err(_) => {
@@ -3535,6 +3535,24 @@ impl HostActor {
                 };
             }
         };
+        if let Err(error) =
+            crate::sessions::resolve_session_profiles_from_store(&self.store, &mut entries).await
+        {
+            let error = peer_text(&format!("could not resolve session profiles: {error:#}"));
+            warn!(
+                error = error.as_str(),
+                destination = %self.destination(),
+                "refreshing the host's session profiles failed; keeping the previous cache"
+            );
+            return RefreshStep {
+                health: RefreshHealth::Failed { error },
+                end_connection: None,
+                live: LiveSessions::Retain,
+                contested: None,
+                truncated: None,
+                cache_changed: false,
+            };
+        }
         let Some(identity) = identity else {
             // Live-only: the walk succeeded, so the count is real, but
             // there is nothing to bind a cache write to. See this method's

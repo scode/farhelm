@@ -798,15 +798,11 @@ put a session on a machine nobody chose. A registered name carrying a control ch
 since the relay refuses one in `--host`; the not-found refusal says so by count, because the fix is a rename and an
 agent has no rename verb for hosts.
 
-Their agent selector travels as a NAME and is resolved by the TARGET supervisor inside creation
-(`CreateMode::ProfileName`), never by carrying an id across hosts and never by a lookup on this side: starter profile
-ids collide between installs by construction, so an id would resolve on the wrong catalog rather than fail, and a
-helm-side name lookup would put two windows around the resolution — one before the create is sent, one before the target
-reserves the intent key — in which a rename or an edit changes what the caller's name meant. The refusals (no such name,
-an ambiguous name) are the target's own, prefixed with the host name the agent asked for, because the target's sentence
-can only say "this host". A clone follows its source's profile ID when the target is the source's own host, and does so
-UNCONDITIONALLY — a deleted profile's id is sent and refused rather than resolved onto whatever now carries the old
-name.
+The helm resolves an agent's profile name exactly against its one catalog before the target call. Zero or multiple
+matches are `InvalidRequest` refusals that name candidates; one match becomes the invocation, agent kind, resume
+template, and immutable profile snapshot carried to the supervisor. A clone follows its source's snapshotted profile id
+through the same helm catalog on any host. A missing id is refused before a target call, with no fallback to the old
+name or source invocation.
 
 `Clone` reads its source LIVE from the asking session's host, by the same drain `GET /api/sessions/{id}` uses for a
 connected host, rather than from the helm's cache — the cache is for the stale list, and a clone built from it could
@@ -817,14 +813,10 @@ its own id as a new one. Both verbs take the fence on `agent_request_locks` that
 create that completes while the asking credential is being invalidated would otherwise leave a session running that
 nobody was told about.
 
-A KEYED RETRY IS BOUND TO THE SELECTOR IT NAMES, not to a snapshot of what that selector once meant. The target
-fingerprints the selector it was sent, so two attempts under one key carrying one profile NAME agree by construction —
-which is the second reason the name is forwarded rather than resolved here. The converse is the caveat an agent has to
-know: if the retry names something DIFFERENT from the first attempt — the remembered default has changed, the source
-session has been renamed or moved, a profile name was swapped for an invocation — the target sees a different
-fingerprint and answers with a conflict rather than replaying the first outcome. That is the same contract
-`farhelm spawn` has; nothing in the agent path softens it. An agent that wants a retry to be safe should name its
-selector explicitly rather than lean on the "no selector" fallback, whose value the helm re-reads on every attempt.
+A KEYED RETRY IS BOUND TO THE RESOLVED BUNDLE SENT TO THE SUPERVISOR. The fingerprint covers the invocation, agent kind,
+resume template, and profile snapshot, so editing a profile between two attempts under one key makes the second request
+different and produces a conflict rather than replaying the first outcome under changed settings. The same applies when
+the remembered default changes or a clone's source metadata changes between attempts.
 
 The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, the same
 number every session id is held to). It is routing metadata the helm consumes and no supervisor ever sees, so charging
@@ -843,12 +835,10 @@ One deliberate difference from `farhelm spawn` is worth stating rather than disc
 credential. An agent's `create`/`clone` reaches the target supervisor over the HELM's full-authority connection, so the
 key gets the same permanent, interactive scope any other helm-mediated create gets. Session-lifetime scoping is not
 merely unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking
-session. Likewise the "no selector" fallback: spawn's is the supervisor's own `latest_source_profile()`, while the agent
-verbs use the HELM's per-host remembered default from helm.db, which is the same value the create dialog preselects and
-the one this feature's mental model calls for. `ControlMsg::CreateSession`'s own docs already state that a remembered
-default never travels on that wire — the helm resolves one into a concrete id before sending. That is why a remembered
-default is the one selector on this path that still crosses as an id: it is the helm's own memory of what worked on that
-host, so there is an id to send and no name to defer.
+session. Their selectorless defaults differ too: spawn copies the asking session's exact stored launch bundle on its own
+supervisor and therefore works offline, while the agent verb resolves the helm's one remembered default. Spawn with
+`--agent <name>` is the exception to that offline path: the supervisor sends `ResolveProfile` through the existing
+upward relay, and refuses with the omit-`--agent` remedy when no helm is attached.
 
 One divergence is worth stating rather than discovering later. A RAW clone — one whose source came from no profile —
 copies the invocation and nothing else, so the target re-derives the integrated kind from the invocation's first token
@@ -889,31 +879,13 @@ reports a failed listing rather than a silently shortened one.
 ## Supervisor internals
 
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's
-  supervisor-authoritative list), agent profiles and each session's profile snapshot taken at creation (SPEC.md's
-  snapshot rule shapes the session schema), spawn idempotency keys, captured conversation identities, host identity, and
-  the boot id last seen. Comparing the stored boot id against the current one (`/proc/sys/kernel/random/boot_id`;
-  `kern.bootsessionuuid` on macOS — a per-boot UUID, chosen over `kern.boottime` because the kernel rewrites boottime on
-  clock steps and a boot id must never change mid-boot) is how "interrupted" is classified per SPEC.md.
+  supervisor-authoritative list), each session's profile snapshot taken at creation, spawn idempotency keys, captured
+  conversation identities, host identity, and the boot id last seen. The helm owns the mutable profile catalog, so the
+  supervisor records the snapshot but sends `ProfileExistence::Unresolved` on its wire replies. Comparing the stored
+  boot id against the current one (`/proc/sys/kernel/random/boot_id`; `kern.bootsessionuuid` on macOS — a per-boot UUID,
+  chosen over `kern.boottime` because the kernel rewrites boottime on clock steps and a boot id must never change
+  mid-boot) is how "interrupted" is classified per SPEC.md.
 - Host identity: generated once at first run, stored in the db.
-- Agent profiles live in a `profiles` table in that same db, bounded on both axes — 128 profiles per host, 8 KiB of
-  caller-supplied text per profile — so the unpaginated catalog reply can never outgrow a frame. That bound is not
-  tidiness: the listing is also how a client finds the profile it wants to delete, so a catalog too large to list would
-  be one nobody could trim back. The starter profiles SPEC.md promises (Claude Code and Codex, each in a plain and a
-  permission-skipping "yolo" variant, four rows total) are seeded by the schema migration that creates the table, not by
-  a check at startup. A migration step runs exactly once per database, so a deleted starter stays deleted and an edited
-  one stays edited, with no "already seeded" flag that could disagree with the table it describes and re-seed what the
-  user threw away. A profile names its kind explicitly (`generic` is the spelling for "no kind"), and an absent resume
-  template means the kind's own default, derived at create time from that profile's invocation. Substituting `{cwd}`
-  into an invocation or a resume template happens in the single spawn seam (`spawn_agent`), after validation and before
-  hook injection, because the value is the directory tmux is handed for that launch and that seam is the only place that
-  knows it on every path — create, retry, and every restart mode alike. A session records the id and name of the profile
-  it was created from and nothing mutable; whether that profile still exists, and whether it has since been renamed, is
-  derived by one catalog lookup when a reply is built (one per reply, not one per session), so an edit or a delete never
-  rewrites historical rows and there is only one copy of existence truth. Creating a session from a profile that has
-  since been deleted fails as a precondition — before any launch, with no session left behind — and never falls back to
-  another profile. Profile writes carry no optimistic-concurrency check: an update replaces the stored definition whole,
-  last write wins (SPEC.md, Concepts / Agent profile), and the helm serves no definition fingerprint for a client to
-  echo back.
 - Sessions launch through the user's shell as an interactive login shell inside the PTY —
   `$SHELL -l -i -c 'exec farhelm internal launch ...'` as the window's command, with the shim doing the final exec of
   the profile invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different
@@ -1084,9 +1056,17 @@ reports a failed listing rather than a silently shortened one.
 ## Helm internals
 
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities), last-known
-  session cache (survives helm restarts per SPEC.md), recoverable web token, hashed browser device sessions, remembered
-  defaults (last-used profile per host), and the one client preference (list order, last-selected session) every client
-  shares.
+  session cache (survives helm restarts per SPEC.md), the helm-wide profile catalog and its one remembered default,
+  recoverable web token, hashed browser device sessions, and the one client preference (list order, last-selected
+  session) every client shares.
+- The `profiles` table is bounded on both axes — 128 profiles per helm, 8 KiB of caller-supplied text per profile — so
+  the unpaginated catalog reply stays predictably bounded. The schema migration that creates it seeds Claude Code and
+  Codex in plain and permission-skipping variants exactly once, so edits and deletions remain durable. A profile names
+  its kind explicitly (`generic` means no integration), and an absent resume template selects that kind's default. The
+  helm resolves every profile-backed create into an invocation, kind, template, and immutable id/name snapshot before
+  the supervisor call. It also resolves every supervisor `SourceProfile` marked `Unresolved` against one catalog read
+  per reply before browser JSON or session-cache storage; missing ids become `Deleted`, and ids whose current names
+  differ from the snapshot become `Renamed`. Profile writes are last-write-wins and carry no definition fingerprint.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never user management surface, never removable. It exists specifically so the local host has a cache row to
   serve stale sessions from when its own supervisor is down — the plan's first draft made this row optional, and review
@@ -1481,9 +1461,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   characters is a host an agent can see and can never target. `--cwd` is required on `create` and has no default, since
   inheriting the asking session's directory would make it a `clone` under another name. `--profile` and `--invocation`
   are mutually exclusive, refused by clap before anything is sent (the helm refuses the same shape for every other
-  client), and naming neither falls back to the target host's remembered default. Every value-taking option on both
-  verbs carries `allow_hyphen_values`, because every one of these values is judged downstream — by the registry, by the
-  target's catalog, by its filesystem — and every one of them may legally begin with `-`; refusing such a value locally
+  client), and naming neither falls back to the helm's remembered default. Every value-taking option on both verbs
+  carries `allow_hyphen_values`, because every one of these values is judged downstream — by the registry, by the helm's
+  catalog, by the target filesystem — and every one of them may legally begin with `-`; refusing such a value locally
   would be this CLI declining to carry a name the far end would have explained.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the

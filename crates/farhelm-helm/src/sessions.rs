@@ -53,8 +53,9 @@ use crate::{
 use anyhow::Context;
 use axum::extract::{Path as AxPath, Query, State};
 use axum::response::IntoResponse;
-use farhelm_proto::ErrorKind;
+use farhelm_proto::{ErrorKind, ProfileSnapshot};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -498,10 +499,11 @@ pub(crate) struct CreateReq {
     /// disagree.
     invocation: Option<String>,
     /// The profile to create from, in PROFILE mode — a `Profile::id` from
-    /// this host's own catalog (`GET /api/hosts/{id}/profiles`), since
-    /// profiles are per-supervisor and an id means nothing on another host.
+    /// the helm catalog (`GET /api/profiles`). The id has the same meaning
+    /// on every managed host because the helm resolves it before choosing a
+    /// supervisor connection.
     ///
-    /// A successful profile-backed create also updates the helm-wide
+    /// A successful profile-backed create is also what UPDATES the helm's
     /// remembered default (see [`create_session`]): "last used" means a
     /// session was actually created from it, not that a picker was opened.
     profile_id: Option<String>,
@@ -558,15 +560,10 @@ pub(crate) struct CreateReq {
     /// and the create is refused with a 409 unless the host is still on that
     /// connection when routing resolves it.
     ///
-    /// It matters most in PROFILE mode, and that is worth stating rather than
-    /// leaving to be inferred: a profile id is minted per supervisor and every
-    /// fresh supervisor seeds the same starter profiles, so a create aimed at
-    /// `starter-claude` and landing on a host that was retargeted or adopted
-    /// mid-flight does not fail — it RESOLVES over there, launching a profile
-    /// the user never chose, and then records it as their remembered default.
-    /// Raw-mode creates accept the field too: an invocation is not
-    /// install-specific in the same way, but "run this on THAT machine" is
-    /// still a thing a caller can mean and be wrong about.
+    /// Profile ids are helm-wide now, but the guard still matters because
+    /// "run this on THAT machine" is a claim independent of how the launch
+    /// bundle was selected. A retargeted row must not silently send either a
+    /// profile-backed or raw create to a successor installation.
     expected_incarnation: Option<u64>,
 }
 
@@ -603,11 +600,9 @@ pub(crate) fn default_rows() -> u16 {
 /// is behind a plain lock. Nothing here awaits, so nothing here should
 /// pretend it might.
 ///
-/// Visible to the crate because profile CRUD (`crate::profiles`) routes the
-/// same way and for the same reasons: a profile lives on ONE supervisor, so
-/// every profile request is a request to a named host's live connection, and
-/// a second lookup path for it would be a second place to get the
-/// state-and-client pairing wrong.
+/// Visible to the crate because REST and agent creates both route through
+/// it. Profile CRUD no longer needs a host connection: the catalog belongs
+/// to the helm.
 pub(crate) fn host_client(
     state: &AppState,
     host: store::HostId,
@@ -725,6 +720,17 @@ async fn record_session(
     claim: &manager::SessionClaim,
     session: &farhelm_proto::SessionInfo,
 ) {
+    // Every caller resolves the reply once and passes that same row both to
+    // the cache and to its consumer. Refuse to persist a supervisor marker
+    // if a future caller bypasses that boundary.
+    if session
+        .source_profile
+        .as_ref()
+        .is_some_and(|source| source.existence == farhelm_proto::ProfileExistence::Unresolved)
+    {
+        warn!(session = %manager::peer_text(&session.id), "refusing to cache a session whose profile existence is unresolved");
+        return;
+    }
     let Err(error) = state.manager.remember_session(claim, session).await else {
         return;
     };
@@ -751,6 +757,96 @@ async fn record_session(
         error = %error,
         "could not record the session for routing; it will be picked up at the next refresh"
     );
+}
+
+/// The catalog fields needed to classify a session's immutable profile
+/// snapshot.
+///
+/// Launch settings stay out of this index deliberately. Existence depends
+/// only on stable identity and the current display name; keeping the smaller
+/// view also makes it clear that resolving a reply cannot change what the
+/// session will run.
+pub(crate) type ProfileNameIndex = HashMap<String, String>;
+
+/// Load one catalog snapshot for use on both sides of a supervisor mutation.
+///
+/// Mutation handlers call this before sending the operation. A failed read
+/// must therefore fail before the supervisor changes anything, while a
+/// successful read leaves reply enrichment infallible after the side effect.
+pub(crate) async fn load_profile_name_index(
+    store: &store::HelmStore,
+) -> anyhow::Result<ProfileNameIndex> {
+    Ok(profile_name_index(&store.profiles().await?))
+}
+
+/// Reduce a decoded catalog to the identity fields session replies need.
+///
+/// Profile-backed creates already need the full catalog to resolve their
+/// launch bundle. Building the index from that same read preserves the
+/// one-read contract instead of reopening the store after creation.
+fn profile_name_index(profiles: &[farhelm_proto::Profile]) -> ProfileNameIndex {
+    profiles
+        .iter()
+        .map(|profile| (profile.id.clone(), profile.name.clone()))
+        .collect()
+}
+
+/// Resolve every source-profile marker against an already-loaded catalog.
+///
+/// This is deliberately infallible: callers that mutate a supervisor load
+/// the index before the side effect, then use this function afterwards.
+/// Centralizing the three-way rule keeps live replies, cached rows, and
+/// merged listings from exposing the supervisor-only `Unresolved` marker.
+pub(crate) fn resolve_session_profiles<'a>(
+    profiles: &ProfileNameIndex,
+    sessions: impl IntoIterator<Item = &'a mut farhelm_proto::SessionInfo>,
+) {
+    for session in sessions {
+        if let Some(source) = &mut session.source_profile {
+            source.existence = match profiles.get(&source.id) {
+                None => farhelm_proto::ProfileExistence::Deleted,
+                Some(name) if name == &source.name => farhelm_proto::ProfileExistence::Present,
+                Some(_) => farhelm_proto::ProfileExistence::Renamed,
+            };
+        }
+    }
+}
+
+/// Resolve a read-only reply, avoiding the catalog entirely for raw rows.
+///
+/// A malformed profile row must not hide sessions that carry no provenance.
+/// The early return happens before the store is touched; profile-backed rows
+/// still fail loudly if the catalog cannot provide a trustworthy snapshot.
+pub(crate) async fn resolve_session_profiles_from_store(
+    store: &store::HelmStore,
+    sessions: &mut [farhelm_proto::SessionInfo],
+) -> anyhow::Result<()> {
+    if sessions
+        .iter()
+        .all(|session| session.source_profile.is_none())
+    {
+        return Ok(());
+    }
+    let profiles = load_profile_name_index(store).await?;
+    resolve_session_profiles(&profiles, sessions.iter_mut());
+    Ok(())
+}
+
+/// Reject a session row at the HTTP edge if it still carries the
+/// supervisor-only existence marker.
+///
+/// This release-build check complements the cache guard. A debug assertion
+/// alone would let a production browser observe a fourth existence word the
+/// public JSON contract does not contain.
+fn browser_session_ready(session: &farhelm_proto::SessionInfo) -> anyhow::Result<()> {
+    if session
+        .source_profile
+        .as_ref()
+        .is_some_and(|source| source.existence == farhelm_proto::ProfileExistence::Unresolved)
+    {
+        anyhow::bail!("refusing to serialize unresolved profile existence");
+    }
+    Ok(())
 }
 
 /// Forget a deleted session everywhere the serving path looks for it.
@@ -811,9 +907,8 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 ///
 /// ## Profile mode, and the remembered default
 ///
-/// A body naming `profile_id` instead of `invocation` creates from the
-/// target host's own profile catalog (PLAN_M6_75.md item 3's second creation
-/// mode). Two consequences live here rather than on the supervisor:
+/// A body naming `profile_id` instead of `invocation` resolves from the
+/// helm-wide catalog before the supervisor call. Two consequences live here:
 ///
 /// - The helm REMEMBERS the profile as its fleet-wide last-used id in
 ///   helm.db, but only after the create SUCCEEDS. A create that failed its
@@ -837,16 +932,10 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 /// `crate::precondition`'s marker) unless the host is still on it. Absent
 /// means no claim, which is every pre-existing caller.
 ///
-/// It exists for profile mode above all, and for a reason that makes the
-/// ordinary reading of "stale request" wrong here: profile ids are minted per
-/// supervisor and every fresh supervisor seeds the same starter profiles, so a
-/// create aimed at a profile the user picked, landing on a host that was
-/// retargeted or adopted in another tab, does not fail. It RESOLVES on the
-/// successor, launches a profile nobody chose, and records that as the
-/// remembered default. See [`crate::precondition`]. This is the one guard of
-/// its kind left: the profile routes and the remembered default itself carry
-/// none (SPEC.md, Sessions / Creation), because a wrong default or a
-/// last-write-wins edit is a smaller thing than a launch nobody asked for.
+/// The profile selection itself is helm-wide, but the connection guard still
+/// protects the chosen TARGET. A retarget or adoption between rendering and
+/// submit would otherwise launch the right bundle on the wrong installation.
+/// See [`crate::precondition`].
 pub(crate) async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(mut req): axum::Json<CreateReq>,
@@ -892,7 +981,10 @@ pub(crate) async fn create_session(
     )
     .await
     {
-        Ok(session) => axum::Json(session).into_response(),
+        Ok(session) => match browser_session_ready(&session) {
+            Ok(()) => axum::Json(session).into_response(),
+            Err(error) => http_error(error),
+        },
         Err(e) => http_error(e),
     }
 }
@@ -910,7 +1002,7 @@ pub(crate) async fn create_session(
 /// [`record_session`] would leave a real session running that the UI could
 /// not route to for a refresh interval, and one that skipped
 /// [`remember_default_profile`] would silently make the two creation
-/// surfaces disagree about the helm-wide last-used profile.
+/// surfaces disagree about what this helm's last-used profile is.
 ///
 /// What is deliberately NOT here is routing. Naming the target host is where
 /// the two callers genuinely differ — the REST edge takes a registry id from
@@ -938,6 +1030,12 @@ pub(crate) async fn create_session(
 /// A hook rather than a split into two public halves because the ORDER is
 /// the contract this function exists to enforce; a caller holding two
 /// functions is a caller that can call one of them.
+///
+/// Profile-backed modes load their catalog snapshot before the supervisor
+/// call and reuse it to enrich the reply. That ordering makes the only
+/// catalog failure happen before creation; a successful create can no longer
+/// be reported as failed because a second read broke afterwards. Raw mode
+/// deliberately has no catalog dependency at either phase.
 pub(crate) async fn do_create_session(
     state: &AppState,
     claim: &manager::SessionClaim,
@@ -955,9 +1053,9 @@ pub(crate) async fn do_create_session(
         resume_template,
         accept_result,
     } = spec;
-    let session = match &mode {
+    let (mut session, profile_names) = match &mode {
         CreateMode::Raw(invocation) => {
-            client
+            let session = client
                 .create_session_with_extras(
                     &cwd,
                     invocation,
@@ -968,21 +1066,96 @@ pub(crate) async fn do_create_session(
                         intent_key,
                         agent_kind,
                         resume_template,
+                        source_profile: None,
                     },
                 )
-                .await
+                .await?;
+            (session, None)
         }
         CreateMode::Profile(profile_id) => {
-            client
-                .create_session_from_profile(&cwd, profile_id, title, cols, rows, intent_key)
-                .await
+            let profiles = state.store.profiles().await?;
+            let profile_names = profile_name_index(&profiles);
+            let profile = profiles
+                .into_iter()
+                .find(|profile| profile.id == *profile_id)
+                .ok_or_else(|| {
+                    anyhow::Error::new(SupervisorError {
+                        kind: ErrorKind::NotFound,
+                        message: format!("profile not found: {profile_id}"),
+                    })
+                })?;
+            let session = client
+                .create_session_with_extras(
+                    &cwd,
+                    &profile.invocation,
+                    title,
+                    cols,
+                    rows,
+                    CreateExtras {
+                        intent_key,
+                        agent_kind: Some(profile.agent_kind),
+                        resume_template: profile.resume_template,
+                        source_profile: Some(ProfileSnapshot {
+                            id: profile.id,
+                            name: profile.name,
+                        }),
+                    },
+                )
+                .await?;
+            (session, Some(profile_names))
         }
         CreateMode::ProfileName(profile_name) => {
-            client
-                .create_session_from_profile_name(&cwd, profile_name, title, cols, rows, intent_key)
-                .await
+            let profiles = state.store.profiles().await?;
+            let profile_names = profile_name_index(&profiles);
+            let profile = crate::profiles::resolve_profile_name(&profiles, profile_name)?;
+            let session = client
+                .create_session_with_extras(
+                    &cwd,
+                    &profile.invocation,
+                    title,
+                    cols,
+                    rows,
+                    CreateExtras {
+                        intent_key,
+                        agent_kind: Some(profile.agent_kind),
+                        resume_template: profile.resume_template,
+                        source_profile: Some(ProfileSnapshot {
+                            id: profile.id,
+                            name: profile.name,
+                        }),
+                    },
+                )
+                .await?;
+            (session, Some(profile_names))
         }
-    }?;
+        CreateMode::ResolvedProfile {
+            profile,
+            profile_names,
+        } => {
+            let session = client
+                .create_session_with_extras(
+                    &cwd,
+                    &profile.invocation,
+                    title,
+                    cols,
+                    rows,
+                    CreateExtras {
+                        intent_key,
+                        agent_kind: Some(profile.agent_kind),
+                        resume_template: profile.resume_template.clone(),
+                        source_profile: Some(ProfileSnapshot {
+                            id: profile.id.clone(),
+                            name: profile.name.clone(),
+                        }),
+                    },
+                )
+                .await?;
+            (session, Some(profile_names.clone()))
+        }
+    };
+    if let Some(profile_names) = &profile_names {
+        resolve_session_profiles(profile_names, std::iter::once(&mut session));
+    }
     // The caller's veto, BEFORE anything durable is written for this row —
     // see this function's own "Two phases" note for why the seam is here and
     // not after the seed.
@@ -990,13 +1163,10 @@ pub(crate) async fn do_create_session(
         accept_result(&session)?;
     }
     record_session(state, claim, &session).await;
-    // The remembered default is written for BOTH profile-backed modes, and
-    // for a name the id comes from the REPLY rather than from anything this
-    // process resolved: the target says which profile it actually launched,
-    // which for a name is the only place that answer exists. A reply that
-    // names no source profile writes nothing — there is no honest id to
-    // remember, and inventing one would make the create dialog preselect a
-    // profile nobody used.
+    // The remembered default is written only after the resolved create
+    // succeeds. A reply that unexpectedly names no source profile writes
+    // nothing: inventing an id would make the next dialog preselect a profile
+    // nobody used.
     let remembered = match &mode {
         CreateMode::Raw(_) => None,
         CreateMode::Profile(profile_id) => Some(profile_id.clone()),
@@ -1004,6 +1174,7 @@ pub(crate) async fn do_create_session(
             .source_profile
             .as_ref()
             .map(|profile| profile.id.clone()),
+        CreateMode::ResolvedProfile { profile, .. } => Some(profile.id.clone()),
     };
     if let Some(profile_id) = remembered {
         remember_default_profile(state, claim.host, &profile_id, &session).await;
@@ -1019,11 +1190,11 @@ pub(crate) async fn do_create_session(
 /// transposed `title` and `intent_key`, or `cols` and `rows`, would compile
 /// and be wrong in a way no type could catch.
 ///
-/// The three snapshot overrides (`agent_kind`, `resume_template`) and
-/// dimensions are carried even though the agent relay always passes the
-/// defaults for them. Giving the agent path a narrower struct of its own
-/// would be a second shape to keep in step with the supervisor's create
-/// message, which is the drift this function exists to prevent.
+/// The integration overrides (`agent_kind`, `resume_template`) and dimensions
+/// are carried even though the agent relay normally passes the defaults for
+/// them. Giving the agent path a narrower struct of its own would be a second
+/// shape to keep in step with the supervisor's create message, which is the
+/// drift this function exists to prevent.
 pub(crate) struct CreateSpec {
     pub(crate) cwd: String,
     pub(crate) mode: CreateMode,
@@ -1068,25 +1239,44 @@ pub(crate) type CreatedSessionCheck =
 /// moved into the call. Taken out of the body rather than cloned — nothing
 /// else reads them afterwards.
 ///
-/// `Profile` always holds an ID and [`CreateMode::ProfileName`] always holds
-/// a NAME, and keeping them apart is a constraint on the producers rather
-/// than an implementation detail. Profile ids are minted per supervisor and
-/// every fresh install seeds the same starter ids, so an id is only ever
-/// meaningful against the catalog of the host the create will land on — the
-/// REST edge sends one because its caller picked it out of that host's own
-/// catalog, and the agent relay's same-host clone sends one because the
-/// source session's snapshot IS that host's id.
-///
-/// A name is not resolved here at all: it travels to the target and is
-/// resolved inside creation, under the lock that reserves the intent key
-/// (see `SupervisorClient::create_session_from_profile_name`). Resolving it
-/// on this side would put two gaps around the lookup — one before the
-/// create, one before the reservation — where a rename or an edit changes
-/// what the caller's name meant.
+/// `Profile` holds a helm-wide ID and [`CreateMode::ProfileName`] holds the
+/// exact human-facing name supplied by the agent CLI. Both resolve against
+/// the helm catalog before any supervisor call, producing the same invocation,
+/// integration fields, and source snapshot on the wire. The resolved bundle,
+/// rather than the selector, is what the supervisor fingerprints, so a profile
+/// edit between keyed retries is correctly treated as a changed request.
 pub(crate) enum CreateMode {
     Raw(String),
     Profile(String),
     ProfileName(String),
+    /// A profile and identity index produced by one caller-owned catalog
+    /// read before target routing.
+    ///
+    /// Agent defaults and clones need to refuse a dangling id without
+    /// contacting the destination. Carrying the catalog snapshot forward
+    /// lets creation enrich the reply without reopening the store after the
+    /// supervisor mutation.
+    ResolvedProfile {
+        profile: farhelm_proto::Profile,
+        profile_names: ProfileNameIndex,
+    },
+}
+
+impl CreateMode {
+    /// Build a resolved mode from the catalog snapshot that selected it.
+    ///
+    /// The profile and index must come from the same read. That pairing is
+    /// what keeps the bundle sent to the supervisor and the existence verdict
+    /// applied to its reply from observing different catalog moments.
+    pub(crate) fn resolved_profile(
+        profile: farhelm_proto::Profile,
+        catalog: &[farhelm_proto::Profile],
+    ) -> CreateMode {
+        CreateMode::ResolvedProfile {
+            profile,
+            profile_names: profile_name_index(catalog),
+        }
+    }
 }
 
 /// Resolve a create body's mode, refusing the two ambiguous shapes.
@@ -1302,14 +1492,27 @@ pub(crate) async fn get_session(
             Err(e) => return http_error(e),
         };
         return match cached {
-            Some(info) => axum::Json(aggregate::SessionRow {
-                info,
-                host,
-                host_identity,
-                host_name,
-                stale: true,
-            })
-            .into_response(),
+            Some(mut info) => {
+                if let Err(error) = resolve_session_profiles_from_store(
+                    &state.store,
+                    std::slice::from_mut(&mut info),
+                )
+                .await
+                {
+                    return http_error(error);
+                }
+                match browser_session_ready(&info) {
+                    Ok(()) => axum::Json(aggregate::SessionRow {
+                        info,
+                        host,
+                        host_identity,
+                        host_name,
+                        stale: true,
+                    })
+                    .into_response(),
+                    Err(error) => http_error(error),
+                }
+            }
             // The host is down and its cached copy is unreadable (or gone).
             // There is nothing to put behind the notice, and inventing a
             // placeholder would be worse than saying so.
@@ -1320,23 +1523,33 @@ pub(crate) async fn get_session(
         };
     };
     match manager::drain_sessions(&client).await {
-        Ok(drained) => match drained.sessions.into_iter().find(|s| s.id == id) {
-            Some(info) => axum::Json(aggregate::SessionRow {
-                info,
-                host,
-                host_identity,
-                host_name,
-                stale: false,
-            })
-            .into_response(),
-            // The host is up and says this session is gone: it was deleted
-            // between the last cache refresh and now, so 404 is the truth
-            // rather than the stale row.
-            None => http_error(anyhow::Error::new(SupervisorError {
-                kind: ErrorKind::NotFound,
-                message: format!("no such session: {id}"),
-            })),
-        },
+        Ok(mut drained) => {
+            if let Err(error) =
+                resolve_session_profiles_from_store(&state.store, &mut drained.sessions).await
+            {
+                return http_error(error);
+            }
+            match drained.sessions.into_iter().find(|s| s.id == id) {
+                Some(info) => match browser_session_ready(&info) {
+                    Ok(()) => axum::Json(aggregate::SessionRow {
+                        info,
+                        host,
+                        host_identity,
+                        host_name,
+                        stale: false,
+                    })
+                    .into_response(),
+                    Err(error) => http_error(error),
+                },
+                // The host is up and says this session is gone: it was deleted
+                // between the last cache refresh and now, so 404 is the truth
+                // rather than the stale row.
+                None => http_error(anyhow::Error::new(SupervisorError {
+                    kind: ErrorKind::NotFound,
+                    message: format!("no such session: {id}"),
+                })),
+            }
+        }
         Err(e) => http_error(e),
     }
 }
@@ -1363,16 +1576,17 @@ pub(crate) struct RestartReq {
 /// (SPEC.md's restart; the resume offered when opening an interrupted
 /// session is this same operation, not a separate one).
 ///
-/// Pure passthrough, including of the refusals that carry this endpoint's
-/// real contract: a `mode` that no longer matches the session's offer and
-/// a live agent without `stop_if_running` both come back as 409s through
-/// `http_error`, and a vanished working directory as a 400 naming the
-/// directory. The success body is the session's freshly recomputed
-/// `SessionInfo` — the same shape `POST /api/sessions` answers with — so a
-/// caller can re-render the row (its new offer included) without listing
-/// again. Routed by owner like every other lifecycle operation, so a
-/// session on a non-connected host is refused with that host's state named
-/// rather than reaching a supervisor at all.
+/// The restart fields pass through unchanged, including the refusals that
+/// carry this endpoint's real contract: a `mode` that no longer matches the
+/// session's offer and a live agent without `stop_if_running` both come back
+/// as 409s through `http_error`, and a vanished working directory as a 400
+/// naming the directory. Before that call the helm snapshots its profile
+/// identity index, so enriching a successful reply is infallible after the
+/// agent has been relaunched. The resulting `SessionInfo` is the same shape
+/// `POST /api/sessions` answers with, allowing a caller to re-render the row
+/// without listing again. Routed by owner like every other lifecycle
+/// operation, so a session on a non-connected host is refused with that
+/// host's state named rather than reaching a supervisor at all.
 pub(crate) async fn restart_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
@@ -1382,13 +1596,23 @@ pub(crate) async fn restart_session(
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
+    // Load before restart: once the supervisor relaunches the agent, no
+    // catalog failure may turn that completed mutation into an error reply.
+    let profile_names = match load_profile_name_index(&state.store).await {
+        Ok(profiles) => profiles,
+        Err(error) => return http_error(error),
+    };
     match client
         .restart_session(&id, req.mode, req.stop_if_running)
         .await
     {
-        Ok(session) => {
+        Ok(mut session) => {
+            resolve_session_profiles(&profile_names, std::iter::once(&mut session));
             record_session(&state, &claim, &session).await;
-            axum::Json(session).into_response()
+            match browser_session_ready(&session) {
+                Ok(()) => axum::Json(session).into_response(),
+                Err(error) => http_error(error),
+            }
         }
         Err(e) => http_error(e),
     }
@@ -1415,10 +1639,11 @@ pub(crate) struct RenameReq {
 }
 
 /// Route to `id`'s owning host, ask it to change the title, and record the
-/// fresh reply — the sequence [`rename_session`] below and the agent
-/// relay's `Rename` verb (`agent_requests::HelmAgentRequests::handle`) both
-/// need, and ONLY that sequence: `title` still reaches
-/// `SupervisorClient::rename_session` VERBATIM, with no trimming or
+/// fresh reply — the sequence [`rename_session`] below and the agent relay's
+/// `Rename` verb (`agent_requests::HelmAgentRequests::handle`) both need.
+/// The profile identity index is loaded before the supervisor call, making
+/// reply enrichment infallible after the title changes. `title` still
+/// reaches `SupervisorClient::rename_session` VERBATIM, with no trimming or
 /// validation on this side (see [`rename_session`]'s own docs for why).
 ///
 /// Returns the [`manager::SessionClaim`] alongside the fresh
@@ -1432,7 +1657,10 @@ pub(crate) async fn do_rename_session(
     title: &str,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     let (claim, client) = route_session(state, id).await?;
-    let session = client.rename_session(id, title).await?;
+    // Catalog failure is still safe here: the title has not changed yet.
+    let profile_names = load_profile_name_index(&state.store).await?;
+    let mut session = client.rename_session(id, title).await?;
+    resolve_session_profiles(&profile_names, std::iter::once(&mut session));
     record_session(state, &claim, &session).await;
     Ok((claim, session))
 }
@@ -1440,24 +1668,26 @@ pub(crate) async fn do_rename_session(
 /// `POST /api/sessions/{id}/rename` — SPEC.md's rename verb (PLAN_M5.md
 /// item 4).
 ///
-/// Pure passthrough, deliberately: the supervisor is the sole authority on
-/// what title is acceptable — control characters are refused, and a title
-/// over the 64 KiB field cap is refused, but every value that clears both
-/// (including an explicit empty title) is accepted — so a helm-side check
-/// would only be a second copy of that rule with its own chance to drift;
-/// a refused title comes back through the same `ErrorKind`→status table
-/// every other route uses (`InvalidRequest` 400, `NotFound` 404 for an
-/// unknown session), and the accepted case answers with the session's
-/// freshly recomputed `SessionInfo`, matching `get_session`'s and
-/// `restart_session`'s success shape so a caller can re-render the row
-/// without listing again.
+/// The title is passed through deliberately: the supervisor is the sole
+/// authority on what title is acceptable — control characters are refused,
+/// and a title over the 64 KiB field cap is refused, but every value that
+/// clears both (including an explicit empty title) is accepted. A helm-side
+/// title check would only be a second copy of that rule with its own chance
+/// to drift. The helm does preload its profile identity index before the
+/// mutation, then enriches the successful `SessionInfo` without another
+/// fallible read. Refusals retain the ordinary `ErrorKind`→status mapping,
+/// and the fresh reply matches `get_session`'s and `restart_session`'s shape
+/// so a caller can re-render the row without listing again.
 pub(crate) async fn rename_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RenameReq>,
 ) -> impl IntoResponse {
     match do_rename_session(&state, &id, &req.title).await {
-        Ok((_claim, session)) => axum::Json(session).into_response(),
+        Ok((_claim, session)) => match browser_session_ready(&session) {
+            Ok(()) => axum::Json(session).into_response(),
+            Err(error) => http_error(error),
+        },
         Err(e) => http_error(e),
     }
 }
@@ -1470,13 +1700,19 @@ pub(crate) async fn rename_session(
 /// The supervisor returns the durable post-teardown state, including for an
 /// idempotent retry. Recording that exact reply before returning makes the
 /// default list hide the row immediately and publishes the ordinary
-/// changed-only fleet event.
+/// changed-only fleet event. The profile identity index is loaded before the
+/// teardown so catalog failure cannot make a completed archive look failed;
+/// enriching the returned row afterwards is infallible.
 pub(crate) async fn do_archive_session(
     state: &AppState,
     id: &str,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     let (claim, client) = route_session(state, id).await?;
-    let session = client.archive_session(id).await?;
+    // Archive tears down live processes. Resolve the catalog dependency
+    // first so a failed read cannot report that teardown as unsuccessful.
+    let profile_names = load_profile_name_index(&state.store).await?;
+    let mut session = client.archive_session(id).await?;
+    resolve_session_profiles(&profile_names, std::iter::once(&mut session));
     record_session(state, &claim, &session).await;
     Ok((claim, session))
 }
@@ -1492,7 +1728,10 @@ pub(crate) async fn archive_session(
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
     match do_archive_session(&state, &id).await {
-        Ok((_claim, session)) => axum::Json(session).into_response(),
+        Ok((_claim, session)) => match browser_session_ready(&session) {
+            Ok(()) => axum::Json(session).into_response(),
+            Err(error) => http_error(error),
+        },
         Err(e) => http_error(e),
     }
 }
