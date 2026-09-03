@@ -116,9 +116,9 @@ pub(crate) struct StatusBadge {
 ///
 /// ## `unseen`, and why only `Idle` reads it
 ///
-/// `unseen` is `Session::has_unseen_output()` (SPEC.md, Status;
-/// `plans/session-dot-read-state.md`) — `None` when the helm predates the
-/// field, `Some(bool)` otherwise. Only the `Idle` arm below branches on it:
+/// `unseen` is `Session::has_unseen_output()` (SPEC.md, Status) — `None`
+/// when the helm predates the field, `Some(bool)` otherwise. Only the
+/// `Idle` arm below branches on it:
 /// `Running`'s pulse and `Waiting`'s colour already say "look here" on their
 /// own, so the entry that asked for this split asked for it on idle alone.
 /// An `Idle` row with unseen output gets class `idle unseen` and the text
@@ -209,8 +209,41 @@ pub(crate) fn status_badge(
 /// the only way back to a badge that has visibly clipped. A live badge has
 /// no visible text at all, so the tooltip is what lets a mouse user recover
 /// the word its color stands in for.
+///
+/// `dot_onclick`/`dot_title` are the row's own mark-read/mark-unread MOUSE
+/// shortcut (SPEC.md, Status), wired through this shared component rather
+/// than duplicated wherever a clickable dot is wanted —
+/// the whole point of having ONE component is that the dot and the word
+/// cannot drift apart between surfaces, and a second, row-only copy of this
+/// markup would reopen exactly that risk for the one surface that needs a
+/// click.
+///
+/// Neither is `Option`; every caller passes both explicitly, a plain no-op
+/// `dot_onclick` and `dot_title: None` for a badge with no toggle to offer —
+/// the session view's header and stale-metadata band (only a row's own dot
+/// is ever a control) and a row whose status is not live or whose helm never
+/// answered the seen-state question. `dot_title` alone decides whether the
+/// dot LOOKS clickable (the CSS hook below), so a caller cannot forget to
+/// keep the two in sync by wiring a live `dot_onclick` behind a `None`
+/// title, or vice versa.
+///
+/// The dot itself stays `aria-hidden="true"` regardless: it is a MOUSE
+/// shortcut only, never a focusable control (`dot_title` sets a `title`
+/// tooltip, not an accessible name) — the row's `…` menu carries the same
+/// toggle as a real, keyboard-operable menu item, and is the path a screen
+/// reader or keyboard user takes instead.
 #[component]
-pub(crate) fn StatusBadgeView(badge: StatusBadge) -> Element {
+pub(crate) fn StatusBadgeView(
+    badge: StatusBadge,
+    dot_onclick: EventHandler<MouseEvent>,
+    dot_title: Option<String>,
+) -> Element {
+    // Computed once, ahead of the rsx below, so the `onclick` closure has
+    // its own `bool` to check rather than fighting `title: dot_title` for
+    // ownership of the `String` — the class selector needs the same
+    // answer, so one shared value is also what keeps the two from being
+    // able to drift apart.
+    let toggle_offered = dot_title.is_some();
     rsx! {
         span { class: "status-badge {badge.class}", title: "{badge.text}",
             if badge.visible {
@@ -225,7 +258,33 @@ pub(crate) fn StatusBadgeView(badge: StatusBadge) -> Element {
                 // `visibility: hidden` would take it out of the
                 // accessibility tree, leaving a status that is a color and
                 // nothing else.
-                span { class: "status-dot", "aria-hidden": "true" }
+                //
+                // `status-dot-toggle` is the CSS hook for the clickable
+                // cursor, present exactly when `dot_title` is — see this
+                // component's own doc for why that one value governs both.
+                span {
+                    class: if toggle_offered { "status-dot status-dot-toggle" } else { "status-dot" },
+                    "aria-hidden": "true",
+                    title: dot_title,
+                    onclick: move |evt| {
+                        // `stop_propagation` is why a dot click does not
+                        // also select the row: the row's own open control
+                        // is an ANCESTOR button (`.session-row-open`), and
+                        // an unstopped click would bubble straight into it.
+                        // Gated on `toggle_offered` rather than called
+                        // unconditionally: for a badge with nothing to
+                        // toggle, stopping here regardless would turn that
+                        // dot's exact pixels into a dead spot that neither
+                        // opens the row nor does anything else, since a
+                        // no-toggle `dot_onclick` is a no-op. Letting the
+                        // click bubble instead keeps the dot's area part of
+                        // the ordinary open control.
+                        if toggle_offered {
+                            evt.stop_propagation();
+                            dot_onclick.call(evt);
+                        }
+                    },
+                }
                 span { class: "visually-hidden", "{badge.text}" }
             }
         }
@@ -385,8 +444,8 @@ mod tests {
         );
     }
 
-    /// The unseen-idle split (SPEC.md, Status; `plans/session-dot-read-state.md`):
-    /// `Idle` with `unseen == Some(true)` gets its own class and text, every
+    /// The unseen-idle split (SPEC.md, Status): `Idle` with
+    /// `unseen == Some(true)` gets its own class and text, every
     /// other combination of status and `unseen` leaves the ordinary idle (or
     /// live) badge untouched — including `Running`/`Waiting`, which the
     /// module doc above states ignore the flag entirely, pinned here rather
@@ -406,7 +465,8 @@ mod tests {
         assert_eq!(
             status_badge(&SessionStatus::Idle, None, None),
             badge("idle", "idle", false),
-            "an old helm that never answers the question draws the pre-plan idle badge"
+            "an old helm that never answers the question draws the SAME ordinary idle \
+             badge every other idle row gets — there is no separate legacy colour"
         );
         for unseen in [None, Some(true), Some(false)] {
             assert_eq!(

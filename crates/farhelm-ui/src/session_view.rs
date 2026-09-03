@@ -1477,7 +1477,10 @@ pub(crate) fn SessionView(
                 span { class: "title", title: "{shown_title}", "{shown_title}" }
                 span { class: "meta", title: "{meta_line}", "{meta_line}" }
                 if let Some(badge) = header_badge {
-                    StatusBadgeView { badge }
+                    // No toggle here: this is chrome for the OPEN session's
+                    // own header, and only a row's own dot is a control
+                    // (`StatusBadgeView`'s own doc).
+                    StatusBadgeView { badge, dot_onclick: |_| {}, dot_title: None }
                 }
                 // Its own `if`, not nested under the badge's: see
                 // `activity_destination` for why an absent badge must not
@@ -1745,7 +1748,9 @@ pub(crate) fn SessionView(
                 if stale_metadata {
                     div { class: "stale-metadata",
                         if let Some(badge) = stale_badge {
-                            StatusBadgeView { badge }
+                            // No toggle here either — see the header's own
+                            // call above.
+                            StatusBadgeView { badge, dot_onclick: |_| {}, dot_title: None }
                         }
                         // How long ago the session was last active, which on
                         // a stale session is the more useful half of the

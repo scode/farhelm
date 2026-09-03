@@ -248,3 +248,18 @@ test, same helper, same error text and call site (`helpers/fleet.ts:696`); `side
 two new, unrelated tests at the end of the file in that run. This widens the earlier entry's engine scope from
 WebKit-only to both engines, which the next person chasing it should know before assuming it is WebKit-specific.
 Disposition: still open (TODO.md); the existing entry's diagnosis stands.
+
+## 2026-09-03 — `tests::sweep_never_reaps_a_held_lock` (crates/farhelm-teststate/src/lib.rs)
+
+One `cargo test` run of the whole workspace at `--test-threads=4` on a 4-vCPU sandbox: `left: []`,
+`right:
+["/tmp/.tmpHAvtBc/fh-it.live01"]`. That is the test's SECOND assertion — after the test drops its own flock,
+`sweep`'s second call is expected to reap the now-genuinely-dead directory (`assert_eq!(outcome.reaped, vec![live])`).
+An empty `reaped` list on the left means the sweep FAILED TO REAP a directory whose lock had actually been released, not
+that it wrongly reaped one still held — the opposite of what an earlier version of this entry claimed. Never reproduced:
+5 solo repetitions and 3 repetitions of the whole `farhelm-teststate` crate under its own `--test-threads=4` all passed;
+only the full-workspace run (every crate's test binaries competing for real `/tmp` and process-table activity at once)
+has shown it, once. Cause not established: the workspace-only reproduction points at some form of contention specific to
+a full-suite run, but nothing in this test's own logic identifies a mechanism, and no cross-test interaction has
+actually been demonstrated — a claim to that effect in an earlier version of this entry was speculation, not a finding.
+Disposition: open (TODO.md).

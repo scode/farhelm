@@ -230,7 +230,10 @@
   --warn-border: #4a4230; /* rule under an amber band */
   --warn-fill-hover: #6a5a34; /* hover on a control that sits on amber */
 
-  --danger: #e08080; /* the red text tone: errors and destructive actions */
+  --danger: #e08080; /* the red text tone: errors, destructive actions, and the
+                         waiting status badge — a live session blocked on the
+                         user earns the same red-family urgency as a failure,
+                         even though nothing has actually failed */
   --danger-strong: #e47a72; /* saturated red: a state that IS failure, not a
                                 risky button. Calibrated to clear WCAG AA
                                 (4.5:1) on every row surface the error status
@@ -247,7 +250,7 @@
 
   /* State hues outside the ok/warn/danger triad, each carrying a meaning
      the triad would misreport if it borrowed one of them. */
-  --info: #6fb8f0; /* waiting: live, but on a human rather than on work */
+  --info: #6fb8f0; /* idle with output nobody has looked at (waiting moved to --danger) */
   --archive: #d08770; /* archive notices and archive-path errors */
   --archived-badge: #b48ead; /* the "archived" marker itself */
 
@@ -1914,6 +1917,18 @@ samp {
   background: currentColor;
 }
 
+/* The row's own dot doubles as a mark-read/mark-unread MOUSE shortcut
+   (SPEC.md, Status) — a cursor is the only visual change a
+   click affordance needs here, since the dot is `aria-hidden` and never a
+   keyboard stop (`status.rs`'s `StatusBadgeView` doc: the row's `…` menu is
+   the keyboard-operable path to the same toggle). Present only on a badge
+   whose caller actually wired a handler (`dot_title` being set is what
+   decides the class), so a plain, non-interactive badge never LOOKS
+   clickable when it is not. */
+.status-dot-toggle {
+  cursor: pointer;
+}
+
 /* The only animation in the app, and it is spent here deliberately: running
    is the one status that means something is happening RIGHT NOW, and a
    still dot cannot distinguish "working" from "alive but at rest" without
@@ -1991,10 +2006,10 @@ samp {
   flex: 0 0 auto;
 }
 
-/* The three live statuses (PLAN_M6_75.md item 3; recoloured by
-   plans/session-dot-read-state.md) are no longer one calm-green pair plus a
-   blue outlier — SEEN is what reads as calm now, and running is the only
-   status that still gets green on its own.
+/* The three live statuses (PLAN_M6_75.md item 3; recoloured for the
+   seen/unseen split — SPEC.md, Status) are no longer one calm-green pair
+   plus a blue outlier — SEEN is what reads as calm now, and running is the
+   only status that still gets green on its own.
 
    Running keeps the healthy colour to itself: it is the one live state that
    needs no further comparison against anything, so a glance across a fleet
@@ -2015,9 +2030,10 @@ samp {
   color: var(--fg-1);
 }
 
-/* Idle WITH output nobody has looked at is the one new live state this plan
-   adds, and it reuses `--info` rather than inventing a colour: the token's
-   old job (waiting) has moved to red above, so this is its only live-status
+/* Idle WITH output nobody has looked at is the one new live state the
+   seen/unseen split adds, and it reuses `--info` rather than inventing a
+   colour: the token's
+   old job (waiting) has moved to red below, so this is its only live-status
    use now, and "the fleet drew your attention here at some point" is close
    enough in kind to "waiting" that reusing the token's established blue is
    more legible than a second, unrelated blue would be. `status.rs` emits
@@ -2030,7 +2046,7 @@ samp {
   color: var(--info);
 }
 
-/* Waiting moves into the red family (plans/session-dot-read-state.md): it
+/* Waiting moves into the red family (SPEC.md, Status): it
    is the one live status that is a REQUEST directed at a human, which makes
    it categorically different from "healthy" (green) or "nothing is wrong,
    somebody is just needed at their own pace" (the blue this token used to

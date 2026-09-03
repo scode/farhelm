@@ -697,6 +697,64 @@ export async function forceBuildSkew(page: Page, stamp: string): Promise<void> {
   });
 }
 
+/**
+ * Strip `seen_activity_at` from every row of every real listing reply, so
+ * the row's actions menu never grows its conditional "mark read"/"mark
+ * unread" item — everything else about the reply, including real
+ * classification, is untouched.
+ *
+ * For the many menu-mechanics tests in `sidebar.spec.ts` that predate that
+ * item and assert an exact, positional item list or a fixed arrow-key
+ * sequence over `rename`/`clone`/`stop`/`archive`/`delete`: those tests are
+ * about generic ARIA/keyboard mechanics, not about the seen-state feature
+ * (which has its own tests), and their fixture sessions genuinely do reach
+ * a live classification under enough real wall-clock time — the real
+ * supervisor's sampler runs on its own clock, indifferent to how fast any
+ * one test happens to complete. Under a loaded, `--repeat-each` run this
+ * used to be fast enough to race past every one of them; it is not
+ * guaranteed to stay that way, and it already stopped being true once. This
+ * closes the race at its source (the field the row's menu ACTUALLY reads)
+ * rather than trying to outrun a real classifier's own timing from the test
+ * side, which nothing here controls.
+ */
+export async function hideSeenState(page: Page): Promise<void> {
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    // Node's own `fetch`, not `route.fetch()`/`APIResponse` — the latter
+    // failed with "Response has been disposed" reading `.json()` on this
+    // exact route (real cause not chased further; `forceBuildSkew` above
+    // only ever reads `response.headers()`, never the body, which this
+    // helper is the first caller here to need). A plain, independent HTTP
+    // call to the same URL sidesteps whatever `APIResponse` lifecycle
+    // that depended on.
+    const upstream = await fetch(route.request().url(), {
+      headers: await route.request().allHeaders(),
+    });
+    const body = await upstream.json();
+    for (const session of body.sessions ?? []) {
+      delete session.seen_activity_at;
+    }
+    // The forwarded headers describe the UPSTREAM body's bytes, not the
+    // mutated one about to be sent — deleting a field only ever shrinks the
+    // JSON, so a stale `content-length` would tell the browser to expect
+    // more bytes than actually arrive. Dropped rather than trusted to `json`
+    // to recompute, matching `holdReads`' own precedent for the same
+    // stale-header risk on any reply whose body it replaces.
+    const headers = Object.fromEntries(upstream.headers.entries());
+    delete headers["content-length"];
+    delete headers["content-encoding"];
+    delete headers["transfer-encoding"];
+    await route.fulfill({
+      status: upstream.status,
+      headers,
+      json: body,
+    });
+  });
+}
+
 /** The helm's shared client preference as `GET /api/preferences` answers it. */
 export interface Preferences {
   list_sort?: string;

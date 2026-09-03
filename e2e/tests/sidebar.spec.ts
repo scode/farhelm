@@ -39,9 +39,11 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import {
   cleanupProfile,
   cleanupSession,
+  countReads,
   createProfile,
   createSession,
   forceBuildSkew,
+  hideSeenState,
   localHostId,
   openFilterBar,
   openHostMenu,
@@ -56,6 +58,19 @@ import {
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
+}
+
+/**
+ * The id of the shared, always-present `e2e-session` fixture
+ * (`terminal-suite.ts`'s `resetStack` relaunches it before every spec
+ * file), for pinning auto-select away from a test's OWN fixture rows —
+ * see `pinAutoSelect`'s own doc for why that pin is needed at all.
+ */
+async function sharedSessionId(request: APIRequestContext): Promise<string> {
+  const listing = await (await request.get("/api/sessions")).json();
+  const shared = listing.sessions.find((s: { title: string }) => s.title === "e2e-session");
+  expect(shared, "the shared e2e-session must exist").toBeTruthy();
+  return shared.id;
 }
 
 /**
@@ -734,6 +749,13 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
   const title = `menu-aria-${Date.now()}`;
   const session = await createSession(request, { title, cwd: "/tmp", invocation: "sleep 300" });
   try {
+    // This test is about the ARIA relationship, not the seen-state feature
+    // (which has its own tests) — hiding the field keeps the item list at
+    // its pre-existing five regardless of whether the real supervisor's
+    // classifier has settled this fixture into a live status by the time
+    // the menu opens (see `hideSeenState`'s own doc for why that race is
+    // otherwise real, not hypothetical).
+    await hideSeenState(page);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
@@ -809,6 +831,9 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     invocation: "sleep 300",
   });
   try {
+    // Fixed five-item navigation, not the seen-state feature — see
+    // `hideSeenState`'s own doc.
+    await hideSeenState(page);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
@@ -1038,6 +1063,9 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     invocation: "sleep 300",
   });
   try {
+    // Fixed item positions, not the seen-state feature — see
+    // `hideSeenState`'s own doc.
+    await hideSeenState(page);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
@@ -1306,6 +1334,9 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
       // API context, which `page.route` never touches.
       await route.continue().catch(() => {});
     });
+    // Fixed item positions, not the seen-state feature — see
+    // `hideSeenState`'s own doc.
+    await hideSeenState(page);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
@@ -1559,6 +1590,9 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
     invocation: "sleep 300",
   });
   try {
+    // Fixed five-item geometry, not the seen-state feature — see
+    // `hideSeenState`'s own doc.
+    await hideSeenState(page);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
@@ -2823,6 +2857,14 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // "bottom edge inside the viewport" assertion below is measured
     // against.
     await page.setViewportSize({ width: 900, height: 500 });
+    // The geometry under test is the panel's height at its FIXED five-item
+    // count; an extra "mark unread" row (this fleet's fixture sessions do
+    // reach a live status under enough real wall-clock time — 18 of them,
+    // outliving every other test in the file) would grow the panel and
+    // push its bottom-most item past the very viewport edge this test
+    // measures, for a reason that has nothing to do with the geometry fix
+    // under test. See `hideSeenState`'s own doc.
+    await hideSeenState(page);
     await page.goto("/");
     await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
     // Settled BEFORE any scroll or menu open: the permanent host list's
@@ -3717,4 +3759,375 @@ test("aliasing the local host shows it in the host panel", async ({ page, reques
   // The local row never shows a destination line, aliased or not — there is
   // no real destination to reveal.
   await expect(hostRow.locator(".host-destination-detail")).toHaveCount(0);
+});
+
+/**
+ * A session nobody has opened reads unseen once it goes idle, and opening
+ * it clears that within one feed round trip (SPEC.md, Status).
+ *
+ * A real `fake-agent basic` session, never a synthetic listing: this is the
+ * one property no mock can stand in for — that a session nobody has ever
+ * selected genuinely reads unseen the moment the real supervisor's sampler
+ * settles it into idle, with no client having done anything to it at all.
+ * `basic` "prints, echoes, and then goes quiet" (`FAKE_AGENT`'s own doc),
+ * which is exactly what the idle-classification wait below needs.
+ *
+ * "Never opened" is deliberately the SIMPLER of the two readings
+ * `Session::has_unseen_output` treats identically ("a session with no
+ * recorded stamp has never been seen") — rather than "opened once, then
+ * produced new output while elsewhere" — because reliably driving fresh
+ * output into an UNATTACHED session's real pane from this suite would need
+ * a second raw terminal socket with no test helper behind it yet; both
+ * readings reach the exact same observable state this test asserts on
+ * (blue, "idle — new output").
+ */
+test("an idle session that was never opened reads unseen, and opening it clears that", async ({
+  page,
+  request,
+}) => {
+  // Budgeted above the sum of this test's own explicit waits (20s + 45s +
+  // 20s + 20s, plus the untimed assertions' 5s default each) rather than
+  // the config's 60s default, which that sum alone already clears with no
+  // margin for the setup and clicks between them.
+  test.setTimeout(150_000);
+  const session = await createSession(request, { title: `seen-state-open-${Date.now()}` });
+  try {
+    // The session must stay UNOPENED until this test opens it by hand —
+    // but auto-select (SPEC.md: opening a client counts as opening a
+    // session) would otherwise attach it the instant `goto` loads if it
+    // happens to be the fleet's newest, silently marking it seen before the
+    // first assertion below ever runs. Pinning away to the shared fixture
+    // is the suite's own established idiom for exactly this — see
+    // `pinAutoSelect`'s own doc.
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+      timeout: 45_000,
+    });
+
+    // Opening it is the automatic mark: the session view's own effect
+    // fires on mount and PUTs the current activity as seen, and the row
+    // must relabel itself grey once that write's fleet-events bump brings
+    // the next listing read back — within a feed round trip, not the
+    // fallback poll's much longer cadence.
+    await target.locator(".session-row-open").click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
+    await expect(target).toHaveAttribute("data-session-selected", "true");
+    await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A manual "mark unread" from the OPEN session's own row menu turns its
+ * dot blue again while it stays the selected session, and the unseen state
+ * STICKS rather than being immediately re-marked seen by the session's own
+ * still-mounted auto-mark effect — the whole reason that effect keys on
+ * the activity STAMP rather than on the unseen predicate (see
+ * `session_view.rs`'s `mark_key` memo).
+ */
+test("a manual mark-unread on the open session sticks", async ({ page, request }) => {
+  // Budgeted above the sum of this test's own explicit waits (20s + 45s +
+  // 20s + 20s + 20s, plus the untimed assertions' 5s default each) rather
+  // than the config's 60s default, which that sum alone already clears
+  // with no margin for the setup, menu open, and clicks between them.
+  test.setTimeout(150_000);
+  const session = await createSession(request, { title: `seen-state-sticky-${Date.now()}` });
+  try {
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+      timeout: 45_000,
+    });
+
+    await target.locator(".session-row-open").click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
+    await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+
+    // The label must already read "mark unread" — the row is currently
+    // seen — and clicking it must turn the dot blue again without moving
+    // the selection.
+    const reads = countReads(page);
+    const listingReadsBeforeClear = reads.count("listing");
+    await openRowMenu(target);
+    const markSeenItem = target.locator(".session-row-mark-seen");
+    await expect(markSeenItem).toHaveText("mark unread");
+    await markSeenItem.click();
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+      timeout: 20_000,
+    });
+    await expect(target).toHaveAttribute("data-session-selected", "true");
+    // Polled past at least one MORE listing read, rather than a fixed
+    // sleep: SPEC_impl.md's 3-second connected-host refresh interval means
+    // a plain `waitForTimeout` would either race a slow refresh under load
+    // or waste time waiting on a fast one, and neither actually proves a
+    // redraw happened — this does, by observing the read itself, which is
+    // what proves the manual clear survives more than one redraw of the
+    // still-open session, not just the instant after the click.
+    await expect
+      .poll(() => reads.count("listing"), {
+        timeout: 20_000,
+        message: "the sidebar must poll the listing at least once more before this proves anything",
+      })
+      .toBeGreaterThan(listingReadsBeforeClear);
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output");
+    await expect(target).toHaveAttribute("data-session-selected", "true");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * `MarkSeen` is reachable and operable through the SAME role/keyboard path
+ * every other menu command is.
+ *
+ * Nothing else in this file proves that. The ARIA/keyboard mechanics tests
+ * above (`the actions menu exposes a real menu-button relationship`, `the
+ * actions menu walks every item and wraps at both ends`, and their
+ * siblings) all call `hideSeenState` to keep the item list at its
+ * pre-existing five — deliberately, since they are about generic menu
+ * mechanics, not this feature — and the seen-state tests above locate the
+ * item by CSS class (`.session-row-mark-seen`) and drive it with a plain
+ * `.click()`, never through `getByRole` or a keyboard step. A regression
+ * that dropped this one item's `role="menuitem"`, its accessible name, or
+ * its reachability from Enter/ArrowDown activation would pass every
+ * existing test in this file untouched.
+ *
+ * `pinAutoSelect` is why: without it, this session — freshly created and
+ * possibly the fleet's newest — is exactly the row `goto`'s own auto-select
+ * would attach to (SPEC.md: opening a CLIENT counts as opening a session),
+ * which marks it seen before the menu is ever opened and leaves the item
+ * reading "mark unread" instead of the "mark read" this test looks for —
+ * the same race `pinAutoSelect`'s own doc and DECISIONS.md's entry on it
+ * already cover for the other seen-state tests above.
+ */
+test("the mark-seen item is reachable and operable by role and keyboard", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const title = `seen-state-keyboard-${Date.now()}`;
+  const session = await createSession(request, { title, cwd: "/tmp", invocation: "sleep 300" });
+  try {
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+
+    await openRowMenu(target);
+    const toggle = target.getByRole("button", { name: `session actions for ${title}` });
+    const menu = target.getByRole("menu", { name: `session actions for ${title}` });
+    // Offered only once the real supervisor's classifier settles this
+    // fixture into a live status and the helm answers the seen-state
+    // question — neither of which `openRowMenu` alone waits for, so this
+    // item can legitimately take longer to appear than the others already
+    // in the panel.
+    const markRead = menu.getByRole("menuitem", { name: "mark read" });
+    await expect(markRead).toBeVisible({ timeout: 45_000 });
+
+    // Driven from OUTSIDE the menu, the same way `the actions menu walks
+    // every item` drives its own navigation — Rename is the first item and
+    // MarkSeen sits right after it (`MENU_ACTIONS`'s own order).
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitem", { name: "rename" })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(markRead).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    // MarkSeen deliberately does NOT close the menu on activation, unlike
+    // Stop/Archive/Delete/Clone (`row.rs`'s `on_mark_seen` handler calls
+    // only `on_mark_seen`, never `on_menu_toggle`) — the toggle stays
+    // visible so its own label flip is the thing to watch, in place,
+    // without navigating away and back. That flip — not a closed menu — is
+    // the proof this was a real activation, once the write's fleet-events
+    // bump brings the next listing read back.
+    await expect(menu.getByRole("menuitem", { name: "mark unread" })).toBeVisible({
+      timeout: 20_000,
+    });
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A dot with no toggle to offer still opens the row on click — the
+ * regression an unconditional `stop_propagation` on `StatusBadgeView`'s
+ * dot would reintroduce: that pixel area would neither open the row (its
+ * click never reaching the ancestor `.session-row-open` button) nor do
+ * anything else, since a no-toggle badge's `dot_onclick` is a no-op. Real
+ * scenario: an old helm that predates `seen_activity_at` entirely, which
+ * `hideSeenState` simulates the same way the ARIA/keyboard tests above use
+ * it to keep the item list fixed.
+ */
+test("a dot with no seen-state toggle still opens the row on click", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `seen-state-dead-spot-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await hideSeenState(page);
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await expect(target.locator(".status-dot")).toBeVisible({ timeout: 45_000 });
+    // No toggle offered at all with the field hidden — the dead-spot risk
+    // this test exists to rule out only exists when there is genuinely
+    // nothing to toggle.
+    await expect(target.locator(".status-dot-toggle")).toHaveCount(0);
+
+    await target.locator(".status-dot").click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
+    await expect(target).toHaveAttribute("data-session-selected", "true");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The dot click marks a DIFFERENT row's seen state without stealing the
+ * selection away from whichever row is actually open — the click's
+ * `stop_propagation` proven end to end, since `.status-dot` sits inside
+ * the SAME `.session-row-open` button that a real open click would
+ * otherwise fire.
+ *
+ * Session A is opened first and fully settled before session B is even
+ * created, deliberately avoiding two sessions racing toward idle
+ * together: this test's subject is the click's selection isolation, not
+ * the classifier, and giving the two fixtures no reason to interleave
+ * keeps a failure here pointing at the one property under test.
+ */
+test("the dot click marks a different row read without moving the selection", async ({
+  page,
+  request,
+}) => {
+  // Budgeted above the sum of this test's own explicit waits, both rows
+  // combined (20s + 20s + 20s + 45s + 20s, plus the untimed assertions'
+  // 5s default each) rather than the config's 60s default, which that sum
+  // alone already clears with no margin for the setup and clicks between
+  // them.
+  test.setTimeout(150_000);
+  const stamp = Date.now();
+  const a = await createSession(request, { title: `seen-state-dot-a-${stamp}` });
+  try {
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const rowA = row(page, a.id);
+    await expect(rowA).toBeVisible({ timeout: 20_000 });
+    await rowA.locator(".session-row-open").click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
+    await expect(rowA).toHaveAttribute("data-session-selected", "true");
+
+    const b = await createSession(request, { title: `seen-state-dot-b-${stamp}` });
+    try {
+      const rowB = row(page, b.id);
+      await expect(rowB).toBeVisible({ timeout: 20_000 });
+      await expect(rowB.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+        timeout: 45_000,
+      });
+
+      await rowB.locator(".status-dot").click();
+      await expect(rowA).toHaveAttribute("data-session-selected", "true");
+      await expect(rowB).toHaveAttribute("data-session-selected", "false");
+      await expect(rowB.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+      await expect(rowB.locator(".status-badge.idle.unseen")).toHaveCount(0);
+      // The click never even routed through the row's open handler — the
+      // terminal pane on screen must still be A's, not B's.
+      await expect(page.locator(".titlebar .title")).toContainText(`seen-state-dot-a-${stamp}`);
+    } finally {
+      await cleanupSession(request, b.id);
+    }
+  } finally {
+    await cleanupSession(request, a.id);
+  }
+});
+
+/**
+ * The seen state is a helm-kept, shared fact (SPEC.md, Status), not a
+ * per-client one — the same "no client keeps its own copy" rule the list
+ * order and last-selected session already carry (Session list). A second
+ * client that never touched the session either must see exactly the verdict
+ * the first client's manual mark-unread left behind, the same two-context
+ * shape `"a second client's launch alone takes the terminal over"` above
+ * uses for the equivalent claim about selection.
+ */
+test("a manual mark-unread is visible to a second client that never touched the session", async ({
+  browser,
+  page,
+  request,
+}) => {
+  // Budgeted above the sum of this test's own explicit waits, TWO clients'
+  // worth (20s + 45s + 20s + 20s + 20s across the first client, then 20s +
+  // 20s again for the second, plus the untimed assertions' 5s default
+  // each), with generous headroom rather than the config's 60s default,
+  // which a single client's own sum already clears on its own.
+  test.setTimeout(180_000);
+  const session = await createSession(request, { title: `seen-state-shared-${Date.now()}` });
+  let second: import("@playwright/test").BrowserContext | undefined;
+  try {
+    // Same pin as the previous test, for the same reason: this session
+    // must start genuinely unopened, not auto-attached by `goto` because it
+    // happens to be the fleet's newest.
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+      timeout: 45_000,
+    });
+
+    // Open it (clearing the unseen state) and then mark it unread by hand —
+    // two writes, so the second client's answer cannot be explained by
+    // having merely inherited the FIRST client's own never-marked default.
+    await target.locator(".session-row-open").click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
+    await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+    await openRowMenu(target);
+    await target.locator(".session-row-mark-seen").click();
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+      timeout: 20_000,
+    });
+
+    second = await browser.newContext({
+      storageState: await page.context().storageState(),
+    });
+    const page2 = await second.newPage();
+    // `session` is now the shared `last_selected` preference (client one
+    // just opened it), so an unpinned `goto` here would auto-attach page2
+    // to it too — SPEC.md's "opening a client counts as opening a session"
+    // applies to EVERY client alike, and page2's own auto-mark effect would
+    // then re-mark it seen from underneath this very assertion, defeating
+    // "never touched" before it can be checked. Re-pinned for page2
+    // specifically: the preference is shared, but a pin only holds until
+    // the next write, and client one's own click already overwrote it once.
+    await pinAutoSelect(page2, await sharedSessionId(request));
+    await page2.goto("/");
+    const target2 = row(page2, session.id);
+    await expect(target2).toBeVisible({ timeout: 20_000 });
+    await expect(target2.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+      timeout: 20_000,
+    });
+  } finally {
+    await second?.close();
+    await cleanupSession(request, session.id);
+  }
 });

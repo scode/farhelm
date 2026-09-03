@@ -31,9 +31,10 @@ fallback is safe here and matches what the user sees when they clone from the UI
 replace does not deduplicate titles, and since the old row is gone a moment later there is no duplicate to see.
 
 What replace does NOT carry: the conversation (that is restart), terminal tabs (they are not durable metadata even
-across a reboot, and a fresh session starts with none), the old session's id and anything keyed on it (an agent-spawned
-child's parent reference now points at a deleted session, exactly as it would after a delete), and the helm-side
-per-session state a later plan may add (the read/unread mark in `plans/session-dot-read-state.md` starts fresh on S').
+across a reboot, and a fresh session starts with none), and the old session's id and anything keyed on it (an
+agent-spawned child's parent reference now points at a deleted session, exactly as it would after a delete) — which
+includes the helm's own `session_seen` read/unread mark (SPEC.md, Status): S' has a new id, so it starts with no row in
+that table at all, the same fresh-unset state a session that has simply never been opened reads.
 
 Order of operations is create first, delete second, and the two failure modes are asymmetric on purpose:
 
