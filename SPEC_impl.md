@@ -499,6 +499,9 @@ check described above) — the desktop's preflight is a user-experience improvem
 app starts the substrate itself, not a replacement for the supervisor's own checks, which remain the authority for the
 case this preflight cannot see: a private server already running on the socket from before an upgrade.
 
+Every pre-window desktop refusal keeps that exact stderr message and exit status, and on macOS also sends it to Console
+and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.
+
 Historical note on what the floor made moot: below 3.7 the supervisor warned once at first attach and lost bracketed
 paste restoration (`bracket_paste_flag` arrived in 3.7), and on 3.3a `capture-pane -N` dropped trailing styled padding
 from a dead pane's captured frame (found 2026-07-29 during M2.5's 3.3a validation, in a since-removed stop-time

@@ -19,9 +19,11 @@ now also assembles `~/Applications/Farhelm.app`, so the launcher path needs its 
   second instance (check with `pgrep -fl farhelm-desktop`).
 - Quit, re-run `install.sh`, and confirm the bundle's `Contents/Info.plist` version tracked the installed version.
 
-Know the failure shape a launcher launch cannot show: a preflight refusal (missing/old tmux, unusable state dir) prints
-one line to stderr and exits, which a Finder/Spotlight launch swallows entirely — "nothing happens" from the launcher
-means "run `~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop` in a terminal and read the line".
+Know the failure shape for both launch paths: a preflight refusal (missing/old tmux, unusable state dir) prints one line
+to stderr and exits, while a Finder/Spotlight launch now also shows a critical alert with that same text and leaves a
+line in Console under the `farhelm-desktop` tag. The terminal remains the way to inspect the stderr contract: "nothing
+happens" from an older build or a non-macOS launch means "run
+`~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop` in a terminal and read the line".
 
 1. Confirm the tmux preflight and floor (SPEC_impl.md's "Terminal substrate: private tmux server") in three controlled
    launches.
@@ -79,9 +81,26 @@ means "run `~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop` in a term
    with the `NotFound` subject instead ("...and none could be run (looked at: /path/to/old/tmux). Each one was either
    not found, or is missing its interpreter or loader.").
 
-   Record whether the ONE stderr line and exit status actually matched, and whether Finder — as opposed to a terminal
-   launch — showed anything at all; a Finder launch has no terminal for that stderr to reach, which is the remaining gap
-   TODO.md tracks. Drop the overrides before the remaining steps.
+   (d) The launcher route. The overrides above reach only the process started from that terminal line; a Finder or
+   Spotlight launch would find the Homebrew tmux from (a) and start normally. Make the refusal reachable for the GUI
+   session instead, launch the app through Finder or Spotlight, confirm the critical alert with the same text as (c) and
+   the Console record under the `farhelm-desktop` tag, then restore the session:
+
+   ```
+   launchctl setenv FARHELM_TMUX /nonexistent/tmux
+   open ~/Applications/Farhelm.app        # or launch it from Spotlight
+   launchctl unsetenv FARHELM_TMUX
+   ```
+
+   (e) The non-tmux route gets the same surface and is checked separately, because it reaches the alert through the
+   generic bootstrap-error path rather than the tmux preflight: with no tmux override, point the state directory at a
+   plain file for the GUI session (`launchctl setenv FARHELM_DESKTOP_STATE_DIR /tmp/not-a-dir` after
+   `touch /tmp/not-a-dir`), launch from Finder, and confirm the alert and Console record carry the `farhelm-desktop:`
+   prefixed message; `launchctl unsetenv FARHELM_DESKTOP_STATE_DIR` afterwards.
+
+   Record whether the exact stderr output and exit status actually matched in (b) and (c), whether Finder showed the
+   critical alert with the same text in (d) and (e), and whether Console contains both refusals under the
+   `farhelm-desktop` tag. Drop the overrides before the remaining steps.
 
    Separately, confirm that an ANSWERING manual supervisor is reused untouched regardless of tmux: start one yourself
    (`farhelm supervisor run --state-dir ~/.local/state/farhelm &`) against a tmux of your choosing, then launch
@@ -112,6 +131,8 @@ Observed release/build: not run
 Mac and remote environment: not recorded
 
 Tmux floor refusal message: not recorded
+
+Native alert shown: not recorded
 
 Close-out result: not run
 
