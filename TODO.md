@@ -18,11 +18,15 @@ everything not yet sorted, which carries no implication either way. Within a buc
   `the supervisor never answered the agent request: Elapsed(())` from the peer's 20 s `answer()` budget, panicking at
   the `answer()` expect. It is a load flake that predates the profiles/host-list stack: on 2026-09-02 a 4-vCPU sandbox
   running the e2e binary alone at `--test-threads=4` hit it in 2 of 5 runs on main and 3 of 7 on that stack's tip, while
-  16 runs alone (`cargo test -p farhelm --test e2e <name> -- --exact`) passed on both, and every local run on a 6-core
-  machine passed. Never yet seen on a GitHub runner, but the release workflow's build gate runs this suite, so it is a
-  tag-build risk. First suspect is the budget or the helm-death detection racing the request under load, not the relay
-  itself. Climb `.agents/narrow-tests.md`'s ladder from rung 3 (rung 1 does not reproduce) with `RUST_BACKTRACE=1` and
-  the supervisor log, and either fix the latency or widen the oracle the way #299 did for its siblings.
+  16 runs alone passed on both, and every local run on a 6-core machine passed. Never yet seen on a GitHub runner, but
+  the release workflow's build gate runs this suite, so it is a tag-build risk. Diagnosed on 2026-09-03 and NOT a test
+  budget: with the test included in the loaded four-thread binary it failed 1 of 10 runs, and a sandbox-only run with
+  the peer read widened to 60 s (the 10 s promptness assertion kept) then got `ErrorKind::Timeout` instead of
+  `Unavailable`, which is the relay's own upcall-answer budget expiring before the helm connection-loss path ran. So the
+  product's helm-death detection loses to the upcall budget under load, and neither a wider peer read nor a wider oracle
+  would be honest. The fix is product work, needing a maintainer decision: trace the helm control connection's
+  reader/demux scheduling and EOF path under a loaded four-thread e2e binary, and make the connection-loss path reach
+  `HelmLink::fail_all` before the answer budget can expire. The test stays `#[ignore]`d until then.
 - Deflake three profiles-popup Playwright cases that fail only under load (e2e/tests/profiles.spec.ts). All three pass
   locally in both engines, repeatedly, and fail on a 4-vCPU sandbox running the spec with the default worker count
   beside a live helm, supervisor, and both browsers; seen 2026-09-03 at the 0.3.0-rc.1 tip, Chromium only. Start at rung
@@ -45,8 +49,12 @@ everything not yet sorted, which carries no implication either way. Within a buc
   (e2e/tests/terminal-flood.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, the poll "the attachment
   must cross HIGH_WATER and pause before the stall clock can start" saw zero pauses in 30 s: the flood never built
   enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
-  backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Start at rung 3 of
-  `.agents/narrow-tests.md` on a 4-vCPU box.
+  backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Attempted the same
+  day without reproduction: 30 loaded WebKit runs of the test on a 4-vCPU sandbox (a `cargo build` looping beside
+  Playwright) all passed, and a temporary timer around the gate-to-first-pause interval measured 1.3 to 2.7 s loaded
+  (ten runs), 1.3 s unloaded on WebKit and 0.9 s on Chromium, against the poll's 30 s budget. No change was made on that
+  evidence. The next attempt needs the full Playwright output of a failing run, since the one sighting's log was not
+  kept; if it recurs, the first question is whether the flood finished before the client ever paused.
 - Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), again. On
   2026-09-03, on a 4-vCPU sandbox with a `cargo build` looping beside the tests, 2 of 10 single runs and 1 of 3
   full-binary runs at `--test-threads=4` against 0.3.0 timed out after 40 s waiting for `BINARY-MARKER`: the request
@@ -56,7 +64,15 @@ everything not yet sorted, which carries no implication either way. Within a buc
   `.agents/narrow-tests.md` on a loaded 4-vCPU box and keep the full transcript the harness panic prints; the sandbox
   run that found this kept only a summary. It then failed the same way on a GitHub-hosted runner (CI run 33716079614,
   the `test` job on a docs-only PR of this stack), so it is a CI flake, not only a sandbox one; kept transcripts from
-  later sandbox runs show READY present, once in snapshot shape, and nothing at all after the request byte.
+  later sandbox runs show READY present, once in snapshot shape, and nothing at all after the request byte. Localized on
+  2026-09-03 and NOT a budget: 8 of 20 loaded single runs failed, and with a temporary test-side barrier (a
+  `ListSessions` request queued right after `send_input`; the helm writer keeps frame order and `handle_connection`
+  finishes the input handler before reading the next frame, so the list's reply proves the `send-keys` exchange
+  completed) a failing run showed `send_input` queued in 11 µs, the barrier replied in 6 ms, and the marker still never
+  came in 40 s. So tmux acknowledged the `send-keys` command and the raw-mode fixture never received the byte, or never
+  produced its reply. The fix is product work, needing a maintainer decision: make the input-delivery contract detect or
+  recover from a `send-keys` that tmux acknowledges without the pane seeing it (or find why the pane does not). Neither
+  widening the 40 s wait nor changing the fixture addresses the measurement.
 - Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e): on
   2026-09-03, on a loaded 4-vCPU sandbox running the full binary at `--test-threads=4`, it failed 1 of 3 runs on its 64
   MiB in-process RSS assertion (terminal_backpressure.rs:906 at 0.3.0), not in the flood-start wait its siblings died

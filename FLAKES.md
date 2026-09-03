@@ -155,3 +155,30 @@ that wait, and it stays open (TODO.md).
 Same loaded sandbox: 1 of 3 full-binary runs on 0.3.0 (before the locale fix, so alongside four locale-caused failures)
 and 1 of 3 on the attach-boundary stack, `timed out waiting for "FAKE-AGENT READY"` after the test's attach at a
 degenerate pane size. Never alone. Nothing about the cause is known beyond the fingerprint. Disposition: open (TODO.md).
+
+## 2026-09-03 — `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e), diagnosed
+
+Reproduced on a loaded 4-vCPU sandbox with the `#[ignore]` lifted for the run: 1 of 10 four-thread full-binary runs
+beside a looping `cargo build`, the usual `Elapsed(())` at the peer's 20 s read. A sandbox-only diagnostic then widened
+only that read to 60 s and kept the test's 10 s promptness assertion; on its second loaded run the test received
+`ErrorKind::Timeout` where it requires `Unavailable`. That is the supervisor relay's own upcall-answer budget expiring
+before the helm connection-loss path had run, so the helm's death was not observed in time under load. The budget and
+the oracle are therefore not the flake; the product's detection latency is. Disposition: open (TODO.md, with the
+proposed product direction); still `#[ignore]`d.
+
+## 2026-09-03 — `a client that stops draining is detached with the stall reason after the full stall interval` (e2e/tests/terminal-flood.spec.ts), not reproduced
+
+Thirty loaded WebKit runs of the test on a 4-vCPU sandbox (a `cargo build` looping beside Playwright) all passed, and a
+temporary timer around the gate-to-first-pause interval read 1.3 to 2.7 s loaded over ten runs, 1.3 s unloaded on WebKit
+and 0.9 s on Chromium, against the poll's 30 s budget. The single sighting's Playwright output was not kept.
+Disposition: open (TODO.md); no change made, for lack of a reproduction or an evident cause.
+
+## 2026-09-03 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), localized
+
+Twenty loaded single runs on a 4-vCPU sandbox: 8 failed, each after the full 40 s wait for `BINARY-MARKER`, with only
+`FAKE-AGENT READY` in the transcript. A temporary test-side barrier, a `ListSessions` request queued immediately after
+`send_input` (the helm writer keeps frame order and `handle_connection` finishes the input handler, including its tmux
+`send-keys` exchange, before reading the next frame), replied in 6 ms on a failing run while `send_input` itself had
+queued in 11 µs; the marker still never came. So the stall is not a slow supervisor exchange and not a short budget:
+tmux acknowledged the `send-keys` and the raw-mode fixture never produced its reply. Disposition: open (TODO.md, with
+the proposed product direction).
