@@ -249,16 +249,16 @@ deliberately does not answer Escape.
 Clone (the row menu's newest item) reuses the create form rather than a second submit path: the click builds a
 `CreatePrefill` snapshot of the row's `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic
 generation the list view mints per click. A `use_effect` inside the form compares that generation against the last one
-it applied and reseeds every field — including the raw invocation, for a profile-backed clone too, since the command
-input is merely disabled while a profile is chosen, not emptied, and leaving it stale would surface an unrelated command
-the moment the user switches modes — whenever the two disagree; comparing generations rather than mere presence is what
-makes cloning the SAME row twice in a row reseed a second time, since an unrelated rerender of that effect (a host
-reconnect, a catalog refresh) must not overwrite an edit in progress. The profile choice is trusted only when the row's
-own profile snapshot is `Present` — the catalog still holds that id under the SAME name — which is deliberately STRICTER
-than an ordinary create's remembered-default rule (an id that merely still exists, under a new name, is not evidence
-that cloning it again is what today's catalog would still offer); every other answer falls back to the raw command.
-Trusting the id at all is still a snapshot decision, not a live one: submitting a profile-backed clone resolves that id
-against whatever definition the catalog holds at that moment, exactly like any other profile-backed create.
+it applied and reseeds every field — including the raw invocation, for a profile-backed clone too, since that value is
+the seed for custom-command mode while profile mode displays the selected profile's own invocation — whenever the two
+disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a row reseed a
+second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not overwrite an edit
+in progress. The profile choice is trusted only when the row's own profile snapshot is `Present` — the catalog still
+holds that id under the SAME name — which is deliberately STRICTER than an ordinary create's remembered-default rule (an
+id that merely still exists, under a new name, is not evidence that cloning it again is what today's catalog would still
+offer); every other answer falls back to the raw command. Trusting the id at all is still a snapshot decision, not a
+live one: submitting a profile-backed clone resolves that id against whatever definition the catalog holds at that
+moment, exactly like any other profile-backed create.
 
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before either the selector or the agent choice trusts

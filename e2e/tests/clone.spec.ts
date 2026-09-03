@@ -2,12 +2,13 @@
 // pre-filled from the clicked row (crates/farhelm-ui/src/list/row.rs's
 // `.session-row-clone`, `create_form::CreatePrefill`), the prefill reflects
 // the row's own agent — a profile id when the row was created from one
-// still `Present` in the catalog, the raw invocation otherwise — and
-// submitting the edited copy creates a SEPARATE session while leaving the
-// cloned row exactly as it was. Also covers an archived row, since clone is
-// deliberately offered there: it is the one way an archived session gets a
-// fresh, running agent again without touching the archived original
-// (row.rs's `row_control_visibility`).
+// still `Present` in the catalog, the raw invocation otherwise. A selected
+// profile displays its own invocation while the raw value remains the seed
+// for custom mode. Submitting the edited copy creates a SEPARATE session
+// while leaving the cloned row exactly as it was. Also covers an archived
+// row, since clone is deliberately offered there: it is the one way an
+// archived session gets a fresh, running agent again without touching the
+// archived original (row.rs's `row_control_visibility`).
 
 import { expect, Locator, Page, test } from "@playwright/test";
 import {
@@ -55,8 +56,16 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
   request,
 }) => {
   const local = await localHostId(request);
-  const profileA = await createProfile(request, local, { name: `clone-profile-a-${Date.now()}` });
-  const profileB = await createProfile(request, local, { name: `clone-profile-b-${Date.now()}` });
+  const invocationA = FAKE_AGENT;
+  const invocationB = FAKE_AGENT.replace("--script basic", "--script altscreen");
+  const profileA = await createProfile(request, local, {
+    name: `clone-profile-a-${Date.now()}`,
+    invocation: invocationA,
+  });
+  const profileB = await createProfile(request, local, {
+    name: `clone-profile-b-${Date.now()}`,
+    invocation: invocationB,
+  });
   const title = `clone-source-${Date.now()}`;
   const originalCwd = "/tmp";
   const original = await createSession(request, {
@@ -97,6 +106,29 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await expect(form.locator(".create-session-profile")).toHaveValue(profileA.id, {
       timeout: 20_000,
     });
+    const command = form.locator('input[type="text"]').nth(1);
+    // The label is located from the input upward: a `has` filter rooted at the
+    // form can never match, because the inner locator would be re-rooted at
+    // each candidate label and the form is not inside its own label.
+    const commandLabel = command.locator("xpath=..");
+    await expect(command).toBeDisabled();
+    await expect(command).toHaveValue(invocationA);
+    await expect(commandLabel).toContainText(
+      'agent command (the selected profile\'s own; choose "custom command" above to edit)',
+    );
+
+    await form.locator(".create-session-profile").selectOption(profileB.id);
+    await expect(command).toHaveValue(invocationB);
+    await expect(command).toBeDisabled();
+
+    await form.locator(".create-session-profile").selectOption("");
+    await expect(command).toBeEnabled();
+    await expect(command).toHaveValue(invocationA);
+    await expect(commandLabel).toHaveText("agent command");
+
+    // Keep the original profile-backed submit assertion below meaningful after
+    // the custom-mode display assertions above.
+    await form.locator(".create-session-profile").selectOption(profileA.id);
 
     const newCwd = stackScratchDir("clone-e2e-");
     await form.locator('input[type="text"]').nth(0).fill(newCwd);
