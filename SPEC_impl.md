@@ -109,17 +109,25 @@ exact, and the alternative was a second request shape for that corner.
 
 What a sidebar row SHOWS was narrowed on 2026-08-23, reversing part of BUGS_BURNDOWN.md's "Decisions (interviewed
 2026-08-13)" list, which called for title, status badge, host, working directory and invocation on every row. Two of
-those turned out to cost a line of height each while saying nothing on the common fleet. The host line now renders only
-when the session is NOT on the helm's own machine — locality is decided by comparing the session's host id against the
-registry's `HostKind::Local` row, never by name. Every unknown (an old helm sending no host, a hosts read that has not
-landed) answers "not local": unknown locality never SUPPRESSES an available host label, it only ever leaves the row free
-to show one it already has. Legacy rows without a host name at all necessarily show none regardless — locality answers
-whether a name would be shown, not whether one exists to show. The invocation is rendered compactly: the profile's
-snapshotted name when the session was created from one, otherwise the program's basename plus a marker for an
-unattended-mode flag (`claude · skip-perms`). The working directory is tilde-folded against the `/home/<user>` and
-`/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of those
-abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
-truth stays one hover away.
+those turned out to cost a line of height each while saying nothing on the common fleet, and the host line was withdrawn
+from every row that WAS the helm's own machine, appearing only for a session that was not.
+
+That VISIBILITY rule was reversed again on 2026-09-03, while the height argument behind it survives: every row now marks
+its locality, but the mark costs one glyph's width on the existing title line rather than a line of its own, so the "no
+extra line" outcome the 2026-08-23 pass fought for is kept even though the visibility choice it made is not.
+`list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
+matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when both
+ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read that has
+not landed). The row draws the LOCAL glyph only for a confirmed `Local` verdict — an `Unknown` row draws no glyph at
+all, never the local one, because a glyph is a positive claim `session_locality` has no evidence to back. The 2026-08-23
+rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available host label, it only ever
+leaves the row free to show one it already has, and the glyph rule adds a second promise on top rather than replacing
+the first. Legacy rows without a host name at all necessarily show none regardless — locality answers whether a name
+would be shown, not whether one exists to show. The invocation is rendered compactly: the profile's snapshotted name
+when the session was created from one, otherwise the program's basename plus a marker for an unattended-mode flag
+(`claude · skip-perms`). The working directory is tilde-folded against the `/home/<user>` and `/Users/<user>` shapes,
+since no home directory is on the wire to fold against properly. Every one of those abbreviations is lossy, so the
+untouched string rides along in a `title` attribute — the row is a summary, and the full truth stays one hover away.
 
 The status badge's dot-or-word split (SPEC.md's Status section) is decided in Rust, in `status::status_badge`, not in
 CSS: the badge carries its word on every path and a flag saying whether that word is shown or only left for a screen

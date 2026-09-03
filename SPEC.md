@@ -291,12 +291,15 @@ client to hold and sort the entire fleet in memory; a fleet that outgrows the ca
 for, and the notice is the whole of the answer to it.
 
 A row shows a session's title, its status (drawn as described under Status), how long ago it was last active, and its
-working directory. The host is named on its own line only for a session that is not on the helm's own machine — a fleet
-that is mostly local gains nothing from a host word repeated on every row, and the line returns the moment a session is
-remote. The working directory and the launch command are shown abbreviated, with their full, untouched values always
-available on the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value is
-recorded. Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather
-than here.
+working directory. Every row also marks whether its session is on the helm's own machine or on another one; a session
+whose host cannot yet be placed either way marks neither, rather than guessing. A remote session additionally names its
+host, on the same line as the title, with the same full-value-on-the-row tooltip promise the directory carries below. An
+available host name stays visible for as long as locality is unknown — only a CONFIRMED local session drops the name,
+since that is the one verdict actually established; a legacy row with no host name at all still shows none, which is an
+allowed absence rather than a promise this row invents one. The working directory and the launch command are shown
+abbreviated, with their full, untouched values always available on the row (a tooltip on the web and desktop clients);
+an abbreviation is never the only place a value is recorded. Exactly how a row lays out its lines and pixels is an
+implementation choice, covered in SPEC_impl.md rather than here.
 
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. Host actions open on demand from the row menu, and one global details control reveals the version, identity, session
