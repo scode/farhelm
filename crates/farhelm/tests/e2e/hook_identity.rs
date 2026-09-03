@@ -382,6 +382,17 @@ fn sole_hook_log_outcome(state: &std::path::Path, session_id: &str) -> String {
 /// measured only the argv would pass a line that had already wrapped by
 /// exactly the marker's length — returning a suffix-truncated argv while
 /// claiming it fit.
+///
+/// Trailing blanks are trimmed BEFORE the bound is applied. When the
+/// fixture wins the race against the test's attach, the marker line arrives
+/// through the attach snapshot rather than live, and a snapshot row is
+/// padded with spaces out to the full pane width — a 484-character "line"
+/// for a 245-character argv in a 500-column pane. That padding is not
+/// wrapping: a row that
+/// really wrapped is full of argv characters to its last column, so the
+/// trimmed length still trips the bound for the case it exists to catch.
+/// The untrimmed check failed the 0.3.0-rc.1 release gate on exactly this
+/// snapshot shape.
 fn argv_marker(transcript: &[u8]) -> String {
     let text = String::from_utf8_lossy(transcript);
     let start = text
@@ -393,6 +404,7 @@ fn argv_marker(transcript: &[u8]) -> String {
         .next()
         .expect("a marker is followed by at least a line ending")
         .trim_end_matches('\r')
+        .trim_end()
         .to_string();
     assert!(
         ARGV_MARKER.chars().count() + line.chars().count() < WIDE_COLS as usize,
