@@ -1306,6 +1306,10 @@ fn agent_row_of_mutation(
         // out loud; this keeps the struct's field consistent with what is
         // reported rather than leaving a stale second copy beside it.
         host_name: host_name.clone().unwrap_or_default(),
+        // Never read by `agent_session` below — the agent-facing `AgentSession`
+        // reply carries no seen-state field at all, since that state is a
+        // human-viewer fact (SPEC.md, Status) an agent verb has no use for.
+        seen_activity_at: None,
         stale,
     };
     agent_session(&row, host_name, asking_host, asking_session)
@@ -1552,6 +1556,7 @@ mod tests {
             host: 1,
             host_identity: None,
             host_name: host_name.to_string(),
+            seen_activity_at: None,
             stale: false,
         }
     }

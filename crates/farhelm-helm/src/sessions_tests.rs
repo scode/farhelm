@@ -455,6 +455,453 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
     peer.await.unwrap();
 }
 
+/// A successful delete also drops the session's `session_seen` row
+/// (SPEC_impl.md's `session_seen` paragraph), not merely the session itself — a
+/// stray row would sit in the table forever with nothing to ever read it
+/// back out, since the id it names is gone. Mirrors
+/// `delete_session_happy_path_returns_200_with_empty_object_body`'s
+/// scripted-peer shape; the only addition is marking the session seen
+/// before the delete and checking the store directly afterward, since the
+/// REST reply carries no evidence either way (SPEC.md's "delete" leaves
+/// nothing behind to inspect through the API once the session is gone).
+#[tokio::test]
+async fn delete_session_drops_the_seen_row() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    harness
+        .store
+        .mark_seen("sess-1", 1_700_000_000)
+        .await
+        .unwrap();
+
+    let app = harness.router();
+    let request = axum::http::Request::builder()
+        .method("DELETE")
+        .uri("/api/sessions/sess-1")
+        .header("host", "127.0.0.1:7433")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    assert!(
+        harness
+            .store
+            .seen_activity(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .is_empty(),
+        "the seen-state row must not survive the session it names"
+    );
+
+    peer.await.unwrap();
+}
+
+/// `PUT /api/sessions/{id}/seen` end to end: a mark, a listing read, a
+/// clear, and another listing read, checking `seen_activity_at` at each
+/// step — the round trip the idle dot's grey/blue split actually depends
+/// on (SPEC.md, Status).
+#[tokio::test]
+async fn mark_seen_route_records_and_clears_the_stamp() {
+    let harness =
+        rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
+
+    let (status, body) = put_json(
+        &harness,
+        "/api/sessions/sess-1/seen",
+        serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body, serde_json::json!({}));
+
+    let (_, listing) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        listing["sessions"][0]["seen_activity_at"], 1_700_000_000,
+        "a mark must be visible on the very next listing read"
+    );
+
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/seen",
+        serde_json::json!({ "seen_activity_at": null }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    let (_, listing) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        listing["sessions"][0]["seen_activity_at"],
+        serde_json::Value::Null,
+        "a clear (mark unread) must read back as null, not merely absent \
+         or reverted to some prior value"
+    );
+}
+
+/// The existence check is the same helm-wide "no host has ever reported
+/// this id" lookup every other per-session route uses
+/// ([`super::resolve_owner`]) — a session nothing knows about is a 404
+/// whether or not any host is even connected.
+#[tokio::test]
+async fn mark_seen_route_unknown_id_returns_404() {
+    let harness = rest_harness::idle_helm().await;
+    let (status, body) = put_json(
+        &harness,
+        "/api/sessions/sess-missing/seen",
+        serde_json::json!({ "seen_activity_at": 100 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(
+        body,
+        serde_json::json!("no such session: sess-missing"),
+        "the refusal must name the id it could not place, like every \
+         other per-session 404"
+    );
+}
+
+/// The fleet-events revision moves on a genuine change and stands still on
+/// a repeat of the SAME write (SPEC_impl.md's "bump the fleet-events
+/// revision on a change, not on a no-op" rule) — the session view's
+/// auto-mark effect can reissue this exact PUT with no new activity behind
+/// it (reopening a session, or a staleness/capability transition —
+/// `session_view.rs`'s `mark_key`), and a bump on every one of those would
+/// wake every other connected client for nothing.
+#[tokio::test]
+async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
+    let harness =
+        rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
+
+    let before_first_mark = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/seen",
+        serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(
+        harness.manager.events().revision() > before_first_mark,
+        "the first mark is a real change and must bump"
+    );
+
+    let before_repeat = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/seen",
+        serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        harness.manager.events().revision(),
+        before_repeat,
+        "re-marking the same stamp is a no-op and must not bump"
+    );
+
+    let before_clear = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/seen",
+        serde_json::json!({ "seen_activity_at": null }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(
+        harness.manager.events().revision() > before_clear,
+        "clearing a real stamp is also a genuine change and must bump"
+    );
+
+    let before_repeat_clear = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/seen",
+        serde_json::json!({ "seen_activity_at": null }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        harness.manager.events().revision(),
+        before_repeat_clear,
+        "clearing an already-clear stamp is the no-op's mirror image and \
+         must not bump either"
+    );
+}
+
+/// An OMITTED `seen_activity_at` key must be rejected outright, not
+/// silently treated as `null` (a clear/"mark unread") — see
+/// `require_present_seen_activity_at`'s doc for why a plain `Option<i64>`
+/// field would otherwise swallow a missing key into `None`. A malformed or
+/// truncated client request must not be able to clear a session's seen
+/// state by accident, and must leave the store and the fleet-events
+/// revision exactly as they were.
+#[tokio::test]
+async fn mark_seen_route_rejects_a_body_with_the_key_omitted() {
+    let harness =
+        rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
+    harness
+        .store
+        .mark_seen("sess-1", 1_700_000_000)
+        .await
+        .unwrap();
+    let before = harness.manager.events().revision();
+
+    let (status, _) = put_json(&harness, "/api/sessions/sess-1/seen", serde_json::json!({})).await;
+    assert_eq!(
+        status,
+        // axum 0.8's `JsonRejection::JsonDataError` for a body that parses
+        // as JSON but fails to deserialize into the target struct — the
+        // same 422 `RenameReq`'s own missing-field doc names, distinct
+        // from the 400 a body that is not even valid JSON gets.
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "an omitted key is a malformed request, not an implicit clear"
+    );
+    assert_eq!(
+        harness
+            .store
+            .seen_activity(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .get("sess-1"),
+        Some(&1_700_000_000),
+        "the stored stamp must be untouched by the refused request"
+    );
+    assert_eq!(
+        harness.manager.events().revision(),
+        before,
+        "a refused request must not bump fleet-events either"
+    );
+}
+
+/// `PUT /api/sessions/{id}/seen` on a session whose host is unreachable
+/// still succeeds — the whole point of NOT routing this write through
+/// `route_session` (see `mark_seen`'s own doc). A wrong implementation
+/// that reused `route_session`'s reachability gate would refuse this
+/// request instead of returning 200 and storing the write, which is
+/// exactly what this test would catch.
+#[tokio::test]
+async fn mark_seen_route_succeeds_on_an_unreachable_host() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@breaks",
+            rest_harness::HostScript {
+                identity: Some("identity-original".to_string()),
+                sessions: vec![rest_harness::session("owned", 1_700_000_000)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+
+    let before = harness.manager.events().revision();
+    let (status, body) = put_json(
+        &harness,
+        "/api/sessions/owned/seen",
+        serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "an unreachable host must not block a helm-local write"
+    );
+    assert_eq!(body, serde_json::json!({}));
+    assert!(
+        harness.manager.events().revision() > before,
+        "the write is real and must still bump fleet-events"
+    );
+    assert_eq!(
+        harness
+            .store
+            .seen_activity(&["owned".to_string()])
+            .await
+            .unwrap()
+            .get("owned"),
+        Some(&1_700_000_000),
+        "the stamp must be durably stored despite the host being down"
+    );
+
+    let before_clear = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/owned/seen",
+        serde_json::json!({ "seen_activity_at": null }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(harness.manager.events().revision() > before_clear);
+    assert!(
+        harness
+            .store
+            .seen_activity(&["owned".to_string()])
+            .await
+            .unwrap()
+            .is_empty(),
+        "a clear must also land while the host is down"
+    );
+}
+
+/// The single-session detail route (`GET /api/sessions/{id}`) carries
+/// `seen_activity_at` on a LIVE reply, matching the merged listing's own
+/// field (`aggregate::row_of`) — a direct fetch (the recovery path
+/// `list::ListView`'s remembered-selection resolver uses) must see the
+/// same seen-state a listing read would have shown.
+#[tokio::test]
+async fn get_session_route_carries_seen_activity_at_when_live() {
+    let harness =
+        rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
+
+    let (status, detail) = get_json(&harness, "/api/sessions/sess-1").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        detail["seen_activity_at"],
+        serde_json::Value::Null,
+        "an id nothing has marked reads back null, not merely absent"
+    );
+
+    harness
+        .store
+        .mark_seen("sess-1", 1_700_000_000)
+        .await
+        .unwrap();
+    let (status, detail) = get_json(&harness, "/api/sessions/sess-1").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(detail["seen_activity_at"], 1_700_000_000);
+}
+
+/// The same field on the STALE branch (host down, answered from the
+/// cache) — `get_session` constructs a separate `SessionRow` literal for
+/// each branch (see its own doc), so a fix that carries the field on the
+/// live branch is not evidence the stale one does too.
+#[tokio::test]
+async fn get_session_route_carries_seen_activity_at_when_stale() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@breaks",
+            rest_harness::HostScript {
+                identity: Some("identity-original".to_string()),
+                sessions: vec![rest_harness::session("owned", 1_700_000_000)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+    harness
+        .store
+        .mark_seen("owned", 1_700_000_000)
+        .await
+        .unwrap();
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+
+    let (status, detail) = get_json(&harness, "/api/sessions/owned").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(detail["stale"], true);
+    assert_eq!(detail["seen_activity_at"], 1_700_000_000);
+}
+
+/// A failed `clear_seen` must not fail the delete: SPEC.md's "delete
+/// removes the session" cannot be held hostage by a local bookkeeping
+/// table that has nothing to do with the session's real, host-side
+/// removal — see `delete_session`'s own doc for why that call is
+/// best-effort. `break_session_seen_table_for_test` makes the failure
+/// real (the table is genuinely gone) rather than simulated, without a
+/// mock trait or an env var.
+#[tokio::test]
+async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    harness
+        .store
+        .mark_seen("sess-1", 1_700_000_000)
+        .await
+        .unwrap();
+    harness
+        .store
+        .break_session_seen_table_for_test()
+        .await
+        .expect("drop the table for the fixture");
+
+    let app = harness.router();
+    let request = axum::http::Request::builder()
+        .method("DELETE")
+        .uri("/api/sessions/sess-1")
+        .header("host", "127.0.0.1:7433")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::OK,
+        "a local bookkeeping failure must not surface as a failed delete"
+    );
+
+    let (status, _) = get_json(&harness, "/api/sessions/sess-1").await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::NOT_FOUND,
+        "the manager-side forget must still run — the session is gone \
+         from the helm's own records even though clearing its seen row \
+         failed"
+    );
+
+    peer.await.unwrap();
+}
+
 /// `GET /api/sessions`'s JSON shape, which the UI decodes and which
 /// PLAN_M6.md item 5 extended without breaking.
 ///
@@ -1855,6 +2302,35 @@ async fn post_text(
         .await
         .unwrap();
     (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+/// PUT with a JSON body, returning the status and the body — mirroring
+/// [`get_json`] rather than [`post_text`]: `PUT /api/sessions/{id}/seen`'s
+/// success body is JSON (`{}`), and its refusal is the same plain-text
+/// `http_error` prose every other route's 404 uses, which the fallback
+/// wraps as a JSON string the same way `get_json` does for a non-JSON body.
+async fn put_json(
+    harness: &rest_harness::Harness,
+    uri: &str,
+    body: serde_json::Value,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    let request = axum::http::Request::builder()
+        .method("PUT")
+        .uri(uri)
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap();
+    let response = tower::ServiceExt::oneshot(harness.router(), request)
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value = serde_json::from_slice(&body)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&body).into()));
+    (status, value)
 }
 
 /// The `id` of every row of a session-list body, in order.

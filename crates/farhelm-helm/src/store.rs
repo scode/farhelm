@@ -108,7 +108,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 16;
+const SCHEMA_VERSION: i64 = 17;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -118,6 +118,35 @@ const PROFILES_SCHEMA: &str = "CREATE TABLE profiles (
                  invocation      TEXT NOT NULL,
                  agent_kind      TEXT NOT NULL,
                  resume_template TEXT
+             ) STRICT;";
+
+/// The per-session "last seen" stamp (schema version 17): the activity
+/// stamp that was current the last time some client had this session open,
+/// compared against `SessionInfo::effective_activity` to decide whether a
+/// session has unseen output (SPEC.md, Status; `SessionRow::seen_activity_at`
+/// is what a listing reply carries this through as).
+///
+/// A separate table rather than a `session_cache` column, unlike most of
+/// this file's per-session state: `session_cache` rows are replaced
+/// WHOLESALE by `replace_host_sessions` on every host refresh under the
+/// changed-only rule, and a column there would need that write to carry
+/// forward a field the SUPERVISOR never reported — putting a viewer fact
+/// inside the host-payload mirror and complicating the one write the cache
+/// has. Keyed by session id alone, with no foreign key to `hosts` and no
+/// `ON DELETE CASCADE`: session ids are supervisor-minted UUIDs the cache
+/// already treats as globally unique (`session_cache_one_owner`), and a
+/// bare id key is what lets this row survive a retarget or an adoption —
+/// both of which are supposed to keep the session, unlike a host removal.
+///
+/// `sessions::delete_session` removes this row explicitly when THIS helm
+/// deletes a session. A session deleted through another helm, or dropped
+/// from a cache because its host was removed here, can leave a row behind:
+/// that garbage is bounded by the number of sessions that ever existed, at
+/// a few dozen bytes each, and is not worth a reaper yet — a later
+/// migration could sweep rows whose id no `session_cache` row names.
+const SESSION_SEEN_SCHEMA: &str = "CREATE TABLE session_seen (
+                 session_id       TEXT NOT NULL PRIMARY KEY,
+                 seen_activity_at INTEGER NOT NULL
              ) STRICT;";
 
 /// Seed rows are inserted once with the schema migration, not repaired at
@@ -1246,6 +1275,13 @@ pub struct HelmStore {
 ///   and `update_alias` for why uniqueness is checked against every other
 ///   host's current DISPLAY name (derived or aliased) rather than only
 ///   other aliases.
+/// - 17: `session_seen` — the per-session "last seen" activity stamp behind
+///   the idle/unseen-idle dot split and the mark read/mark unread toggle
+///   (SPEC.md, Status). A new table, not a `session_cache` column; see the
+///   table's own comment for why. Nothing migrates INTO it: no prior schema
+///   recorded whether a session had ever been looked at, so every upgraded
+///   helm starts every session unseen — the same "no client kept a copy of
+///   this" starting point version 14's `preferences` table began from.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1465,10 +1501,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  list_sort     TEXT,
                  last_selected TEXT
              ) STRICT;
+             {SESSION_SEEN_SCHEMA}
              -- Must equal SCHEMA_VERSION exactly — see the Rust comment
              -- above this whole `execute_batch` call for what goes wrong
              -- when the two drift.
-             PRAGMA user_version = 16;",
+             PRAGMA user_version = 17;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1880,6 +1917,16 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("ALTER TABLE hosts ADD COLUMN alias TEXT; PRAGMA user_version = 16;")
             .context("migrating helm.db to schema version 16")?;
         version = 16;
+    }
+    if version == 16 {
+        // Pure DDL, nothing to backfill: no prior schema recorded whether a
+        // session had ever been looked at, so every session in an upgraded
+        // database starts unseen — the same starting point version 14's
+        // `preferences` table began from, and for the same reason (the fact
+        // never lived anywhere the helm could read it back from).
+        tx.execute_batch(&format!("{SESSION_SEEN_SCHEMA} PRAGMA user_version = 17;"))
+            .context("migrating helm.db to schema version 17")?;
+        version = 17;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2396,6 +2443,148 @@ impl HelmStore {
         })
         .await
         .context("preference write task panicked")?
+    }
+
+    // ---- Per-session "seen" state ---------------------------------------
+
+    /// The recorded `seen_activity_at` stamp for every id in `ids` that has
+    /// one. An id with no row — never seen, or unknown to this table
+    /// entirely — is simply absent from the map rather than present with a
+    /// placeholder, the same "absence carries meaning" shape
+    /// `SessionRow::seen_activity_at` serializes onto the wire.
+    ///
+    /// Bounded by the caller's own id list (`WHERE session_id IN (...)`,
+    /// same shape as [`Self::cached_slice`]'s host scoping) rather than
+    /// reading the whole table: the one caller today,
+    /// `aggregate::session_list_staged`, already knows every id the reply
+    /// will carry before it needs this map, so there is no reason to pull
+    /// rows for sessions outside the current listing.
+    pub async fn seen_activity(
+        &self,
+        ids: &[String],
+    ) -> anyhow::Result<std::collections::HashMap<String, i64>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let conn = Arc::clone(&self.conn);
+        let ids = ids.to_vec();
+        tokio::task::spawn_blocking(
+            move || -> anyhow::Result<std::collections::HashMap<String, i64>> {
+                let conn = conn.lock().expect("helm db mutex poisoned");
+                let placeholders = (1..=ids.len())
+                    .map(|index| format!("?{index}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT session_id, seen_activity_at FROM session_seen \
+                         WHERE session_id IN ({placeholders})"
+                    ))
+                    .context("preparing the seen-activity query")?;
+                let rows: Vec<(String, i64)> = stmt
+                    .query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
+                    .context("querying seen-activity rows")?
+                    .collect::<Result<_, _>>()
+                    .context("reading seen-activity rows")?;
+                Ok(rows.into_iter().collect())
+            },
+        )
+        .await
+        .context("seen-activity read task panicked")?
+    }
+
+    /// Upsert `session_id`'s seen stamp to `activity_at` (a manual "mark
+    /// read", or the automatic mark the session view issues on open and on
+    /// every activity advance), returning whether the stored value actually
+    /// changed.
+    ///
+    /// The `WHERE` clause on the `DO UPDATE` is what makes the return value
+    /// meaningful: SQLite only counts a row as touched by
+    /// `Connection::execute` when the update clause's `WHERE` matched, so
+    /// re-marking the SAME stamp that is already stored reports zero rows
+    /// changed rather than one. That is exactly the signal the
+    /// `PUT /api/sessions/{id}/seen` handler needs to honor SPEC_impl.md's
+    /// "bump the fleet-events revision on a change, not on a no-op" rule —
+    /// without it, reopening an already-seen session with no new activity
+    /// behind it, or a client retrying a PUT whose response it missed,
+    /// would re-bump the revision for nothing, waking every other
+    /// connected client to redraw a dot that never moved.
+    pub async fn mark_seen(&self, session_id: &str, activity_at: i64) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let changed = conn
+                .lock()
+                .expect("helm db mutex poisoned")
+                .execute(
+                    "INSERT INTO session_seen (session_id, seen_activity_at) VALUES (?1, ?2) \
+                     ON CONFLICT (session_id) DO UPDATE SET seen_activity_at = excluded.seen_activity_at \
+                     WHERE session_seen.seen_activity_at != excluded.seen_activity_at",
+                    rusqlite::params![session_id, activity_at],
+                )
+                .context("writing the seen stamp")?;
+            Ok(changed > 0)
+        })
+        .await
+        .context("seen-stamp write task panicked")?
+    }
+
+    /// Delete `session_id`'s seen stamp — a manual "mark unread", which
+    /// [`SessionInfo::effective_activity`] then reads as unseen because any
+    /// recorded activity is newer than no stamp at all. Returns whether a
+    /// row actually existed to delete, the clear-direction twin of
+    /// [`Self::mark_seen`]'s change flag and for the same reason: clearing
+    /// an already-absent stamp is a no-op the caller must not bump the
+    /// fleet-events revision over.
+    ///
+    /// Also the primitive `sessions::delete_session` calls, unconditionally
+    /// and discarding the flag, to drop this table's row when the session
+    /// itself is deleted — see SPEC_impl.md's `session_seen` paragraph for
+    /// why a deleted session's row does not simply cascade away on its own.
+    pub async fn clear_seen(&self, session_id: &str) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let changed = conn
+                .lock()
+                .expect("helm db mutex poisoned")
+                .execute(
+                    "DELETE FROM session_seen WHERE session_id = ?1",
+                    rusqlite::params![session_id],
+                )
+                .context("clearing the seen stamp")?;
+            Ok(changed > 0)
+        })
+        .await
+        .context("seen-stamp clear task panicked")?
+    }
+
+    /// Test-only failure-injection seam: drop `session_seen` out from under
+    /// this store's own connection, so [`Self::clear_seen`] fails for a
+    /// REAL reason (the table is gone) rather than a mock returning a
+    /// canned error.
+    ///
+    /// `sessions_tests.rs`'s `delete_session_succeeds_even_when_clearing_
+    /// the_seen_row_fails` is the one caller: it needs `sessions::
+    /// delete_session`'s best-effort `clear_seen` call to genuinely fail
+    /// without touching the database file directly, which `HelmStore`
+    /// deliberately gives no caller outside this module a path to (unlike
+    /// `store.rs`'s own migration-downgrade fixtures, which reopen the file
+    /// by its OS path because they run IN this module and are testing the
+    /// schema ladder itself, not a caller's error handling).
+    #[cfg(test)]
+    pub(crate) async fn break_session_seen_table_for_test(&self) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            conn.lock()
+                .expect("helm db mutex poisoned")
+                .execute_batch("DROP TABLE session_seen;")
+                .context("dropping session_seen for a failure-injection test")
+        })
+        .await
+        .context("session_seen drop task panicked")?
     }
 
     /// Every registered host, local row included, ordered by [`HostId`] —
@@ -4873,6 +5062,109 @@ mod tests {
         );
     }
 
+    // ---- Per-session "seen" state ---------------------------------------
+
+    /// The whole read/write/clear cycle behind the idle-dot's blue/grey
+    /// split (SPEC.md, Status): marking sets the stamp,
+    /// re-marking a DIFFERENT stamp replaces it, and clearing removes it
+    /// entirely rather than leaving a tombstone a later read might trip
+    /// over. No `session_cache` row is planted for any of the ids used here
+    /// — deliberately, since `session_seen` carries no foreign key to that
+    /// table (see the table's own doc comment) and this test would
+    /// otherwise imply a dependency that does not exist.
+    #[tokio::test]
+    async fn mark_seen_and_clear_seen_round_trip() {
+        let (_dir, store) = fresh_store().await;
+
+        assert!(
+            store
+                .seen_activity(&["s-1".to_string()])
+                .await
+                .unwrap()
+                .is_empty(),
+            "an id nothing has marked has no row at all"
+        );
+
+        store.mark_seen("s-1", 1_700_000_000).await.unwrap();
+        let map = store.seen_activity(&["s-1".to_string()]).await.unwrap();
+        assert_eq!(map.get("s-1"), Some(&1_700_000_000));
+
+        // Re-marking with a NEWER stamp replaces the row rather than
+        // refusing a second write — the store records whatever the caller
+        // last observed, exactly as `update_preferences` does for its own
+        // fields.
+        store.mark_seen("s-1", 1_700_000_100).await.unwrap();
+        let map = store.seen_activity(&["s-1".to_string()]).await.unwrap();
+        assert_eq!(map.get("s-1"), Some(&1_700_000_100));
+
+        store.clear_seen("s-1").await.unwrap();
+        assert!(
+            store
+                .seen_activity(&["s-1".to_string()])
+                .await
+                .unwrap()
+                .is_empty(),
+            "a cleared stamp must not merely reset to some sentinel value — the row is gone"
+        );
+    }
+
+    /// [`HelmStore::seen_activity`]'s listing join must answer for exactly
+    /// the ids that have a row, silently omitting the rest, over a MIX of
+    /// marked and unmarked ids in one call — the shape
+    /// `aggregate::session_list_staged` actually uses it in, joining a
+    /// whole page of rows at once rather than one id at a time.
+    #[tokio::test]
+    async fn seen_activity_joins_a_mixed_id_list() {
+        let (_dir, store) = fresh_store().await;
+        store.mark_seen("has-a-row", 42).await.unwrap();
+
+        let ids = vec![
+            "has-a-row".to_string(),
+            "never-marked".to_string(),
+            "also-never-marked".to_string(),
+        ];
+        let map = store.seen_activity(&ids).await.unwrap();
+        assert_eq!(map.len(), 1, "only the marked id produces an entry");
+        assert_eq!(map.get("has-a-row"), Some(&42));
+        assert_eq!(map.get("never-marked"), None);
+    }
+
+    /// The store's own half of "bump the fleet-events revision on a
+    /// change, not on a no-op" (SPEC_impl.md): the
+    /// `PUT /api/sessions/{id}/seen` handler decides whether to bump off
+    /// this return value, so it has to be right in both directions and at
+    /// the boundary between them.
+    #[tokio::test]
+    async fn mark_seen_and_clear_seen_report_whether_anything_changed() {
+        let (_dir, store) = fresh_store().await;
+
+        assert!(
+            store.mark_seen("s-1", 100).await.unwrap(),
+            "the first mark for an id always changes the stored state"
+        );
+        assert!(
+            !store.mark_seen("s-1", 100).await.unwrap(),
+            "re-marking the SAME stamp must report no change"
+        );
+        assert!(
+            store.mark_seen("s-1", 200).await.unwrap(),
+            "a genuinely different stamp must report a change"
+        );
+
+        assert!(
+            store.clear_seen("s-1").await.unwrap(),
+            "clearing a row that exists must report a change"
+        );
+        assert!(
+            !store.clear_seen("s-1").await.unwrap(),
+            "clearing an id with no row must report no change"
+        );
+        assert!(
+            !store.clear_seen("never-marked-at-all").await.unwrap(),
+            "clearing an id this table has never heard of is a no-op, not an error"
+        );
+    }
+
     // ---- Schema and the version mechanism ----------------------------
 
     /// A fresh database must come up on the current schema with the reserved
@@ -5449,7 +5741,10 @@ mod tests {
         // COLUMN over a column that is already there, which is the migration
         // failing loudly at a state no real database can be in. (Version 12
         // already dropped the version-11 ordering columns, so only the
-        // version-10 flag is left to remove.)
+        // version-10 flag is left to remove.) `session_seen` (version 17)
+        // goes the same way as every other post-version-5 table: it must
+        // not exist yet, or the version-17 migration's plain `CREATE TABLE`
+        // fails against one that is already there.
         {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
@@ -5458,6 +5753,7 @@ mod tests {
                  DROP TABLE profiles;
                  DROP TABLE remembered_profile;
                  DROP TABLE preferences;
+                 DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE hosts DROP COLUMN alias;
                  ALTER TABLE session_cache DROP COLUMN archived;
@@ -5511,8 +5807,9 @@ mod tests {
             // Down to the version-11 shape everywhere a later rung looks:
             // the identity column version 12 removes, the two ordering
             // columns version 13 drops (they must EXIST for the drop to
-            // succeed), and the absence of what versions 13 and 14 add
-            // (`hosts.cache_truncated`, the `preferences` table).
+            // succeed), and the absence of what versions 13, 14, 16, and 17
+            // add (`hosts.cache_truncated`, the `preferences` table,
+            // `hosts.alias`, and `session_seen`).
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "DROP TABLE profiles;
@@ -5530,6 +5827,7 @@ mod tests {
                  ALTER TABLE session_cache ADD COLUMN activity_at INTEGER;
                  ALTER TABLE session_cache ADD COLUMN title_sort TEXT;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
+                 DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN alias;
                  -- IF EXISTS: the preferences table only exists one stack
                  -- level up; this fixture runs at both.
@@ -5594,6 +5892,7 @@ mod tests {
                 "DROP TABLE profiles;
                  DROP TABLE remembered_profile;
                  DROP TABLE preferences;
+                 DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE hosts DROP COLUMN alias;
                  ALTER TABLE session_cache DROP COLUMN archived;
@@ -5651,6 +5950,55 @@ mod tests {
         assert_eq!(
             store.remembered_profile().await.unwrap().as_deref(),
             Some("established-profile")
+        );
+    }
+
+    /// The version-17 migration itself (SPEC.md, Status): opening a
+    /// version-16 database creates `session_seen` empty and
+    /// leaves everything else — the host registry here — untouched, rather
+    /// than needing any data carried forward (nothing pre-16 ever recorded
+    /// whether a session had been looked at, so there is nothing TO carry).
+    ///
+    /// Planted by dropping the table from a just-opened current database
+    /// rather than by writing out the whole version-16 shape by hand, unlike
+    /// the older fixtures above: version 17 is a pure table ADDITION with no
+    /// prior column or table it replaces, so "current schema minus this one
+    /// table" and "the version-16 shape" are the same database.
+    #[tokio::test]
+    async fn a_version_16_database_gains_the_session_seen_table() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helm.db");
+        let host = {
+            let store = HelmStore::open(&path).await.expect("create");
+            store.add_ssh_host("v15@host", None, None).await.unwrap()
+        };
+        {
+            let conn = Connection::open(&path).expect("reopen raw");
+            conn.execute_batch("DROP TABLE session_seen; PRAGMA user_version = 16;")
+                .expect("downgrade to version 16");
+        }
+
+        let migrated = HelmStore::open(&path).await.expect("migrate");
+        assert!(
+            migrated
+                .seen_activity(&["anything".to_string()])
+                .await
+                .unwrap()
+                .is_empty(),
+            "the fresh table starts with nothing marked"
+        );
+        assert!(
+            migrated.mark_seen("s-1", 1_700_000_000).await.unwrap(),
+            "the migrated table must accept writes exactly like a fresh one"
+        );
+        assert!(
+            migrated
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host),
+            "the migration must not disturb the host registry it has nothing to do with"
         );
     }
 
@@ -6760,7 +7108,8 @@ mod tests {
         {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
-                "ALTER TABLE hosts DROP COLUMN alias;
+                "DROP TABLE session_seen;
+                 ALTER TABLE hosts DROP COLUMN alias;
                  PRAGMA user_version = 15;",
             )
             .expect("downgrade to the version-15 shape");

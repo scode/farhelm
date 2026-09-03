@@ -1369,6 +1369,26 @@ reports a failed listing rather than a silently shortened one.
 - The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
   supervisor is a separate process either way — the app discovers one that already answers and leaves it alone, or
   starts `farhelm supervisor run` from its sibling binary and owns that child for its own lifetime.
+- Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
+  `session_seen` table keyed by session id alone, not as a `session_cache` column: that cache is replaced WHOLESALE by
+  each host's refresh, so a column there would need every refresh to carry forward a viewer fact the supervisor never
+  reported, and a bare id key (no foreign key to `hosts`, no `ON DELETE CASCADE`) is what lets the state survive a
+  retarget or an adoption, both of which keep the session. The stored value is the ACTIVITY STAMP that was current the
+  last time some client had the session open, never a wall-clock "seen at" time — comparing a later activity stamp
+  against an earlier one from the SAME host involves no clock at all, where a wall-clock comparison would pit the
+  session's host's clock against the helm's own, on a remote host a different machine's clock entirely (the same reason
+  the relative-age column reads an activity stamp rather than a "last seen" timestamp). One caveat follows directly: the
+  supervisor quantizes `last_activity_at` at the source, advancing it only when what it observes is at least a minute
+  newer than what it already holds, so output landing within that minute after a mark-read does not yet register as
+  unseen — cosmetic, and not worth a second, finer-grained stamp. The table is a helm-local write with nothing to
+  refuse: `PUT /api/sessions/{id}/seen` does not route through a session's owning host at all (unlike every lifecycle
+  verb above), so a session on an unreachable host can still be marked read or unread, and the write bumps the
+  fleet-events revision only when the stored value actually changed — a client re-marking the SAME stamp it already
+  recorded — which happens when a session is reopened with no new activity behind it, or when a client retries a PUT
+  whose response it missed — must not wake every other connected client to redraw a dot that has not moved. Deleting a
+  session drops its `session_seen` row explicitly, since nothing else cascades into a table with no foreign key; a
+  session deleted through ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row
+  behind, which is accepted as garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
 
 ## Logging
 

@@ -1487,6 +1487,13 @@ pub(crate) async fn get_session(
         .into_iter()
         .find(|row| row.id == host)
         .and_then(|row| row.host_identity);
+    // One-id seen-state read, same table and same reason as the listing's
+    // own join (`aggregate::session_list_staged`): this route answers with
+    // exactly the shape a listing row has, so it must carry the same field.
+    let seen_activity_at = match state.store.seen_activity(std::slice::from_ref(&id)).await {
+        Ok(map) => map.get(&id).copied(),
+        Err(e) => return http_error(e),
+    };
 
     // The client comes from the SAME status read that resolved the owner,
     // so "ask the host" and "say this row is live" cannot disagree.
@@ -1511,6 +1518,7 @@ pub(crate) async fn get_session(
                         host,
                         host_identity,
                         host_name,
+                        seen_activity_at,
                         stale: true,
                     })
                     .into_response(),
@@ -1540,6 +1548,7 @@ pub(crate) async fn get_session(
                         host,
                         host_identity,
                         host_name,
+                        seen_activity_at,
                         stale: false,
                     })
                     .into_response(),
@@ -1754,6 +1763,20 @@ pub(crate) async fn archive_session(
 /// it at once rather than at the owning host's next refresh. Without that,
 /// a delete followed immediately by a create shows both rows — which is
 /// what the browser suite's own shared-session reset does on every test.
+///
+/// It also clears the session's `session_seen` row (SPEC_impl.md's
+/// `session_seen` paragraph).
+/// That table carries no foreign key to the session it names — it survives a
+/// retarget or an adoption on purpose (`store::SESSION_SEEN_SCHEMA`'s own
+/// comment) — so it does not disappear on its own the way the cache row
+/// `forget_session` clears does; a genuine delete has to say so explicitly,
+/// or the row becomes exactly the harmless garbage that comment already
+/// accepts for every OTHER path a session can vanish by. Best-effort like
+/// the manager-side forget below: the session is already gone on the host by
+/// this point, and refusing the whole delete over a local bookkeeping table
+/// would contradict SPEC.md's "changes ... appear in all other connected
+/// clients automatically" for the one fact — deletion — that matters most
+/// here.
 pub(crate) async fn delete_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
@@ -1764,7 +1787,100 @@ pub(crate) async fn delete_session(
     };
     match client.delete_session(&id).await {
         Ok(()) => {
+            if let Err(error) = state.store.clear_seen(&id).await {
+                warn!(
+                    session_id = manager::peer_text(&id).as_str(),
+                    error = %error,
+                    "could not clear the deleted session's seen state; a stray row may remain"
+                );
+            }
             forget_session(&state, &claim, &id).await;
+            axum::Json(serde_json::json!({})).into_response()
+        }
+        Err(e) => http_error(e),
+    }
+}
+
+/// The body of `PUT /api/sessions/{id}/seen`: `Some(stamp)` marks the
+/// session seen as of that activity stamp (a manual "mark read", or the
+/// automatic mark the session view issues on open and on every activity
+/// advance), `None` clears it (a manual "mark unread" — SPEC.md, Status).
+/// One field rather than two verbs
+/// because the two directions share every other part of the handler:
+/// existence check, the changed-or-not bump decision, and the reply shape.
+#[derive(Deserialize)]
+pub(crate) struct MarkSeenReq {
+    #[serde(deserialize_with = "require_present_seen_activity_at")]
+    seen_activity_at: Option<i64>,
+}
+
+/// Delegates to `Option<i64>`'s ordinary `Deserialize` impl — an explicit
+/// JSON `null` still decodes to `None`, an integer to `Some` — but merely
+/// attaching a `deserialize_with` is what disables serde derive's syntactic
+/// special case that would otherwise default an ABSENT `seen_activity_at`
+/// key to `None` too (the same trick `Session::seen_activity_at`'s
+/// `double_option` uses the other way, to tell absent apart from an
+/// explicit null). Without this, a malformed or truncated PUT body (`{}`)
+/// would silently be interpreted as a "mark unread" instead of being
+/// rejected — axum 0.8's `JsonRejection::JsonDataError`, a 422, the same
+/// status `RenameReq`'s own missing-field doc explains — see the
+/// seen-route tests' `{}`-body coverage.
+fn require_present_seen_activity_at<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer)
+}
+
+/// `PUT /api/sessions/{id}/seen` — record or clear this session's "last
+/// seen" activity stamp (SPEC.md, Status), the state behind the idle dot's
+/// grey/blue split and the row's read/unread toggle.
+///
+/// Deliberately NOT routed through [`route_session`], unlike every
+/// lifecycle verb above: marking a session seen is a helm-local write to
+/// `store::HelmStore::mark_seen`/`clear_seen`, with no host to ask and
+/// nothing for a down host to refuse. A session on an unreachable host is
+/// still listed and clearly marked stale (SPEC.md), and its dot still has a
+/// colour — so it must still be markable. The existence check is the SAME
+/// "no host has ever reported this id" lookup [`get_session`] uses
+/// ([`resolve_owner`]) rather than a bespoke one, but only for the 404: the
+/// resolved host and connection status are irrelevant to a write that never
+/// reaches a supervisor, and are discarded.
+///
+/// Bumps the fleet-events revision only when the store reports the write
+/// actually changed something. Without that check, the same stamp being
+/// resent — a manual "mark read" repeated on an already-seen session, the
+/// session view's auto-mark effect re-firing after a staleness or
+/// capability transition with no new activity behind it
+/// (`session_view.rs`'s `mark_key`), or a client retrying a PUT whose
+/// response it missed — would each re-bump the revision for nothing,
+/// pinging every other connected client to re-read a list that has not
+/// moved. The store's `mark_seen`/`clear_seen` own docs carry the SQL half
+/// of that guarantee; `sessions_tests.rs`'s seen-route tests pin the
+/// bump/no-bump split from this end.
+///
+/// Same bare `{}` success body as `stop_session`/`delete_session`: nothing
+/// about the write needs echoing back, since the events bump this handler
+/// issues on a real change is what brings every client's next list read
+/// (including the caller's own) up to date — no optimistic client-side
+/// state is needed here.
+pub(crate) async fn mark_seen(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<MarkSeenReq>,
+) -> impl IntoResponse {
+    if let Err(e) = resolve_owner(&state, &id).await {
+        return http_error(e);
+    }
+    let changed = match req.seen_activity_at {
+        Some(activity_at) => state.store.mark_seen(&id, activity_at).await,
+        None => state.store.clear_seen(&id).await,
+    };
+    match changed {
+        Ok(changed) => {
+            if changed {
+                state.manager.events().bump();
+            }
             axum::Json(serde_json::json!({})).into_response()
         }
         Err(e) => http_error(e),
