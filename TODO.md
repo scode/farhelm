@@ -110,6 +110,12 @@ everything not yet sorted, which carries no implication either way. Within a buc
   loaded runs during the profiles attempt above). Same spec, same box, same day as the three cases above; nothing about
   either cause is known beyond the names. Start at rung 1 of `.agents/narrow-tests.md` with `--repeat-each` on the
   engine that failed.
+- Deflake `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts): on 2026-09-03, on
+  `webkit-sidebar`, `Error: route.fulfill: Route is already handled!` inside `forceBuildSkew` (`helpers/fleet.ts`, four
+  callers: three in `feed.spec.ts` and this test) — reproduced alone at 1/20 on a 4-vCPU sandbox, single worker, so it
+  is not a cross-test interaction. Reads as the route handler racing itself under WebKit, but why WebKit dispatches the
+  intercepted request twice for one navigation is not known. Start at rung 1 of `.agents/narrow-tests.md` (already run
+  once; widen the repeat count) on `webkit-sidebar`.
 - Put the tmux e2e suite back into the release gate, and un-ignore the two load-flaky tests still ignored, once the
   deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
   every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or
@@ -129,9 +135,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
 - Add "mark unread" and "mark read": toggle the dot between blue and grey by clicking the dot itself, and from the
   session row's popup menu, where the item reads "mark read" or "mark unread" depending on the current state. Plan:
   `plans/session-dot-read-state.md` (medium).
-- Make local versus remote obvious in the sidebar: an icon for local vs remote (which icon is not decided), and a more
-  prominent hostname, probably moved up to the session name row with some visual weight (details to be settled later).
-  Plan: `plans/sidebar-local-vs-remote.md` (low).
 - Add "replace" on sessions: like clone, but the new session takes the old one's place instead of duplicating it. A
   fresh session and a fresh agent process, with the same directory, host, and the rest of the settings. Plan:
   `plans/replace-session.md` (medium).

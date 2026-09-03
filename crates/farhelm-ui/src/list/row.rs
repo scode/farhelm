@@ -12,12 +12,13 @@ use crate::Session;
 #[cfg(test)]
 use crate::SessionStatus;
 use crate::archive::confirmation as archive_confirmation;
+use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{existence_word, source_profile_label};
 use crate::rename::RenameForm;
 use crate::status::{StatusBadgeView, confirm_consequence, status_badge};
 
-use super::shared::{DeleteTarget, RowState};
+use super::shared::{DeleteTarget, HostLocality, RowState};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
@@ -436,23 +437,31 @@ std::thread_local! {
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
-/// The row is at most three lines: the title (with the stale/archived/
-/// status badges and the last-activity age beside it), the host — only when
-/// the session is NOT on the helm's own machine — and a meta line carrying
-/// the abbreviated cwd beside a compact invocation badge. Each field
-/// ellipsizes alone in the fixed-width sidebar.
+/// The row is always two lines: the title line (the title, the
+/// stale/archived/status badges, the locality glyph, an optional host name
+/// for a remote or unknown session, and the last-activity age) and a meta
+/// line carrying the abbreviated cwd beside a compact invocation badge.
+/// Each field ellipsizes alone in the fixed-width sidebar; the host name
+/// specifically occupies a BOUNDED slot on the title line (`.session-host`
+/// in app.css, `flex: 0 1 auto` with a `max-width` cap) rather than a
+/// line of its own, so a long destination cannot push the title to
+/// nothing and a long title cannot hide the host entirely.
 ///
-/// The shape is a density decision (2026-08-23, the UI refresh), and it
-/// reverses the interviewed row contents recorded in BUGS_BURNDOWN.md's
-/// "Decisions (interviewed 2026-08-13)", which called for the host and the
-/// full invocation on every row. In a fleet that is mostly local, the host
-/// line said "this machine" over and over, and the full invocation line
-/// was usually an absolute path plus flags that ellipsized into
-/// indistinguishability — two lines of row height for near-zero
-/// information. Both are still reachable: the host line returns the moment
-/// a session IS remote, and the full cwd and invocation are on the
-/// respective elements' `title` attributes. See `abbreviate_home` and
-/// `compact_invocation` for what each abbreviation costs.
+/// The two-line shape is a density decision (2026-08-23, the UI refresh),
+/// and it reverses the interviewed row contents recorded in
+/// BUGS_BURNDOWN.md's "Decisions (interviewed 2026-08-13)", which called
+/// for the host and the full invocation on every row. In a fleet that is
+/// mostly local, a dedicated host line said "this machine" over and over,
+/// and the full invocation line was usually an absolute path plus flags
+/// that ellipsized into indistinguishability — two lines of row height for
+/// near-zero information. Both are still reachable, and neither ever costs
+/// a line of its own again (2026-09-03 moved the host onto the title line
+/// rather than reviving its dedicated one — see `SPEC_impl.md`'s
+/// sidebar-row paragraph for that reversal's own reasoning): a remote or
+/// unknown session's host name rides the title line's bounded slot, and
+/// the full cwd and invocation are on the respective elements' `title`
+/// attributes. See `abbreviate_home` and `compact_invocation` for what
+/// each abbreviation costs.
 ///
 /// A row the helm marked stale
 /// — its host is in some non-connected state — is dimmed and badged rather
@@ -652,7 +661,7 @@ pub(super) fn SessionRow(
         nav_disabled,
         menu_open,
         selected,
-        host_is_local,
+        locality,
         activity,
     } = state;
     #[cfg(test)]
@@ -675,6 +684,16 @@ pub(super) fn SessionRow(
     // `status_badge`'s own docs for why an empty badge box would be the
     // same mistake in CSS.
     let badge = status_badge(&session.status, session.annotation.as_deref());
+    // The browser suite's stable wire token for locality, the same role
+    // `data-host-kind` plays in the host panel: a plain string rather than
+    // `Debug`'s derived spelling, so a rename of the enum's variants (their
+    // Rust-side naming is free to change) does not silently rewrite what
+    // every existing selector matches on.
+    let locality_attribute = match locality {
+        HostLocality::Local => "local",
+        HostLocality::Remote => "remote",
+        HostLocality::Unknown => "unknown",
+    };
     let open_session = session.clone();
     let stop_id = session.id.clone();
     let delete_target = DeleteTarget {
@@ -1035,6 +1054,12 @@ pub(super) fn SessionRow(
             "data-session-stale": "{session.stale}",
             "data-session-archived": "{session.archived}",
             "data-session-selected": "{selected}",
+            // The browser suite's hook for the locality glyph, the same
+            // role `data-host-kind` plays on a host panel row: a stable
+            // string the markup carries independent of which icon (if any)
+            // actually rendered, so a test can assert the verdict without
+            // depending on SVG internals.
+            "data-host-locality": "{locality_attribute}",
             // Two stacked rows, not one: the buttons need a plain flex
             // ROW (see `.session-row-main` in app.css), but a per-session
             // error line needs its own full-width row underneath rather
@@ -1068,11 +1093,15 @@ pub(super) fn SessionRow(
                     // row contents) is far too narrow for the old
                     // everything-on-one-line layout, whose min-width floors
                     // produced the MT-8 overflow class the moment space ran
-                    // short. The title line leads with identity and its
-                    // qualifiers; the host (when it is not the helm's own
-                    // machine) and the directory/invocation pair follow on
-                    // lines of their own, each field ellipsizing alone.
-                    // `span` wrappers, not `div`: this all sits inside the
+                    // short. The title line leads with identity, its
+                    // qualifiers, and (2026-09-03) locality — the glyph and,
+                    // for a remote or unknown host, its name, sharing the
+                    // line with the title rather than spending a second one
+                    // on it (see the locality slot below and
+                    // `SPEC_impl.md`'s sidebar-row paragraph for why); the
+                    // directory/invocation pair follows on a line of its
+                    // own, each field ellipsizing alone. `span` wrappers,
+                    // not `div`: this all sits inside the
                     // native `.session-row-open` <button>, whose content
                     // model only permits phrasing content — a flow-content
                     // div inside a button is invalid HTML that engines and
@@ -1089,6 +1118,68 @@ pub(super) fn SessionRow(
                         }
                         if let Some(badge) = badge {
                             StatusBadgeView { badge }
+                        }
+                        // The locality slot (2026-09-03): between the
+                        // badges and the age, so the title
+                        // ellipsizes first under pressure and the host
+                        // keeps a bounded share of the line rather than
+                        // being pushed off it entirely — see `.session-host`
+                        // and `.host-kind-icon` in app.css for the width
+                        // split.
+                        //
+                        // Every row draws a glyph once its locality is
+                        // KNOWN — local is a positive signal on its own row,
+                        // not an absence to notice elsewhere — and an
+                        // `Unknown` row draws none, because a local claim
+                        // this row cannot back is exactly what
+                        // `shared::session_locality` was designed never to
+                        // assert. The glyph carries its own accessible word
+                        // in a `.visually-hidden` span beside it (the same
+                        // clip-not-remove pattern `status::StatusBadgeView`
+                        // uses for a status word next to a color-only dot),
+                        // since the icon itself is `aria-hidden`.
+                        match locality {
+                            HostLocality::Local => rsx! {
+                                LocalHostIcon {}
+                                span { class: "visually-hidden", "local" }
+                            },
+                            HostLocality::Remote => rsx! {
+                                RemoteHostIcon {}
+                                span { class: "visually-hidden", "remote" }
+                            },
+                            HostLocality::Unknown => rsx! {},
+                        }
+                        // The host NAME rides the same line, for a remote or
+                        // unknown row only — a local row already said so
+                        // with the glyph above and never repeats "this
+                        // machine" in words (see `session_locality`'s doc:
+                        // the row still never prints the helm's own
+                        // rendering of its local host). The name is the
+                        // helm's own rendering (`host_name`), denormalized
+                        // onto the row so the list needs no second request
+                        // — a row from a helm that sends none simply shows
+                        // nothing here rather than inventing a label.
+                        // Escaped and direction-isolated like every other
+                        // rendering of a destination: this one names the
+                        // machine a row's stop and delete will reach, so a
+                        // name able to reorder the line around it could
+                        // make one host's session read as another's.
+                        //
+                        // `title` carries the same escaped value, not the
+                        // raw one — SPEC.md's promise is the FULL value on
+                        // the row, and the title-line slot ellipsizes at
+                        // 40% width (`.session-host` in app.css), so a long
+                        // destination needs the same tooltip recovery path
+                        // the directory line already has.
+                        if let Some(host_name) =
+                            session.host_name.as_ref().filter(|_| locality != HostLocality::Local)
+                        {
+                            span {
+                                class: "session-host peer-value",
+                                dir: "ltr",
+                                title: "{display_peer(host_name)}",
+                                "{display_peer(host_name)}"
+                            }
                         }
                         // Beside the badge, and about something ELSE. The
                         // badge is the session's current (or, on a stale
@@ -1112,34 +1203,6 @@ pub(super) fn SessionRow(
                                 class: "status-time",
                                 title: "{activity.absolute}",
                                 "{activity.age}"
-                            }
-                        }
-                    }
-                    // The host gets a line of its own, but ONLY for a
-                    // session that is not on the helm's own machine: with
-                    // more than one machine in play the name is what
-                    // disambiguates two otherwise identical sessions, and
-                    // with only one it is the same word on every row,
-                    // costing a quarter of the row's height to say nothing.
-                    // `host_is_local` is `ListView`'s answer, not this
-                    // row's — see `shared::session_is_local` for why the
-                    // row cannot decide it and why every unknown answers
-                    // "not local" (the line shows, rather than a local
-                    // claim being invented).
-                    //
-                    // The name is the helm's own rendering (`host_name`),
-                    // denormalized onto the row so the list needs no second
-                    // request — a row from a helm that sends none simply
-                    // shows nothing here rather than inventing a label.
-                    // Escaped and direction-isolated like every other
-                    // rendering of a destination: this one names the machine
-                    // a row's stop and delete will reach, so a name able to
-                    // reorder the line around it could make one host's
-                    // session read as another's.
-                    if let Some(host_name) = session.host_name.as_ref().filter(|_| !host_is_local) {
-                        span { class: "session-row-line",
-                            span { class: "session-host peer-value", dir: "ltr",
-                                "{display_peer(host_name)}"
                             }
                         }
                     }
@@ -1922,7 +1985,7 @@ mod tests {
                         nav_disabled: false,
                         menu_open: false,
                         selected: false,
-                        host_is_local: false,
+                        locality: HostLocality::Unknown,
                         activity: None,
                     },
                     rename_draft,
@@ -2009,7 +2072,7 @@ mod tests {
                             nav_disabled: false,
                             menu_open: false,
                             selected: selected == id,
-                            host_is_local: false,
+                            locality: HostLocality::Unknown,
                             activity: None,
                         },
                         rename_draft,

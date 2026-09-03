@@ -137,6 +137,7 @@ mod auth;
 pub mod desktop;
 mod feed;
 mod hosts;
+mod icons;
 mod list;
 mod menu_panel;
 mod ops;

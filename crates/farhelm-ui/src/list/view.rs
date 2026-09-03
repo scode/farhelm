@@ -32,7 +32,7 @@ use super::create_form::{CreatePrefill, CreateSessionForm, CreateTarget, prefill
 use super::row::SessionRow;
 use super::shared::{
     DeleteTarget, HostOption, OpenHost, RowState, effective_create_host, host_options,
-    session_is_local,
+    session_locality,
 };
 
 /// The shared preference (SPEC.md, Session list) as this page holds it:
@@ -2102,9 +2102,10 @@ pub(crate) fn ListView(
     // than an option the user cannot even select to find out.
     let host_options: Vec<HostOption> = host_options(hosts.read().hosts().unwrap_or_default());
     // Which registry row is the helm's own machine, derived once for the
-    // whole render: it is what lets each row decide whether naming its
-    // host tells the user anything (see `shared::session_is_local`, and
-    // `SessionRow`'s doc for the density argument). Taken from the
+    // whole render: it is what lets each row decide whether it is local,
+    // remote, or unplaceable, and therefore which glyph (if any) and which
+    // host name to draw (see `shared::session_locality`, and `SessionRow`'s
+    // doc for the density argument). Taken from the
     // ALREADY-NORMALIZED `host_options` above rather than a second scan of
     // the raw registry — `HostOption::local` is the same
     // `HostKind::Local` comparison a dedicated rescan would make, so a
@@ -2647,7 +2648,7 @@ pub(crate) fn ListView(
                                         == Some(session.id.as_str()),
                                     selected: selected.read().as_deref()
                                         == Some(session.id.as_str()),
-                                    host_is_local: session_is_local(session.host, local_host),
+                                    locality: session_locality(session.host, local_host),
                                     // Formatted HERE, not in the row: see
                                     // `RowState::activity` for why the
                                     // clock's tick must not reach a row

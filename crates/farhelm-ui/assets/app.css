@@ -330,9 +330,10 @@ samp {
 /* The two-pane shell (BUGS_BURNDOWN.md issue 5): a fixed-width sidebar
  * holding the session list, and a main pane holding the selected session.
  * The sidebar width is FIXED by decision (no drag handle, no persistence);
- * wider than the bare minimum because rows carry title, status, directory
- * and invocation (plus a host line when the session is not on the helm's
- * own machine). Every ancestor of .terminal-panes must keep a definite
+ * wider than the bare minimum because rows carry title, status, directory,
+ * invocation, a locality glyph, and (for a remote or unknown session) a
+ * host name sharing the title line in a bounded slot. Every ancestor of
+ * .terminal-panes must keep a definite
  * height, which is why the chain here is all height:100%/flex — a
  * height:auto link would collapse the terminal to zero rows. */
 .app-shell {
@@ -1694,13 +1695,68 @@ samp {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* `flex: 1 1 auto` claims the growth this line's fixed-width siblings
+     (the badges, the icon, the age) leave unused — that is what `1 1`
+     differs on from `.session-host`'s `0 1` below. It is NOT what protects
+     the title from collapsing: `flex-shrink` is `1` on both this and
+     `.session-host`, so under real pressure the two shrink in the same
+     pass, proportional to their own content size, and neither's
+     flex-shrink factor alone stops it reaching zero. `min-width` below is
+     the actual floor — a fixed pixel amount the browser will not shrink
+     past, whatever the surrounding pressure — and `.session-host` carries
+     the matching floor on the other side of this split, so long content on
+     either side cannot squeeze the other to an unreadable sliver. */
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: 60px;
+}
+
+/* The locality glyph (2026-09-03):
+   `icons::LocalHostIcon`/`RemoteHostIcon`, sized to the title's cap height
+   rather than its own em so the glyph reads as part of the same line of
+   text instead of a bigger decoration dropped onto it. `flex: 0 0 auto`
+   keeps it a fixed-size claimant that never shrinks and never grows — a
+   glyph that ellipsized or stretched would not read as an icon at all.
+
+   No `vertical-align` override: an inline SVG is a replaced element whose
+   default baseline is its own bottom edge, which is exactly what
+   `.session-row-line`'s `align-items: baseline` needs to sit it on the
+   title's text baseline — the same mechanism `.status-dot` relies on
+   (see the `.visually-hidden` rule's own doc for why a baseline has to
+   come from a visible element rather than a clipped one). */
+.host-kind-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+/* The remote host's name, sharing the title line rather than a line of its
+   own (the 2026-09-03 reversal — see SPEC_impl.md's sidebar-row paragraph).
+   `flex: 0 1 auto` differs from `.session-title`'s `1 1 auto` only in
+   flex-GROW: this item claims none of the line's unused space, the title
+   claims all of it. That is a growth rule, not a shrink one — `flex-shrink`
+   is `1` here exactly as it is on the title, so on its own it would let
+   this shrink at the same rate and, under enough pressure, to the same
+   zero. Two properties do the actual two-sided bounding the split needs:
+   `max-width: 40%` caps this ABOVE, so a very long destination cannot push
+   the title toward nothing regardless of how little the title's own
+   content wants; `min-width` below floors this BELOW, so a very long
+   TITLE cannot push the host past legibility either. 40% is a deliberate
+   middle ground — generous enough that an ordinary ssh destination is
+   rarely clipped, tight enough that the title still gets the majority of
+   the line whenever both are long. */
+.session-host {
+  color: var(--fg-1);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  max-width: 40%;
+  min-width: 40px;
 }
 
 .session-cwd,
-.session-invocation,
-.session-host {
+.session-invocation {
   color: var(--fg-1);
   font-size: 12px;
   overflow: hidden;
@@ -2838,6 +2894,13 @@ samp {
   color: var(--archived-badge);
   font-size: 11px;
   text-transform: uppercase;
+  /* Matches `.stale-badge`'s `flex-shrink: 0` (2026-09-03): the title
+     line's width rule promises the stale and archived badges never shrink,
+     and this one was missing the property that actually makes that true —
+     without it, the flex default (`flex-shrink: 1`) let a long title and
+     host squeeze "archived" toward illegibility instead of taking their
+     own share of the pressure first. */
+  flex-shrink: 0;
 }
 
 /* A restart refusal is the supervisor's own prose — a stale-offer conflict
