@@ -1485,6 +1485,8 @@ samp {
 .confirm-cancel,
 .confirm-archive,
 .archive-cancel,
+.confirm-replace,
+.replace-cancel,
 .rename-submit,
 .rename-cancel {
   align-self: center;

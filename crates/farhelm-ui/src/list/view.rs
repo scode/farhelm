@@ -11,7 +11,8 @@ use dioxus::prelude::*;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, archive_session, delete_session,
-    fetch_hosts, fetch_session, fetch_sessions, queue_seen_write, rename_session, stop_session,
+    fetch_hosts, fetch_session, fetch_sessions, queue_seen_write, rename_session, replace_session,
+    stop_session,
 };
 use crate::app_bar::AppBar;
 use crate::archive::confirmation as archive_confirmation;
@@ -292,30 +293,37 @@ fn accepts_listing(
     }
 }
 
-/// Whether a clone click on `session_id` must be refused outright, before
-/// `ListView`'s `on_clone` touches a single signal.
+/// Whether a click that only SNAPSHOTS this row's `Session` — clone (opens
+/// the create form pre-filled) or replace (opens `confirming_replace`) —
+/// must be refused outright, before `ListView` touches a single signal for
+/// it.
 ///
 /// Pulled out as a pure predicate over the same primitives `on_rename_start`
 /// and `on_delete` already guard on, so the cross-guard is checkable without
 /// mounting a component: the controls a busy or mid-decision row disables
 /// lag one render behind the click that triggered them (`disabled`/
-/// `aria-disabled` are attributes, not synchronous vetoes), so a clone
+/// `aria-disabled` are attributes, not synchronous vetoes), so a click
 /// queued just ahead of that render can still reach the handler. `busy` is
 /// the page-wide operation lock (`OpLock::busy_now`); the rest are this
 /// SPECIFIC row's own state — any of them true means this row's `Session`
 /// is about to change, or is mid-decision, and is not a stable thing to
-/// snapshot into a fresh clone right now.
+/// snapshot right now. Shared by both callers rather than duplicated,
+/// because clone and replace need the identical answer to the identical
+/// question — a row mid-archive-confirmation, say, is exactly as unstable
+/// a clone source as it is a replace source.
 fn clone_is_refused(
     busy: bool,
     session_id: &str,
     pending: &HashSet<String>,
     confirming: &HashSet<String>,
     confirming_archive: &HashSet<String>,
+    confirming_replace: &HashSet<String>,
     renaming: Option<&str>,
 ) -> bool {
     busy || pending.contains(session_id)
         || confirming.contains(session_id)
         || confirming_archive.contains(session_id)
+        || confirming_replace.contains(session_id)
         || renaming == Some(session_id)
 }
 
@@ -603,6 +611,15 @@ pub(crate) fn ListView(
     // mutual exclusion explicit instead of overloading one flag with an
     // action kind that every handler would then have to decode.
     let mut confirming_archive = use_signal(HashSet::<String>::new);
+    // Replace's own prompt, on the same footing as the two above. Unlike
+    // `confirming_archive` — which `commit_listing` retires once a row
+    // ARCHIVES, since an archived row's `archive_confirmation` prompt no
+    // longer applies to it — this one reconciles the same way `confirming`
+    // does: only a row that leaves the listing ENTIRELY drops its pending
+    // replace confirmation, because replace stays a legitimate action on an
+    // archived row (`row::session_menu_order` offers it unconditionally,
+    // same as clone).
+    let mut confirming_replace = use_signal(HashSet::<String>::new);
     // At most one row's actions menu is open, and this parent owns which.
     // A per-row boolean would let two menus fight, and the parent is the
     // only place "opening yours closes mine" can live. Defined up here with
@@ -1055,6 +1072,14 @@ pub(crate) fn ListView(
             confirming_archive
                 .write()
                 .retain(|id| active_ids.contains(id.as_str()));
+            // Replace reconciles against `live_ids`, not `active_ids`: an
+            // archived row is still a legitimate replace target (see the
+            // signal's own doc), so archiving a row elsewhere must not
+            // silently dismiss a replace confirmation already open on it —
+            // only the row leaving the listing entirely does that.
+            confirming_replace
+                .write()
+                .retain(|id| live_ids.contains(id.as_str()));
             // An open rename field for a session that has left the
             // listing entirely goes with it, the same tidiness the
             // `confirming` retain above performs — there is no row
@@ -1437,6 +1462,7 @@ pub(crate) fn ListView(
         // the same buttons for the same reason.
         if confirming.read().contains(&id)
             || confirming_archive.read().contains(&id)
+            || confirming_replace.read().contains(&id)
             || renaming.read().as_deref() == Some(id.as_str())
         {
             return;
@@ -1626,6 +1652,7 @@ pub(crate) fn ListView(
     let on_delete = move |target: DeleteTarget| {
         if pending.read().contains(&target.id)
             || confirming_archive.read().contains(&target.id)
+            || confirming_replace.read().contains(&target.id)
             || renaming.read().as_deref() == Some(target.id.as_str())
         {
             return;
@@ -1770,6 +1797,7 @@ pub(crate) fn ListView(
         if session.archived
             || pending.read().contains(&session.id)
             || confirming.read().contains(&session.id)
+            || confirming_replace.read().contains(&session.id)
             || renaming.read().as_deref() == Some(session.id.as_str())
         {
             return;
@@ -1792,6 +1820,94 @@ pub(crate) fn ListView(
     };
     let cancel_archive = move |id: String| {
         confirming_archive.write().remove(&id);
+    };
+
+    // Replace shares the per-row operation gate with stop, rename,
+    // archive, and delete (`begin_row_op`, which is also what enforces the
+    // page-wide nav lock here — see that helper's own doc), but its
+    // success path does something none of the others do: it changes which
+    // session is SELECTED, not merely how the clicked row itself now reads.
+    //
+    // The selection write happens BEFORE `refresh` requests the next
+    // listing read, and that ordering is load-bearing, not incidental.
+    // `ListView`'s own auto-select effect only runs while `selected` reads
+    // `None` — see that effect's guard — so writing the new session as the
+    // selection FIRST is what keeps the reconciliation path from ever
+    // getting a chance to run at all: there is no window where the old
+    // row's disappearance leaves the pane momentarily unselected for that
+    // effect to fill with whatever the fallback would have picked.
+    // `remember_selection` is the same "a user-initiated choice" write
+    // `guarded_open` and the create form's `on_created` make; `on_open` is
+    // what actually swaps the right pane, which a stored preference alone
+    // does not do for a client that already has a page open.
+    let replace_base = base.clone();
+    let replace_refresh = request_listing.clone();
+    let mut do_replace = move |id: String| {
+        if !begin_row_op(&id) {
+            return;
+        }
+        errors.write().remove(&id);
+        let base = replace_base.clone();
+        let refresh = replace_refresh.clone();
+        spawn(async move {
+            match replace_session(&base, &id).await {
+                Ok(session) => {
+                    remember_selection(&base, preferences, &session.id);
+                    on_open.call(session);
+                    refresh(Trigger::Explicit);
+                }
+                Err(e) => {
+                    // Keyed by the SOURCE id: the row this error belongs
+                    // beside is the one the user clicked "replace" on,
+                    // which — on a delete-after-create failure — is also
+                    // the row that is still there to show it next to. On
+                    // that same failure the message already names the new
+                    // session's id too (`api::replace_session`'s own doc),
+                    // so nothing here needs to remember it separately.
+                    errors.write().insert(id.clone(), format!("replace: {e}"));
+                }
+            }
+            end_row_op(&id);
+        });
+    };
+    // The "replace" menu item's click: guarded by the SAME predicate
+    // `on_clone` uses (`clone_is_refused`'s own doc explains why the two
+    // share it — the difference between clone and replace is never in
+    // whether either is refused, only in what happens once accepted), then
+    // opens `confirming_replace` unconditionally, unlike `on_delete`'s
+    // `has_ended()` split. Delete's split exists because an already-finished
+    // session has nothing left for the CONFIRMATION to be honest about
+    // beyond "delete anyway"; replace always has something worth confirming
+    // regardless of liveness — a fresh session is about to take this row's
+    // place — so `status::replace_consequence` is total over every status
+    // (no `Option` to skip on) and this handler never bypasses the prompt
+    // once the guard above lets it through.
+    let on_replace = move |session: Session| {
+        if clone_is_refused(
+            ops.busy_now(),
+            &session.id,
+            &pending.read(),
+            &confirming.read(),
+            &confirming_archive.read(),
+            &confirming_replace.read(),
+            renaming.read().as_deref(),
+        ) {
+            return;
+        }
+        confirming_replace.write().insert(session.id);
+    };
+    let confirm_replace = move |id: String| {
+        // Same shared-token refusal as `confirm_delete`/`confirm_archive`,
+        // for the same keep-the-prompt reason.
+        if ops.busy_now() {
+            return;
+        }
+        if confirming_replace.write().remove(&id) {
+            do_replace(id);
+        }
+    };
+    let cancel_replace = move |id: String| {
+        confirming_replace.write().remove(&id);
     };
 
     // The "clone" menu item's click. It never calls the API itself — it
@@ -1834,6 +1950,7 @@ pub(crate) fn ListView(
             &pending.read(),
             &confirming.read(),
             &confirming_archive.read(),
+            &confirming_replace.read(),
             renaming.read().as_deref(),
         ) {
             return;
@@ -1868,6 +1985,7 @@ pub(crate) fn ListView(
             || pending.read().contains(&id)
             || confirming.read().contains(&id)
             || confirming_archive.read().contains(&id)
+            || confirming_replace.read().contains(&id)
         {
             return;
         }
@@ -2121,8 +2239,11 @@ pub(crate) fn ListView(
     let cancel_delete = use_callback(cancel_delete);
     let on_archive = use_callback(on_archive);
     let on_clone = use_callback(on_clone);
+    let on_replace = use_callback(on_replace);
     let confirm_archive = use_callback(confirm_archive);
     let cancel_archive = use_callback(cancel_archive);
+    let confirm_replace = use_callback(confirm_replace);
+    let cancel_replace = use_callback(cancel_replace);
     let on_rename_start = use_callback(on_rename_start);
     let on_rename_submit = use_callback(on_rename_submit);
     let on_rename_cancel = use_callback(move |_| renaming.set(None));
@@ -2679,6 +2800,9 @@ pub(crate) fn ListView(
                                     confirming_archive: confirming_archive
                                         .read()
                                         .contains(&session.id),
+                                    confirming_replace: confirming_replace
+                                        .read()
+                                        .contains(&session.id),
                                     renaming: renaming.read().as_deref()
                                         == Some(session.id.as_str()),
                                     nav_disabled: nav_locked,
@@ -2700,6 +2824,9 @@ pub(crate) fn ListView(
                                 on_open: guarded_open,
                                 on_clone,
                                 on_mark_seen,
+                                on_replace,
+                                on_confirm_replace: confirm_replace,
+                                on_cancel_replace: cancel_replace,
                                 on_stop,
                                 on_delete,
                                 on_confirm_delete: confirm_delete,
@@ -2727,8 +2854,9 @@ pub(crate) fn ListView(
 mod tests {
     use super::*;
 
-    /// A clone click is refused by EACH of its four guards independently,
-    /// and accepted only when every one of them is clear.
+    /// A clone (or replace — the two share this predicate, see its own doc)
+    /// click is refused by EACH of its five guards independently, and
+    /// accepted only when every one of them is clear.
     ///
     /// This pins the regression the guard exists to prevent: the row's own
     /// `disabled`/`aria-disabled` attributes are a render behind the click
@@ -2740,33 +2868,37 @@ mod tests {
     /// dropped any single one of them would fail here rather than only
     /// under a real browser.
     #[test]
-    fn a_clone_is_refused_by_any_one_of_its_four_guards() {
+    fn a_clone_is_refused_by_any_one_of_its_five_guards() {
         let id = "session-1";
         let empty = HashSet::new();
         let holding = HashSet::from([id.to_string()]);
 
         assert!(
-            !clone_is_refused(false, id, &empty, &empty, &empty, None),
+            !clone_is_refused(false, id, &empty, &empty, &empty, &empty, None),
             "nothing is holding this row, so the clone must proceed"
         );
         assert!(
-            clone_is_refused(true, id, &empty, &empty, &empty, None),
+            clone_is_refused(true, id, &empty, &empty, &empty, &empty, None),
             "the shared page-wide lock alone must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &holding, &empty, &empty, None),
+            clone_is_refused(false, id, &holding, &empty, &empty, &empty, None),
             "a stop or delete already in flight for THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &holding, &empty, None),
+            clone_is_refused(false, id, &empty, &holding, &empty, &empty, None),
             "an open delete confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &empty, &holding, None),
+            clone_is_refused(false, id, &empty, &empty, &holding, &empty, None),
             "an open archive confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &empty, &empty, Some(id)),
+            clone_is_refused(false, id, &empty, &empty, &empty, &holding, None),
+            "an open replace confirmation on THIS row must refuse it"
+        );
+        assert!(
+            clone_is_refused(false, id, &empty, &empty, &empty, &empty, Some(id)),
             "this row's own open rename field must refuse it"
         );
         // A guard keyed to a DIFFERENT row must never refuse this one —
@@ -2774,7 +2906,7 @@ mod tests {
         // guard that read them as a single shared flag would block every
         // clone in the list the instant any one row was mid-operation.
         assert!(
-            !clone_is_refused(false, id, &empty, &empty, &empty, Some("other-row")),
+            !clone_is_refused(false, id, &empty, &empty, &empty, &empty, Some("other-row")),
             "another row's rename must not block this row's clone"
         );
     }
