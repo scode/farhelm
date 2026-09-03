@@ -25,11 +25,14 @@ machine passed. A load flake in the helm-death detection racing the request, or 
 mechanism is not suspected. Disposition: open (TODO.md); marked `#[ignore]` in the 0.3.0 stack after it blocked release
 gates, to be un-ignored when deflaked.
 
-## 2026-09-02 — `terminal_backpressure::a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam` (crates/farhelm/tests/e2e)
+## 2026-09-02 — `terminal_backpressure::a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam` (crates/farhelm/tests/e2e; renamed `a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam` in #357)
 
 Failed once on a GitHub-hosted runner in CI's `test` job for a PR that touched nothing on the terminal path, and passed
 on the re-run; the panic is in the file's shared wait ("timed out waiting for FLOOD-…"). Predates that PR. Disposition:
-open (TODO.md); `#[ignore]` as above.
+fixed in #357. The wait matched one of the first 100 records, and every failing transcript had already received records
+through 799999: the initial prefix of the burst had aged out of tmux history before the attachment started draining, so
+no budget could have found it. The flood now starts behind an input gate after the attachment is ready, making that
+initial-prefix wait a valid setup oracle again.
 
 ## 2026-09-02 — `session_lifecycle::input_bytes_survive_verbatim_through_hexecho` (crates/farhelm/tests/e2e)
 
@@ -76,7 +79,9 @@ consume.
 
 Failed in the same rc.2 gate run, in the same shared wait its sibling above timed out in the day before
 (`timed out waiting for FLOOD-000000; 11619657 bytes seen`). Two members of one file failing at one wait under load
-points at the wait's budget rather than either test. Disposition: open (TODO.md); `#[ignore]` as above.
+points at the wait's budget rather than either test. Disposition: fixed in #357, with the entry above; the wait's oracle
+was wrong (the initial prefix had aged out), not its budget. The gated start described there restores that prefix as a
+loud premise instead of accepting a retained tail.
 
 ## 2026-09-03 — profiles popup, three cases (e2e/tests/profiles.spec.ts)
 
@@ -140,8 +145,10 @@ Same loaded sandbox, full binary at `--test-threads=4` on 0.3.0: the deep-pause 
 shared wait (`timed out waiting for FLOOD-000000; ~12 MB seen, last records [799999, ...]`), the same wait and the same
 fingerprint as the two `#[ignore]`d siblings above; the memory test failed 1 of 3. Neither failed in the three loaded
 full runs on the attach-boundary stack the same day, so the rate is noisy. A third member at the same wait strengthens
-the reading that the wait's budget under load, not any one test, is the thing to look at. Disposition: open (TODO.md,
-folded into the backpressure entries).
+the reading that the wait's budget under load, not any one test, is the thing to look at. Disposition: the deep-pause
+test is fixed in #357 with the two entries above (same wait, same cause: the first 100 records had aged out of history);
+its gated start now makes the initial-prefix premise deterministic. The memory test's failure was its RSS assertion, not
+that wait, and it stays open (TODO.md).
 
 ## 2026-09-03 — `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e)
 
