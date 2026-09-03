@@ -182,3 +182,12 @@ Twenty loaded single runs on a 4-vCPU sandbox: 8 failed, each after the full 40 
 queued in 11 µs; the marker still never came. So the stall is not a slow supervisor exchange and not a short budget:
 tmux acknowledged the `send-keys` and the raw-mode fixture never produced its reply. Disposition: open (TODO.md, with
 the proposed product direction).
+
+## 2026-09-03 — profiles popup, three cases (e2e/tests/profiles.spec.ts), attempted
+
+A loaded before leg on a 4-vCPU sandbox (10 full-spec runs, both engines, a `cargo build` looping beside Playwright)
+reproduced two of the three: `unknown then transit waits for the pending focus request` 5/10 Chromium and 1/10 WebKit,
+`stale focus-out classifiers cannot clear newer obligations` 2/10 and 2/10; the focus-and-Escape case 0/10. The
+attempted fix (an exhausted `Unknown` retried on the next focus event, ordinal-named test hooks, a quiescence wait
+before arming holds, a 30 s `stubFeed` socket wait) passed the stale case but made the pending-focus case fail 11/20 on
+Chromium, so it was not shipped. Disposition: open (TODO.md, with the attempt's shape and rates).
