@@ -752,12 +752,15 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
     );
 
     await page.locator("#terminal").click();
-    // Two queries go out together: DSR-6 (`\e[6n`, "where is the
-    // cursor?"), which xterm must still answer, and the DECRQM query for
-    // mode 12 (`\e[?12$p`, vim's cursor-blink probe), which must now
-    // provoke NO reply at all. PROBE-DONE is the synchronization marker
-    // proving the whole line — including the 1-second gap — actually ran
-    // in this real shell, not merely that it was typed.
+    // Two queries go out together. DSR-6 is wrapped in tmux passthrough so
+    // tmux forwards it deliberately to xterm, where its reply remains this
+    // test's positive browser-parser control. The bare DECRQM query for mode
+    // 12 (`\e[?12$p`, vim's cursor-blink probe) stays on the ordinary
+    // supervisor path and must provoke NO reply at all. That distinction
+    // keeps the positive control from contradicting supervisor filtering.
+    // PROBE-DONE is the synchronization marker proving the whole line —
+    // including the 1-second gap — actually ran in this real shell, not
+    // merely that it was typed.
     //
     // DSR-6 rather than an OSC-11 color query as the control, and that
     // choice is CI-hardened rather than arbitrary: headless WebKit on
@@ -782,7 +785,7 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
     // the wait below before the command — including the 1-second gap
     // the queries need — had actually executed.
     const probeLine =
-      "printf '\\e[6n\\e[?12$p'; sleep 1; printf 'PROBE-%s\\n' DONE";
+      "printf '\\ePtmux;\\e\\e[6n\\e\\\\\\e[?12$p'; sleep 1; printf 'PROBE-%s\\n' DONE";
     await page.evaluate(
       (line) => (window as any).__farhelmTerm.paste(line),
       probeLine,
