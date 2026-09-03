@@ -537,14 +537,16 @@ impl Session {
     }
 }
 
-/// Deserialize `Session::host_identity`, whose key PRESENCE carries meaning
-/// separately from its value: an absent key stays the outer `None` (via
-/// `#[serde(default)]`), while a present key — `null` included — lands in
-/// `Some(inner)`. Serde's stock `Option<Option<T>>` handling cannot express
-/// this: it decodes `null` and "absent" to the same outer `None`, which is
-/// exactly the collapse that field's contract forbids. Deliberately NOT
-/// generic: one field uses it, and the concrete signature keeps the wire
-/// shape it implements in plain sight.
+/// Deserialize a field whose key PRESENCE carries meaning separately from
+/// its value — `Session::host_identity` and `Host::alias` both use it: an
+/// absent key stays the outer `None` (via `#[serde(default)]`), while a
+/// present key — `null` included — lands in `Some(inner)`. Serde's stock
+/// `Option<Option<T>>` handling cannot express this: it decodes `null` and
+/// "absent" to the same outer `None`, which is exactly the collapse both
+/// fields' contracts forbid. Deliberately NOT generic over `T`: every field
+/// that uses it wants a `String`, and the concrete signature keeps the wire
+/// shape it implements in plain sight rather than hiding it behind a type
+/// parameter.
 fn double_option<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -664,6 +666,17 @@ pub struct Host {
     pub kind: HostKind,
     /// `None` for the local row, always present for an ssh row.
     pub destination: Option<String>,
+    /// The optional stored alias, editable from the host row's "⋯" menu.
+    ///
+    /// The outer option is a COMPATIBILITY signal, not a value: an older
+    /// helm predating this field omits the `alias` key from `GET /api/hosts`
+    /// entirely, decoding here to the outer `None`, while a current helm
+    /// with nothing stored sends an explicit JSON `null` (`Some(None)`).
+    /// `hosts.rs` reads the outer option to decide whether to OFFER the
+    /// editor at all — an older helm has no `/api/hosts/{id}/alias` route
+    /// to submit to, so showing it would be a dead end.
+    #[serde(default, deserialize_with = "double_option")]
+    pub alias: Option<Option<String>>,
     /// The helm's own rendering of the host's name — the same string
     /// session rows carry in `host_name`, so a row and its chip never
     /// disagree about what a host is called.
@@ -1866,6 +1879,45 @@ mod tests {
         let present: Session =
             serde_json::from_value(body(Some(serde_json::json!("install-a")))).unwrap();
         assert_eq!(present.host_identity, Some(Some("install-a".to_string())));
+    }
+
+    /// `Host::alias`'s three wire shapes decode to three distinct values —
+    /// `Session::host_identity`'s mirror of the same `double_option` contract,
+    /// pinned separately because it is what gates whether `hosts.rs` offers
+    /// the alias editor at all (see the field's own doc): an absent key (an
+    /// older helm that predates the field) must decode to the outer `None`,
+    /// never be conflated with a current helm's explicit `null` for "no
+    /// alias set" (`Some(None)`), or the editor would be silently offered
+    /// against a helm with no route to submit to.
+    #[test]
+    fn host_alias_decodes_absent_null_and_present_distinctly() {
+        let body = |alias: Option<serde_json::Value>| {
+            let mut json = serde_json::json!({
+                "id": 1,
+                "kind": "ssh",
+                "destination": "user@box",
+                "name": "user@box",
+                "identity": null,
+                "remote_farhelm": null,
+                "remote_state_dir": null,
+                "state": { "phase": "connecting", "attempt": 1, "last_error": null },
+            });
+            if let Some(value) = alias {
+                json["alias"] = value;
+            }
+            json
+        };
+        let absent: Host = serde_json::from_value(body(None)).unwrap();
+        assert_eq!(
+            absent.alias, None,
+            "an older helm's reply, with no `alias` key at all, must not be mistaken for one \
+             that explicitly cleared the alias"
+        );
+        let null: Host = serde_json::from_value(body(Some(serde_json::Value::Null))).unwrap();
+        assert_eq!(null.alias, Some(None));
+        let present: Host =
+            serde_json::from_value(body(Some(serde_json::json!("shortname")))).unwrap();
+        assert_eq!(present.alias, Some(Some("shortname".to_string())));
     }
 
     /// An old-shaped `Session` JSON (no `status` field at all — exactly
