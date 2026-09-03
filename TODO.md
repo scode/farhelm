@@ -72,6 +72,15 @@ Within a bucket, no order.
   wait at terminal_backpressure.rs:289 — the same wait the `a_paused_replay_detaches…` sibling above timed out in on
   2026-09-02. Two members of this file failing at the same line under load says the wait's budget, not either test's
   logic, is the first thing to look at.
+- Put the tmux e2e suite back into the release gate, and un-ignore the four load-flaky tests, once the deflake entries
+  above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs every test target
+  EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or two of the
+  load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a different one,
+  with the code they check unchanged; and `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once`, both
+  `terminal_backpressure` tests above, and
+  `session_lifecycle::delete_fails_closed_when_a_launch_artifact_cannot_be_removed` carry `#[ignore]` so CI's full suite
+  stops rolling the same dice. The suite still runs in CI's `test` job on every ready PR and before a stack lands, so
+  the gap is at tag time only. Reversing both is the definition of done for the deflake work.
 
 ## Maybe later
 
