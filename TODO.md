@@ -30,6 +30,17 @@ Within a bucket, no order.
 
 ## Maybe later
 
+- Take a pre-upgrade backup of the on-disk state so a release can be rolled back. Rerunning the installer pinned to an
+  older `FARHELM_VERSION` swaps the binaries back cleanly, but it does not make a downgrade work: both stores refuse to
+  open a database whose `user_version` is above what the binary understands (deliberately — misreading is worse than
+  refusing), so any release that bumps a schema (0.3.0 takes both the helm and the supervisor from 14 to 15) leaves the
+  older binary unable to open the state it finds. Today the only rollback is a state-directory backup taken by hand
+  before upgrading (the 2026-08-31 upgrade kept one next to the old binary), and remote hosts updated by the helm have
+  the same problem for their own supervisor state with nobody taking a backup at all. Wanted: the upgrade paths — the
+  installer for the local machine, and the helm's host update for remote ones — snapshot the state directory (a copy, or
+  SQLite's backup API, taken while the old version is stopped) before the new version first opens it, keep a bounded
+  number of such snapshots, and document the restore. Noted 2026-09-03 while cutting 0.3.0-rc.1.
+
 - Automate end-to-end testing of the host UPDATE path, including across releases. Nothing in CI updates a host: the
   CentOS provisioning test only ever installs onto a fresh container, and the update flow's own tests drive fake
   backends. The gap shipped a real field failure (2026-09-01), which is the worked example any design here should be
