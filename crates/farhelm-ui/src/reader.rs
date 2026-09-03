@@ -34,13 +34,13 @@
 //! Every [`Trigger`] answers two questions, and conflating either with the
 //! other has already produced product bugs:
 //!
-//! - **Does it carry news?** A feed notice and a user's filter submit do:
+//! - **Does it carry news?** A feed notice and a user's live filter edit do:
 //!   something changed, or the user asked for something different, and the
 //!   answer is owed now. A fallback tick does NOT — it is a clock going off,
 //!   with no more information than the last one had. Neither does the
 //!   reader's own [`Demand::Retry`], which knows only that the last attempt
 //!   failed.
-//! - **Is anyone watching?** A filter submit, a host mutation's refresh and
+//! - **Is anyone watching?** A live filter edit, a host mutation's refresh and
 //!   a mount are ATTENDED — a person did something and is waiting for the
 //!   result. A feed notice, a fallback tick and a retry are unattended:
 //!   nobody asked, the page is keeping itself current on its own.
@@ -61,7 +61,7 @@
 //! must stop keeping itself current against a helm whose vocabulary it does
 //! not share — while explicit user actions keep working, because refusing to
 //! answer a person who just clicked something is a broken page rather than a
-//! safe one. So under skew a filter submit still reads and the feed, the
+//! safe one. So under skew a live filter edit still reads and the feed, the
 //! fallback and the retry ladder all stand down.
 //!
 //! The retry cadence is `reconnect`'s ladder and probe interval, reused
@@ -104,7 +104,7 @@ use crate::skew;
 /// conclusion someone might disagree with in the moment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Trigger {
-    /// A person did something and is waiting: a filter submit, a host or
+    /// A person did something and is waiting: a live filter edit, a host or
     /// profile mutation's follow-up, a mount, a restart's refresh. Carries
     /// news, and keeps working under a latched build mismatch.
     Explicit,
@@ -541,7 +541,7 @@ pub(crate) async fn sleep_ms(millis: u64) {
 /// "only the mounted page reads" a lifecycle property: navigating away drops
 /// the reader mid-wait along with everything else the page owns. That is
 /// also why this is a free function taking a signal rather than a hook —
-/// every trigger (mount, feed notice, fallback tick, filter submit) calls it
+/// every trigger (mount, feed notice, fallback tick, live filter edit) calls it
 /// from a different place in the same component.
 ///
 /// A news-carrying trigger that lands while a retry is BACKING OFF reads
@@ -961,7 +961,7 @@ mod tests {
     /// SPEC_impl.md's withdrawal rule is about UNATTENDED behavior: polling
     /// a helm whose vocabulary this bundle does not share is what gets
     /// revoked. Withdrawing explicit reads too was a real regression — a
-    /// filter submit under skew produced no read at all, so the control
+    /// live filter edit under skew produced no read at all, so the control
     /// silently did nothing — and it is the kind of bug that reads as
     /// correct in the diff, because "stop reading" sounds like the safe
     /// direction until it is a person's click that stops working.

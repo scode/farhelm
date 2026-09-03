@@ -58,7 +58,16 @@ async function listWithStubbedFeed(page: Page): Promise<void> {
   await page.goto("/");
   await feed.waitForConnection(1);
   feed.notify(1);
-  // The filter bar sits behind the sidebar's on-demand toggle now; every
+  // The compact host strip's first read landing is itself a layout change
+  // above the session header, and the popover is a fixed surface measured
+  // once against that header, so `ListView` closes it for exactly that
+  // change (`hosts_strip_shape`). Opening before the strip has settled
+  // therefore races the page's own dismissal; settle first, then open.
+  await expect(page.locator(".hosts-compact-entry").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".hosts-compact-note", { hasText: "loading hosts" })).toHaveCount(0, {
+    timeout: 20_000,
+  });
+  // The filter popover sits behind the session header's on-demand toggle; every
   // test in this suite drives it, so opening it is part of arriving. The
   // helper's own visibility wait doubles as the page-arrived assertion
   // this line used to be.
@@ -109,9 +118,13 @@ async function watchListingReads(page: Page): Promise<ListingRead[]> {
   return reads;
 }
 
-/** Fill the search box and apply. Submitting, not typing: the filter is a
- * query, and this UI deliberately sends one per submit rather than one per
- * keystroke (see `list::ListView`). */
+/** Fill live filter fields and wait until the list is in a filtered state.
+ *
+ * The helper waits for the count's filtered wording rather than the debounce
+ * interval: tests should observe user-visible state, not renderer timing. It
+ * does not identify a particular reply once another filter is already active,
+ * so callers must wait for the rows or banner their own query requires.
+ */
 async function applyFilter(
   page: Page,
   fields: { title?: string; directory?: string; profile?: string; status?: string; host?: number },
@@ -123,7 +136,7 @@ async function applyFilter(
   if (fields.host !== undefined) {
     await page.locator(".filter-host").selectOption(String(fields.host));
   }
-  await page.locator(".filter-apply").click();
+  await expect(page.locator(".session-count")).toContainText("matching", { timeout: 20_000 });
 }
 
 test.describe("session list filtering", () => {
@@ -158,6 +171,89 @@ test.describe("session list filtering", () => {
       const dir = directories.pop();
       if (dir) fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  /**
+   * Focus moving inside the popover must not be mistaken for a dismissal.
+   *
+   * The desktop bridge supplies no `relatedTarget`, so this covers the
+   * document-active-element fallback across both keyboard and pointer moves.
+   */
+  test("moving focus among filter controls keeps the popover mounted", async ({ page }) => {
+    await listWithStubbedFeed(page);
+
+    await page.locator(".filter-host").press("Tab");
+    await expect(page.locator(".filter-popover")).toBeVisible();
+    await page.locator(".filter-parent").click();
+    await expect(page.locator(".filter-popover")).toBeVisible();
+    await page.locator(".filter-title").fill(`focus-${Date.now()}`);
+    await page.locator(".filter-clear").click();
+    await expect(page.locator(".filter-popover")).toBeVisible();
+  });
+
+  /**
+   * The fixed surface follows its header toggle without leaving the viewport.
+   *
+   * Ordinary and narrow widths cover the two sides of the responsive clamp;
+   * checking every edge prevents a placement that only looks anchored while
+   * part of the controls are unreachable off-screen.
+   */
+  test("the filter popover stays on screen at ordinary and narrow widths", async ({ page }) => {
+    for (const width of [1280, 360]) {
+      await page.setViewportSize({ width, height: 720 });
+      await listWithStubbedFeed(page);
+      const toggle = await page.locator(".filter-toggle").boundingBox();
+      const popover = await page.locator(".filter-popover").boundingBox();
+      expect(toggle).not.toBeNull();
+      expect(popover).not.toBeNull();
+      expect(popover!.x).toBeGreaterThanOrEqual(0);
+      expect(popover!.y).toBeGreaterThanOrEqual(toggle!.y + toggle!.height - 1);
+      expect(popover!.x + popover!.width).toBeLessThanOrEqual(width);
+      expect(popover!.y + popover!.height).toBeLessThanOrEqual(720);
+      await page.locator(".filter-toggle").click();
+    }
+  });
+
+  /**
+   * Text edits share one delayed listing read, while a completed choice
+   * retires that delay before issuing its own read. This observes requests,
+   * not only the final DOM, because duplicate reads can render the same rows.
+   */
+  test("filter debounce coalesces text and yields to discrete changes", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    const reads = await watchListingReads(page);
+
+    await page.locator(".filter-title").pressSequentially("debounce");
+    await page.waitForTimeout(500);
+    expect(reads).toHaveLength(1);
+    expect(reads[0].url.searchParams.get("title")).toBe("debounce");
+
+    reads.splice(0);
+    // Both edits land in ONE browser task, so the text debounce cannot fire
+    // between them. Two separate Playwright actions leave a round trip's gap
+    // on a slow engine, and a debounce that fires in that gap is the page
+    // behaving correctly for a user who paused, not the retirement under test.
+    await page.locator(".filter-popover").evaluate((popover) => {
+      const title = popover.querySelector<HTMLInputElement>(".filter-title")!;
+      title.value = "retire-delay";
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+      popover.querySelector<HTMLInputElement>(".filter-include-archived")!.click();
+    });
+    await page.waitForTimeout(500);
+    expect(reads).toHaveLength(1);
+    expect(reads[0].url.searchParams.get("title")).toBe("retire-delay");
+    expect(reads[0].url.searchParams.get("include_archived")).toBe("true");
+  });
+
+  /**
+   * A live result changes the count row above the toggle, but that ordinary
+   * header reflow must remeasure the popover rather than dismiss the edit.
+   */
+  test("a matching-count update keeps the filter popover open", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await page.locator(".filter-title").fill(`count-remeasure-${Date.now()}`);
+    await expect(page.locator(".session-count")).toContainText("matching", { timeout: 20_000 });
+    await expect(page.locator(".filter-popover")).toBeVisible();
   });
 
   /**
@@ -230,6 +326,59 @@ test.describe("session list filtering", () => {
         false,
       );
     }
+  });
+
+  /**
+ * Pins the live-popover lifecycle around a pending text debounce.
+ *
+ * Escape must return focus to the toggle without cancelling a request the
+ * user already made; pointer and Tab dismissal instead preserve the outside
+ * destination. Those paths are deliberately distinct because only Escape is
+ * an instruction to return to the surface's invoker.
+   */
+  test("title filtering stays applied after Escape and clear restores the list", async ({
+    page,
+    request,
+  }) => {
+    const stamp = Date.now();
+    const wanted = await createSession(request, { title: `live-needle-${stamp}` });
+    const other = await createSession(request, { title: `live-haystack-${stamp}` });
+    created.push(wanted.id, other.id);
+
+    await listWithStubbedFeed(page);
+    await expect(row(page, wanted.id)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, other.id)).toBeVisible();
+
+    await page.locator(".filter-title").fill(`live-needle-${stamp}`);
+    await expect(page.locator(".filter-apply")).toHaveCount(0);
+    await expect(page.locator(".filter-active-note")).toHaveCount(0);
+    await page.locator(".filter-title").press("Escape");
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
+    await expect(page.locator(".filter-toggle")).toBeFocused();
+    await expect(page.locator(".filter-active-note")).toHaveCount(0);
+    await expect(row(page, wanted.id)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, other.id)).toHaveCount(0);
+    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
+
+    await openFilterBar(page);
+    // Tab chooses a real outside control. The popover must close behind it
+    // rather than stealing focus back to its toggle or withdrawing the query.
+    await page.locator(".filter-clear").press("Tab");
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
+    await expect(page.locator(".new-session-button")).toBeFocused();
+    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
+
+    await openFilterBar(page);
+    // Clicking inert list chrome also closes the surface, but has no focus
+    // destination for the popover to redirect.
+    await page.locator(".session-count").click();
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
+    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
+
+    await openFilterBar(page);
+    await page.locator(".filter-clear").click();
+    await expect(row(page, other.id)).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/);
   });
 
   /**
@@ -401,7 +550,7 @@ test.describe("session list filtering", () => {
     await openFilterBar(page);
     await feed.waitForConnection(1);
     feed.notify(1);
-    await expect(page.locator(".session-filter")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".filter-popover")).toBeVisible({ timeout: 20_000 });
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
 
     await applyFilter(page, { host: removedId });
@@ -412,6 +561,15 @@ test.describe("session list filtering", () => {
     removed = true;
     const before = reads.count("listing");
     feed.notify(2);
+
+    // A host leaving the registry shrinks the strip above the session header,
+    // which is a layout change the page answers by closing the fixed popover
+    // (its measured anchor moved). Reopen it to read the select; `openFilterBar`
+    // is idempotent, so a page that had not closed it yet is fine too.
+    await expect
+      .poll(async () => reads.count("listing"), { timeout: 20_000 })
+      .toBeGreaterThan(before);
+    await openFilterBar(page);
 
     const tombstone = page.locator(`.filter-host option[value="${removedId}"]`);
     await expect(tombstone).toHaveCount(1, { timeout: 20_000 });

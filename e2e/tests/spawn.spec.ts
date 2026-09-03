@@ -150,7 +150,6 @@ test("a fake agent spawns children that appear without refreshing the observer",
     expect(page.url()).toBe(observerUrl);
 
     await page.locator(".filter-parent").fill(parent.id);
-    await page.locator(".filter-apply").click();
     await expect(row(page, parented.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, unparented.id)).toHaveCount(0);
     await expect(page.locator(".session-row")).toHaveCount(1);

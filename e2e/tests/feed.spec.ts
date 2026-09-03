@@ -832,15 +832,15 @@ test.describe("the invalidation feed", () => {
    *
    * The classification lives one layer down (`reader::Trigger`) and its unit
    * tests already prove an Explicit demand survives a latched mismatch. What
-   * only a browser can say is that the UI CLASSIFIES a filter submit that
+   * only a browser can say is that the UI CLASSIFIES a live filter edit that
    * way: the assertion is a request on the wire carrying the search, and rows
    * that changed because of it.
    *
    * The unattended half is asserted in the same test rather than trusted from
    * the one above, because the interesting failure is a fix that reopens the
-   * floodgates — restoring the submit by ungating reads altogether.
+   * floodgates — restoring live filtering by ungating reads altogether.
    */
-  test("a skewed page still reads when a person submits a filter", async ({ page, request }) => {
+  test("a skewed page still reads after a live filter edit", async ({ page, request }) => {
     const stamp = Date.now();
     const needle = `skew-needle-${stamp}`;
     const wanted = await createSession(request, { title: needle });
@@ -872,7 +872,6 @@ test.describe("the invalidation feed", () => {
     // And then a person asks.
     const before = reads.count("listing");
     await page.locator(".filter-title").fill(needle);
-    await page.locator(".filter-apply").click();
 
     await expect(page.locator(".session-row")).toHaveCount(1, { timeout: 20_000 });
     await expect(row(page, wanted.id)).toBeVisible();
@@ -880,11 +879,11 @@ test.describe("the invalidation feed", () => {
     const asked = reads.urls("listing").slice(before);
     expect(
       asked.length,
-      "a submit under skew must reach the helm, or the search box is decorative",
+      "a live filter edit under skew must reach the helm, or the search box is decorative",
     ).toBeGreaterThan(0);
     expect(
       asked.every((url) => new URL(url).searchParams.get("title") === needle),
-      `every read the submit produced must carry the search; saw ${asked.join(", ")}`,
+      `every read the live edit produced must carry the search; saw ${asked.join(", ")}`,
     ).toBe(true);
     // The banner is the helm's own count, so it is the half the page could
     // not have produced by narrowing rows it already held.

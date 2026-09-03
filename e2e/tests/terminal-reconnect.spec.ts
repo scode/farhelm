@@ -1713,13 +1713,13 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
   // page withdraws every UNATTENDED behavior — the feed, the fallback poll,
   // the heartbeat, automatic reconnect — while "anything the user explicitly
   // asks for keeps working". Nothing reads on its own here, so a test that
-  // waited for a read would wait forever; applying the (empty) filter is a
-  // person asking, and a submit always reads (`ListView`'s `apply_filter`).
+  // waited for a read would wait forever; each live filter action below is a
+  // person asking and issues an attended read.
   //
   // So these two waits assert the explicit half of that rule as much as they
   // stage the latch: a page that stood its EXPLICIT reads down under skew
   // would hang here rather than fail an assertion, which is the shape this
-  // exact regression took on WebKit. Two submits, two agreeing replies.
+  // exact regression took on WebKit. Two live edits, two agreeing replies.
   await page.unroute("**/api/**");
   for (let i = 0; i < 2; i++) {
     const landed = page.waitForResponse(
@@ -1727,7 +1727,7 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
         response.request().method() === "GET" && /\/api\/sessions/.test(response.url()),
       { timeout: 30_000 },
     );
-    await page.locator(".filter-apply").click();
+    await page.locator(".filter-include-archived").setChecked(i === 0);
     await landed;
   }
   await expect(

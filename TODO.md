@@ -46,30 +46,6 @@ Within a bucket, no order.
   each supervisor" paragraph and the spawn-resolution paragraph, and SPEC_impl.md's supervisor profile-table bullet, are
   rewritten in the same change; the "post-v1 convenience" sentence goes.
 
-- Move the session list's filter and sort controls onto the session list's own header. Today the sidebar's top line is
-  "hosts filter sort [recently active]": one hosts toggle and three session-list controls sharing a row, which makes the
-  filter and sort read as host controls, and the "13 sessions" count banner further down is the line that actually heads
-  the list. Intended shape: the count banner grows to two rows and becomes the header — the count on the first row ("13
-  sessions", or "5 matching of 13 sessions" when a filter is in force), the filter toggle and the sort select on the
-  second. The visible word "sort" goes (the select's value reads as one; keep it as the control's accessible name). The
-  amber "filtered" word that today appears beside the filter toggle whenever an applied filter narrows the list (bar
-  open or closed; the archive switch alone does not trigger it) goes too: the count wording on the same line already
-  says the list is narrowed, which is what SPEC.md's "the list says visibly that a filter is in force" asks for. The
-  filter itself becomes a POPOVER anchored on its toggle, like the row "⋯" menus (`menu_panel.rs`'s fixed-position,
-  measured-rect pattern, which also already escapes the sidebar's overflow clipping), rather than a bar that opens in
-  the flow and re-jigs the whole sidebar. Inside the popover the filter is LIVE: the list re-filters on every keystroke,
-  so what you see always matches what the fields say, with no apply button and no separate "applied" state to reason
-  about; Escape or a click outside only closes the popover, and the filter stays as typed; a "clear" control stays.
-  Today the bar is a form applied on submit, with `filter` and `filter_draft` as separate signals in `list/view.rs`,
-  kept apart so that a feed-triggered re-read landing mid-edit would use the filter whose results were on screen rather
-  than a half-typed one. Live filtering makes that distinction moot — the typed text IS the filter — so the draft signal
-  goes and the field writes the applied one directly. Mechanics to keep in mind, not UX: every change is a helm round
-  trip (the helm filters the whole fleet in memory and the client walks the reply by cursor), so a short debounce on the
-  text fields is fine as an implementation detail but the intent is that the list follows the typing; `commit_listing`
-  already refuses a read that was walking under an older filter, so a fast typist cannot get a stale result painted over
-  a newer one; and the count and the "no sessions" placeholder keep answering only for a committed result, never for an
-  in-flight read. The hosts toggle on the old top line goes away with the hosts-list rework below. Settled 2026-09-02.
-
 - Make the host list one list, and make it look like it belongs next to the session list. Today the sidebar renders
   hosts TWICE: an always-visible compact strip (`.hosts-compact` in `list/view.rs`) of name plus colored phase word,
   where the word trails the name at whatever x the name ends on so "connected" lands in a different column on every row
