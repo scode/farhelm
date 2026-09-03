@@ -1478,7 +1478,11 @@ pub(crate) async fn get_session(
             message: format!("no such session: {id}"),
         }));
     };
-    let host_name = aggregate::host_display_name(snapshot.kind, snapshot.destination.as_deref());
+    let host_name = aggregate::host_display_name(
+        snapshot.kind,
+        snapshot.destination.as_deref(),
+        snapshot.alias.as_deref(),
+    );
     let host_identity = identities
         .into_iter()
         .find(|row| row.id == host)

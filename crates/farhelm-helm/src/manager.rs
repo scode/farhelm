@@ -615,6 +615,9 @@ pub struct HostSnapshot {
     pub kind: HostKind,
     /// `None` for the reserved local row, always `Some` for an ssh row.
     pub destination: Option<String>,
+    /// The registry alias paired with this connection state, so every
+    /// snapshot-based display derives the same host name.
+    pub alias: Option<String>,
     pub state: HostState,
     /// The sessions this host is serving from MEMORY rather than from
     /// helm.db — non-empty only for a connected host that reports no
@@ -1686,6 +1689,7 @@ impl ConnectionManager {
                     id: handle.row.id,
                     kind: handle.row.kind,
                     destination: handle.row.destination.clone(),
+                    alias: handle.row.alias.clone(),
                     state: published.state.clone(),
                     live_sessions: published.live_sessions.clone(),
                     contested: Arc::clone(&published.contested),
@@ -7614,6 +7618,7 @@ mod tests {
             id: 1,
             kind: HostKind::Local,
             destination: None,
+            alias: None,
             remote_farhelm: None,
             remote_state_dir: None,
             host_identity: None,
@@ -7665,6 +7670,7 @@ mod tests {
             id: 2,
             kind: HostKind::Ssh,
             destination: Some("remote.example".to_string()),
+            alias: None,
             remote_farhelm: None,
             remote_state_dir: None,
             host_identity: None,
