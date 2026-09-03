@@ -1,5 +1,5 @@
-// Agent profiles in a real browser (PLAN_M6_75.md item 8): the hosts panel's
-// per-host CRUD surface, the create dialog's picker and its ask-don't-guess
+// Agent profiles in a real browser: the app bar's helm-wide CRUD popup, the
+// create dialog's shared picker and its ask-don't-guess
 // fallback, and SPEC.md's snapshot rule as the session list shows it.
 //
 // A per-area spec of its own, per this milestone's convention (see
@@ -25,7 +25,7 @@
 // ## Every test cleans its profiles up, and registers them before asserting
 //
 // Cleanup is not tidiness. A successful profile-backed create writes that
-// host's REMEMBERED DEFAULT, which every later create dialog — in this file and
+// helm's REMEMBERED DEFAULT, which every later create dialog — in this file and
 // in every other spec — then answers for. Neither outcome is neutral: a LIVE
 // remembered profile is preselected (so the command field is disabled), and a
 // DELETED one leaves the dialog selecting nothing and blocking the create until
@@ -38,10 +38,9 @@
 // Registration happens as soon as the object EXISTS server-side, before any
 // assertion about the page — a repaint that never happens must not leak a
 // profile or a session into a stack every later run shares.
-import { expect, Page, Route, test } from "@playwright/test";
+import { APIRequestContext, expect, Page, Route, test } from "@playwright/test";
 import {
   cleanupProfile,
-  countReads,
   cleanupSession,
   createProfile,
   createSession,
@@ -58,6 +57,7 @@ import {
   updateProfile,
 } from "./helpers/fleet";
 import type { FeedStub } from "./helpers/fleet";
+import { sharedSessionRow } from "./helpers/terminal-suite";
 
 /** The value of the picker's placeholder — `profiles::UNRESOLVED_VALUE`, the
  * option a dialog shows while nothing is selected and a create is blocked. */
@@ -68,14 +68,14 @@ function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
 
-/** One host's expanded profiles section. */
-function section(page: Page, host: number) {
-  return page.locator(`.profiles-section[data-profiles-host="${host}"]`);
+/** The helm-wide profiles popup opened from the sidebar app bar. */
+function section(page: Page) {
+  return page.locator(".profiles-popover");
 }
 
-/** One profile's row inside that section. */
-function profileRow(page: Page, host: number, id: string) {
-  return section(page, host).locator(`[data-profile-id="${id}"]`);
+/** One profile's row inside the popup. */
+function profileRow(page: Page, id: string) {
+  return section(page).locator(`[data-profile-id="${id}"]`);
 }
 
 /**
@@ -87,6 +87,67 @@ function profileRow(page: Page, host: number, id: string) {
  * poll would then be running underneath assertions about what a notification
  * caused.
  */
+/**
+ * Fulfil a held route with a helm-style refusal that still carries the
+ * helm's build stamp.
+ *
+ * A fabricated reply without `x-farhelm-build` reads to the page as a helm
+ * that predates the stamp: it latches version skew, raises the skew banner
+ * at the top of the sidebar, and that banner is a layout change which closes
+ * the popup the test is watching. Whether the banner lands before or after
+ * the popup opens is scheduling, which is how an unstamped refusal turned
+ * into an engine-dependent flake rather than a steady failure.
+ */
+async function fulfillRefusal(
+  route: Route,
+  request: APIRequestContext,
+  body: string,
+  status = 409,
+): Promise<void> {
+  const probe = await request.get("/api/profiles");
+  const build = probe.headers()["x-farhelm-build"] ?? "";
+  expect(build, "fabricated API replies must retain the helm build stamp").toBeTruthy();
+  await route.fulfill({
+    status,
+    body,
+    headers: { "content-type": "text/plain", "x-farhelm-build": build },
+  });
+}
+
+/**
+ * A point inside the sidebar that a real click can reach and that focuses
+ * nothing: outside the profiles popup, and not on any control.
+ *
+ * The candidates are the two ends of the session-count line and the
+ * sidebar's bottom-left corner. Which of them the popup covers depends on
+ * how many host rows sit above the session header, so the choice is made at
+ * click time from the live geometry rather than fixed in the test.
+ */
+async function inertSidebarPoint(page: Page): Promise<{ x: number; y: number }> {
+  const point = await page.evaluate(() => {
+    const popover = document.querySelector(".profiles-popover")?.getBoundingClientRect();
+    const count = document.querySelector(".session-count")?.getBoundingClientRect();
+    const sidebar = document.querySelector(".app-sidebar")?.getBoundingClientRect();
+    const candidates: [number, number][] = [];
+    if (count) {
+      candidates.push([count.left + 2, count.top + 2], [count.right - 2, count.top + 2]);
+    }
+    if (sidebar) candidates.push([sidebar.left + 4, sidebar.bottom - 4]);
+    for (const [x, y] of candidates) {
+      const covered = popover
+        && x >= popover.left && x <= popover.right && y >= popover.top && y <= popover.bottom;
+      if (covered) continue;
+      const target = document.elementFromPoint(x, y);
+      if (!target || target.closest(".profiles-popover")) continue;
+      if (target.closest("button, a, input, select, textarea, [tabindex]")) continue;
+      return { x, y };
+    }
+    return null;
+  });
+  expect(point, "the sidebar must offer one inert, uncovered spot").not.toBeNull();
+  return point!;
+}
+
 async function listWithStubbedFeed(page: Page): Promise<FeedStub> {
   const feed = await stubFeed(page);
   await page.goto("/");
@@ -98,27 +159,48 @@ async function listWithStubbedFeed(page: Page): Promise<FeedStub> {
   return feed;
 }
 
-/** Expand one host's profiles section from its row in the hosts panel —
- * opening the panel itself first, since the sidebar keeps it behind a
- * toggle, and the row's own "⋯" menu behind a second one now that
- * `profiles`/`retry`/`adopt`/`edit destination`/`remove` all moved into it. */
-async function openProfiles(page: Page, host: number) {
-  await openHostsPanel(page);
-  const row = page.locator(`[data-host-id="${host}"]`);
-  await openHostMenu(row);
-  await row.locator(".host-profiles-toggle").click();
-  await expect(section(page, host)).toBeVisible({ timeout: 20_000 });
+/** Open the helm-wide popup from the app bar and wait for its catalog. */
+async function openProfiles(page: Page) {
+  await page.locator(".profiles-toggle").click();
+  await expect(section(page)).toBeVisible({ timeout: 20_000 });
 }
 
-/** Collapse it again. `openHostMenu` is idempotent (see its own doc), so
- * this reopens the row's menu rather than assuming it is still the one
- * `openProfiles` left up — anything between the two calls (a poll, a
- * layout shift) may have closed it in the meantime. */
-async function closeProfiles(page: Page, host: number) {
-  const row = page.locator(`[data-host-id="${host}"]`);
-  await openHostMenu(row);
-  await row.locator(".host-profiles-toggle").click();
-  await expect(section(page, host)).toHaveCount(0, { timeout: 20_000 });
+/** Close the popup with the same app-bar toggle that opened it. */
+async function closeProfiles(page: Page) {
+  await page.locator(".profiles-toggle").click();
+  await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+}
+
+/**
+ * Start a real profile save and hold its helm request after the operation lock
+ * is claimed. Provenance tests use this shared boundary so only the event that
+ * follows the claim differs between their otherwise identical busy windows.
+ */
+async function beginHeldProfileSave(page: Page, profile: ProfileRow) {
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(
+    (url) => new RegExp(`/api/profiles/${profile.id}$`).test(url.pathname),
+    async (route: Route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      await held;
+      await route.continue();
+    },
+  );
+  const profileRowLocator = profileRow(page, profile.id);
+  await profileRowLocator.locator(".profile-edit").click();
+  await profileRowLocator.locator(".profile-name-input").fill(`${profile.name}-saved`);
+  await profileRowLocator.locator(".profile-save").click();
+  await expect(profileRowLocator.locator(".profile-save")).toBeDisabled();
+  return {
+    row: profileRowLocator,
+    release: () => release!(),
+  };
 }
 
 /** Open the create dialog and wait for its agent picker. */
@@ -127,8 +209,7 @@ async function openCreateDialog(page: Page) {
   await expect(page.locator(".create-session-profile")).toBeVisible({ timeout: 20_000 });
 }
 
-/** Wait until the picker offers one profile, which it can only do after the
- * catalog read for its target lands. */
+/** Wait until the picker offers one profile from the shared helm catalog. */
 async function waitForOption(page: Page, id: string) {
   await expect(page.locator(`.create-session-profile option[value="${id}"]`)).toHaveCount(1, {
     timeout: 20_000,
@@ -136,50 +217,36 @@ async function waitForOption(page: Page, id: string) {
 }
 
 /**
- * Per-host observation of the catalog endpoint, with a switch for making one
- * host unable to answer.
- *
- * Counting is what proves the two surfaces are independent: rows and pickers
- * can only show what a read produced, but "the closed one performed no read at
- * all" is a claim about requests and nothing else. The abort switch is what
- * turns "independent" from a coincidence into a demonstration — one host's
- * catalog failing must leave the other's surface untouched.
+ * Hold exactly one reveal for the primary terminal at its real replay marker.
+ * Scoping the global test hook to `#terminal` keeps later tab mounts and
+ * remounts from accidentally consuming this test's lifecycle gate.
  */
-interface CatalogWatch {
-  /** Catalog GETs seen for `host` since the watch was installed. */
-  reads(host: number): number;
-  /** Every catalog GET, for a failure message that can name what was read. */
-  total(): number;
-  /** Fail every later catalog read for `host`, as an unreachable host would. */
-  cut(host: number): void;
+async function holdPrimaryTerminalReveal(page: Page) {
+  await page.addInitScript(() => {
+    (window as any).__farhelmTestReplay = {
+      holdMarker: true,
+      targetEl: "terminal",
+      idleMs: 60_000,
+    };
+  });
 }
 
-async function watchCatalogReads(page: Page): Promise<CatalogWatch> {
-  const seen = new Map<number, number>();
-  const cutOff = new Set<number>();
-  await page.route(
-    (url) => /^\/api\/hosts\/\d+\/profiles$/.test(url.pathname),
-    async (route: Route) => {
-      if (route.request().method() !== "GET") {
-        await route.continue();
-        return;
-      }
-      const host = Number(new URL(route.request().url()).pathname.split("/")[3]);
-      seen.set(host, (seen.get(host) ?? 0) + 1);
-      if (cutOff.has(host)) {
-        await route.abort();
-        return;
-      }
-      await route.continue();
-    },
-  );
-  return {
-    reads: (host: number) => seen.get(host) ?? 0,
-    total: () => [...seen.values()].reduce((sum, count) => sum + count, 0),
-    cut: (host: number) => {
-      cutOff.add(host);
-    },
-  };
+/** Wait until the selected primary terminal has reached the held marker. */
+async function waitForHeldPrimaryReveal(page: Page) {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as any).__farhelmIslands?.terminal?.test?.replay?.heldReason ?? null,
+        ),
+      { timeout: 60_000 },
+    )
+    .toBe("marker");
+}
+
+/** Release the primary terminal through terminal.js's production reveal path. */
+async function releasePrimaryReveal(page: Page) {
+  await page.evaluate(() => (window as any).__farhelmIslands.terminal.test.releaseCatchUp());
 }
 
 /**
@@ -240,7 +307,7 @@ async function watchCreateBodies(page: Page): Promise<Record<string, unknown>[]>
 
 test.describe("agent profiles", () => {
   const created: string[] = [];
-  const profiles: { host: number; id: string }[] = [];
+  const profiles: string[] = [];
 
   test.afterEach(async ({ request }) => {
     while (created.length) {
@@ -253,7 +320,7 @@ test.describe("agent profiles", () => {
     // moment in between — which is a state some other spec could then read.
     while (profiles.length) {
       const profile = profiles.pop();
-      if (profile) await cleanupProfile(request, profile.host, profile.id);
+      if (profile) await cleanupProfile(request, profile);
     }
   });
 
@@ -268,113 +335,804 @@ test.describe("agent profiles", () => {
    */
   async function registerByName(
     request: Parameters<typeof listProfiles>[0],
-    host: number,
     name: string,
   ): Promise<ProfileRow> {
     let found: ProfileRow | undefined;
     await expect
       .poll(
         async () => {
-          found = (await listProfiles(request, host)).profiles.find(
+          found = (await listProfiles(request)).profiles.find(
             (profile) => profile.name === name,
           );
           return found?.id;
         },
-        { timeout: 20_000, message: `the profile ${name} must reach the supervisor's catalog` },
+        { timeout: 20_000, message: `the profile ${name} must reach the helm catalog` },
       )
       .toBeTruthy();
-    profiles.push({ host, id: found!.id });
+    profiles.push(found!.id);
     return found!;
   }
 
   /**
-   * F5/COR-PROFILES-OVERLAY: choosing "profiles" from the kebab menu must
-   * close the menu itself. Both surfaces begin directly under the same host
-   * line, so an actions panel left open (the behavior before this fix)
-   * could cover the profiles header or its first control depending on
-   * viewport and content geometry. This proves the fix without dismissing
-   * anything by hand: the row's own menu must already be gone, and
-   * "new profile" must take a real click rather than one a covering panel
-   * would have intercepted.
+   * The app-bar trigger opens the helm-wide popup with every seeded starter.
+   * This pins both the new entry point and the fact that management consumes
+   * the same complete catalog as session creation.
    */
-  test("profiles-closes-its-own-menu: the new-profile control needs no manual dismissal", async ({
+  test("the app-bar popup lists all four starter profiles", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await expect(section(page).locator("[data-profile-id]")).toHaveCount(4);
+    await expect(page.locator(".profiles-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  /**
+   * Opening the popup is an attended retry even after the first catalog read
+   * failed and latched build skew. Background work must stand down in that
+   * state, but a person reopening a consumer must still be able to recover
+   * once the route answers again.
+   */
+  test("opening profiles retries a failed mount read under latched skew", async ({
     page,
     request,
   }) => {
-    const local = await localHostId(request);
+    const profile = await createProfile(request, { name: `retry-${Date.now()}` });
+    profiles.push(profile.id);
+    let reads = 0;
+    await page.route(
+      (url) => url.pathname === "/api/profiles",
+      async (route: Route) => {
+        if (route.request().method() !== "GET") {
+          await route.continue();
+          return;
+        }
+        reads += 1;
+        if (reads === 1) {
+          await route.fulfill({
+            status: 503,
+            headers: {
+              "content-type": "text/plain",
+              "x-farhelm-build": "intentionally-mismatched-build",
+            },
+            body: "catalog temporarily unavailable",
+          });
+          return;
+        }
+        await route.continue();
+      },
+    );
+
+    await page.goto("/");
+    await expect.poll(() => reads, { timeout: 20_000 }).toBe(1);
+    await expect(page.locator(".build-skew")).toBeVisible({ timeout: 20_000 });
+    await openProfiles(page);
+    await expect(profileRow(page, profile.id)).toBeVisible({ timeout: 20_000 });
+    expect(reads, "the open transition must issue an attended retry").toBeGreaterThanOrEqual(2);
+  });
+
+  /**
+   * The create form has the same attended-retry contract as the management
+   * popup. This separately pins its closed-to-open edge so recovery cannot be
+   * accidentally left only on the app-bar entry point.
+   */
+  test("opening create retries a failed mount read under latched skew", async ({
+    page,
+    request,
+  }) => {
+    const profile = await createProfile(request, { name: `retry-create-${Date.now()}` });
+    profiles.push(profile.id);
+    let reads = 0;
+    await page.route(
+      (url) => url.pathname === "/api/profiles",
+      async (route: Route) => {
+        if (route.request().method() !== "GET") {
+          await route.continue();
+          return;
+        }
+        reads += 1;
+        if (reads === 1) {
+          await route.fulfill({
+            status: 503,
+            headers: {
+              "content-type": "text/plain",
+              "x-farhelm-build": "intentionally-mismatched-build",
+            },
+            body: "catalog temporarily unavailable",
+          });
+          return;
+        }
+        await route.continue();
+      },
+    );
+
+    await page.goto("/");
+    await expect.poll(() => reads, { timeout: 20_000 }).toBe(1);
+    await expect(page.locator(".build-skew")).toBeVisible({ timeout: 20_000 });
+    await openCreateDialog(page);
+    await waitForOption(page, profile.id);
+    expect(reads, "the create open transition must issue an attended retry")
+      .toBeGreaterThanOrEqual(2);
+  });
+
+  /**
+   * A refresh requested by a short-lived popup belongs to the page reader.
+   * Starting from idle, this holds that refresh, unmounts its requester, and
+   * specifies exactly one serialized follow-up with no duplicate third walk.
+   */
+  test("the popup and create picker share one always-active catalog reader", async ({
+    page,
+    request,
+  }) => {
+    let releaseInitial: (() => void) | undefined;
+    const initial = new Promise<void>((resolve) => {
+      releaseInitial = resolve;
+    });
+    let releasePopup: (() => void) | undefined;
+    const popupRead = new Promise<void>((resolve) => {
+      releasePopup = resolve;
+    });
+    let reads = 0;
+    let active = 0;
+    let maximumActive = 0;
+    let holdPopupRead = false;
+    let popupReadHeld = false;
+    await page.route(
+      (url) => url.pathname === "/api/profiles",
+      async (route: Route) => {
+        if (route.request().method() !== "GET") {
+          await route.continue();
+          return;
+        }
+        reads += 1;
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        const response = await route.fetch();
+        if (reads === 1) await initial;
+        if (holdPopupRead && !popupReadHeld) {
+          popupReadHeld = true;
+          await popupRead;
+        }
+        await route.fulfill({ response });
+        active -= 1;
+      },
+    );
+
     await listWithStubbedFeed(page);
-    await openHostsPanel(page);
-    const row = page.locator(`[data-host-id="${local}"]`);
-    await openHostMenu(row);
-    await row.locator(".host-profiles-toggle").click();
-    await expect(section(page, local)).toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => reads, { timeout: 20_000 }).toBe(1);
+    expect(active, "the controlled mount read must still own the reader").toBe(1);
+    releaseInitial!();
+    await expect.poll(() => active, { timeout: 20_000 }).toBe(0);
+    const baseline = reads;
+    expect(active, "the baseline must be idle before the lifecycle boundary").toBe(0);
+    holdPopupRead = true;
+    await openProfiles(page);
+    await expect.poll(() => popupReadHeld, { timeout: 20_000 }).toBe(true);
+    expect(reads).toBe(baseline + 1);
+    await page.locator(".profiles-toggle").click();
+    await expect(section(page)).toHaveCount(0);
 
-    // The choice closes the menu itself — nothing here dismisses it by hand.
-    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
-    await expect(row.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+    const profile = await createProfile(request, { name: `shared-reader-${Date.now()}` });
+    profiles.push(profile.id);
+    await openCreateDialog(page);
+    await expect(page.locator(".create-session-profile")).toBeVisible({ timeout: 20_000 });
+    expect(reads, "the surviving consumer queues behind the held requester refresh")
+      .toBe(baseline + 1);
 
-    // Not merely present: a click Playwright's actionability checks would
-    // refuse to deliver if a still-open menu panel covered this point.
-    await section(page, local).locator(".new-profile-button").click();
-    await expect(section(page, local).locator(".profile-form")).toBeVisible({ timeout: 20_000 });
+    releasePopup!();
+    await waitForOption(page, profile.id);
+    expect(maximumActive, "the shared surface permits only one catalog GET at a time").toBe(1);
+    await expect.poll(() => reads, { timeout: 20_000 }).toBe(baseline + 2);
+    await expect.poll(() => active, { timeout: 20_000 }).toBe(0);
+    expect(reads, "the coalesced follow-up drains demand without a third post-baseline GET")
+      .toBe(baseline + 2);
+  });
+
+  /** The popup is a keyboard-dismissable transient surface: its first action
+   * receives focus, Escape returns focus to the trigger, and moving focus
+   * outside closes it without stealing that destination. */
+  test("the profiles popup follows its focus and Escape dismissal contract", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    const toggle = page.locator(".profiles-toggle");
+    await openProfiles(page);
+    await expect(section(page).locator(".new-profile-button")).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(section(page)).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    await openProfiles(page);
+    const destination = page.locator(".hosts-toggle");
+    await destination.focus();
+    await expect(section(page)).toHaveCount(0);
+    await expect(destination).toBeFocused();
+  });
+
+  /**
+   * A delayed in-popup request cannot replace a control chosen outside, and a
+   * superseded request cannot wake during the render gap and apply afterwards.
+   * The test hook hides only the target lookup; Rust still owns the production
+   * retry and cancellation loop.
+   */
+  test("delayed and superseded profile focus requests preserve newer intent", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = { hideFocusTarget: true };
+    });
+    await section(page).locator(".new-profile-button").click();
+    const outside = page.locator(".hosts-toggle");
+    await outside.focus();
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles.hideFocusTarget = false;
+    });
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect(outside).toBeFocused();
+
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles.hideFocusTarget = true;
+    });
+    await section(page).locator(".new-profile-button").click();
+    await section(page).locator(".profile-cancel").dispatchEvent("click");
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles.hideFocusTarget = false;
+    });
+    await expect(section(page).locator(".new-profile-button")).toBeFocused();
+  });
+
+  /**
+   * Browser-evaluation latency is part of the 250 ms wall-clock budget. The
+   * target remains one connected node throughout, so focus proves two delayed
+   * observations fit inside the deadline rather than succeeding after it.
+   */
+  test("profile focus counts delayed evaluations against one deadline", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        focusEvalDelayMs: 90,
+        focusAttempts: 0,
+      };
+    });
+    await page.locator(".profiles-toggle").click();
+    const target = section(page).locator(".new-profile-button");
+    await expect(target).toBeAttached();
+    const original = await target.elementHandle();
+    expect(original).not.toBeNull();
+    await expect(target).toBeFocused({ timeout: 2_000 });
+    const timing = await page.evaluate(() => {
+      const testState = (window as any).__farhelmTestProfiles;
+      return {
+        attempts: testState.focusAttempts,
+        elapsed: testState.focusedAt - testState.focusStartedAt,
+      };
+    });
+    expect(timing.attempts).toBe(2);
+    expect(timing.elapsed).toBeLessThanOrEqual(250);
+    expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await original!.evaluate((node) => document.activeElement === node)).toBe(true);
+  });
+
+  /**
+   * One observation that outlives the 250 ms request budget is consumed as
+   * unknown. Its late JavaScript continuation has no focus side effect, so it
+   * cannot place focus after Rust has stopped owning the request.
+   */
+  test("an overdue focus observation cannot focus late", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        focusEvalDelayMs: 400,
+        focusAttempts: 0,
+      };
+    });
+    await page.locator(".profiles-toggle").click();
+    const target = section(page).locator(".new-profile-button");
+    await expect(target).toBeAttached();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusSettled)
+    ).toBe("unknown");
+    await page.waitForTimeout(250);
+    await expect(target).not.toBeFocused();
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusAttempts)).toBe(1);
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusedAt)).toBeUndefined();
+  });
+
+  /**
+   * The renderer checks the request's absolute browser deadline immediately
+   * before focus. Even though a delayed commit keeps running after Rust times
+   * out, it expires without moving focus when it finally resumes.
+   */
+  test("an overdue focus commit expires before its side effect", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        focusBrowserBudgetMs: 100,
+        focusCommitDelayMs: 120,
+        focusCommitAttempts: 0,
+      };
+    });
+    await page.locator(".profiles-toggle").click();
+    const target = section(page).locator(".new-profile-button");
+    await expect(target).toBeAttached();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitAttempts)
+    ).toBe(1);
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusSettled)
+    ).toBe("unknown");
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitExpired)
+    ).toBe(true);
+    await expect(target).not.toBeFocused();
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusedAt)).toBeUndefined();
+  });
+
+  /**
+   * An unknown attempt breaks the stable-node handshake. Found, error, Found
+   * is not consecutive evidence, so the same connected target needs a fourth
+   * observation before it may receive focus.
+   */
+  test("an unknown focus attempt breaks consecutive target observations", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        focusAttempts: 0,
+        focusEvalErrorAttempts: [2],
+      };
+    });
+    await page.locator(".profiles-toggle").click();
+    const target = section(page).locator(".new-profile-button");
+    await expect(target).toBeAttached();
+    const original = await target.elementHandle();
+    expect(original).not.toBeNull();
+    await expect(target).toBeFocused({ timeout: 2_000 });
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusAttempts)
+    ).toBe(4);
+    expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+  });
+
+  /**
+   * Renderer errors and timeouts are absence of evidence, not proof of
+   * document transit. Persistent focus-placement failures and an overdue
+   * classifier consume bounded work without dismissing or stealing focus.
+   */
+  test("focus evaluation errors never become dismissal evidence", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = { focusEvalErrors: 100 };
+    });
+    await section(page).locator(".new-profile-button").click();
+    await expect(section(page)).toBeVisible();
+    await page.waitForTimeout(400);
+    await expect(section(page)).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = { classification: { delayMs: 500 } };
+    });
+    const outside = page.locator(".hosts-toggle");
+    await outside.focus();
+    await page.waitForTimeout(500);
+    await expect(section(page)).toBeVisible();
+    await expect(outside).toBeFocused();
+  });
+
+  /**
+   * A failed classification followed by document transit still waits for the
+   * popup's live focus request. Unknown evidence cannot skip that settlement
+   * loop and turn `body` into an early dismissal destination.
+   */
+  test("unknown then transit waits for the pending focus request", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        hideFocusTarget: true,
+        focusAttempts: 0,
+        classificationErrors: 1,
+        classificationAttempts: 0,
+      };
+    });
+    await section(page).locator(".new-profile-button").click();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusAttempts)
+    ).toBeGreaterThanOrEqual(1);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classificationAttempts)
+    ).toBeGreaterThanOrEqual(2);
+    await page.waitForTimeout(400);
+    await expect(section(page)).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+  });
+
+  /**
+   * Focus-out tasks may finish out of order within one opening or after a new
+   * opening. Full obligation tokens prevent either stale classifier from
+   * clearing the newer dismissal it does not own.
+   */
+  test("stale focus-out classifiers cannot clear newer obligations", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        classification: { holds: 2, started: 0, releases: [] },
+      };
+    });
+    const outside = page.locator(".hosts-toggle");
+    await outside.focus();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
+    ).toBe(1);
+    await section(page).locator(".new-profile-button").focus();
+    await outside.focus();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
+    ).toBe(2);
+    await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
+    await expect(section(page)).toBeVisible();
+    await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles.classification = { holds: 2, started: 0, releases: [] };
+    });
+    await outside.focus();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
+    ).toBe(1);
+    await page.locator(".profiles-toggle").click();
+    await openProfiles(page);
+    await outside.focus();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
+    ).toBe(2);
+    await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
+    await expect(section(page)).toBeVisible();
+    await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+  });
+
+  /**
+   * A background terminal reveal must not pull focus through a mounted popup.
+   * Holding the real replay marker specifies that the popup's focused entry
+   * control remains active when the selected terminal becomes visible.
+   */
+  test("a held terminal reveal does not steal focus from profiles", async ({ page }) => {
+    await holdPrimaryTerminalReveal(page);
+    await listWithStubbedFeed(page);
+    await sharedSessionRow(page).click();
+    await waitForHeldPrimaryReveal(page);
+    await openProfiles(page);
+    const popupFocus = section(page).locator(".new-profile-button");
+    await expect(popupFocus).toBeFocused();
+
+    await releasePrimaryReveal(page);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as any).__farhelmIslands.terminal.test.replay.revealed,
+        ),
+      )
+      .toBe(true);
+    await expect(section(page)).toBeVisible();
+    await expect(popupFocus).toBeFocused();
+  });
+
+  /**
+   * A reveal vetoed by the popup is not retained for dismissal. Escape keeps
+   * focus on the popup toggle; the terminal accepts focus only after the user
+   * explicitly clicks it.
+   */
+  test("a popup-vetoed terminal reveal requires a later click", async ({ page }) => {
+    await holdPrimaryTerminalReveal(page);
+    await listWithStubbedFeed(page);
+    await sharedSessionRow(page).click();
+    await waitForHeldPrimaryReveal(page);
+    await openProfiles(page);
+    await releasePrimaryReveal(page);
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmIslands.terminal.test.replay.revealed)
+    ).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(section(page)).toHaveCount(0);
+    await expect(page.locator(".profiles-toggle")).toBeFocused();
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.closest("#terminal") !== null))
+      .toBe(false);
+
+    await page.locator("#terminal").click();
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.closest("#terminal") !== null))
+      .toBe(true);
+  });
+
+  /**
+   * An inert sidebar click closes profiles after focus remains on the document
+   * body, matching the adjacent filter popover without stealing focus back to
+   * the profiles toggle.
+   */
+  test("an inert sidebar click dismisses the profiles popup", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+
+    // A real click, because synthetic dispatch would not move focus; on a spot
+    // chosen from live geometry, because which part of the sidebar the popup
+    // leaves uncovered depends on how many host rows sit above the header.
+    const { x, y } = await inertSidebarPoint(page);
+    await page.mouse.click(x, y);
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+    await expect(section(page)).toHaveCount(0);
+    await expect(page.locator(".profiles-toggle")).not.toBeFocused();
+  });
+
+  /**
+   * Every state change inside the popup names the next keyboard position.
+   *
+   * These assertions protect the transitions that remove the focused node:
+   * entering and leaving an editor, saving it, and deleting a row. Without an
+   * explicit successor, browsers fall back to the document body and Escape is
+   * no longer reachable from the still-open popup.
+   */
+  test("profile form transitions keep keyboard focus inside the popup", async ({
+    page,
+    request,
+  }) => {
+    const first = await createProfile(request, { name: `focus-a-${Date.now()}` });
+    profiles.push(first.id);
+    const second = await createProfile(request, { name: `focus-b-${Date.now()}` });
+    profiles.push(second.id);
+
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const firstRow = profileRow(page, first.id);
+
+    await firstRow.locator(".profile-edit").click();
+    await expect(firstRow.locator(".profile-name-input")).toBeFocused();
+    await firstRow.locator(".profile-cancel").click();
+    await expect(firstRow.locator(".profile-edit")).toBeFocused();
+
+    await firstRow.locator(".profile-edit").click();
+    await firstRow.locator(".profile-name-input").fill(`${first.name}-saved`);
+    await firstRow.locator(".profile-save").click();
+    await expect(firstRow.locator(".profile-edit")).toBeFocused({ timeout: 20_000 });
+
+    const catalog = (await listProfiles(request)).profiles;
+    const firstIndex = catalog.findIndex((profile) => profile.id === first.id);
+    const next = catalog[firstIndex + 1];
+    expect(next, "the first fixture must have a following row for the delete focus check")
+      .toBeTruthy();
+    await firstRow.locator(".profile-delete").click();
+    await expect(firstRow.locator(".profile-cancel-delete")).toBeFocused();
+    await firstRow.locator(".profile-confirm-delete").click();
+    await expect(profileRow(page, next.id).locator(".profile-edit")).toBeFocused({
+      timeout: 20_000,
+    });
+  });
+
+  /**
+   * The popup's measured border box, not only its content area, stays inside a
+   * constrained viewport. Padding and borders used to extend past the inline
+   * maximums because the popup inherited content-box sizing.
+   */
+  test("the profiles popup border box stays inside a constrained viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 260, height: 220 });
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+
+    const box = (await section(page).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(8);
+    expect(box.y).toBeGreaterThanOrEqual(8);
+    expect(box.x + box.width).toBeLessThanOrEqual(252);
+    expect(box.y + box.height).toBeLessThanOrEqual(212);
+  });
+
+  /**
+   * A layout event from the closed state must not invalidate a fresh opening.
+   * This delivers a sidebar scroll and activation in one browser turn, then
+   * specifies that only a later scroll closes the measured popup and restores
+   * its toggle.
+   */
+  test("only layout changes after a profiles opening invalidate its geometry", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      document.querySelector(".app-sidebar")?.dispatchEvent(new Event("scroll"));
+      const toggle = document.querySelector(".profiles-toggle") as HTMLButtonElement;
+      toggle.focus();
+      toggle.click();
+    });
+    await expect(section(page)).toBeVisible();
+    await expect(section(page).locator(".new-profile-button")).toBeFocused();
+
+    await page.evaluate(() =>
+      document.querySelector(".app-sidebar")?.dispatchEvent(new Event("scroll"))
+    );
+    await expect(section(page)).toHaveCount(0);
+    await expect(page.locator(".profiles-toggle")).toBeFocused();
+  });
+
+  /**
+   * A rectangle sampled before a layout epoch change is never accepted. The
+   * measurement gate holds the sampled value across a real sidebar scroll, so
+   * the second measurement is observable rather than inferred from timing.
+   */
+  test("profile placement retries a rectangle made stale while awaiting acceptance", async ({
+    page,
+  }) => {
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        measurement: { holds: 2, started: 0 },
+      };
+    });
+    await page.locator(".profiles-toggle").click();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.measurement.started)
+    ).toBe(1);
+    await page.evaluate(() => {
+      document.querySelector(".app-sidebar")?.dispatchEvent(new Event("scroll"));
+      (window as any).__farhelmTestProfiles.measurement.release();
+    });
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.measurement.started)
+    ).toBe(2);
+    await page.evaluate(() => (window as any).__farhelmTestProfiles.measurement.release());
+    await expect(section(page)).toBeVisible();
+  });
+
+  /**
+   * Creating before the first catalog answer cannot target a row that is not
+   * renderable yet. The stable New Profile control receives focus and keeps
+   * the popup open until the released catalog makes the accepted row visible.
+   */
+  test("a create before the initial catalog answer uses the stable focus fallback", async ({
+    page,
+    request,
+  }) => {
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      (url) => url.pathname === "/api/profiles",
+      async (route: Route) => {
+        if (route.request().method() === "GET") {
+          await held;
+        }
+        await route.continue();
+      },
+    );
+
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await section(page).locator(".new-profile-button").click();
+    const name = `pending-create-${Date.now()}`;
+    const form = section(page).locator(".profile-form");
+    await form.locator(".profile-name-input").fill(name);
+    await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
+    await form.locator(".profile-save").click();
+
+    const stored = await registerByName(request, name);
+    profiles.push(stored.id);
+    await expect(form).toHaveCount(0, { timeout: 20_000 });
+    await expect(section(page).locator(".new-profile-button")).toBeFocused();
+    await page.waitForTimeout(400);
+    await expect(section(page)).toBeVisible();
+
+    release!();
+    await expect(profileRow(page, stored.id)).toBeVisible({ timeout: 20_000 });
+  });
+
+  /**
+   * A differing confirmation that changes only a peer profile establishes
+   * whether Dioxus preserves an already-focused control in a keyed target row.
+   * The answer decides whether production needs any reconciliation replay at
+   * all, so this test records both node identity and focus after the patch.
+   */
+  test("a differing catalog preserves focus in an unchanged keyed profile row", async ({
+    page,
+    request,
+  }) => {
+    const target = await createProfile(request, { name: `keyed-target-${Date.now()}` });
+    profiles.push(target.id);
+    let releaseRead: (() => void) | undefined;
+    const heldRead = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let holdNextRead = false;
+    let readHeld = false;
+    await page.route(
+      (url) => url.pathname === "/api/profiles",
+      async (route: Route) => {
+        if (route.request().method() !== "GET" || !holdNextRead) {
+          await route.continue();
+          return;
+        }
+        holdNextRead = false;
+        readHeld = true;
+        await heldRead;
+        await route.continue();
+      },
+    );
+
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const targetRow = profileRow(page, target.id);
+    await targetRow.locator(".profile-edit").click();
+    await targetRow.locator(".profile-name-input").fill(`${target.name}-saved`);
+    holdNextRead = true;
+    await targetRow.locator(".profile-save").click();
+    await expect.poll(() => readHeld).toBe(true);
+    const originalEdit = await targetRow.locator(".profile-edit").elementHandle();
+    expect(originalEdit).not.toBeNull();
+    await expect(targetRow.locator(".profile-edit")).toBeFocused();
+
+    const peer = await createProfile(request, { name: `keyed-peer-${Date.now()}` });
+    profiles.push(peer.id);
+    releaseRead!();
+    await expect(profileRow(page, peer.id)).toBeVisible({ timeout: 20_000 });
+    expect(await originalEdit!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await originalEdit!.evaluate((node) => document.activeElement === node)).toBe(true);
   });
 
   /**
    * The whole CRUD round trip, driven through the panel: define a profile,
    * edit it, delete it — each step confirmed in the catalog the helm proxies
-   * from the owning supervisor.
+   * from the helm catalog.
    *
    * The API assertions are what make this more than a DOM test. A create that
    * only repainted locally, or a delete that only hid a row, would look
-   * identical on screen; reading the host's catalog back proves the request
-   * reached the supervisor that owns it.
+   * identical on screen; reading the helm catalog back proves the request
+   * reached its authority.
    */
-  test("profile CRUD round-trips from the hosts panel to the supervisor", async ({
+  test("profile CRUD round-trips from the app-bar popup to the helm", async ({
     page,
     request,
   }) => {
-    const local = await localHostId(request);
     const name = `panel-profile-${Date.now()}`;
     const renamed = `${name}-edited`;
 
     await listWithStubbedFeed(page);
-    await openProfiles(page, local);
+    await openProfiles(page);
 
-    await section(page, local).locator(".new-profile-button").click();
-    const form = section(page, local).locator(".profile-form");
+    await section(page).locator(".new-profile-button").click();
+    const form = section(page).locator(".profile-form");
     await form.locator(".profile-name-input").fill(name);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     await form.locator(".profile-save").click();
 
     // Registered from the API's answer the moment it exists, before any
     // assertion about the page — see `registerByName`.
-    const stored = await registerByName(request, local, name);
-    await expect(profileRow(page, local, stored.id)).toBeVisible({ timeout: 20_000 });
+    const stored = await registerByName(request, name);
+    await expect(profileRow(page, stored.id)).toBeVisible({ timeout: 20_000 });
 
     // Editing replaces the definition; the row is the same row (same id) with
     // a new name, which is what a rename IS here.
-    await profileRow(page, local, stored.id).locator(".profile-edit").click();
-    await profileRow(page, local, stored.id).locator(".profile-name-input").fill(renamed);
-    await profileRow(page, local, stored.id).locator(".profile-save").click();
-    await expect(profileRow(page, local, stored.id).locator(".profile-name")).toHaveText(renamed, {
+    await profileRow(page, stored.id).locator(".profile-edit").click();
+    await profileRow(page, stored.id).locator(".profile-name-input").fill(renamed);
+    await profileRow(page, stored.id).locator(".profile-save").click();
+    await expect(profileRow(page, stored.id).locator(".profile-name")).toHaveText(renamed, {
       timeout: 20_000,
     });
     expect(
-      (await listProfiles(request, local)).profiles.find((p) => p.id === stored.id)?.name,
+      (await listProfiles(request)).profiles.find((p) => p.id === stored.id)?.name,
     ).toBe(renamed);
 
     // Deleting confirms first — wry ships no native JS dialogs on macOS's
     // WKWebView, so every confirmation in this UI is in-page — and the
     // consequence it opens with is the snapshot rule itself.
-    await profileRow(page, local, stored.id).locator(".profile-delete").click();
-    await expect(profileRow(page, local, stored.id).locator(".confirm-consequence")).toContainText(
+    await profileRow(page, stored.id).locator(".profile-delete").click();
+    await expect(profileRow(page, stored.id).locator(".confirm-consequence")).toContainText(
       "leaves every session already created from it running",
     );
-    await profileRow(page, local, stored.id).locator(".profile-confirm-delete").click();
+    await profileRow(page, stored.id).locator(".profile-confirm-delete").click();
 
-    await expect(profileRow(page, local, stored.id)).toHaveCount(0, { timeout: 20_000 });
+    await expect(profileRow(page, stored.id)).toHaveCount(0, { timeout: 20_000 });
     expect(
-      (await listProfiles(request, local)).profiles.some((p) => p.id === stored.id),
+      (await listProfiles(request)).profiles.some((p) => p.id === stored.id),
       "the delete must reach the catalog, not merely the DOM",
     ).toBe(false);
   });
@@ -396,23 +1154,22 @@ test.describe("agent profiles", () => {
     page,
     request,
   }) => {
-    const local = await localHostId(request);
     const name = `verbatim-${Date.now()}`;
     // `{conversation}` is required for an integrated kind, and `--note=a b` is
     // the element that cannot survive a re-split.
     const template = ["claude", "--resume", "{conversation}", "--note=a b"];
     const invocation = "claude --dangerously-skip-permissions";
-    const profile = await createProfile(request, local, {
+    const profile = await createProfile(request, {
       name,
       invocation,
       agent_kind: "claude",
       resume_template: template,
     });
-    profiles.push({ host: local, id: profile.id });
+    profiles.push(profile.id);
 
     await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    const editing = profileRow(page, local, profile.id);
+    await openProfiles(page);
+    const editing = profileRow(page, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
     await editing.locator(".profile-edit").click();
 
@@ -438,7 +1195,7 @@ test.describe("agent profiles", () => {
       timeout: 20_000,
     });
 
-    const stored = await (await request.get(`/api/hosts/${local}/profiles`)).json();
+    const stored = await (await request.get("/api/profiles")).json();
     const after = stored.profiles.find((p: { id: string }) => p.id === profile.id);
     expect(after.name).toBe(`${name}-edited`);
     expect(after.agent_kind, "the kind must not be rewritten by an edit that never touched it")
@@ -458,17 +1215,16 @@ test.describe("agent profiles", () => {
    * The window is small and what happens inside it is durable: the operation
    * token is released when the save's own reply lands, so the row can be
    * reopened before the re-read commits. An editor seeded from the pre-edit
-   * definition there would save it back and undo an update the supervisor had
+   * definition there would save it back and undo an update the helm had
    * already accepted — silently, since both saves succeed.
    */
   test("a saved profile is what the next editor sees, before the re-read lands", async ({
     page,
     request,
   }) => {
-    const local = await localHostId(request);
     const name = `delayed-read-${Date.now()}`;
-    const profile = await createProfile(request, local, { name });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name });
+    profiles.push(profile.id);
 
     await listWithStubbedFeed(page);
     // One route for the whole test, with a FLAG rather than a route added
@@ -477,7 +1233,7 @@ test.describe("agent profiles", () => {
     // the click it must precede.
     let held = false;
     await page.route(
-      (url) => /^\/api\/hosts\/\d+\/profiles$/.test(url.pathname),
+      (url) => /^\/api\/profiles$/.test(url.pathname),
       async (route: Route) => {
         if (route.request().method() === "GET" && held) {
           await route.abort();
@@ -486,8 +1242,8 @@ test.describe("agent profiles", () => {
         await route.continue();
       },
     );
-    await openProfiles(page, local);
-    const editing = profileRow(page, local, profile.id);
+    await openProfiles(page);
+    const editing = profileRow(page, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
 
     // From here on the authoritative read cannot answer, so everything below
@@ -513,7 +1269,7 @@ test.describe("agent profiles", () => {
 
   /**
    * The create dialog defaults to the profile a session was last created from
-   * on the target host — SPEC.md's creation rule, first half.
+   * in the helm catalog — SPEC.md's creation rule, first half.
    *
    * The remembered default is the HELM's own state, written only by a
    * successful profile-backed create, so the fixture makes one through the
@@ -526,13 +1282,13 @@ test.describe("agent profiles", () => {
    * beside a selected profile would invite typing a command that is not what
    * launches.
    */
-  test("the create dialog preselects the profile last used on the target host", async ({
+  test("the create dialog preselects the profile last used in the helm", async ({
     page,
     request,
   }) => {
     const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `remembered-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: `remembered-${Date.now()}` });
+    profiles.push(profile.id);
     const session = await createSession(request, {
       title: `remembered-session-${Date.now()}`,
       profile_id: profile.id,
@@ -548,6 +1304,52 @@ test.describe("agent profiles", () => {
     });
     await expect(page.locator(".create-session-profile-note")).toHaveCount(0);
     await expect(page.locator(".create-session-form input[type=\"text\"]").nth(1)).toBeDisabled();
+    await expect(page.locator(".create-session-submit")).toBeEnabled();
+  });
+
+  /**
+   * A failed refresh leaves the retained catalog usable but visibly stale in
+   * the create form. Submission stays available because the helm resolves the
+   * selected id against its authoritative catalog at submit time.
+   */
+  test("the create picker reports a retained catalog refresh failure", async ({
+    page,
+    request,
+  }) => {
+    const profile = await createProfile(request, { name: `stale-picker-${Date.now()}` });
+    profiles.push(profile.id);
+    const probe = await request.get("/api/profiles");
+    const build = probe.headers()["x-farhelm-build"] ?? "";
+    expect(build, "fabricated API replies must retain the helm build stamp").toBeTruthy();
+    let fail = false;
+    await page.route(
+      (url) => url.pathname === "/api/profiles",
+      async (route: Route) => {
+        if (route.request().method() !== "GET" || !fail) {
+          await route.continue();
+          return;
+        }
+        await route.fulfill({
+          status: 503,
+          headers: { "content-type": "text/plain", "x-farhelm-build": build },
+          body: "catalog refresh refused by fixture",
+        });
+      },
+    );
+
+    const feed = await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await expect(profileRow(page, profile.id)).toBeVisible({ timeout: 20_000 });
+    await closeProfiles(page);
+    fail = true;
+    feed.notify(2);
+    await openCreateDialog(page);
+    await waitForOption(page, profile.id);
+    await expect(page.locator(".create-session-profile-refresh-error"))
+      .toContainText("showing the last catalog this client read");
+    await expect(page.locator(".create-session-profile-refresh-error"))
+      .toContainText("catalog refresh refused by fixture");
+    await page.locator(".create-session-profile").selectOption(profile.id);
     await expect(page.locator(".create-session-submit")).toBeEnabled();
   });
 
@@ -571,10 +1373,10 @@ test.describe("agent profiles", () => {
     request,
   }) => {
     const local = await localHostId(request);
-    const doomed = await createProfile(request, local, { name: `doomed-${Date.now()}` });
-    profiles.push({ host: local, id: doomed.id });
-    const survivor = await createProfile(request, local, { name: `survivor-${Date.now()}` });
-    profiles.push({ host: local, id: survivor.id });
+    const doomed = await createProfile(request, { name: `doomed-${Date.now()}` });
+    profiles.push(doomed.id);
+    const survivor = await createProfile(request, { name: `survivor-${Date.now()}` });
+    profiles.push(survivor.id);
 
     const session = await createSession(request, {
       title: `doomed-session-${Date.now()}`,
@@ -582,9 +1384,9 @@ test.describe("agent profiles", () => {
       host: local,
     });
     created.push(session.id);
-    await cleanupProfile(request, local, doomed.id);
+    await cleanupProfile(request, doomed.id);
     expect(
-      (await listProfiles(request, local)).default_profile,
+      (await listProfiles(request)).default_profile,
       "the helm keeps the remembered id after the profile is gone; without that there is nothing " +
         "to ask about",
     ).toBe(doomed.id);
@@ -622,12 +1424,10 @@ test.describe("agent profiles", () => {
    * delete half is where a "helpful" implementation goes wrong, and the
    * presence of the survivor is what makes the assertion mean something.
    *
-   * The last step is the host-change rule, which is not cosmetic: a profile id
-   * means nothing on another supervisor, and because every fresh supervisor
-   * seeds the same starter profiles, carrying one across does not fail loudly
-   * — it resolves, to a profile nobody chose.
+   * The host-change step pins the shared-catalog rule: choosing another target
+   * must not discard an explicit profile choice.
    */
-  test("an explicit choice follows a rename, blocks on a delete, and never crosses hosts", async ({
+  test("an explicit choice follows a rename, survives a host change, and blocks on delete", async ({
     page,
     request,
   }) => {
@@ -636,10 +1436,10 @@ test.describe("agent profiles", () => {
     expect(remote, "the e2e stack registers a second host; without it this test proves nothing")
       .toBeTruthy();
     const stamp = Date.now();
-    const chosen = await createProfile(request, local, { name: `chosen-${stamp}` });
-    profiles.push({ host: local, id: chosen.id });
-    const survivor = await createProfile(request, local, { name: `bystander-${stamp}` });
-    profiles.push({ host: local, id: survivor.id });
+    const chosen = await createProfile(request, { name: `chosen-${stamp}` });
+    profiles.push(chosen.id);
+    const survivor = await createProfile(request, { name: `bystander-${stamp}` });
+    profiles.push(survivor.id);
 
     const feed = await listWithStubbedFeed(page);
     await openCreateDialog(page);
@@ -647,34 +1447,35 @@ test.describe("agent profiles", () => {
     await page.locator(".create-session-profile").selectOption(chosen.id);
 
     // A rename keeps the id, so the choice holds and only the label moves.
-    await updateProfile(request, local, chosen.id, { name: `chosen-${stamp}-renamed` });
+    await updateProfile(request, chosen.id, { name: `chosen-${stamp}-renamed` });
     feed.notify(2);
     await expect(page.locator(`.create-session-profile option[value="${chosen.id}"]`))
       .toHaveText(`chosen-${stamp}-renamed`, { timeout: 20_000 });
     await expect(page.locator(".create-session-profile")).toHaveValue(chosen.id);
     await expect(page.locator(".create-session-submit")).toBeEnabled();
 
+    // Every target consumes this helm's catalog, so changing hosts keeps both
+    // the option and the explicit choice.
+    await page.locator(".create-session-host").selectOption(String(remote!.id));
+    await expect(page.locator(`.create-session-profile option[value="${chosen.id}"]`))
+      .toHaveCount(1);
+    await expect(page.locator(".create-session-profile")).toHaveValue(chosen.id);
+
     // A delete takes the choice away, and nothing replaces it.
-    await cleanupProfile(request, local, chosen.id);
+    await cleanupProfile(request, chosen.id);
     feed.notify(3);
     await expect(page.locator(".create-session-profile")).toHaveValue(UNRESOLVED, {
       timeout: 20_000,
     });
-    await expect(page.locator(".create-session-profile-note")).toContainText("no longer on this host");
+    await expect(page.locator(".create-session-profile-note")).toContainText("no longer in this helm");
     await expect(page.locator(".create-session-profile")).not.toHaveValue(survivor.id);
     await expect(page.locator(".create-session-submit")).toBeDisabled();
-
-    // And moving to another host discards the whole catalog before offering
-    // anything: the previous host's options must not be selectable there.
-    await page.locator(".create-session-host").selectOption(String(remote!.id));
-    await expect(page.locator(`.create-session-profile option[value="${survivor.id}"]`))
-      .toHaveCount(0, { timeout: 20_000 });
   });
 
   /**
    * Choosing a profile creates from it and the session records the snapshot —
    * the create dialog's half of SPEC.md's "creating a session offers the
-   * target host's profiles".
+   * helm's profiles".
    *
    * Asserted through the created session's own `source_profile` rather than
    * through the request body: the snapshot is what every later surface reads,
@@ -686,8 +1487,8 @@ test.describe("agent profiles", () => {
     request,
   }) => {
     const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `chosen-create-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: `chosen-create-${Date.now()}` });
+    profiles.push(profile.id);
     const title = `chosen-session-${Date.now()}`;
 
     await listWithStubbedFeed(page);
@@ -735,9 +1536,72 @@ test.describe("agent profiles", () => {
     );
     expect(detail.source_profile?.existence).toBe("present");
     expect(
-      (await listProfiles(request, local)).default_profile,
+      (await listProfiles(request)).default_profile,
       "and a successful profile-backed create is what makes a profile the remembered default",
     ).toBe(profile.id);
+  });
+
+  /**
+   * A successful profile-backed create fences the retained remembered default
+   * before the dialog can reopen. The new form waits for the explicit refresh
+   * instead of consuming the previous default and latching the wrong choice.
+   */
+  test("reopening after a profile create waits for its fresh remembered default", async ({
+    page,
+    request,
+  }) => {
+    const local = await localHostId(request);
+    const stamp = Date.now();
+    const previous = await createProfile(request, { name: `default-old-${stamp}` });
+    profiles.push(previous.id);
+    const chosen = await createProfile(request, { name: `default-new-${stamp}` });
+    profiles.push(chosen.id);
+    const anchor = await createSession(request, {
+      title: `default-anchor-${stamp}`,
+      host: local,
+      profile_id: previous.id,
+    });
+    created.push(anchor.id);
+
+    let hold = false;
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      (url) => url.pathname === "/api/profiles",
+      async (route: Route) => {
+        if (route.request().method() === "GET" && hold) await held;
+        await route.continue();
+      },
+    );
+
+    await listWithStubbedFeed(page);
+    await openCreateDialog(page);
+    await waitForOption(page, chosen.id);
+    const form = page.locator(".create-session-form");
+    await page.locator(".create-session-profile").selectOption(chosen.id);
+    await form.locator('input[type="text"]').nth(0).fill("/tmp");
+    await form.locator('input[type="text"]').nth(2).fill(`default-created-${stamp}`);
+    hold = true;
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (reply) => reply.request().method() === "POST" && reply.url().endsWith("/api/sessions"),
+      ),
+      form.locator(".create-session-submit").click(),
+    ]);
+    const createdSession = await response.json();
+    created.push(createdSession.id as string);
+
+    await expect(page.locator(".create-session-form")).toHaveCount(0, { timeout: 20_000 });
+    await openCreateDialog(page);
+    await expect(page.locator(".create-session-profile")).toHaveValue(UNRESOLVED);
+    await expect(page.locator(".create-session-submit")).toBeDisabled();
+
+    release!();
+    await expect(page.locator(".create-session-profile")).toHaveValue(chosen.id, {
+      timeout: 20_000,
+    });
   });
 
   /**
@@ -763,10 +1627,10 @@ test.describe("agent profiles", () => {
   }) => {
     const local = await localHostId(request);
     const stamp = Date.now();
-    const first = await createProfile(request, local, { name: `key-a-${stamp}` });
-    profiles.push({ host: local, id: first.id });
-    const second = await createProfile(request, local, { name: `key-b-${stamp}` });
-    profiles.push({ host: local, id: second.id });
+    const first = await createProfile(request, { name: `key-a-${stamp}` });
+    profiles.push(first.id);
+    const second = await createProfile(request, { name: `key-b-${stamp}` });
+    profiles.push(second.id);
 
     await listWithStubbedFeed(page);
     const bodies = await watchCreateBodies(page);
@@ -816,17 +1680,10 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * The two catalog surfaces are independent, and a surface that is not shown
-   * reads nothing at all.
-   *
-   * Counting requests is the only way to make either claim: what a picker
-   * shows cannot distinguish "read for this host" from "read for some host and
-   * rendered anyway", and "the closed one performed no read" is not visible on
-   * screen by construction. The cut is what turns independence from a
-   * coincidence into a demonstration — one host's catalog failing must leave
-   * the other's surface exactly as it was.
+   * A definition created in the management popup belongs to the helm, so the
+   * create picker must retain it when the target moves between two hosts.
    */
-  test("each profile surface reads only its own host, and a closed one reads nothing", async ({
+  test("a popup-created profile is offered on every host", async ({
     page,
     request,
   }) => {
@@ -834,71 +1691,37 @@ test.describe("agent profiles", () => {
     const remote = (await listHosts(request)).find((host) => host.id !== local);
     expect(remote, "the e2e stack registers a second host; without it this test proves nothing")
       .toBeTruthy();
-    const profile = await createProfile(request, local, { name: `isolated-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
+    const name = `shared-${Date.now()}`;
 
-    const feed = await listWithStubbedFeed(page);
-    const watch = await watchCatalogReads(page);
-    // A second counter, over an endpoint the FEED is known to drive, used as
-    // the causal barrier for the negative assertion at the end.
-    const listingReads = countReads(page);
-    expect(
-      watch.total(),
-      "with no dialog open and no section expanded there is no catalog anyone is looking at",
-    ).toBe(0);
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await section(page).locator(".new-profile-button").click();
+    const form = section(page).locator(".profile-form");
+    await form.locator(".profile-name-input").fill(name);
+    await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
+    await form.locator(".profile-save").click();
+    const profile = await registerByName(request, name);
+    await closeProfiles(page);
 
-    // The dialog reads the host it would create on, and only that one.
     await openCreateDialog(page);
     await waitForOption(page, profile.id);
-    expect(watch.reads(local)).toBeGreaterThan(0);
-    expect(watch.reads(remote!.id), "the dialog must not read a host it is not aimed at").toBe(0);
-
-    // The panel's section is a second surface, asking a second question.
-    await openProfiles(page, remote!.id);
-    await expect
-      .poll(() => watch.reads(remote!.id), { timeout: 20_000 })
-      .toBeGreaterThan(0);
-
-    // One host's catalog failing leaves the other's surface untouched — and
-    // the failure has to be shown to have HAPPENED, not merely to have been
-    // armed: both counts are watched across the notice, so the remote read
-    // reached the cut and the local one answered anyway.
-    const localReadsBefore = watch.reads(local);
-    const remoteReadsBefore = watch.reads(remote!.id);
-    watch.cut(remote!.id);
-    feed.notify(2);
-    await expect
-      .poll(() => watch.reads(remote!.id), {
-        timeout: 20_000,
-        message: "the cut host must actually be read, or nothing was proven to fail",
-      })
-      .toBeGreaterThan(remoteReadsBefore);
-    await expect
-      .poll(() => watch.reads(local), { timeout: 20_000 })
-      .toBeGreaterThan(localReadsBefore);
+    await page.locator(".create-session-profile").selectOption(profile.id);
+    await page.locator(".create-session-host").selectOption(String(remote!.id));
     await expect(page.locator(`.create-session-profile option[value="${profile.id}"]`))
       .toHaveCount(1);
+    await expect(page.locator(".create-session-profile")).toHaveValue(profile.id);
+  });
 
-    // Closed surfaces ignore notifications entirely.
-    await closeProfiles(page, remote!.id);
-    await page.locator(".new-session-button").click();
-    await expect(page.locator(".create-session-profile")).toHaveCount(0);
-    const quiet = { local: watch.reads(local), remote: watch.reads(remote!.id) };
-    // The barrier that makes the negative assertion mean something: the
-    // LISTING is notification-driven too, so waiting for its count to advance
-    // proves this notice was received and acted on. A sleep would only prove
-    // the test waited — and would fail or pass on how fast the machine is.
-    const listings = listingReads;
-    const before = listings.count();
-    feed.notify(3);
-    await expect
-      .poll(() => listings.count(), {
-        timeout: 20_000,
-        message: "the page must have acted on the notification before absence proves anything",
-      })
-      .toBeGreaterThan(before);
-    expect(watch.reads(local), "a closed dialog reads no catalog").toBe(quiet.local);
-    expect(watch.reads(remote!.id), "a collapsed section reads no catalog").toBe(quiet.remote);
+  /** Profiles are managed from the app bar, so no host row may advertise a
+   * second profile surface in its actions menu. */
+  test("the host row menu has no profiles item", async ({ page, request }) => {
+    const local = await localHostId(request);
+    await listWithStubbedFeed(page);
+    await openHostsPanel(page);
+    const host = page.locator(`[data-host-id="${local}"]`);
+    await openHostMenu(host);
+    await expect(host.locator(".host-row-menu-panel")).not.toContainText("profiles");
+    await expect(host.locator(".host-profiles-toggle")).toHaveCount(0);
   });
 
   /**
@@ -909,8 +1732,8 @@ test.describe("agent profiles", () => {
    * announced, rather than being staged before the page loads. Both halves are
    * deliberate. Renaming under an open page is the case the rule is about, and
    * the settle-then-notify is the stubbed-feed convention: a session's
-   * `existence` is derived per reply by the owning supervisor and reaches the
-   * merged list only when the helm's session cache next refreshes, so a
+   * `existence` is derived per reply by the helm and reaches the merged list
+   * only when its session cache next refreshes, so a
    * notification played before that lands would have the page re-read a view
    * that has not moved.
    */
@@ -922,8 +1745,8 @@ test.describe("agent profiles", () => {
     const before = `snapshot-before-${Date.now()}`;
     const after = `${before}-renamed`;
     const title = `snapshot-session-${Date.now()}`;
-    const profile = await createProfile(request, local, { name: before });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: before });
+    profiles.push(profile.id);
     const session = await createSession(request, {
       title,
       profile_id: profile.id,
@@ -951,7 +1774,7 @@ test.describe("agent profiles", () => {
     await expect(badge).toHaveText(before);
     await expect(badge).toHaveAttribute("title", `profile: ${before} — ${FAKE_AGENT}`);
 
-    await updateProfile(request, local, profile.id, { name: after });
+    await updateProfile(request, profile.id, { name: after });
     await settleExistence(request, title, "renamed");
     feed.notify(2);
 
@@ -975,22 +1798,12 @@ test.describe("agent profiles", () => {
 
     // The catalog, meanwhile, says the new name — the two surfaces disagree
     // on purpose.
-    await openProfiles(page, local);
-    await expect(profileRow(page, local, profile.id).locator(".profile-name")).toHaveText(after, {
+    await openProfiles(page);
+    await expect(profileRow(page, profile.id).locator(".profile-name")).toHaveText(after, {
       timeout: 20_000,
     });
   });
 
-  /**
-   * A DELETED profile's sessions keep their snapshot too, and say so.
-   *
-   * The complement of the rename case, and the one where "leaves existing
-   * sessions alone" is most easily broken in the other direction: a row that
-   * vanished with its profile, or one that quietly dropped the name it was
-   * created from, would both destroy the record of what a session actually
-   * launched. The session is neither removed nor renamed — only the qualifier
-   * beside the name changes.
-   */
   /**
    * A near-limit unbroken profile name stays constrained inside the
    * actions panel instead of widening it out of the sidebar.
@@ -1004,8 +1817,8 @@ test.describe("agent profiles", () => {
     const local = await localHostId(request);
     const name = `long-${"p".repeat(180)}`;
     const title = `long-profile-session-${Date.now()}`;
-    const profile = await createProfile(request, local, { name });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name });
+    profiles.push(profile.id);
     const session = await createSession(request, { title, profile_id: profile.id, host: local });
     created.push(session.id);
 
@@ -1027,15 +1840,22 @@ test.describe("agent profiles", () => {
     expect(await chip.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   });
 
-  test("a deleted profile's sessions keep their snapshot and say it is gone", async ({
+  /**
+   * A deleted profile's sessions keep the snapshotted name as a plain label.
+   *
+   * The row must outlive the catalog definition, but absence from this helm is
+   * not a warning about an old session or one imported from another helm. The
+   * immutable name therefore renders exactly as it did while the row existed.
+   */
+  test("a deleted profile's sessions keep their plain snapshot label", async ({
     page,
     request,
   }) => {
     const local = await localHostId(request);
     const name = `deleted-snapshot-${Date.now()}`;
     const title = `deleted-snapshot-session-${Date.now()}`;
-    const profile = await createProfile(request, local, { name });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name });
+    profiles.push(profile.id);
     const session = await createSession(request, { title, profile_id: profile.id, host: local });
     created.push(session.id);
 
@@ -1045,6 +1865,7 @@ test.describe("agent profiles", () => {
     await openRowMenu(row(page, session.id));
     const label = row(page, session.id).locator(".session-profile");
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
+    const presentLabelColor = await label.evaluate((element) => getComputedStyle(element).color);
 
     // The row's own meta-line badge, same present-state snapshot as the
     // panel chip — see the rename test above for why this is a second
@@ -1052,8 +1873,9 @@ test.describe("agent profiles", () => {
     const badge = row(page, session.id).locator(".session-invocation");
     await expect(badge).toHaveText(name);
     await expect(badge).toHaveAttribute("title", `profile: ${name} — ${FAKE_AGENT}`);
+    const presentBadgeColor = await badge.evaluate((element) => getComputedStyle(element).color);
 
-    await cleanupProfile(request, local, profile.id);
+    await cleanupProfile(request, profile.id);
     await settleExistence(request, title, "deleted");
     feed.notify(2);
 
@@ -1065,12 +1887,16 @@ test.describe("agent profiles", () => {
         "record of what it launched",
     ).toBeVisible();
 
-    // The badge keeps the same snapshot too, qualified as deleted.
+    // The badge keeps the same snapshot as a plain historical label.
     await expect(badge).toHaveText(name);
     await expect(badge).toHaveAttribute(
       "title",
-      `profile: ${name} (deleted since) — ${FAKE_AGENT}`,
+      `profile: ${name} — ${FAKE_AGENT}`,
     );
+    expect(await label.evaluate((element) => getComputedStyle(element).color))
+      .toBe(presentLabelColor);
+    expect(await badge.evaluate((element) => getComputedStyle(element).color))
+      .toBe(presentBadgeColor);
   });
 
   /**
@@ -1089,43 +1915,43 @@ test.describe("agent profiles", () => {
   }) => {
     const local = await localHostId(request);
     const stamp = Date.now();
-    const edited = await createProfile(request, local, { name: `vanish-edit-${stamp}` });
-    profiles.push({ host: local, id: edited.id });
-    const confirmed = await createProfile(request, local, { name: `vanish-delete-${stamp}` });
-    profiles.push({ host: local, id: confirmed.id });
+    const edited = await createProfile(request, { name: `vanish-edit-${stamp}` });
+    profiles.push(edited.id);
+    const confirmed = await createProfile(request, { name: `vanish-delete-${stamp}` });
+    profiles.push(confirmed.id);
 
     const feed = await listWithStubbedFeed(page);
-    await openProfiles(page, local);
+    await openProfiles(page);
 
     // An open EDITOR on a profile that then goes away.
-    await profileRow(page, local, edited.id).locator(".profile-edit").click();
-    await expect(profileRow(page, local, edited.id).locator(".profile-form")).toBeVisible();
-    await cleanupProfile(request, local, edited.id);
+    await profileRow(page, edited.id).locator(".profile-edit").click();
+    await expect(profileRow(page, edited.id).locator(".profile-form")).toBeVisible();
+    await cleanupProfile(request, edited.id);
     feed.notify(2);
-    await expect(profileRow(page, local, edited.id)).toHaveCount(0, { timeout: 20_000 });
-    const notice = section(page, local).locator(".profiles-notice");
-    await expect(notice).toContainText("no longer on this host");
+    await expect(profileRow(page, edited.id)).toHaveCount(0, { timeout: 20_000 });
+    const notice = section(page).locator(".profiles-notice");
+    await expect(notice).toContainText("no longer in this helm");
 
     // And an open CONFIRMATION, tracked separately.
-    await profileRow(page, local, confirmed.id).locator(".profile-delete").click();
-    await expect(profileRow(page, local, confirmed.id).locator(".profile-confirm-delete"))
+    await profileRow(page, confirmed.id).locator(".profile-delete").click();
+    await expect(profileRow(page, confirmed.id).locator(".profile-confirm-delete"))
       .toBeVisible();
-    await cleanupProfile(request, local, confirmed.id);
+    await cleanupProfile(request, confirmed.id);
     feed.notify(3);
-    await expect(profileRow(page, local, confirmed.id)).toHaveCount(0, { timeout: 20_000 });
+    await expect(profileRow(page, confirmed.id)).toHaveCount(0, { timeout: 20_000 });
     await expect(notice).toContainText("already gone");
     // Nothing is left that could act on either: the section is back to its
     // ordinary state, with no form and no prompt anywhere in it.
-    await expect(section(page, local).locator(".profile-form")).toHaveCount(0);
-    await expect(section(page, local).locator(".profile-confirm-delete")).toHaveCount(0);
+    await expect(section(page).locator(".profile-form")).toHaveCount(0);
+    await expect(section(page).locator(".profile-confirm-delete")).toHaveCount(0);
   });
 
   /**
    * A refused save keeps every draft field and changes nothing server-side.
    *
-   * The refusal is a REAL one from the supervisor — a definition past the
+   * The refusal is a REAL one from the helm — a definition past the
    * per-profile size cap — rather than a routed reply, because the sentence
-   * the user acts on is the supervisor's and a fabricated one would prove only
+   * the user acts on is the helm's and a fabricated one would prove only
    * that this UI can render a string it was handed. What must survive is the
    * whole draft: a refused name is usually one keystroke from an accepted one,
    * and a form that cleared itself would make the user retype a definition
@@ -1135,27 +1961,29 @@ test.describe("agent profiles", () => {
     page,
     request,
   }) => {
-    const local = await localHostId(request);
-    const before = (await listProfiles(request, local)).profiles.length;
+    const before = (await listProfiles(request)).profiles.length;
     const oversized = "x".repeat(9_000);
 
     await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    await section(page, local).locator(".new-profile-button").click();
-    const form = section(page, local).locator(".profile-form");
+    await openProfiles(page);
+    await section(page).locator(".new-profile-button").click();
+    const form = section(page).locator(".profile-form");
     await form.locator(".profile-name-input").fill(oversized);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     await form.locator(".profile-kind-select").selectOption("codex");
     await form.locator(".profile-save").click();
 
     await expect(form.locator(".profile-form-error")).toBeVisible({ timeout: 20_000 });
+    await expect(form.locator(".profile-name-input")).toBeFocused();
+    await page.waitForTimeout(400);
+    await expect(section(page)).toBeVisible();
     // Preserved, not cleared or reset — including the fields the refusal was
     // not about.
     await expect(form.locator(".profile-invocation-input")).toHaveValue(FAKE_AGENT);
     await expect(form.locator(".profile-kind-select")).toHaveValue("codex");
     expect(await form.locator(".profile-name-input").inputValue()).toHaveLength(oversized.length);
     expect(
-      (await listProfiles(request, local)).profiles.length,
+      (await listProfiles(request)).profiles.length,
       "a refused create must leave the catalog exactly as it was",
     ).toBe(before);
   });
@@ -1173,7 +2001,6 @@ test.describe("agent profiles", () => {
     page,
     request,
   }) => {
-    const local = await localHostId(request);
     const name = `unreadable-${Date.now()}`;
     // ONE route for this path, handling both verbs. Two routes over the same
     // pattern would not compose: Playwright runs the LAST matching handler
@@ -1187,7 +2014,7 @@ test.describe("agent profiles", () => {
     // client's own decision rather than a re-read papering over it.
     let held = true;
     await page.route(
-      (url) => /^\/api\/hosts\/\d+\/profiles$/.test(url.pathname),
+      (url) => /^\/api\/profiles$/.test(url.pathname),
       async (route: Route) => {
         if (route.request().method() === "POST") {
           const response = await route.fetch();
@@ -1208,18 +2035,18 @@ test.describe("agent profiles", () => {
 
     await listWithStubbedFeed(page);
     held = false;
-    await openProfiles(page, local);
-    const before = section(page, local).locator(".profile-row");
+    await openProfiles(page);
+    const before = section(page).locator(".profile-row");
     await expect(before.first()).toBeVisible({ timeout: 20_000 });
-    await section(page, local).locator(".new-profile-button").click();
-    const form = section(page, local).locator(".profile-form");
+    await section(page).locator(".new-profile-button").click();
+    const form = section(page).locator(".profile-form");
     await form.locator(".profile-name-input").fill(name);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     held = true;
     await form.locator(".profile-save").click();
 
-    const stored = await registerByName(request, local, name);
-    await expect(section(page, local).locator(".profiles-warning")).toBeVisible({
+    const stored = await registerByName(request, name);
+    await expect(section(page).locator(".profiles-warning")).toBeVisible({
       timeout: 20_000,
     });
     // The held catalog is DROPPED, not left reopenable: this build cannot say
@@ -1227,7 +2054,7 @@ test.describe("agent profiles", () => {
     // suspect — and an editor seeded from one would save a definition known to
     // be superseded.
     await expect(
-      section(page, local).locator(".profile-row"),
+      section(page).locator(".profile-row"),
       "a success this build could not read must not leave stale rows editable",
     ).toHaveCount(0);
     // Deliberately NOT asserting which of the two empty states is showing.
@@ -1235,7 +2062,7 @@ test.describe("agent profiles", () => {
     // or reporting that failure depending on whether the request had been
     // issued yet — and both are honest. What must hold is that nothing is
     // there to reopen and edit.
-    await expect(section(page, local).locator(".profile-edit")).toHaveCount(0);
+    await expect(section(page).locator(".profile-edit")).toHaveCount(0);
 
     // Only the authoritative read fills it back in.
     held = false;
@@ -1244,7 +2071,7 @@ test.describe("agent profiles", () => {
     await expect(form).toHaveCount(0, { timeout: 20_000 });
     // And the authoritative read is what puts the rows back, which is exactly
     // what the warning says it will.
-    await expect(profileRow(page, local, stored.id)).toBeVisible({ timeout: 30_000 });
+    await expect(profileRow(page, stored.id)).toBeVisible({ timeout: 30_000 });
   });
 
   /**
@@ -1260,46 +2087,48 @@ test.describe("agent profiles", () => {
    * released so the next attempt is possible.
    */
   test("a refused profile delete keeps the row and reports on it", async ({ page, request }) => {
-    const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `undeletable-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: `undeletable-${Date.now()}` });
+    profiles.push(profile.id);
     await page.route(
-      (url) => /^\/api\/hosts\/\d+\/profiles\/[^/]+$/.test(url.pathname),
+      (url) => /^\/api\/profiles\/[^/]+$/.test(url.pathname),
       async (route: Route) => {
         if (route.request().method() !== "DELETE") {
           await route.continue();
           return;
         }
-        await route.fulfill({
-          status: 409,
-          contentType: "text/plain",
-          body: "host is unreachable-reprobing, so this operation is refused and nothing was queued",
-        });
+        await fulfillRefusal(
+          route,
+          request,
+          "host is unreachable-reprobing, so this operation is refused and nothing was queued",
+        );
       },
     );
 
     await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    const target = profileRow(page, local, profile.id);
+    await openProfiles(page);
+    const target = profileRow(page, profile.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await target.locator(".profile-delete").click();
     await target.locator(".profile-confirm-delete").click();
 
     await expect(target.locator(".profile-error")).toContainText("refused", { timeout: 20_000 });
+    await expect(target.locator(".profile-edit")).toBeFocused();
+    await page.waitForTimeout(400);
+    await expect(section(page)).toBeVisible();
     await expect(target, "a refused delete must not remove the row").toBeVisible();
     await expect(
       target.locator(".profile-delete"),
-      "the operation token must be released, or the section is inert with nothing explaining why",
+      "the operation token must be released, or the popup is inert with nothing explaining why",
     ).toBeEnabled();
     expect(
-      (await listProfiles(request, local)).profiles.some((p) => p.id === profile.id),
+      (await listProfiles(request)).profiles.some((p) => p.id === profile.id),
       "and the catalog still holds it",
     ).toBe(true);
   });
 
   /**
-   * A profile edited elsewhere reaches an open profiles section on the next
-   * notification, and NOT before — the panel surface's half of the
+   * A profile edited elsewhere reaches an open profiles popup on the next
+   * notification, and NOT before — the popup's half of the
    * invalidation contract.
    *
    * The stub is what makes both halves provable: the socket is silent until
@@ -1307,27 +2136,25 @@ test.describe("agent profiles", () => {
    * to land, and the assertion made BEFORE the notification is what shows the
    * surface is genuinely notification-driven rather than merely fast.
    *
-   * No settle step here, deliberately, unlike the session-row tests: a catalog
-   * is a LIVE read from the owning supervisor rather than something the helm
-   * caches, so the awaited edit has already committed by the time it answers
-   * and polling for it would assert nothing.
+   * No settle step here, deliberately, unlike the session-row tests: the
+   * awaited helm edit has already committed by the time it answers, so polling
+   * for it would assert nothing.
    */
-  test("a profile edited elsewhere reaches an open profiles section on notification", async ({
+  test("a profile edited elsewhere reaches an open profiles popup on notification", async ({
     page,
     request,
   }) => {
-    const local = await localHostId(request);
     const before = `feed-profile-${Date.now()}`;
     const after = `${before}-elsewhere`;
-    const profile = await createProfile(request, local, { name: before });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: before });
+    profiles.push(profile.id);
 
     const feed = await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    const name = profileRow(page, local, profile.id).locator(".profile-name");
+    await openProfiles(page);
+    const name = profileRow(page, profile.id).locator(".profile-name");
     await expect(name).toHaveText(before, { timeout: 20_000 });
 
-    await updateProfile(request, local, profile.id, { name: after });
+    await updateProfile(request, profile.id, { name: after });
     // Still showing the old name: nothing polls this surface while the feed is
     // healthy, which is what makes the assertion after the notice meaningful.
     await expect(name).toHaveText(before);
@@ -1356,17 +2183,17 @@ test.describe("agent profiles", () => {
     const local = await localHostId(request);
     const stamp = Date.now();
     // The dialog's first catalog must have a remembered default that is GONE.
-    const doomed = await createProfile(request, local, { name: `ask-doomed-${stamp}` });
-    profiles.push({ host: local, id: doomed.id });
-    const survivor = await createProfile(request, local, { name: `ask-survivor-${stamp}` });
-    profiles.push({ host: local, id: survivor.id });
+    const doomed = await createProfile(request, { name: `ask-doomed-${stamp}` });
+    profiles.push(doomed.id);
+    const survivor = await createProfile(request, { name: `ask-survivor-${stamp}` });
+    profiles.push(survivor.id);
     const first = await createSession(request, {
       title: `ask-first-${stamp}`,
       profile_id: doomed.id,
       host: local,
     });
     created.push(first.id);
-    await cleanupProfile(request, local, doomed.id);
+    await cleanupProfile(request, doomed.id);
 
     const feed = await listWithStubbedFeed(page);
     await openCreateDialog(page);
@@ -1384,7 +2211,7 @@ test.describe("agent profiles", () => {
     });
     created.push(second.id);
     await expect
-      .poll(async () => (await listProfiles(request, local)).default_profile, { timeout: 20_000 })
+      .poll(async () => (await listProfiles(request)).default_profile, { timeout: 20_000 })
       .toBe(survivor.id);
     feed.notify(2);
 
@@ -1416,10 +2243,10 @@ test.describe("agent profiles", () => {
   }) => {
     const local = await localHostId(request);
     const stamp = Date.now();
-    const first = await createProfile(request, local, { name: `turn-a-${stamp}` });
-    profiles.push({ host: local, id: first.id });
-    const second = await createProfile(request, local, { name: `turn-b-${stamp}` });
-    profiles.push({ host: local, id: second.id });
+    const first = await createProfile(request, { name: `turn-a-${stamp}` });
+    profiles.push(first.id);
+    const second = await createProfile(request, { name: `turn-b-${stamp}` });
+    profiles.push(second.id);
 
     await listWithStubbedFeed(page);
     const bodies = await watchCreateBodies(page);
@@ -1448,36 +2275,38 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * A dialog whose catalog has not answered yet selects nothing and blocks —
-   * it does not fall back to the command field.
-   *
-   * SPEC.md's ask-don't-guess rule read conservatively, and the reason it is
-   * not merely pedantic: the command field is not necessarily empty, and a
-   * dialog that defaulted to it while still reading would let a create go out
-   * carrying text typed for another intention. The state is transient and
-   * always escapable, which this test also shows — the block lifts the moment
-   * the catalog arrives.
+   * An explicit command chosen while the catalog is pending remains
+   * authoritative after a late answer supplies a live remembered profile.
+   * The picker, visible invocation, and submitted wire mode must agree; any
+   * one of them moving would let a late default replace the user's decision.
    */
-  test("a dialog blocks while its catalog is still unread", async ({ page, request }) => {
+  test("a command chosen before a late catalog default remains authoritative", async ({
+    page,
+    request,
+  }) => {
     const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `pending-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
-
-    let held = true;
+    const profile = await createProfile(request, { name: `pending-${Date.now()}` });
+    profiles.push(profile.id);
+    const anchor = await createSession(request, {
+      title: `pending-default-${Date.now()}`,
+      host: local,
+      profile_id: profile.id,
+    });
+    created.push(anchor.id);
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     await page.route(
-      (url) => /^\/api\/hosts\/\d+\/profiles$/.test(url.pathname),
+      (url) => /^\/api\/profiles$/.test(url.pathname),
       async (route: Route) => {
-        if (route.request().method() === "GET" && held) {
-          // Never answered while the assertion below runs: the dialog is
-          // deciding with no catalog at all.
-          await route.abort();
-          return;
-        }
+        if (route.request().method() === "GET") await held;
         await route.continue();
       },
     );
 
     await listWithStubbedFeed(page);
+    const bodies = await watchCreateBodies(page);
     await openCreateDialog(page);
     await expect(page.locator(".create-session-profile")).toHaveValue(UNRESOLVED, {
       timeout: 20_000,
@@ -1487,39 +2316,49 @@ test.describe("agent profiles", () => {
       "a dialog that cannot say what it would launch must not be submittable",
     ).toBeDisabled();
 
-    // Typing a command IS an answer — the user said what they want.
-    await page.locator(".create-session-form").locator('input[type="text"]').nth(1)
-      .fill(FAKE_AGENT);
+    const form = page.locator(".create-session-form");
+    const command = `${FAKE_AGENT} --late-default-test`;
+    await form.locator('input[type="text"]').nth(1).fill(command);
     await expect(page.locator(".create-session-submit")).toBeEnabled();
+
+    release!();
+    await waitForOption(page, profile.id);
+    await expect(page.locator(".create-session-profile")).toHaveValue("");
+    await expect(form.locator('input[type="text"]').nth(1)).toHaveValue(command);
+
+    await form.locator('input[type="text"]').nth(0).fill("/nonexistent/late-default-test");
+    await form.locator('input[type="text"]').nth(2).fill(`late-default-${Date.now()}`);
+    await form.locator(".create-session-submit").click();
+    await expect.poll(() => bodies.length, { timeout: 20_000 }).toBe(1);
+    expect(bodies[0].profile_id, "command mode must not send the late default id").toBeUndefined();
+    expect(bodies[0].invocation).toBe(command);
   });
 
   /**
    * The editor shows peer text ESCAPED, and saving an untouched field writes
    * back the original bytes.
    *
-   * A profile name or invocation comes from a supervisor, which under `--ssh`
-   * is a machine this helm does not control, and an `<input>` is the one place
-   * this UI cannot isolate what it renders: a right-to-left override stays
-   * active there, so what a person reads while editing can differ from what
-   * they save — on a value that is about to be executed. The escaped form is
-   * what makes the field say what is stored; the API read-back is what proves
-   * nothing was mangled by saying so.
+   * API clients can store control characters in profile names and invocations,
+   * and an `<input>` is the one place this UI cannot isolate what it renders:
+   * a right-to-left override stays active there, so what a person reads while
+   * editing can differ from what they save — on a value that is about to be
+   * executed. The escaped form is what makes the field say what is stored; the
+   * API read-back is what proves nothing was mangled by saying so.
    */
   test("an editor shows escaped peer text and saves the original bytes", async ({
     page,
     request,
   }) => {
-    const local = await localHostId(request);
     // A right-to-left override inside the name, and a zero-width space inside
     // the invocation.
     const name = `rlo-‮txt.exe-${Date.now()}`;
     const invocation = `${FAKE_AGENT}​`;
-    const profile = await createProfile(request, local, { name, invocation });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name, invocation });
+    profiles.push(profile.id);
 
     await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    const editing = profileRow(page, local, profile.id);
+    await openProfiles(page);
+    const editing = profileRow(page, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
     await editing.locator(".profile-edit").click();
 
@@ -1538,155 +2377,411 @@ test.describe("agent profiles", () => {
     await editing.locator(".profile-save").click();
     await expect(editing.locator(".profile-form")).toHaveCount(0, { timeout: 20_000 });
 
-    const stored = (await listProfiles(request, local)).profiles.find((p) => p.id === profile.id);
+    const stored = (await listProfiles(request)).profiles.find((p) => p.id === profile.id);
     expect(stored?.name, "an untouched field saves what it was seeded with").toBe(name);
     expect(stored?.invocation).toBe(invocation);
     expect(stored?.agent_kind).toBe("codex");
   });
 
   /**
-   * A mutation's reply that arrives after the surface has been re-pointed
-   * writes NOTHING — not a warning, not an error, not a row.
-   *
-   * The window is real and the failure is quiet: an adoption in another client
-   * re-points this host while a save is in flight, and the reply that lands
-   * afterwards describes a machine nobody is looking at. Gating only the
-   * CATALOG on the lease would still leave the message lines writable, so the
-   * section would report a refusal (or a success) about the predecessor
-   * install under the successor's rows.
-   *
-   * The incarnation is moved by rewriting the hosts reply rather than by a
-   * real adoption, which cannot be staged against a stack the rest of the
-   * suite is using — what is under test is the client's lease, not the helm's
-   * bookkeeping.
+   * A host menu refused by the operation token leaves the helm-wide popup
+   * exactly as it was. A mutation keeps its surface mounted until the reply
+   * settles, so another popover cannot discard its outcome mid-request.
    */
-  test("a reply that lands after the surface moved writes nothing", async ({ page, request }) => {
-    const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `lease-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
-
-    // A fabricated API reply still has to look like it came from this helm.
-    // Omitting the stamp latches global build skew, which suppresses feed
-    // invalidations and turns this lease test into a race against that policy.
-    const probe = await request.get("/api/hosts");
-    const build = probe.headers()["x-farhelm-build"];
-    if (!build) throw new Error("the helm hosts response has no build stamp");
-
-    // The save is held open until this test releases it.
+  /**
+   * A profile mutation keeps its form mounted through every transient-surface
+   * layout dismissal attempt. Once the reply releases the operation lock, the
+   * queued invalidation closes the stale popup and returns focus to its owner.
+   */
+  test("busy profile work defers dismissal and layout invalidation until completion", async ({
+    page,
+    request,
+  }) => {
+    const profile = await createProfile(request, { name: `busy-focus-${Date.now()}` });
+    profiles.push(profile.id);
     let release: (() => void) | undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let markStarted: (() => void) | undefined;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
     await page.route(
-      (url) => /^\/api\/hosts\/\d+\/profiles\/[^/]+$/.test(url.pathname),
+      (url) => new RegExp(`/api/profiles/${profile.id}$`).test(url.pathname),
       async (route: Route) => {
         if (route.request().method() !== "POST") {
           await route.continue();
           return;
         }
-        markStarted!();
         await held;
-        // A refusal becomes a form error on the row (profile routes carry no
-        // precondition, so every 409 is shown as plain prose). Without the
-        // lease guard it would be written after the old editor closes, which
-        // makes the negative assertions below capable of catching that
-        // broken implementation.
-        await route.fulfill({
-          status: 409,
-          contentType: "text/plain",
-          headers: { "x-farhelm-build": build },
-          body: "a refusal about an install nobody is looking at any more",
-        });
-      },
-    );
-    // What moves is the row's INSTALL fields, which is what a retarget looks
-    // like to this client: the target changes, the surface re-activates, and
-    // the lease the held save is running under stops being current.
-    //
-    // Deliberately NOT the connection token. That is the other half of the
-    // same identity, but it is also what a session create hands back as
-    // `expected_incarnation`, and keeping the fabricated hosts reply honest
-    // about it costs nothing: moving a field the helm does not compare
-    // changes the identity while leaving every request answerable.
-    let moved = false;
-    await page.route(
-      (url) => url.pathname === "/api/hosts",
-      async (route: Route) => {
-        const response = await route.fetch();
-        const body = await response.json();
-        if (moved) {
-          for (const host of body.hosts) {
-            if (host.id === local) host.remote_state_dir = "/moved/by/the/test";
-          }
-        }
-        await route.fulfill({ response, json: body });
+        await route.continue();
       },
     );
 
-    const feed = await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    const editing = profileRow(page, local, profile.id);
-    await expect(editing).toBeVisible({ timeout: 20_000 });
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const editing = profileRow(page, profile.id);
     await editing.locator(".profile-edit").click();
-    await editing.locator(".profile-name-input").fill(`lease-${Date.now()}-edited`);
-    const completed = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        /^\/api\/hosts\/\d+\/profiles\/[^/]+$/.test(new URL(response.url()).pathname),
-    );
+    await editing.locator(".profile-name-input").fill(`${profile.name}-saved`);
     await editing.locator(".profile-save").click();
-    await started;
+    await expect(editing.locator(".profile-save")).toBeDisabled();
 
-    // While the save hangs, move the host and wait for the old form to be
-    // replaced. A request counter cannot provide this barrier: routes observe
-    // a catalog GET before its reply lands, and the hosts and catalog reads
-    // race each other after one feed notice.
-    moved = true;
-    feed.notify(2);
-    await expect(editing.locator(".profile-form")).toHaveCount(0, { timeout: 20_000 });
-    await expect(profileRow(page, local, profile.id)).toBeVisible({ timeout: 20_000 });
+    await page.keyboard.press("Escape");
+    await expect(section(page), "Escape cannot unmount the in-flight reply destination")
+      .toBeVisible();
+    // The open popup physically covers this control, so drive the busy-surface
+    // contract directly rather than pretending a pointer can reach it.
+    await page.locator(".filter-toggle").dispatchEvent("click");
+    await expect(page.locator(".filter-popover"), "a competing filter is refused while busy")
+      .toHaveCount(0);
+    await expect(section(page)).toBeVisible();
+    await page.setViewportSize({ width: 900, height: 650 });
+    await expect(section(page), "resize dismissal waits for the mutation reply").toBeVisible();
 
     release!();
-    await completed;
-
-    // The operation token is released only after the held reply has completed.
-    // Waiting for its control to re-enable makes every absence below an
-    // assertion about the settled completion, not about a lucky early read.
-    await expect(section(page, local).locator(".new-profile-button")).toBeEnabled({
-      timeout: 20_000,
-    });
-    await expect(profileRow(page, local, profile.id)).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".build-skew")).toHaveCount(0);
-    await expect(
-      section(page, local).locator(".profile-form-error"),
-      "a refusal about the previous install must not appear under the successor's rows",
-    ).toHaveCount(0);
-    await expect(section(page, local).locator(".profiles-notice")).toHaveCount(0);
-    await expect(section(page, local).locator(".profiles-warning")).toHaveCount(0);
-    await expect(editing.locator(".profile-error")).toHaveCount(0);
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.locator(".profiles-toggle")).toBeFocused();
   });
 
   /**
-   * A host verb REFUSED by the operation token leaves the profiles section
-   * exactly as it was; an accepted one folds it away.
-   *
-   * Folding is the right answer to a retarget or an adoption — the section is
-   * about an install that is being replaced — but only once the verb is
-   * actually out. A click the token refuses started nothing, and collapsing
-   * the section for it would throw away an editor draft over an action that
-   * never happened.
+   * Two stale placement samples use the same busy-aware layout obligation as
+   * a later scroll. The second stale result cannot unmount an in-flight form;
+   * dismissal waits for the mutation reply and then restores the toggle.
    */
-  test("a host verb refused by the operation token leaves the profiles section alone", async ({
+  test("twice-stale placement defers its busy layout dismissal", async ({
+    page,
+    request,
+  }) => {
+    const profile = await createProfile(request, { name: `busy-measure-${Date.now()}` });
+    profiles.push(profile.id);
+    let releaseSave: (() => void) | undefined;
+    const heldSave = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    await page.route(
+      (url) => new RegExp(`/api/profiles/${profile.id}$`).test(url.pathname),
+      async (route: Route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        await heldSave;
+        await route.continue();
+      },
+    );
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        measurement: { holds: 2, started: 0 },
+      };
+    });
+    await page.locator(".profiles-toggle").click();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.measurement.started)
+    ).toBe(1);
+    const row = profileRow(page, profile.id);
+    await row.locator(".profile-edit").dispatchEvent("click");
+    await row.locator(".profile-name-input").fill(`${profile.name}-saved`);
+    await row.locator(".profile-save").dispatchEvent("click");
+    await expect(row.locator(".profile-save")).toBeDisabled();
+
+    await page.evaluate(() => {
+      document.querySelector(".app-sidebar")?.dispatchEvent(new Event("scroll"));
+      (window as any).__farhelmTestProfiles.measurement.release();
+    });
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.measurement.started)
+    ).toBe(2);
+    await page.evaluate(() => {
+      document.querySelector(".app-sidebar")?.dispatchEvent(new Event("scroll"));
+      (window as any).__farhelmTestProfiles.measurement.release();
+    });
+    await expect(section(page)).toBeAttached();
+    releaseSave!();
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.locator(".profiles-toggle")).toBeFocused();
+  });
+
+  /**
+   * A real inert click during busy work has causal precedence over completion
+   * focus. The popup stays mounted for the reply, then dismisses without a
+   * late row-focus request swallowing the outside interaction.
+   */
+  test("busy profile work preserves an inert focus-out obligation", async ({
+    page,
+    request,
+  }) => {
+    const profile = await createProfile(request, { name: `busy-outside-${Date.now()}` });
+    profiles.push(profile.id);
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      (url) => new RegExp(`/api/profiles/${profile.id}$`).test(url.pathname),
+      async (route: Route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        await held;
+        await route.continue();
+      },
+    );
+
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const row = profileRow(page, profile.id);
+    await row.locator(".profile-edit").click();
+    await row.locator(".profile-name-input").fill(`${profile.name}-saved`);
+    await row.locator(".profile-save").click();
+    await expect(row.locator(".profile-save")).toBeDisabled();
+
+    const { x, y } = await inertSidebarPoint(page);
+    await page.mouse.click(x, y);
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+    await expect(section(page)).toBeVisible();
+    release!();
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+  });
+
+  /**
+   * Scripted pointer events carry no user provenance. Fabricating one over an
+   * inert outside target cannot turn a busy control's body transit into a
+   * dismissal obligation or suppress mutation-completion focus.
+   */
+  test("a synthetic outside pointerdown is not dismissal intent", async ({ page, request }) => {
+    const profile = await createProfile(request, { name: `synthetic-outside-${Date.now()}` });
+    profiles.push(profile.id);
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const save = await beginHeldProfileSave(page, profile);
+    const point = await inertSidebarPoint(page);
+    await page.evaluate(({ x, y }) => {
+      document.elementFromPoint(x, y)?.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, clientX: x, clientY: y }),
+      );
+    }, point);
+
+    save.release();
+    await expect(save.row.locator(".profile-edit")).toBeFocused({ timeout: 20_000 });
+    await expect(section(page)).toBeVisible();
+  });
+
+  /**
+   * Tab supplies trusted keyboard provenance before its outside focusin. That
+   * destination wins during a held mutation, so completion never focuses the
+   * row and idle transition dismisses without restoring the toggle.
+   */
+  test("Tab to an outside control preserves busy dismissal intent", async ({ page, request }) => {
+    const profile = await createProfile(request, { name: `tab-outside-${Date.now()}` });
+    profiles.push(profile.id);
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const save = await beginHeldProfileSave(page, profile);
+    await save.row.locator(".profile-save").evaluate((element: HTMLButtonElement) => {
+      // The operation lock disables the focused Save control on its next
+      // render. Re-enable only this DOM test origin so the trusted Tab starts
+      // inside the still-busy popup; the application state remains locked.
+      element.disabled = false;
+      element.focus();
+    });
+    for (let presses = 0; presses < 20; presses += 1) {
+      await page.keyboard.press("Tab");
+      const reachedOutside = await page.evaluate(() => {
+        const active = document.activeElement;
+        const popup = document.querySelector(".profiles-popover");
+        if (
+          !(active instanceof HTMLElement) ||
+          active === document.body ||
+          popup?.contains(active) ||
+          active.matches(".profiles-toggle")
+        ) {
+          return false;
+        }
+        active.id = "trusted-tab-destination";
+        return true;
+      });
+      if (reachedOutside) break;
+    }
+    const destination = page.locator("#trusted-tab-destination");
+    await expect(destination).toBeFocused();
+
+    save.release();
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect(destination).toBeFocused();
+  });
+
+  /**
+   * Trusted Tab provenance survives when the last page control yields focus
+   * to `body` or browser chrome and no outside focusin follows. Releasing the
+   * held mutation dismisses the popup without completion pulling focus back.
+   */
+  test("Tab leaving the document preserves busy dismissal intent", async ({ page, request }) => {
+    const profile = await createProfile(request, { name: `tab-document-${Date.now()}` });
+    profiles.push(profile.id);
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const save = await beginHeldProfileSave(page, profile);
+    await save.row.locator(".profile-save").evaluate((origin: HTMLButtonElement) => {
+      for (const element of document.querySelectorAll<HTMLElement>(
+        "button, a, input, select, textarea, [tabindex]",
+      )) {
+        element.tabIndex = -1;
+      }
+      // Leave one final page tab stop inside the popup. The next real Tab
+      // crosses the document boundary instead of landing on an outside node.
+      origin.disabled = false;
+      origin.tabIndex = 0;
+      origin.focus();
+    });
+    await expect(save.row.locator(".profile-save")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+
+    save.release();
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+  });
+
+  /**
+   * A page-owned focus call after the save handler claims the operation lock
+   * is not user provenance, even when its focus event is browser-trusted. The
+   * popup stays open after completion and the programmatic destination keeps
+   * focus because completion may not replace an outside active control.
+   */
+  test("same-turn programmatic focus is not busy dismissal intent", async ({ page, request }) => {
+    const profile = await createProfile(request, { name: `programmatic-outside-${Date.now()}` });
+    profiles.push(profile.id);
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await page.evaluate(() => {
+      const handler = (event: MouseEvent) => {
+        const target = event.target;
+        if (!(target instanceof Element) || !target.closest(".profile-save")) return;
+        window.removeEventListener("click", handler);
+        (document.querySelector(".hosts-toggle") as HTMLButtonElement).focus();
+      };
+      window.addEventListener("click", handler);
+    });
+    const save = await beginHeldProfileSave(page, profile);
+    const destination = page.locator(".hosts-toggle");
+    await expect(destination).toBeFocused();
+
+    save.release();
+    await expect(save.row.locator(".profile-edit")).toBeVisible({ timeout: 20_000 });
+    await expect(section(page)).toBeVisible();
+    await expect(destination).toBeFocused();
+  });
+
+  /**
+   * Classification can start while idle and find the operation lock busy only
+   * after its await. The obligation must remain armed through that late claim
+   * and dismiss as soon as the held mutation releases the lock.
+   */
+  test("a late busy claim rearms an in-flight focus-out classifier", async ({
+    page,
+    request,
+  }) => {
+    const profile = await createProfile(request, { name: `late-busy-${Date.now()}` });
+    profiles.push(profile.id);
+    let releaseSave: (() => void) | undefined;
+    const heldSave = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    await page.route(
+      (url) => new RegExp(`/api/profiles/${profile.id}$`).test(url.pathname),
+      async (route: Route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        await heldSave;
+        await route.continue();
+      },
+    );
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    const row = profileRow(page, profile.id);
+    await row.locator(".profile-edit").click();
+    await row.locator(".profile-name-input").fill(`${profile.name}-saved`);
+    // Opening the editor replaced the focused edit button, and that transit
+    // starts a classifier of its own. Let it finish before arming the hold,
+    // or on a slow machine it consumes the hold instead of the inert click's
+    // classifier, which then runs free and dismisses the popup under this
+    // test. Quiescence is "no new classification attempt for a while".
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = { classificationAttempts: 0 };
+    });
+    await expect
+      .poll(
+        async () => {
+          const before = await page.evaluate(
+            () => (window as any).__farhelmTestProfiles.classificationAttempts,
+          );
+          await page.waitForTimeout(400);
+          const after = await page.evaluate(
+            () => (window as any).__farhelmTestProfiles.classificationAttempts,
+          );
+          return after === before;
+        },
+        { timeout: 20_000, intervals: [100] },
+      )
+      .toBe(true);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        classification: { holds: 1, started: 0, releases: [] },
+      };
+    });
+    const point = await inertSidebarPoint(page);
+    await page.mouse.click(point.x, point.y);
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
+    ).toBe(1);
+    await row.locator(".profile-save").dispatchEvent("click");
+    await expect(row.locator(".profile-save")).toBeDisabled();
+    await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
+    await expect(section(page)).toBeVisible();
+    releaseSave!();
+    await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
+  });
+
+  /**
+   * Profiles and filters are mutually exclusive in both opening directions.
+   * Testing each direction prevents two independent reactive effects from
+   * drifting into an asymmetric two-popover state.
+   */
+  test("profiles and filters exclude each other in both opening directions", async ({ page }) => {
+    await listWithStubbedFeed(page);
+
+    await page.locator(".filter-toggle").click();
+    await expect(page.locator(".filter-popover")).toBeVisible();
+    await openProfiles(page);
+    await expect(page.locator(".filter-popover")).toHaveCount(0);
+    await closeProfiles(page);
+
+    await openProfiles(page);
+    // The open popup physically covers this control, so drive mutual exclusion
+    // directly rather than pretending a pointer can reach it.
+    await page.locator(".filter-toggle").dispatchEvent("click");
+    await expect(page.locator(".filter-popover")).toBeVisible();
+    await expect(section(page)).toHaveCount(0);
+  });
+
+  /**
+   * A refused competing surface may focus its own toggle as part of handling
+   * the refusal, but that programmatic side effect is not an outside choice.
+   * The busy profiles operation therefore keeps its popup and confirmation.
+   */
+  test("a host menu refused by the operation token leaves the profiles popup alone", async ({
     page,
     request,
   }) => {
     const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `fold-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: `fold-${Date.now()}` });
+    profiles.push(profile.id);
 
     // A profile delete that never answers holds the page's operation token.
     let release: (() => void) | undefined;
@@ -1694,48 +2789,37 @@ test.describe("agent profiles", () => {
       release = resolve;
     });
     await page.route(
-      (url) => /^\/api\/hosts\/\d+\/profiles\/[^/]+$/.test(url.pathname),
+      (url) => /^\/api\/profiles\/[^/]+$/.test(url.pathname),
       async (route: Route) => {
         if (route.request().method() !== "DELETE") {
           await route.continue();
           return;
         }
         await held;
-        await route.fulfill({ status: 409, contentType: "text/plain", body: "refused" });
+        await fulfillRefusal(route, request, "refused");
       },
     );
-    let retries = 0;
-    await page.route(
-      (url) => /^\/api\/hosts\/\d+\/retry$/.test(url.pathname),
-      async (route: Route) => {
-        retries += 1;
-        await route.continue();
-      },
-    );
-
     await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    await profileRow(page, local, profile.id).locator(".profile-delete").click();
-    await profileRow(page, local, profile.id).locator(".profile-confirm-delete").click();
+    await openHostsPanel(page);
+    await openProfiles(page);
+    await profileRow(page, profile.id).locator(".profile-delete").click();
+    await profileRow(page, profile.id).locator(".profile-confirm-delete").click();
 
-    // With the token held, a host verb on the same row is refused before it
-    // starts — and the section must survive it. `.host-retry` lives inside
-    // the row's own "⋯" menu now; `openProfiles` above already opened it
-    // and clicking `.profile-delete`/`.profile-confirm-delete` (inside the
-    // profiles SECTION, a sibling of the menu, not a child of it) does not
-    // close it, but reopening is idempotent and guards against a stray
-    // dismissal in between.
+    // With the token held, an attempted host menu closes immediately and the
+    // popup survives. This preserves one floating surface while keeping the
+    // in-flight reply's destination mounted.
     const localRow = page.locator(`[data-host-id="${local}"]`);
-    await openHostMenu(localRow);
-    await localRow.locator(".host-retry").click({ force: true });
+    // The open popup physically covers this control, so drive the busy-surface
+    // contract directly rather than pretending a pointer can reach it.
+    await localRow.locator(".host-row-menu").dispatchEvent("click");
+    await expect(localRow.locator(".host-row-menu-panel")).toHaveCount(0);
     await expect(
-      section(page, local),
-      "a verb that never started must not collapse the surface it would have replaced",
+      section(page),
+      "an incompatible popover must not discard the busy popup",
     ).toBeVisible();
-    expect(retries, "and it must not have reached the helm either").toBe(0);
 
     release!();
-    await expect(profileRow(page, local, profile.id).locator(".profile-error")).toBeVisible({
+    await expect(profileRow(page, profile.id).locator(".profile-error")).toBeVisible({
       timeout: 20_000,
     });
   });
@@ -1758,30 +2842,25 @@ test.describe("agent profiles", () => {
     page,
     request,
   }) => {
-    const local = await localHostId(request);
-    const profile = await createProfile(request, local, { name: `refused-${Date.now()}` });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: `refused-${Date.now()}` });
+    profiles.push(profile.id);
 
     const sent: Record<string, unknown>[] = [];
     await page.route(
-      (url) => /^\/api\/hosts\/\d+\/profiles\/[^/]+$/.test(url.pathname),
+      (url) => /^\/api\/profiles\/[^/]+$/.test(url.pathname),
       async (route: Route) => {
         if (route.request().method() !== "POST") {
           await route.continue();
           return;
         }
         sent.push(route.request().postDataJSON());
-        await route.fulfill({
-          status: 409,
-          contentType: "text/plain",
-          body: "the supervisor declined this edit",
-        });
+        await fulfillRefusal(route, request, "the helm declined this edit");
       },
     );
 
     await listWithStubbedFeed(page);
-    await openProfiles(page, local);
-    const editing = profileRow(page, local, profile.id);
+    await openProfiles(page);
+    const editing = profileRow(page, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
     await editing.locator(".profile-edit").click();
     const draft = `refused-${Date.now()}-edited`;
@@ -1803,7 +2882,7 @@ test.describe("agent profiles", () => {
       "the draft survives the refusal byte for byte",
     ).toBe(draft);
     await expect(
-      section(page, local).locator(".profiles-notice"),
+      section(page).locator(".profiles-notice"),
       "an ordinary refusal is the form's business, not a section-level notice",
     ).toHaveCount(0);
 
@@ -1812,7 +2891,7 @@ test.describe("agent profiles", () => {
     // retry the client was going to make has had its chance. The body carries
     // no precondition of either kind, which is the contract SPEC.md states
     // for profile writes.
-    await expect(section(page, local).locator(".new-profile-button")).toBeEnabled({
+    await expect(section(page).locator(".new-profile-button")).toBeEnabled({
       timeout: 20_000,
     });
     expect(sent.length, "a refusal must never be retried automatically").toBe(1);
@@ -1822,7 +2901,7 @@ test.describe("agent profiles", () => {
 
   /**
    * Two real clients: an edit made through ONE browser's panel reaches the
-   * other's open profiles section, with no stub and no injected notification
+   * other's open profiles popup, with no stub and no injected notification
    * anywhere.
    *
    * This is the milestone's multi-client promise for profiles, executable —
@@ -1855,11 +2934,10 @@ test.describe("agent profiles", () => {
     browser,
     request,
   }) => {
-    const local = await localHostId(request);
     const before = `two-client-${Date.now()}`;
     const after = `${before}-elsewhere`;
-    const profile = await createProfile(request, local, { name: before });
-    profiles.push({ host: local, id: profile.id });
+    const profile = await createProfile(request, { name: before });
+    profiles.push(profile.id);
 
     // The OBSERVER: a real page with a real feed, and the socket is proven up
     // BEFORE the edit is made. Without that, an observer that connected late
@@ -1875,16 +2953,16 @@ test.describe("agent profiles", () => {
           "requested proves nothing, and one greeted afterwards would re-read on its own handshake",
       })
       .toBeGreaterThan(0);
-    await openProfiles(page, local);
-    const observed = profileRow(page, local, profile.id).locator(".profile-name");
+    await openProfiles(page);
+    const observed = profileRow(page, profile.id).locator(".profile-name");
     await expect(observed).toHaveText(before, { timeout: 20_000 });
 
     const second = await browser.newContext({ baseURL: new URL(page.url()).origin });
     try {
       const editor = await second.newPage();
       await editor.goto("/");
-      await openProfiles(editor, local);
-      const editing = profileRow(editor, local, profile.id);
+      await openProfiles(editor);
+      const editing = profileRow(editor, profile.id);
       await expect(editing).toBeVisible({ timeout: 20_000 });
       await editing.locator(".profile-edit").click();
       await editing.locator(".profile-name-input").fill(after);

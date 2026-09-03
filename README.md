@@ -142,6 +142,10 @@ Linux" below).
   for Claude Code and Codex, shared by every host. The working directory starts at `~`, which expands once against that
   host's home at creation; any other directory must be an existing absolute path on that host — plain relative paths are
   rejected, and `~user` forms and variables never expand. Submitting drops you straight into the agent's terminal.
+- Manage that shared catalog from the "profiles" button in the sidebar app bar. Its popup creates, edits, and deletes
+  definitions without attaching them to any host row.
+- Upgrading does not carry over profiles previously stored on each host's supervisor; recreate custom definitions in the
+  helm catalog.
 - If you start agents through a launcher that wants the directory as an argument (`my-wrapper run <dir> claude`), write
   `{cwd}` where the directory goes and set the profile's agent kind — see
   [docs/agent-wrappers.md](docs/agent-wrappers.md).

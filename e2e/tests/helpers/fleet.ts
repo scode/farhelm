@@ -71,13 +71,11 @@ export interface SessionRow {
   /**
    * The profile this session was created from, absent for a raw-created one.
    *
-   * `existence` is the field specs actually wait on: it is DERIVED per reply
-   * from the owning supervisor's catalog, so it changes under a session
-   * nobody touched — and it reaches the merged list only when the helm's
-   * session cache next refreshes. A spec that renames a profile and then
-   * asserts about a row has to settle on this value before it plays a
-   * notification, or it is telling the page to re-read a view that has not
-   * moved yet.
+   * `existence` is the field specs actually wait on: the helm derives it per
+   * reply from its catalog, so it changes under a session nobody touched. A
+   * spec that renames a profile and then asserts about a row has to settle on
+   * this value before it plays a notification, or it is telling the page to
+   * re-read a view that has not moved yet.
    */
   source_profile?: { id: string; name: string; existence: string };
 }
@@ -107,7 +105,7 @@ export interface HostRow {
 }
 
 /**
- * One profile from `GET /api/hosts/{id}/profiles`, narrowed on the same
+ * One profile from `GET /api/profiles`, narrowed on the same
  * terms as [`SessionRow`]: a field here is a field some assertion depends on.
  *
  * All of them are, now. The preservation spec reads the whole definition back
@@ -123,8 +121,8 @@ export interface ProfileRow {
 }
 
 /**
- * The profiles reply: the catalog plus this helm's remembered default for
- * that host.
+ * The profiles reply: the helm-wide catalog plus this helm's remembered
+ * default.
  *
  * The pair travels together on the wire deliberately (the helm serves the
  * remembered id RAW, even when it names a deleted profile), and it is what
@@ -247,13 +245,10 @@ export async function cleanupSession(request: APIRequestContext, id: string): Pr
   }
 }
 
-/** One host's profile catalog, as any client reads it. */
-export async function listProfiles(
-  request: APIRequestContext,
-  host: number,
-): Promise<ProfilesView> {
-  const response = await request.get(`/api/hosts/${host}/profiles`);
-  await ok(response, `reading host ${host}'s profiles`);
+/** The helm-wide profile catalog, as every UI consumer reads it. */
+export async function listProfiles(request: APIRequestContext): Promise<ProfilesView> {
+  const response = await request.get("/api/profiles");
+  await ok(response, "reading profiles");
   return await response.json();
 }
 
@@ -272,10 +267,9 @@ export async function listProfiles(
  */
 export async function createProfile(
   request: APIRequestContext,
-  host: number,
   body: { name: string; invocation?: string; agent_kind?: string; resume_template?: string[] },
 ): Promise<ProfileRow> {
-  const response = await request.post(`/api/hosts/${host}/profiles`, {
+  const response = await request.post("/api/profiles", {
     data: {
       name: body.name,
       invocation: body.invocation ?? FAKE_AGENT,
@@ -283,7 +277,7 @@ export async function createProfile(
       ...(body.resume_template ? { resume_template: body.resume_template } : {}),
     },
   });
-  await ok(response, `creating profile ${body.name} on host ${host}`);
+  await ok(response, `creating profile ${body.name}`);
   return await response.json();
 }
 
@@ -293,11 +287,10 @@ export async function createProfile(
  */
 export async function updateProfile(
   request: APIRequestContext,
-  host: number,
   id: string,
   body: { name: string; invocation?: string; agent_kind?: string; resume_template?: string[] },
 ): Promise<ProfileRow> {
-  const response = await request.post(`/api/hosts/${host}/profiles/${id}`, {
+  const response = await request.post(`/api/profiles/${id}`, {
     data: {
       name: body.name,
       invocation: body.invocation ?? FAKE_AGENT,
@@ -305,7 +298,7 @@ export async function updateProfile(
       ...(body.resume_template ? { resume_template: body.resume_template } : {}),
     },
   });
-  await ok(response, `updating profile ${id} on host ${host}`);
+  await ok(response, `updating profile ${id}`);
   return await response.json();
 }
 
@@ -320,10 +313,9 @@ export async function updateProfile(
  */
 export async function cleanupProfile(
   request: APIRequestContext,
-  host: number,
   id: string,
 ): Promise<void> {
-  const response = await request.delete(`/api/hosts/${host}/profiles/${id}`);
+  const response = await request.delete(`/api/profiles/${id}`);
   if (!response.ok() && response.status() !== 404) {
     throw new Error(
       `cleanup: deleting profile ${id} failed (${response.status()}): ${await response.text()}`,
@@ -783,8 +775,8 @@ export async function forgetAutoSelect(page: Page): Promise<void> {
  *
  * The sidebar redesign (BUGS_BURNDOWN.md issue 5) collapsed the hosts
  * panel behind a toggle — only the compact per-host strip is permanent —
- * so any test that manages hosts (add, retry, retarget, remove, profiles)
- * opens the panel first through this helper. Idempotent like
+ * so any test that manages hosts (add, retry, retarget, or remove) opens the
+ * panel first through this helper. Idempotent like
  * `openRowMenu`, and it awaits the panel itself so callers can go
  * straight for its controls.
  */
@@ -971,8 +963,8 @@ export async function openRowMenu(row: Locator): Promise<void> {
 /**
  * Open a host row's actions menu when it is not already open.
  *
- * The host row's own "⋯" menu folds `profiles`/`retry`/`adopt`/
- * `edit destination`/`remove` off `.host-row-main` into a floating panel
+ * The host row's own "⋯" menu folds `retry`/`adopt`/`edit destination`/
+ * `remove` off `.host-row-main` into a floating panel
  * behind a `.host-row-menu` toggle — built on the identical mechanics
  * `openRowMenu` above already drives for the session row's menu (shared
  * generically in `menu_panel.rs`; see `openMenuPanel`'s own doc for the

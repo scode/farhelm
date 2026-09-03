@@ -239,6 +239,17 @@ impl ReadGate {
         self.started
     }
 
+    /// Supersede every read that started before a locally confirmed mutation.
+    ///
+    /// A mutation is newer evidence than any request already in flight, even
+    /// when its response cannot be decoded into a replacement snapshot. The
+    /// next read receives a later generation and may apply normally; older
+    /// successes and failures are both rejected when they eventually land.
+    pub(crate) fn fence(&mut self) {
+        self.started += 1;
+        self.applied = self.started;
+    }
+
     /// Whether a success from `generation` should be committed — and, if so,
     /// record it as the newest applied.
     pub(crate) fn accept_success(&mut self, generation: u64) -> bool {
@@ -363,5 +374,22 @@ mod tests {
         let fresh = gate.start();
         assert!(gate.accept_success(fresh));
         assert!(!gate.accept_failure(stale));
+    }
+
+    /// A mutation accepted after a GET starts is newer evidence than that
+    /// GET's eventual body or failure. This pins the catalog race where an
+    /// old response could otherwise undo the locally absorbed mutation until
+    /// its follow-up refresh completed.
+    #[test]
+    fn a_mutation_fence_rejects_reads_that_started_before_it() {
+        let mut gate = ReadGate::default();
+        let old_get = gate.start();
+
+        gate.fence();
+
+        assert!(!gate.accept_success(old_get));
+        assert!(!gate.accept_failure(old_get));
+        let refresh = gate.start();
+        assert!(gate.accept_success(refresh));
     }
 }

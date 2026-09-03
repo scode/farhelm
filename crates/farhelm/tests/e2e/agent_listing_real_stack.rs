@@ -634,23 +634,11 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
 
-    let local_host = {
-        let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
-        hosts["hosts"]
-            .as_array()
-            .expect("hosts is an array")
-            .iter()
-            .find(|row| row["kind"] == "local")
-            .and_then(|row| row["id"].as_i64())
-            .expect("the helm always has a local row")
-    };
-
-    // This goes through the compatibility alias on purpose: the current UI
-    // still uses the host-shaped route, but the row must land in the helm's
-    // one shared catalog and resolve there for the agent verb below.
+    // The shipped agent and UI share the helm catalog. Creating the fixture
+    // through its sole endpoint pins the same resolution path the verb uses.
     let (status, body) = post(
         &client,
-        &format!("{}/api/hosts/{local_host}/profiles", helm.base),
+        &format!("{}/api/profiles", helm.base),
         serde_json::json!({
             "name": "Relay Fixture",
             "invocation": agent_cmd("internal fake-agent --script basic"),
@@ -736,7 +724,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     assert_eq!(created["cwd"], created_cwd);
     assert_eq!(
         created["source_profile"]["id"], profile_id,
-        "the profile NAME must have resolved to the target host's own id: {created}"
+        "the profile NAME must have resolved through the helm catalog: {created}"
     );
 
     // `clone`, naming nothing: the asking session's own host, directory and
@@ -792,8 +780,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
         "the target supervisor's own words must survive both hops: {refusal}"
     );
 
-    // A profile name the target host does not have is refused by NAME and
-    // by HOST, with no session created — the no-silent-fallback rule.
+    // A profile name the helm catalog does not have is refused by NAME, with
+    // no session created — the no-silent-fallback rule.
     let output = spawn_agent_command_args(
         &[
             "create",

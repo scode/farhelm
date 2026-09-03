@@ -13,39 +13,6 @@ Within a bucket, no order.
 
 ## Near term
 
-- Move agent profiles from the supervisor to the helm. Today a profile belongs to the supervisor that runs it: the
-  catalog is a table in each host's supervisor.db, seeded with the four starters per install, edited through the host
-  row's "⋯ → profiles" surface, and a create names a profile ID that the target supervisor resolves to an invocation,
-  agent kind, and resume template at launch. SPEC.md states the reason as "the invocation has to exist on the host that
-  runs it", with cross-host sync deferred as post-v1 convenience. That reason is about the command, not the storage — a
-  profile saying `claude` runs through the login shell on whichever host launches it, and the supervisor already
-  launches arbitrary invocations for custom-command creates — and the per-host model works against how hosts are
-  actually used: remote hosts come and go, are not backed up, and should be treated as ephemeral rather than as places
-  configuration accumulates. One catalog per helm is also the natural fit for the planned mode where the desktop app
-  connects to a helm running elsewhere, which is what lets the browser and the desktop app share one logical helm
-  instead of each carrying its own state. Intended user experience, settled 2026-09-02: profiles are the helm's, one
-  catalog, every profile applies to every host, and the create dialog's picker offers the whole catalog regardless of
-  the chosen host. The management surface is reachable from the sidebar but takes no standing vertical space — a popup
-  of some kind (the row "⋯" menu / filter-popover pattern), holding the list with new, edit, and delete, and the
-  "profiles" item leaves the host row menu entirely. No host-specific profiles in this change; if a need ever shows up
-  it becomes an optional "only on these hosts" scope on a helm profile, never a different kind of profile and never
-  something the supervisor knows about. Existing catalogs on hosts are simply DROPPED — no import, no migration, no
-  trace going forward; the simplest code that removes them wins (the maintainer is the only user, and the edited
-  profiles on the two live hosts get recreated by hand). "Last used profile" becomes one memory per helm rather than one
-  per host. A session whose snapshotted profile this helm has no row for — created before the change, or by another helm
-  — shows the snapshotted name as a plain label with no warning state, and clone offers the profile only when this helm
-  holds one under that name, falling back to the raw command otherwise, the same way it already does for a deleted
-  profile. Accepted consequence: the desktop app's embedded helm and the service helm on one machine get separate
-  catalogs, exactly as they already have separate host registries; the connect-to-a-helm mode is what closes that. The
-  architecturally major internal is the create wire: it must carry the resolved bundle (invocation, agent kind, resume
-  template) inline instead of a profile ID, so a profile-backed create stops being distinguishable from a custom-command
-  one on the supervisor side — and custom-command creates gain integration fields for free. The session's profile
-  snapshot (id and name) stays on the supervisor; present/renamed/deleted is derived by the helm against its own catalog
-  when it builds the listing. The agent CLI's `--profile <name>` resolves against the helm, and the spawn fallback that
-  reads the supervisor's most recently used source profile becomes a helm lookup. SPEC.md's "Agent profiles belong to
-  each supervisor" paragraph and the spawn-resolution paragraph, and SPEC_impl.md's supervisor profile-table bullet, are
-  rewritten in the same change; the "post-v1 convenience" sentence goes.
-
 - Make the host list one list, and make it look like it belongs next to the session list. Today the sidebar renders
   hosts TWICE: an always-visible compact strip (`.hosts-compact` in `list/view.rs`) of name plus colored phase word,
   where the word trails the name at whatever x the name ends on so "connected" lands in a different column on every row

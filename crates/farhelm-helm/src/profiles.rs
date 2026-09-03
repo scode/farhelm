@@ -3,22 +3,20 @@
 //! ## The helm owns the catalog
 //!
 //! The helm now stores one catalog shared by every host and every client.
-//! `GET` and CRUD under `/api/profiles` read and mutate that catalog. The
-//! host-scoped profile routes are temporary aliases that parse but otherwise
-//! ignore the host id, preserving the current UI contract without restoring
-//! per-host ownership. The remembered default is one raw id per helm,
-//! including a dangling id after deletion, so the client can ask instead of
-//! guessing.
+//! `GET` and CRUD under `/api/profiles` read and mutate that catalog. There is
+//! no host-scoped profile surface: hosts consume resolved launch bundles, not
+//! catalog storage. The remembered default is one raw id per helm, including a
+//! dangling id after deletion, so the client can ask instead of guessing.
 //!
 //! ## The default is one bare profile id
 //!
 //! The remembered default is one plain profile id in helm.db. It is not
-//! reconciled against either catalog on read: a deleted profile remains a
+//! reconciled against the catalog on read: a deleted profile remains a
 //! useful signal to the client that it must ask instead of guessing.
 //!
 //! ## One read, both halves
 //!
-//! [`list_profiles`] answers with the catalog AND the remembered default id
+//! [`list_catalog_profiles`] answers with the catalog AND the remembered default id
 //! in one shape, and that pairing is the point rather than a convenience.
 //! SPEC.md's creation rule is that the dialog defaults to the last-used
 //! profile and ASKS when that profile is gone — which is a question about
@@ -41,7 +39,6 @@
 //! submits exactly what is already stored is accepted and wakes the fleet
 //! like any other last-write-wins edit.
 
-use crate::store::HostId;
 use crate::{AppState, http_error};
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
@@ -87,7 +84,7 @@ pub(crate) fn resolve_profile_name(profiles: &[Profile], name: &str) -> anyhow::
     Ok((*profile).clone())
 }
 
-/// What either profile-list route answers with: the helm catalog and its
+/// What the profile-list route answers with: the helm catalog and its
 /// remembered default.
 ///
 /// See the module docs for why the two travel in one shape. The field names
@@ -135,64 +132,6 @@ fn catalog_validation_error(message: String) -> axum::response::Response {
         kind: farhelm_proto::ErrorKind::InvalidRequest,
         message,
     }))
-}
-
-/// `GET /api/hosts/{id}/profiles` — compatibility alias for
-/// `GET /api/profiles`.
-///
-/// The typed extractor still parses the host id so malformed paths retain
-/// their existing rejection. A valid id is otherwise ignored because every
-/// host now shares the helm catalog.
-pub(crate) async fn list_profiles(
-    State(state): State<Arc<AppState>>,
-    AxPath(_host): AxPath<HostId>,
-) -> impl IntoResponse {
-    list_catalog_profiles(State(state)).await.into_response()
-}
-
-/// `POST /api/hosts/{id}/profiles` — compatibility alias for
-/// `POST /api/profiles`.
-///
-/// The parsed host id is deliberately ignored; the canonical handler provides
-/// the mutation and cancellation behavior for both route shapes.
-pub(crate) async fn create_profile(
-    State(state): State<Arc<AppState>>,
-    AxPath(_host): AxPath<HostId>,
-    axum::Json(spec): axum::Json<ProfileSpec>,
-) -> impl IntoResponse {
-    create_catalog_profile(State(state), axum::Json(spec))
-        .await
-        .into_response()
-}
-
-/// `POST /api/hosts/{id}/profiles/{profile_id}` — compatibility alias for
-/// the canonical helm-wide update route.
-///
-/// The host id is parsed and ignored. The path profile id remains
-/// authoritative, matching the canonical handler's full-replacement
-/// contract.
-pub(crate) async fn update_profile(
-    State(state): State<Arc<AppState>>,
-    AxPath((_host, profile_id)): AxPath<(HostId, String)>,
-    axum::Json(spec): axum::Json<ProfileSpec>,
-) -> impl IntoResponse {
-    update_catalog_profile(State(state), AxPath(profile_id), axum::Json(spec))
-        .await
-        .into_response()
-}
-
-/// `DELETE /api/hosts/{id}/profiles/{profile_id}` — compatibility alias for
-/// the canonical helm-wide delete route.
-///
-/// The host id is parsed and ignored. Deletion retains the helm's remembered
-/// id so the next create can ask rather than silently choose another profile.
-pub(crate) async fn delete_profile(
-    State(state): State<Arc<AppState>>,
-    AxPath((_host, profile_id)): AxPath<(HostId, String)>,
-) -> impl IntoResponse {
-    delete_catalog_profile(State(state), AxPath(profile_id))
-        .await
-        .into_response()
 }
 
 /// `GET /api/profiles` — read the helm-owned catalog and its raw remembered id.
@@ -525,65 +464,22 @@ mod tests {
         );
     }
 
-    /// The host-scoped routes remain aliases while the existing UI still
-    /// calls them, but a valid host id does not select or validate a catalog.
-    /// This test pins both halves: an unknown host can create, update, and
-    /// delete through the aliases, while the canonical route observes the
-    /// same row. The update body deliberately omits `id`, preserving the
-    /// canonical handler's path-authority contract after the alias rewrite.
+    /// Host-shaped profile paths are gone rather than retained as a second
+    /// spelling of helm state. This matters because accepting them would keep
+    /// teaching clients that a host selects a catalog even though no such
+    /// distinction exists.
     #[tokio::test]
-    async fn host_scoped_profile_routes_alias_the_helm_catalog() {
+    async fn host_scoped_profile_routes_are_not_found() {
         let harness = rest_harness::idle_helm().await;
-        let (status, created) = request(
-            &harness,
-            "POST",
-            "/api/hosts/999999/profiles",
-            Some(serde_json::json!({
-                "name": "shared",
-                "invocation": "shared-agent",
-                "agent_kind": "generic",
-                "resume_template": null,
-            })),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::CREATED);
-        let id = created["id"].as_str().expect("created profile id");
-
-        let (status, canonical) = request(&harness, "GET", "/api/profiles", None).await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert!(
-            canonical["profiles"]
-                .as_array()
-                .expect("profile array")
-                .iter()
-                .any(|profile| profile["id"] == id),
-            "the alias and canonical route must expose one catalog"
-        );
-
-        let (status, updated) = request(
-            &harness,
-            "POST",
-            &format!("/api/hosts/999999/profiles/{id}"),
-            Some(serde_json::json!({
-                "name": "renamed",
-                "invocation": "renamed-agent",
-                "agent_kind": "generic",
-                "resume_template": null,
-            })),
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(updated["id"], id);
-        assert_eq!(updated["name"], "renamed");
-
-        let (status, _) = request(
-            &harness,
-            "DELETE",
-            &format!("/api/hosts/999999/profiles/{id}"),
-            None,
-        )
-        .await;
-        assert_eq!(status, axum::http::StatusCode::OK);
+        for (method, path) in [
+            ("GET", "/api/hosts/999999/profiles"),
+            ("POST", "/api/hosts/999999/profiles"),
+            ("POST", "/api/hosts/999999/profiles/profile-1"),
+            ("DELETE", "/api/hosts/999999/profiles/profile-1"),
+        ] {
+            let (status, _) = request(&harness, method, path, None).await;
+            assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{method} {path}");
+        }
     }
 
     /// The two creation modes are exclusive at the REST edge too, and a

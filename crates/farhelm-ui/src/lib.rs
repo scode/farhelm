@@ -52,8 +52,8 @@
 //!   with `session_view`, which puts the same wording behind a stale
 //!   session's notice).
 //! - `profiles`: agent profiles as this UI handles them (PLAN_M6_75.md item
-//!   8) — the per-host catalog read every profile surface goes through, the
-//!   hosts panel's profiles section (create/edit/delete), and the
+//!   8) — the one helm-wide catalog read shared by the app-bar popup and the
+//!   create picker, the popup's create/edit/delete surface, and the
 //!   renderer-free rules the create dialog's picker needs: which profile a
 //!   fresh dialog preselects, when it must ask instead of guessing, and how
 //!   a session's snapshotted profile reads once the catalog has moved on.
@@ -569,7 +569,7 @@ where
 /// Note what is deliberately NOT here: the profile's CURRENT name. A renamed
 /// profile's new name is knowable server-side and is withheld on purpose, so
 /// that there is exactly one copy of existence truth — a surface that needs
-/// today's name (the profiles section) reads the catalog, where it is
+/// today's name (the profiles popup) reads the catalog, where it is
 /// authoritative.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SourceProfile {
@@ -610,14 +610,9 @@ pub enum ProfileExistence {
     Unrecognized,
 }
 
-/// Mirror of one entry in a host's profile catalog (farhelm-proto's
-/// `Profile`): a named, editable definition of how to launch an agent, and
-/// how to resume one.
-///
-/// Per-supervisor by construction — an id minted on one host means nothing on
-/// another (SPEC.md leaves profile syncing to post-v1) — which is why every
-/// surface here holds a catalog together with the host it came from, and why
-/// the create dialog drops a profile choice when its target host changes.
+/// Mirror of one entry in the helm's profile catalog (farhelm-proto's
+/// `Profile`): a named, editable definition of how to launch and resume an
+/// agent on any host.
 ///
 /// `agent_kind` stays the wire STRING rather than becoming an enum, unlike
 /// [`HostKind`], and the difference is what the value is FOR: a kind decides
@@ -628,8 +623,8 @@ pub enum ProfileExistence {
 /// else — the one outcome an editor must never produce.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Profile {
-    /// Supervisor-minted and stable across every rename: what a create names
-    /// and what a session's [`SourceProfile`] snapshots.
+    /// Helm-minted and stable across every rename and every managed host: what
+    /// a create names and what a session's [`SourceProfile`] snapshots.
     pub id: String,
     /// The user's label, as the CATALOG holds it today: what the profiles
     /// section lists and what the create dialog's picker offers.
@@ -1265,7 +1260,6 @@ fn AppBody() -> Element {
                         // web-only affordance despite `ResizeObserver` sounding
                         // browser-specific.
                         onresize: move |_| layout_epoch += 1,
-                        app_bar::AppBar {}
                         ListView {
                             // Selection memory lives in `ListView` (it knows
                             // which selections were user-initiated, and writes
