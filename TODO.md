@@ -45,6 +45,17 @@ everything not yet sorted, which carries no implication either way. Within a buc
   - `stale focus-out classifiers cannot clear newer obligations`: "the page never opened feed socket #1 (saw 0)" — the
     stubbed feed harness in `helpers/fleet.ts` (`stubFeed`) never saw the page's socket within its wait. Harness, not
     product; the same helper serves every profiles test, so the first look is the wait's length under load.
+  - Attempted on 2026-09-03, not shipped. A loaded before leg (10 full-spec runs on a 4-vCPU sandbox, both engines, a
+    `cargo build` looping beside Playwright) reproduced: the pending-focus case failed 5/10 on Chromium and 1/10 on
+    WebKit, the stale-classifier case 2/10 and 2/10, the focus-and-Escape case 0/10. The attempt made an exhausted
+    `Unknown` obligation wait for the next document focus event (reading the event revision when the classifier settles,
+    since the `focusin` can land while the bridge is still evaluating), gave the test hook page-local ordinals so a hold
+    names the classification it owns, added a quiescence wait before tests arm holds, and widened `stubFeed`'s socket
+    wait from 15 s to 30 s. Its loaded after leg failed: the pending-focus case then failed 11/20 on Chromium (the popup
+    gone before the test looks, more often than before), and one WebKit focus-and-Escape repeat still found the popup
+    mounted. The stale-classifier case was clean. Whoever picks this up next starts from that attempt's diff (kept
+    outside the repo) and from why the event-driven retry closes the popup sooner than the pending-focus test expects;
+    the two tests and the retry still do not share one story.
 - Deflake `a client that stops draining is detached with the stall reason after the full stall interval`
   (e2e/tests/terminal-flood.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, the poll "the attachment
   must cross HIGH_WATER and pause before the stall clock can start" saw zero pauses in 30 s: the flood never built
