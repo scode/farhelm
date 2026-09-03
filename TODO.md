@@ -106,7 +106,7 @@ work below is what retires them as a class. Order is a suggestion, from cheapest
   from print it ON REQUEST (a byte on raw-mode stdin, the way the `binary` script now does), and the helper attaches,
   sends the trigger, then waits, so the interesting output is live by construction. Audit: grep `wait_for` calls against
   `crates/farhelm/src/fake_agent.rs` scripts that print at startup. Prove it by repeating the affected tests on a loaded
-  4-vCPU box, not locally. Roughly half a day; no product code.
+  4-vCPU box, not locally. Roughly half a day; no product code. Plan: `plans/deflake-attach-boundary.md` (effort: low).
 - One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
   relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
   the profiles popup's 250 + 120 ms settlement, the stub feed's socket wait, and every 5 s Playwright `expect`.
