@@ -198,6 +198,17 @@ binary or engine, then the full battery. `.agents/narrow-tests.md` is the recipe
 every suite. Running a many-minute battery to check a one-test hypothesis is the failure mode this rule exists to
 prevent.
 
+# FLAKES.md
+
+`FLAKES.md` is the append-only log of LATENT flakes: tests that pass where they were written and fail elsewhere,
+sometimes, or under load, whose cause was not obvious when they failed. When you establish that a failure is a true
+flake of that kind — pre-existing, or one that survived past the session that wrote it — add a dated entry: one
+paragraph naming the test and its file (no line numbers), what was observed and where, the cause found or suspected, and
+the disposition (fixed in which PR, ignored with what reason, or open). Fixed ones stay; a fixed flake that recurs gets
+a new dated entry. Do NOT log a test that was written, flaked, and was fixed within the same session: that is ordinary
+development, and logging it buries the tech debt the file exists to show. Open flakes also get a deflake entry in
+TODO.md; the log keeps the history, TODO.md keeps the work.
+
 # TODO.md
 
 `TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
