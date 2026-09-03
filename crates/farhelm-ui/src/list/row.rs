@@ -16,7 +16,7 @@ use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{existence_word, source_profile_label};
 use crate::rename::RenameForm;
-use crate::status::{StatusBadgeView, confirm_consequence, status_badge};
+use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
 
 use super::shared::{DeleteTarget, HostLocality, RowState};
 use crate::menu_panel::{
@@ -29,16 +29,18 @@ use crate::menu_panel::{
 ///
 /// Archive removes terminal lifecycle actions, not metadata management: an
 /// archived row can still be opened, renamed, or deleted, but cannot be
-/// stopped or archived a second time. Clone carries NO field here at all —
-/// unlike these four, it is offered unconditionally on every retention
-/// state (see `MENU_ACTIONS`/`session_menu_order`), because it is not a
-/// lifecycle action or a metadata edit on the row at all: it only reads the
-/// row to seed a brand-new, independent create, which needs nothing about
-/// this row to be live or mutable — an archived session has no running
-/// process to act on, but its host, directory, title, and launch profile
-/// (or raw invocation) are all still on this `Session`, and clone is the
-/// only way to turn that history back into a running agent without
-/// un-archiving the original.
+/// stopped or archived a second time. Clone and Replace carry NO field here
+/// at all — unlike these four, both are offered unconditionally on every
+/// retention state (see `MENU_ACTIONS`/`session_menu_order`), because
+/// neither is a lifecycle action or a metadata edit on the row at all: each
+/// only reads the row to seed a brand-new create (opening a form for
+/// clone, or acting at once for replace), which needs nothing about this
+/// row to be live or mutable — an archived session has no running process
+/// to act on, but its host, directory, title, and launch profile (or raw
+/// invocation) are all still on this `Session`. Clone turns that history
+/// back into a running agent without un-archiving the original; replace
+/// discards the archived record entirely and puts the running agent in its
+/// place instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RowControlVisibility {
     rename: bool,
@@ -94,6 +96,7 @@ enum MenuAction {
     /// distinction visible in the menu's own order.
     MarkSeen,
     Clone,
+    Replace,
     Stop,
     Archive,
     Delete,
@@ -105,10 +108,16 @@ enum MenuAction {
 /// `MenuOrder` and the rendered list cannot disagree about what "the
 /// first item" or "the last item" means — the two places arrow keys and
 /// the open-intent both resolve against.
-const MENU_ACTIONS: [MenuAction; 6] = [
+///
+/// `Replace` sits directly after `Clone`: the two are the row's only two
+/// "make a new session from this one" actions, and putting them beside each
+/// other is what lets a user compare "keep both" against "swap this one
+/// out" without hunting across the menu.
+const MENU_ACTIONS: [MenuAction; 7] = [
     MenuAction::Rename,
     MenuAction::MarkSeen,
     MenuAction::Clone,
+    MenuAction::Replace,
     MenuAction::Stop,
     MenuAction::Archive,
     MenuAction::Delete,
@@ -127,15 +136,19 @@ type MenuOrder = menu_panel::MenuOrder<MenuAction, { MENU_ACTIONS.len() }>;
 /// between `RowControlVisibility`'s named fields and the shared
 /// `MenuOrder::pack`'s generic `(action) -> bool` predicate.
 ///
-/// `Clone` answers `true` unconditionally rather than reading a
-/// `RowControlVisibility` field: it has none, because it is offered on
-/// every retention state (see that struct's own doc for why the omission
-/// is deliberate rather than a gap this match should be filling).
+/// `Clone` and `Replace` both answer `true` unconditionally rather than
+/// reading a `RowControlVisibility` field: neither has one, because both
+/// are offered on every retention state (see that struct's own doc for why
+/// the omission is deliberate rather than a gap this match should be
+/// filling). Replace needs no running process any more than clone does —
+/// an archived source has no agent to kill, only a record to delete before
+/// the fresh session takes its place.
 fn session_menu_order(controls: RowControlVisibility) -> MenuOrder {
     MenuOrder::pack(MENU_ACTIONS, |action| match action {
         MenuAction::Rename => controls.rename,
         MenuAction::MarkSeen => controls.mark_seen,
         MenuAction::Clone => true,
+        MenuAction::Replace => true,
         MenuAction::Stop => controls.stop,
         MenuAction::Archive => controls.archive,
         MenuAction::Delete => controls.delete,
@@ -659,6 +672,14 @@ pub(super) fn SessionRow(
     /// (`create_form::CreatePrefill`). Nothing is mutated or restarted
     /// here — this row's only job is to say WHICH session was cloned.
     on_clone: EventHandler<Session>,
+    /// The "replace" menu item's click: opens `confirming_replace`, hands
+    /// the row's own `Session` up. Unlike `on_clone` this DOES eventually
+    /// mutate the fleet — `ListView`'s handler calls `api::replace_session`
+    /// — but not from this click alone; see `on_confirm_replace` for the
+    /// step that actually acts.
+    on_replace: EventHandler<Session>,
+    on_confirm_replace: EventHandler<String>,
+    on_cancel_replace: EventHandler<String>,
     on_stop: EventHandler<String>,
     on_delete: EventHandler<DeleteTarget>,
     on_confirm_delete: EventHandler<String>,
@@ -685,6 +706,7 @@ pub(super) fn SessionRow(
         busy,
         confirming,
         confirming_archive,
+        confirming_replace,
         renaming,
         nav_disabled,
         menu_open,
@@ -738,10 +760,13 @@ pub(super) fn SessionRow(
     };
     let archive_target = session.clone();
     let clone_target = session.clone();
+    let replace_target = session.clone();
     let confirm_id = session.id.clone();
     let cancel_id = session.id.clone();
     let confirm_archive_id = session.id.clone();
     let cancel_archive_id = session.id.clone();
+    let confirm_replace_id = session.id.clone();
+    let cancel_replace_id = session.id.clone();
     let rename_start = (session.id.clone(), session.title.clone());
     let rename_submit_id = session.id.clone();
     // The toggle is offered on a LIVE row (running, waiting, idle — SPEC.md;
@@ -776,16 +801,18 @@ pub(super) fn SessionRow(
     let menu_id = session.id.clone();
     // This render's item list, derived from the same visibility answer
     // that decides whether each item renders at all — an archived row's
-    // menu is rename + clone + delete, and its delete is position 2, not
-    // the 4 a fixed numbering would give it. Every focus position below is
-    // read out of this one value (see `MenuOrder`), so the rendered list
-    // and the navigable list cannot disagree.
+    // menu is Rename, Clone, Replace, Delete, in that order, with Stop and
+    // Archive withdrawn, so Delete sits wherever THIS shorter list puts it
+    // rather than at whatever position a fixed numbering across every
+    // retention state would give it. Every focus position below is read
+    // out of this one value (see `MenuOrder`), so the rendered list and the
+    // navigable list cannot disagree.
     let menu_order = session_menu_order(controls);
     // Whether the panel is currently showing its ITEM list, as opposed to
     // a confirm prompt or the rename field. Only the item list is a menu
     // — see the "Keyboard" section above for why the other two states
     // carry neither the ARIA role nor any key binding.
-    let showing_menu_items = !(confirming || confirming_archive || renaming);
+    let showing_menu_items = !(confirming || confirming_archive || confirming_replace || renaming);
     // The accessible name for the panel's prompt states. Only read when
     // one of them is showing; the menu state names its inner list
     // instead. Same clamp as the toggle's own name, for the same reason
@@ -794,6 +821,8 @@ pub(super) fn SessionRow(
         format!("delete confirmation for {}", clamp_title(&session.title))
     } else if confirming_archive {
         format!("archive confirmation for {}", clamp_title(&session.title))
+    } else if confirming_replace {
+        format!("replace confirmation for {}", clamp_title(&session.title))
     } else {
         format!("rename {}", clamp_title(&session.title))
     };
@@ -812,6 +841,7 @@ pub(super) fn SessionRow(
     let rename_key_id = session.id.clone();
     let mark_seen_key_id = session.id.clone();
     let clone_key_id = session.id.clone();
+    let replace_key_id = session.id.clone();
     let stop_key_id = session.id.clone();
     let archive_key_id = session.id.clone();
     let delete_key_id = session.id.clone();
@@ -1157,7 +1187,8 @@ pub(super) fn SessionRow(
                     // the open button inert for the whole time a prompt is
                     // showing, rather than giving it a second, competing
                     // meaning as an implicit cancel.
-                    disabled: nav_disabled || confirming || confirming_archive || renaming,
+                    disabled: nav_disabled || confirming || confirming_archive || confirming_replace
+                        || renaming,
                     onclick: move |_| on_open.call(open_session.clone()),
                     // STACKED lines rather than one squeezed flex row: the
                     // sidebar column (BUGS_BURNDOWN.md issue 5, interviewed
@@ -1597,6 +1628,38 @@ pub(super) fn SessionRow(
                                 onclick: move |_| on_cancel_archive.call(cancel_archive_id.clone()),
                                 "cancel"
                             }
+                        } else if confirming_replace {
+                            // Same two-element, consequence-first shape as
+                            // the delete and archive prompts above — see
+                            // the component doc's opening paragraphs for
+                            // why the consequence never shrinks or
+                            // ellipsizes while the title does. Unlike
+                            // those two, `replace_consequence` has no
+                            // `Option`/fallback branch to pick between: it
+                            // is total over `SessionStatus`, so every
+                            // status reaches here with real wording of its
+                            // own (`status::replace_consequence`'s own
+                            // doc).
+                            span {
+                                class: "confirm-consequence",
+                                "{replace_consequence(&session.status)}"
+                            }
+                            span { class: "confirm-title", "\"{session.title}\"" }
+                            button {
+                                r#type: "button",
+                                class: "btn confirm-replace",
+                                // See confirm-delete: refusal made visible.
+                                disabled: busy,
+                                onclick: move |_| on_confirm_replace.call(confirm_replace_id.clone()),
+                                "confirm replace"
+                            }
+                            button {
+                                r#type: "button",
+                                class: "btn replace-cancel",
+                                autofocus: true,
+                                onclick: move |_| on_cancel_replace.call(cancel_replace_id.clone()),
+                                "cancel"
+                            }
                         } else if renaming {
                             // The AUTHORITATIVE title stays beside the
                             // field: a refused rename must never leave the
@@ -1792,6 +1855,47 @@ pub(super) fn SessionRow(
                                         on_clone.call(clone_target.clone());
                                     },
                                     "clone"
+                                }
+                                // Also unconditional, directly beside clone
+                                // — the row's other "make a new session
+                                // from this one" action, and the one
+                                // difference between them is the whole
+                                // point of offering both: clone keeps this
+                                // row and opens an editable form around a
+                                // SECOND session, replace acts at once,
+                                // deletes this row's own session, and puts
+                                // the fresh one in its place. The click
+                                // only opens `confirming_replace`;
+                                // `on_confirm_replace` is what actually
+                                // calls the API.
+                                button {
+                                    r#type: "button",
+                                    class: "btn session-row-menu-item session-row-replace",
+                                    role: "menuitem",
+                                    aria_disabled: if busy { "true" },
+                                    tabindex: if menu_tab_stop == Some(MenuAction::Replace) { "0" } else { "-1" },
+                                    onmounted: move |element| {
+                                        remember_menu_item(menu_wiring, MenuAction::Replace, element.data())
+                                    },
+                                    onfocusin: move |_| {
+                                        menu_focus.set(menu_order.position(MenuAction::Replace));
+                                    },
+                                    onfocusout: move |_| menu_focus.set(None),
+                                    onkeydown: move |evt| {
+                                        handle_menu_key(
+                                            &evt,
+                                            menu_order.position(MenuAction::Replace),
+                                            menu_wiring,
+                                            &replace_key_id,
+                                        );
+                                    },
+                                    onclick: move |_| {
+                                        if busy {
+                                            return;
+                                        }
+                                        on_replace.call(replace_target.clone());
+                                    },
+                                    "replace"
                                 }
                                 if controls.stop {
                                     button {
@@ -2021,8 +2125,9 @@ mod tests {
 
     /// The item list a render offers, and every focus position derived
     /// from it, must follow the retention state rather than a fixed
-    /// numbering — and clone, in particular, must sit right after rename
-    /// in BOTH retention states, since it is offered unconditionally.
+    /// numbering — and clone and replace, in particular, must sit right
+    /// after rename, in that order, in BOTH retention states, since both
+    /// are offered unconditionally.
     ///
     /// This is the arithmetic behind a real bug. Archiving a session
     /// while its menu is open withdraws stop and archive, and delete's
@@ -2034,36 +2139,44 @@ mod tests {
     /// pins the half of it that can be checked without a renderer.
     ///
     /// The `last()` case earns its own assertion because ArrowUp on a
-    /// closed toggle and End both resolve through it, and an archived
-    /// row's last item is delete at position 2, not at 4.
+    /// closed toggle and End both resolve through it, and an archived row's
+    /// last item is Delete at the END of the SHORTER four-item archived
+    /// list (Rename, Clone, Replace, Delete), not wherever it would sit in
+    /// the six-item active one.
     #[test]
     fn menu_order_follows_the_retention_state_rather_than_a_fixed_numbering() {
         // `mark_seen: false` throughout — this test is about the archive
         // dimension specifically; `mark_seen_sits_right_after_rename_when_offered`
         // below is where MarkSeen's own predicate and position are pinned.
         let active = session_menu_order(row_control_visibility(false, false));
-        assert_eq!(active.len(), 5);
+        assert_eq!(active.len(), 6);
         assert_eq!(active.get(0), Some(MenuAction::Rename));
         assert_eq!(active.get(1), Some(MenuAction::Clone));
-        assert_eq!(active.get(2), Some(MenuAction::Stop));
-        assert_eq!(active.get(3), Some(MenuAction::Archive));
-        assert_eq!(active.get(4), Some(MenuAction::Delete));
-        assert_eq!(active.get(5), None);
+        assert_eq!(active.get(2), Some(MenuAction::Replace));
+        assert_eq!(active.get(3), Some(MenuAction::Stop));
+        assert_eq!(active.get(4), Some(MenuAction::Archive));
+        assert_eq!(active.get(5), Some(MenuAction::Delete));
+        assert_eq!(active.get(6), None);
         assert_eq!(active.last(), Some(MenuAction::Delete));
         assert_eq!(active.position(MenuAction::Clone), Some(1));
-        assert_eq!(active.position(MenuAction::Delete), Some(4));
+        assert_eq!(active.position(MenuAction::Replace), Some(2));
+        assert_eq!(active.position(MenuAction::Delete), Some(5));
 
         let archived = session_menu_order(row_control_visibility(true, false));
-        assert_eq!(archived.len(), 3);
+        assert_eq!(archived.len(), 4);
         assert_eq!(archived.get(0), Some(MenuAction::Rename));
         assert_eq!(archived.get(1), Some(MenuAction::Clone));
-        assert_eq!(archived.get(2), Some(MenuAction::Delete));
-        assert_eq!(archived.get(3), None);
+        assert_eq!(archived.get(2), Some(MenuAction::Replace));
+        assert_eq!(archived.get(3), Some(MenuAction::Delete));
+        assert_eq!(archived.get(4), None);
         assert_eq!(archived.last(), Some(MenuAction::Delete));
         // The whole point: the SAME action, a different position, and no
-        // durable state anywhere that remembers the old one.
+        // durable state anywhere that remembers the old one. Replace joins
+        // clone here — both stay reachable on an archived row (see
+        // `session_menu_order`'s own doc for why).
         assert_eq!(archived.position(MenuAction::Clone), Some(1));
-        assert_eq!(archived.position(MenuAction::Delete), Some(2));
+        assert_eq!(archived.position(MenuAction::Replace), Some(2));
+        assert_eq!(archived.position(MenuAction::Delete), Some(3));
         // Withdrawn actions have no position at all, which is what the
         // handle map's rebuild filters on when the set shrinks under an
         // open menu.
@@ -2079,18 +2192,20 @@ mod tests {
     #[test]
     fn mark_seen_sits_right_after_rename_when_offered() {
         let offered = session_menu_order(row_control_visibility(false, true));
-        assert_eq!(offered.len(), 6);
+        assert_eq!(offered.len(), 7);
         assert_eq!(offered.get(0), Some(MenuAction::Rename));
         assert_eq!(offered.get(1), Some(MenuAction::MarkSeen));
         assert_eq!(offered.get(2), Some(MenuAction::Clone));
+        assert_eq!(offered.get(3), Some(MenuAction::Replace));
         assert_eq!(offered.position(MenuAction::MarkSeen), Some(1));
 
         let offered_archived = session_menu_order(row_control_visibility(true, true));
-        assert_eq!(offered_archived.len(), 4);
+        assert_eq!(offered_archived.len(), 5);
         assert_eq!(offered_archived.get(0), Some(MenuAction::Rename));
         assert_eq!(offered_archived.get(1), Some(MenuAction::MarkSeen));
         assert_eq!(offered_archived.get(2), Some(MenuAction::Clone));
-        assert_eq!(offered_archived.get(3), Some(MenuAction::Delete));
+        assert_eq!(offered_archived.get(3), Some(MenuAction::Replace));
+        assert_eq!(offered_archived.get(4), Some(MenuAction::Delete));
 
         let withdrawn = session_menu_order(row_control_visibility(false, false));
         assert_eq!(
@@ -2132,6 +2247,9 @@ mod tests {
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
+            let on_replace = use_callback(|_: Session| {});
+            let on_confirm_replace = use_callback(|_: String| {});
+            let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(|_: String| {});
@@ -2152,6 +2270,7 @@ mod tests {
                         busy: false,
                         confirming: false,
                         confirming_archive: false,
+                        confirming_replace: false,
                         renaming: false,
                         nav_disabled: false,
                         menu_open: false,
@@ -2163,6 +2282,9 @@ mod tests {
                     on_open,
                     on_clone,
                     on_mark_seen,
+                    on_replace,
+                    on_confirm_replace,
+                    on_cancel_replace,
                     on_stop,
                     on_delete,
                     on_confirm_delete,
@@ -2219,6 +2341,9 @@ mod tests {
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
+            let on_replace = use_callback(|_: Session| {});
+            let on_confirm_replace = use_callback(|_: String| {});
+            let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(|_: String| {});
@@ -2241,6 +2366,7 @@ mod tests {
                             busy: false,
                             confirming: false,
                             confirming_archive: false,
+                            confirming_replace: false,
                             renaming: false,
                             nav_disabled: false,
                             menu_open: false,
@@ -2252,6 +2378,9 @@ mod tests {
                         on_open,
                         on_clone,
                         on_mark_seen,
+                        on_replace,
+                        on_confirm_replace,
+                        on_cancel_replace,
                         on_stop,
                         on_delete,
                         on_confirm_delete,

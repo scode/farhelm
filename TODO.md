@@ -141,9 +141,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   un-ignored in #355 and #357; the invalid-byte test joined the list after its stall was localized to the input path and
   failed 3 of 9 GitHub runs of this stack in one day). The suite still runs in CI's `test` job on every ready PR and
   before a stack lands, so the gap is at tag time only. Reversing both is the definition of done for the deflake work.
-- Add "replace" on sessions: like clone, but the new session takes the old one's place instead of duplicating it. A
-  fresh session and a fresh agent process, with the same directory, host, and the rest of the settings. Plan:
-  `plans/replace-session.md` (medium).
 
 ## Systematic deflake
 

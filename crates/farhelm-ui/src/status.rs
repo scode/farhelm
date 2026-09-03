@@ -361,6 +361,54 @@ pub(crate) fn confirm_consequence(status: &SessionStatus) -> &'static str {
     }
 }
 
+/// The row's replace confirmation, beside [`confirm_consequence`] and under
+/// the same no-guessing discipline that function's own doc states: a live
+/// status must claim the agent IS killed, `Unknown` may only admit
+/// uncertainty,
+/// and neither `Exited` nor `Interrupted` may claim a kill that cannot
+/// happen. What replace adds beyond delete's wording is the OTHER half of
+/// the operation — every arm ends by saying a fresh session with the same
+/// settings takes the old one's place, which is the one sentence that
+/// tells a reader this prompt is not delete's. Without it, a user
+/// skimming a familiar-looking warning could read "kills the agent" and
+/// assume the row is simply gone, missing that a running replacement is
+/// what they are actually about to get.
+///
+/// Unlike [`confirm_consequence`], EVERY arm here can legitimately open
+/// this prompt — replace has no `has_ended()`-style bypass the way delete
+/// does for an already-finished session (see `list::row`'s `on_replace`),
+/// because "the same settings, a moment later" is worth confirming
+/// regardless of whether there was anything left to kill. That is also why
+/// `Exited` gets its own wording instead of delete's terse "delete
+/// anyway:" — replace has no analogous "there is nothing to reconsider"
+/// shortcut to fall back on, so its own consequence is spelled out in full
+/// even for a session that was already at rest.
+pub(crate) fn replace_consequence(status: &SessionStatus) -> &'static str {
+    match status {
+        SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
+            "still running — replacing kills the agent and discards the conversation; a fresh \
+             session with the same settings takes its place:"
+        }
+        SessionStatus::Unknown => {
+            "status unknown — the agent may still be running and will be killed, and the \
+             conversation is discarded either way; a fresh session with the same settings \
+             takes its place:"
+        }
+        SessionStatus::Exited { .. } => {
+            "replacing discards the conversation; a fresh session with the same settings takes \
+             its place:"
+        }
+        SessionStatus::Interrupted => {
+            "interrupted by a host reboot — nothing left to kill, but replacing still discards \
+             the conversation; a fresh session with the same settings takes its place:"
+        }
+        SessionStatus::Error { .. } => {
+            "the agent never started — nothing to kill; a fresh session with the same settings \
+             takes its place:"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,5 +683,137 @@ mod tests {
             wording.contains("discard"),
             "the honest consequence is losing the session record itself: {wording}"
         );
+    }
+
+    /// [`replace_consequence`]'s own version of the no-guessing pin above:
+    /// a live status must claim the kill, `Unknown` may only admit
+    /// uncertainty, and neither may borrow the other's certainty.
+    #[test]
+    fn replace_consequence_wording_differs_between_live_and_unknown() {
+        for live in [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+        ] {
+            let wording = replace_consequence(&live);
+            assert!(
+                wording.contains("still running") && wording.contains("kills the agent"),
+                "every live status costs the same kill, so every one must say so: {live:?} -> \
+                 {wording}"
+            );
+        }
+        let unknown = replace_consequence(&SessionStatus::Unknown);
+        assert!(
+            unknown.contains("may still be running") && unknown.contains("will be killed"),
+            "an unresolved status may not round up to a live status's certainty: {unknown}"
+        );
+    }
+
+    /// Neither `Exited` nor `Interrupted` may claim a kill replace cannot
+    /// perform — the same rule [`confirm_consequence`]'s own
+    /// `interrupted_consequence_promises_no_kill` pins for delete, applied
+    /// to replace's wording instead. `Interrupted` additionally names the
+    /// reboot that is why there is nothing left to kill; `Exited` does not,
+    /// since an ordinary exit needs no such explanation.
+    #[test]
+    fn replace_consequence_never_promises_a_kill_for_an_already_ended_session() {
+        let exited = replace_consequence(&SessionStatus::Exited { exit_code: Some(0) });
+        assert!(
+            !exited.contains("kills the agent") && !exited.contains("will be killed"),
+            "an exited agent leaves nothing for replace to kill: {exited}"
+        );
+        let interrupted = replace_consequence(&SessionStatus::Interrupted);
+        assert!(
+            !interrupted.contains("kills the agent") && !interrupted.contains("will be killed"),
+            "a host reboot already ended the agent; replace cannot kill it again: {interrupted}"
+        );
+        assert!(
+            interrupted.contains("reboot"),
+            "interrupted's wording must say WHY there is nothing to kill: {interrupted}"
+        );
+    }
+
+    /// [`confirm_consequence`]'s own `error_consequence_promises_no_kill_and_names_no_reboot`,
+    /// mirrored for replace: an agent whose exec never succeeded leaves
+    /// nothing for replace to kill either, and the wording must not borrow
+    /// `Interrupted`'s reboot framing for an unrelated failure.
+    #[test]
+    fn replace_consequence_error_promises_no_kill_and_names_no_reboot() {
+        let wording = replace_consequence(&SessionStatus::Error {
+            detail: "exec_failed argv0=/nope errno=2".to_string(),
+        });
+        assert!(
+            !wording.contains("kills the agent") && !wording.contains("will be killed"),
+            "an agent that never started leaves nothing for replace to kill: {wording}"
+        );
+        assert!(
+            !wording.contains("reboot"),
+            "an exec failure is not a reboot; the wording must not borrow that framing: {wording}"
+        );
+    }
+
+    /// Every status EXCEPT `Error` must warn that the conversation is
+    /// discarded — the plan requirement no earlier test actually pins: the
+    /// wording tests above check kill certainty, reboot framing, and the
+    /// fresh-session suffix, but none of them would fail if an
+    /// implementation quietly dropped the irreversible conversation-loss
+    /// warning from every applicable arm. `Error` is the one deliberate
+    /// exception: no agent conversation ever started, so there is nothing
+    /// for that arm to say was discarded.
+    #[test]
+    fn every_status_but_error_warns_the_conversation_is_discarded() {
+        let discards = [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+            SessionStatus::Exited { exit_code: Some(0) },
+            SessionStatus::Interrupted,
+        ];
+        for status in discards {
+            let wording = replace_consequence(&status);
+            assert!(
+                wording.contains("discard"),
+                "{status:?}'s wording must warn that the conversation is discarded: {wording}"
+            );
+        }
+        let error_wording = replace_consequence(&SessionStatus::Error {
+            detail: "exec_failed argv0=/nope errno=2".to_string(),
+        });
+        assert!(
+            !error_wording.contains("discard"),
+            "an agent that never started never held a conversation to discard: {error_wording}"
+        );
+    }
+
+    /// The one property every arm must share, spelled out as its own test
+    /// rather than folded into the others above: whatever a status costs,
+    /// [`replace_consequence`] must always say a fresh session with the
+    /// same settings takes the old one's place — the sentence that is the
+    /// entire reason this prompt exists separately from
+    /// [`confirm_consequence`]'s. A regression that dropped it from even
+    /// one arm would leave that status's prompt reading exactly like
+    /// delete's, with nothing telling the user a replacement is coming.
+    #[test]
+    fn every_replace_consequence_arm_promises_a_fresh_replacement() {
+        let statuses = [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+            SessionStatus::Exited { exit_code: Some(0) },
+            SessionStatus::Interrupted,
+            SessionStatus::Error {
+                detail: "exec_failed argv0=/nope errno=2".to_string(),
+            },
+        ];
+        for status in statuses {
+            let wording = replace_consequence(&status);
+            assert!(
+                wording.contains("fresh session") && wording.contains("takes its place"),
+                "{status:?}'s wording must promise a replacement, not just a consequence: \
+                 {wording}"
+            );
+        }
     }
 }

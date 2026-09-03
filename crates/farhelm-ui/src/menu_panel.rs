@@ -96,8 +96,22 @@ const MENU_PANEL_VIEWPORT_MARGIN_PX: f64 = 8.0;
 /// app.css that actually guarantees the panel stays on screen regardless
 /// of how far off this estimate runs. This constant only keeps the clamp
 /// from placing the panel's TOP so close to the viewport's bottom that
-/// even its shortest mode would still be pushed off.
-const MENU_PANEL_MIN_RESERVE_PX: f64 = 160.0;
+/// the everyday mode — the plain command list — would be pushed off and
+/// left scrolling inside its own panel.
+///
+/// Sized for the session row's FULL menu, seven items (rename, mark seen,
+/// clone, replace, stop, archive, delete) plus the separator and the
+/// panel's own padding and border. The number is empirical, not derived
+/// from the stylesheet: a six-item menu measured 178px from the panel's
+/// top to the bottom of its last item on Chromium, one item is about
+/// 28px, and the remainder is slack for engine differences in line
+/// height. The previous value, 160px, was sized when the menu had five
+/// items; the sixth (replace) was the one that first overran it, and the
+/// clipping showed up as a delete item sitting below the viewport edge
+/// whenever the menu opened on the last visible row of a scrolled list.
+/// A larger reserve costs nothing when the toggle has room below it — the
+/// clamp only bites within this many pixels of the viewport's bottom.
+const MENU_PANEL_MIN_RESERVE_PX: f64 = 240.0;
 
 /// The panel's own floor on how narrow `menu_panel_style`'s horizontal
 /// clamp (below) may shrink it to. Below this, the panel could no longer
@@ -1331,7 +1345,7 @@ mod tests {
         );
         assert_eq!(
             menu_panel_style(toggle_rect),
-            "--menu-top: max(8px, min(72px, calc(100vh - 160px))); top: var(--menu-top); \
+            "--menu-top: max(8px, min(72px, calc(100vh - 240px))); top: var(--menu-top); \
              right: max(8px, calc(100vw - 246px)); \
              max-width: min(288px, 238px, calc(100vw - 16px)); \
              max-height: calc(100vh - var(--menu-top) - 8px);"
