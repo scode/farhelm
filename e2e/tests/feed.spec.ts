@@ -40,6 +40,7 @@ import {
   createSession,
   FeedStub,
   forceBuildSkew,
+  hideSeenState,
   listSessions,
   openFilterBar,
   openRowMenu,
@@ -998,11 +999,21 @@ test.describe("the invalidation feed", () => {
    * depends on how the sampler's schedule lines up with this page's reads.
    * Requiring a specific first observation would make this a test of that
    * timing rather than of the feed carrying a change.
+   *
+   * `hideSeenState` keeps the badge text this test polls at the bare status
+   * word: a session created here and never opened genuinely earns the
+   * idle-unseen annotation ("idle — new output", SPEC.md, Status) once the
+   * real sampler settles it, which is a real and correct behavior but not
+   * this test's subject — it is about the STATUS transition arriving
+   * through the feed, and the annotation would otherwise make `.toBe("idle")`
+   * below fail on a badge that has, in every way this test cares about,
+   * already made the transition it exists to prove.
    */
   test("a status transition arrives through the feed without a refresh", async ({
     page,
     request,
   }) => {
+    await hideSeenState(page);
     await page.goto("/");
     await expect(page.locator(".session-list")).toBeVisible({ timeout: 20_000 });
 

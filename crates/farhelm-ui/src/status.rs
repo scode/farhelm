@@ -113,9 +113,23 @@ pub(crate) struct StatusBadge {
 /// host-unreachable notice (SPEC.md's "title, directory, last-known status")
 /// — and two copies of this mapping would let one surface describe a session
 /// differently from the other.
+///
+/// ## `unseen`, and why only `Idle` reads it
+///
+/// `unseen` is `Session::has_unseen_output()` (SPEC.md, Status;
+/// `plans/session-dot-read-state.md`) — `None` when the helm predates the
+/// field, `Some(bool)` otherwise. Only the `Idle` arm below branches on it:
+/// `Running`'s pulse and `Waiting`'s colour already say "look here" on their
+/// own, so the entry that asked for this split asked for it on idle alone.
+/// An `Idle` row with unseen output gets class `idle unseen` and the text
+/// `idle — new output`; the text change matters as much as the class,
+/// because the hidden word is what a screen reader and the browser suite
+/// read, and "new output" is a fact the colour alone would not otherwise
+/// carry to either.
 pub(crate) fn status_badge(
     status: &SessionStatus,
     annotation: Option<&str>,
+    unseen: Option<bool>,
 ) -> Option<StatusBadge> {
     let (class, text) = match status {
         // The three live statuses get three words and three CSS modifiers,
@@ -125,6 +139,9 @@ pub(crate) fn status_badge(
         // stylesheet, so a new status is a rename nobody has to translate.
         SessionStatus::Running => ("running", "running".to_string()),
         SessionStatus::Waiting => ("waiting", "waiting".to_string()),
+        SessionStatus::Idle if unseen == Some(true) => {
+            ("idle unseen", "idle — new output".to_string())
+        }
         SessionStatus::Idle => ("idle", "idle".to_string()),
         SessionStatus::Exited { exit_code } => {
             // The exit code leads the annotation, not the other way
@@ -332,27 +349,27 @@ mod tests {
     #[test]
     fn status_badge_matches_text_and_class_for_each_status() {
         assert_eq!(
-            status_badge(&SessionStatus::Running, None),
+            status_badge(&SessionStatus::Running, None, None),
             badge("running", "running", false)
         );
         assert_eq!(
-            status_badge(&SessionStatus::Waiting, None),
+            status_badge(&SessionStatus::Waiting, None, None),
             badge("waiting", "waiting", false)
         );
         assert_eq!(
-            status_badge(&SessionStatus::Idle, None),
+            status_badge(&SessionStatus::Idle, None, None),
             badge("idle", "idle", false)
         );
         assert_eq!(
-            status_badge(&SessionStatus::Exited { exit_code: Some(7) }, None),
+            status_badge(&SessionStatus::Exited { exit_code: Some(7) }, None, None),
             badge("exited", "exited (code 7)", true)
         );
         assert_eq!(
-            status_badge(&SessionStatus::Exited { exit_code: None }, None),
+            status_badge(&SessionStatus::Exited { exit_code: None }, None, None),
             badge("exited", "exited", true)
         );
         assert_eq!(
-            status_badge(&SessionStatus::Interrupted, None),
+            status_badge(&SessionStatus::Interrupted, None, None),
             badge("interrupted", "interrupted", true)
         );
         assert_eq!(
@@ -360,11 +377,50 @@ mod tests {
                 &SessionStatus::Error {
                     detail: "exec_failed argv0=/nope errno=2".to_string()
                 },
+                None,
                 None
             ),
             badge("error", "error — exec_failed argv0=/nope errno=2", true),
             "the shim's own recorded detail must reach the badge text, not just its class"
         );
+    }
+
+    /// The unseen-idle split (SPEC.md, Status; `plans/session-dot-read-state.md`):
+    /// `Idle` with `unseen == Some(true)` gets its own class and text, every
+    /// other combination of status and `unseen` leaves the ordinary idle (or
+    /// live) badge untouched — including `Running`/`Waiting`, which the
+    /// module doc above states ignore the flag entirely, pinned here rather
+    /// than left to be inferred from the match arms.
+    #[test]
+    fn idle_alone_reads_the_unseen_flag() {
+        assert_eq!(
+            status_badge(&SessionStatus::Idle, None, Some(true)),
+            badge("idle unseen", "idle — new output", false),
+            "unseen idle output gets its own class and its own hidden word"
+        );
+        assert_eq!(
+            status_badge(&SessionStatus::Idle, None, Some(false)),
+            badge("idle", "idle", false),
+            "explicitly seen is the ordinary idle badge"
+        );
+        assert_eq!(
+            status_badge(&SessionStatus::Idle, None, None),
+            badge("idle", "idle", false),
+            "an old helm that never answers the question draws the pre-plan idle badge"
+        );
+        for unseen in [None, Some(true), Some(false)] {
+            assert_eq!(
+                status_badge(&SessionStatus::Running, None, unseen),
+                badge("running", "running", false),
+                "a pulsing dot already says \"look here\"; running ignores unseen \
+                 entirely: {unseen:?}"
+            );
+            assert_eq!(
+                status_badge(&SessionStatus::Waiting, None, unseen),
+                badge("waiting", "waiting", false),
+                "waiting is already an attention colour and ignores unseen too: {unseen:?}"
+            );
+        }
     }
 
     /// The no-badge-until-classified rule (PLAN_M6_75.md item 3): an
@@ -385,11 +441,16 @@ mod tests {
     /// annotation must never be a back door to a badge.
     #[test]
     fn an_unknown_status_produces_no_badge_at_all() {
-        assert_eq!(status_badge(&SessionStatus::Unknown, None), None);
+        assert_eq!(status_badge(&SessionStatus::Unknown, None, None), None);
         assert_eq!(
-            status_badge(&SessionStatus::Unknown, Some("stopped by user")),
+            status_badge(&SessionStatus::Unknown, Some("stopped by user"), None),
             None,
             "an annotation must not conjure a badge for a status that has none"
+        );
+        assert_eq!(
+            status_badge(&SessionStatus::Unknown, None, Some(true)),
+            None,
+            "an unseen flag must not conjure a badge for a status that has none either"
         );
     }
 
@@ -418,20 +479,22 @@ mod tests {
         assert_eq!(
             status_badge(
                 &SessionStatus::Exited { exit_code: None },
-                Some("stopped by user")
+                Some("stopped by user"),
+                None
             ),
             badge("exited", "exited — stopped by user", true)
         );
         assert_eq!(
             status_badge(
                 &SessionStatus::Exited { exit_code: Some(0) },
-                Some("stopped by user")
+                Some("stopped by user"),
+                None
             ),
             badge("exited", "exited (code 0) — stopped by user", true),
             "the code leads so it survives the badge's character cap ahead of a long annotation"
         );
         assert_eq!(
-            status_badge(&SessionStatus::Running, Some("stopped by user")),
+            status_badge(&SessionStatus::Running, Some("stopped by user"), None),
             badge("running", "running", false),
             "an annotation must never describe a session that is running"
         );

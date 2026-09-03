@@ -473,6 +473,7 @@ mod tests {
             // rename overlay is about titles, and a source profile is neither
             // read nor rewritten by any of it.
             source_profile: None,
+            seen_activity_at: None,
         }
     }
 
