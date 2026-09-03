@@ -96,23 +96,6 @@ use crate::harness::*;
 /// and this feature's whole rule is that it never is.
 const WRAPPER_SCRIPT: &str = r#"cd "$1" && shift && "$@"; exit $?"#;
 
-/// Pane width every session that reads an argv marker is created and
-/// attached at.
-///
-/// The same reason `hook_identity` uses one: the marker line carries two
-/// absolute tempdir paths plus the injected `--settings` JSON, and a pane
-/// narrower than the line wraps it. A replayed wrap comes back as a real
-/// newline (`capture-pane` runs without `-J`), so a narrow pane would
-/// silently feed the assertions a truncated argv. [`argv_marker`] asserts
-/// the line fit, so outgrowing this fails loudly.
-const WIDE_COLS: u16 = 500;
-
-/// Pane height; nothing here depends on it.
-const ROWS: u16 = 24;
-
-/// The marker the record-writing fixture echoes its own argv under.
-const ARGV_MARKER: &str = "FAKE-AGENT ARGV:";
-
 /// A flag that appears in the fallback resume template and NOWHERE else,
 /// so a relaunch through that template is distinguishable from a replay of
 /// the create-time launch.
@@ -322,40 +305,6 @@ fn assert_wrapper_got(session_id: &str, cwd: &std::path::Path) {
     );
 }
 
-/// The LAST `FAKE-AGENT ARGV:` line in a transcript.
-///
-/// Last, because a reattach after a relaunch replays the previous run's
-/// markers too and the first one answers for the wrong generation.
-///
-/// The width assertion is the same guard `hook_identity` carries: a
-/// wrapped line comes back from replay as a genuine newline, so without
-/// it this would silently return a prefix of the argv and every "the
-/// injected flag is present" assertion would fail with the flag simply
-/// missing. Failing on the width instead names the fix (raise
-/// [`WIDE_COLS`]). Trailing blanks are trimmed before the bound for the
-/// reason `hook_identity`'s copy documents: a marker line that arrived
-/// through the attach snapshot is padded to the full pane width, which is
-/// not wrapping.
-fn argv_marker(transcript: &[u8]) -> String {
-    let text = String::from_utf8_lossy(transcript);
-    let start = text
-        .rfind(ARGV_MARKER)
-        .unwrap_or_else(|| panic!("no {ARGV_MARKER} in transcript:\n{text}"))
-        + ARGV_MARKER.len();
-    let line = text[start..]
-        .lines()
-        .next()
-        .expect("a marker is followed by at least a line ending")
-        .trim_end_matches('\r')
-        .trim_end()
-        .to_string();
-    assert!(
-        ARGV_MARKER.chars().count() + line.chars().count() < WIDE_COLS as usize,
-        "the argv line filled the pane and may have wrapped; raise WIDE_COLS: {line}"
-    );
-    line
-}
-
 /// Keep reading until the LAST `FAKE-AGENT ARGV:` line in `seen` is
 /// complete — that is, until the fixture's `FAKE-AGENT READY` has arrived
 /// after it.
@@ -372,32 +321,12 @@ fn argv_marker(transcript: &[u8]) -> String {
 /// each with a complete line and its own `READY`; only the newest one is
 /// still being written.
 async fn wait_for_settled_argv(rx: &mut TermStream, seen: &mut Vec<u8>, secs: u64) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    let mut ended: Option<String> = None;
-    loop {
-        let text = String::from_utf8_lossy(seen).into_owned();
-        if let Some(idx) = text.rfind(ARGV_MARKER)
-            && text[idx..].contains("FAKE-AGENT READY")
-        {
-            return;
-        }
-        if let Some(reason) = ended {
-            panic!("stream ended ({reason}) before the last argv line completed:\n{text}");
-        }
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
-            Ok(Some(TermEvent::ReplayComplete)) => {}
-            Ok(Some(TermEvent::Detached(reason))) => {
-                while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
-                    seen.extend_from_slice(&bytes);
-                }
-                ended = Some(reason);
-            }
-            Ok(None) => ended = Some("closed".to_string()),
-            Err(_) => panic!("timed out waiting for the last argv line to complete:\n{text}"),
-        }
-    }
+    wait_until(rx, seen, secs, "the last argv line to complete", |seen| {
+        let text = String::from_utf8_lossy(seen);
+        text.rfind(ARGV_MARKER)
+            .is_some_and(|idx| text[idx..].contains("FAKE-AGENT READY"))
+    })
+    .await;
 }
 
 /// Attach at [`WIDE_COLS`], wait for the fixture's prompt, send one line,

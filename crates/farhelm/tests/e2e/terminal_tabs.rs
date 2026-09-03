@@ -1434,6 +1434,9 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
             }
         };
         let mut seen = Vec::new();
+        // The printf below runs after this attach, so the invalid byte is
+        // live already; keeping the boundary makes that true by construction.
+        let live_from = wait_for_replay_complete(&mut rx, &mut seen, 20).await;
         wait_for_shell(&h.client, chan, &mut rx, &mut seen, "READY").await;
 
         // Binary-clean live output: invalid UTF-8 is legitimate terminal
@@ -1452,7 +1455,7 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
         )
         .await;
         assert!(
-            seen.contains(&0xff),
+            seen[live_from..].contains(&0xff),
             "{label}: live output replaced or dropped an invalid UTF-8 byte"
         );
 

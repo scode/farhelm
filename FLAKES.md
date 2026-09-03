@@ -107,3 +107,16 @@ browser suite's replay hold one-shot per page, so specs where several terminal i
 after navigating away) never held the island the test waited on. Fixed in #340 before the tag. Kept as a reminder that
 "fails only under load" is a hypothesis to test, not a diagnosis: this one failed under load first only because the
 loaded run was the first run of that spec after the change.
+
+## 2026-09-03 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), recurrence
+
+Under load on a 4-vCPU sandbox (a `cargo build` of the workspace looping beside the tests, the attach-boundary deflake's
+"before" proof run), 2 of 10 single-test runs against 0.3.0 timed out after 40 s waiting for `BINARY-MARKER`, the marker
+the `binary` fixture writes after its one-byte read, and 1 of 3 full-binary runs at `--test-threads=4` failed the same
+way. Not the attach-shape seam the two entries above were fixed for: the fixture is in raw mode before it prints READY,
+and the 0xff assertion never ran. What the timeout shows is only that the request-and-reply round trip (the test's
+`send_input`, the supervisor's `send-keys` exchange, the fixture's read and write, the output's trip back) did not
+complete within the budget; the transcript that would localize it was not kept. The input path, the behavior #339's
+hardening was aimed at, is the first hypothesis, not an established cause. The load was harsher than a release runner's,
+where the build finishes before the tests start, so the measured rate is not directly representative. Disposition: open
+(TODO.md).
