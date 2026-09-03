@@ -1,36 +1,32 @@
-//! `/api/hosts/{id}/profiles` — agent profiles, proxied to the host that
-//! owns them, plus the one thing the helm owns about them (PLAN_M6_75.md
-//! item 5).
+//! Agent profile APIs: the helm-owned catalog and the still-proxied host
+//! routes.
 //!
-//! ## The split: catalogs are the supervisor's, defaults are the helm's
+//! ## The helm owns the catalog
 //!
-//! A profile is per-supervisor state. The catalog, the ids, the validation
-//! rules and the snapshot semantics all live over there, and everything in
-//! this module except one field is a pass-through to the owning host's live
-//! connection — the same `host_client` routing every other host-scoped
-//! operation uses, so a profile request against a host that is down refuses
-//! exactly like a session operation against it, naming the state.
+//! The helm now stores one catalog shared by every host and every client.
+//! `GET` and CRUD under `/api/profiles` read and mutate that catalog, while
+//! `/api/hosts/{id}/profiles` remains a proxy to the owning supervisor for
+//! this part of the migration. The remembered default is one raw id per helm,
+//! including a dangling id after deletion, so the client can ask instead of
+//! guessing. The next change makes session creates resolve against this helm
+//! catalog rather than the supervisor's catalog.
 //!
-//! What the helm owns is the REMEMBERED DEFAULT: which profile a session was
-//! last created from, per host, in helm.db. That is deliberately not on the
-//! wire (PLAN_M6_75.md item 3) — it is a preference of whoever is driving
-//! this helm, not a fact about the supervisor, and a supervisor serving two
-//! helms has no business holding either one's last choice.
+//! ## The split during this migration
 //!
-//! ## The default is a bare profile id per registry row
+//! The new top-level routes use the helm-owned catalog. The host-scoped
+//! routes remain a pass-through to the owning supervisor for this part of the
+//! migration, so existing clients can continue to use them while session
+//! creation is moved in the next change. The helm-wide remembered default is
+//! separate from both catalogs and is not sent over the supervisor wire.
+//! Selectorless creates therefore still send that raw id to the target
+//! supervisor, where it may be absent or name that host's different profile
+//! definition until the next migration part moves resolution to the helm.
 //!
-//! The remembered default is a plain profile id stored against the registry
-//! row, and that is the whole mechanism. It is not bound to the install
-//! behind the row, no request here carries a precondition about which
-//! connection it was prepared against, and nothing revalidates the id beyond
-//! the catalog lookup the client does: a row that reaches a different install
-//! after a reinstall or a retarget, where the same id exists (every fresh
-//! supervisor seeds the same starter ids), gets that profile preselected. That
-//! is accepted because a default is a suggestion in a dropdown, never an
-//! action. SPEC.md's "asks instead of guessing" is about a profile that no
-//! longer exists, which a bare id still honours — the catalog lookup fails and
-//! the dialog asks. Machinery to detect "same id, different install" is not
-//! wanted (SPEC.md, Sessions / Creation).
+//! ## The default is one bare profile id
+//!
+//! The remembered default is one plain profile id in helm.db. It is not
+//! reconciled against either catalog on read: a deleted profile remains a
+//! useful signal to the client that it must ask instead of guessing.
 //!
 //! ## One read, both halves
 //!
@@ -94,19 +90,16 @@ use farhelm_proto::{AgentKind, Profile};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// What `GET /api/hosts/{id}/profiles` answers with: the host's catalog and
-/// this helm's remembered default for it.
+/// The common response shape for host-scoped and helm-owned catalog reads.
 ///
 /// See the module docs for why the two travel in one shape. The field names
 /// are frozen by PLAN_M6_75.md item 6's consumer.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct ProfilesView {
-    /// The catalog exactly as the supervisor ordered it (by profile id
-    /// ascending — stable across renames). Not re-sorted here: a client
-    /// wanting the user's alphabet sorts locally, where it knows the locale.
+    /// The requested catalog in stable id order: supervisor-owned for a host
+    /// route and helm-owned for a top-level route.
     pub(crate) profiles: Vec<Profile>,
-    /// The id of the profile a session was last created from on this host,
-    /// or `None` if none ever was.
+    /// The helm-wide id last used by a profile-backed session, or `None`.
     ///
     /// May name a profile ABSENT from `profiles` above — a deleted one — and
     /// that combination is meaningful rather than a bug: it is what a client
@@ -122,10 +115,12 @@ pub(crate) struct ProfilesView {
     pub(crate) default_profile: Option<String>,
 }
 
-/// The body of a profile create or update — everything but the id, which the
-/// supervisor mints on a create (a client has no way to know one in advance,
-/// and letting it propose one would invite collisions the catalog would then
-/// have to arbitrate) and the URL carries on an update.
+/// The body of a profile create or update — everything but the id.
+///
+/// A host-scoped create asks that host's supervisor to mint the id; a
+/// top-level create asks the helm store. A client has no id to know in
+/// advance, and letting it propose one would invite collisions. On update,
+/// the URL is the sole resource authority.
 #[derive(Deserialize)]
 pub(crate) struct ProfileSpec {
     name: String,
@@ -142,8 +137,17 @@ pub(crate) struct ProfileSpec {
     resume_template: Option<Vec<String>>,
 }
 
+/// Render a catalog field refusal as the same 400-shaped error used by the
+/// supervisor profile API.
+fn catalog_validation_error(message: String) -> axum::response::Response {
+    http_error(anyhow::Error::new(crate::SupervisorError {
+        kind: farhelm_proto::ErrorKind::InvalidRequest,
+        message,
+    }))
+}
+
 /// `GET /api/hosts/{id}/profiles` — one host's profile catalog plus this
-/// helm's remembered default for it.
+/// helm-wide remembered default.
 ///
 /// A live read from the owning supervisor, never a cache: profiles are
 /// small, hand-curated, and read when a user opens a picker, so there is
@@ -155,7 +159,7 @@ pub(crate) struct ProfileSpec {
 /// The catalog and the default are read in separate awaits and are not
 /// atomic — one comes over the wire and the other from helm.db. Nothing here
 /// checks that the host stayed on one connection across the two reads: the
-/// default is a bare id per registry row (see the module docs), so pairing it
+/// default is a helm-wide bare id (see the module docs), so pairing it
 /// with whatever catalog the row reaches now is the intended reading.
 pub(crate) async fn list_profiles(
     State(state): State<Arc<AppState>>,
@@ -175,7 +179,7 @@ pub(crate) async fn list_profiles(
     // default whose profile has just been deleted (ask which to use
     // instead), rather than a default written moments ago for a profile the
     // catalog read predates.
-    let default_profile = match state.store.remembered_profile(host).await {
+    let default_profile = match state.store.remembered_profile().await {
         Ok(default_profile) => default_profile,
         Err(e) => return http_error(e),
     };
@@ -363,6 +367,153 @@ pub(crate) async fn delete_profile(
             axum::Json(serde_json::json!({})).into_response()
         }
         Err(e) => http_error(e),
+    }
+}
+
+/// `GET /api/profiles` — read the helm-owned catalog and its raw remembered id.
+///
+/// The shared response deliberately exposes a dangling default: deletion
+/// changes future choices, not the historical suggestion clients need to
+/// recognize and ask the user to replace.
+pub(crate) async fn list_catalog_profiles(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let profiles = match state.store.profiles().await {
+        Ok(profiles) => profiles,
+        Err(error) => return http_error(error),
+    };
+    let default_profile = match state.store.remembered_profile().await {
+        Ok(default_profile) => default_profile,
+        Err(error) => return http_error(error),
+    };
+    axum::Json(ProfilesView {
+        profiles,
+        default_profile,
+    })
+    .into_response()
+}
+
+/// `POST /api/profiles` — create a profile in the helm-wide catalog.
+///
+/// SQLite serializes catalog writes and enforces the bound in the same
+/// transaction as insertion, so an application mutex would only impose an
+/// unneeded request-arrival order. The detached task couples a successful
+/// durable mutation to its revision bump even after axum drops this request.
+pub(crate) async fn create_catalog_profile(
+    State(state): State<Arc<AppState>>,
+    axum::Json(spec): axum::Json<ProfileSpec>,
+) -> impl IntoResponse {
+    if let Err(message) = farhelm_proto::validate_profile_fields(
+        &spec.name,
+        &spec.invocation,
+        spec.agent_kind,
+        spec.resume_template.as_deref(),
+    ) {
+        return catalog_validation_error(message);
+    }
+    let task_state = Arc::clone(&state);
+    let mutation = tokio::spawn(async move {
+        let outcome = task_state
+            .store
+            .create_profile(
+                spec.name,
+                spec.invocation,
+                spec.agent_kind,
+                spec.resume_template,
+            )
+            .await?;
+        if matches!(outcome, crate::store::ProfileCreation::Created(_)) {
+            task_state.manager.events().bump();
+        }
+        Ok::<_, anyhow::Error>(outcome)
+    });
+    match mutation.await {
+        Err(error) => http_error(anyhow::Error::new(error).context("catalog create task panicked")),
+        Ok(Err(error)) => http_error(error),
+        Ok(Ok(crate::store::ProfileCreation::Created(profile))) => {
+            (axum::http::StatusCode::CREATED, axum::Json(profile)).into_response()
+        }
+        Ok(Ok(crate::store::ProfileCreation::CatalogFull)) => {
+            http_error(anyhow::Error::new(crate::SupervisorError {
+                kind: farhelm_proto::ErrorKind::InvalidRequest,
+                message: format!(
+                    "this helm already holds the maximum of {} profiles; delete one before creating another",
+                    farhelm_proto::MAX_PROFILES
+                ),
+            }))
+        }
+    }
+}
+
+/// `POST /api/profiles/{id}` — replace a helm-owned profile wholesale.
+///
+/// The URL is the resource authority; the id-free body cannot accidentally
+/// redirect an update. Concurrent accepted updates are last-write-wins in
+/// SQLite commit order. As with create, a detached task makes the revision
+/// bump cancellation-safe and refusals leave that revision unchanged.
+pub(crate) async fn update_catalog_profile(
+    State(state): State<Arc<AppState>>,
+    AxPath(profile_id): AxPath<String>,
+    axum::Json(spec): axum::Json<ProfileSpec>,
+) -> impl IntoResponse {
+    if let Err(message) = farhelm_proto::validate_profile_fields(
+        &spec.name,
+        &spec.invocation,
+        spec.agent_kind,
+        spec.resume_template.as_deref(),
+    ) {
+        return catalog_validation_error(message);
+    }
+    let profile = Profile {
+        id: profile_id,
+        name: spec.name,
+        invocation: spec.invocation,
+        agent_kind: spec.agent_kind,
+        resume_template: spec.resume_template,
+    };
+    let task_state = Arc::clone(&state);
+    let mutation = tokio::spawn(async move {
+        let outcome = task_state.store.update_profile(profile).await?;
+        if outcome.is_some() {
+            task_state.manager.events().bump();
+        }
+        Ok::<_, anyhow::Error>(outcome)
+    });
+    match mutation.await {
+        Err(error) => http_error(anyhow::Error::new(error).context("catalog update task panicked")),
+        Ok(Err(error)) => http_error(error),
+        Ok(Ok(Some(profile))) => axum::Json(profile).into_response(),
+        Ok(Ok(None)) => http_error(anyhow::Error::new(crate::SupervisorError {
+            kind: farhelm_proto::ErrorKind::NotFound,
+            message: "profile not found".to_string(),
+        })),
+    }
+}
+
+/// `DELETE /api/profiles/{id}` — remove a helm-owned profile.
+///
+/// Deletion intentionally leaves a dangling remembered id, which tells a
+/// later picker to ask rather than silently substitute another profile. Its
+/// detached mutation task follows the same commit-and-invalidate contract as
+/// create and update.
+pub(crate) async fn delete_catalog_profile(
+    State(state): State<Arc<AppState>>,
+    AxPath(profile_id): AxPath<String>,
+) -> impl IntoResponse {
+    let task_state = Arc::clone(&state);
+    let mutation = tokio::spawn(async move {
+        let deleted = task_state.store.delete_profile(&profile_id).await?;
+        if deleted {
+            task_state.manager.events().bump();
+        }
+        Ok::<_, anyhow::Error>(deleted)
+    });
+    match mutation.await {
+        Err(error) => http_error(anyhow::Error::new(error).context("catalog delete task panicked")),
+        Ok(Err(error)) => http_error(error),
+        Ok(Ok(true)) => axum::Json(serde_json::json!({})).into_response(),
+        Ok(Ok(false)) => http_error(anyhow::Error::new(crate::SupervisorError {
+            kind: farhelm_proto::ErrorKind::NotFound,
+            message: "profile not found".to_string(),
+        })),
     }
 }
 
@@ -667,6 +818,149 @@ mod tests {
         let value = serde_json::from_slice(&bytes)
             .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&bytes).into()));
         (status, value)
+    }
+
+    /// The helm-owned routes expose the seeded catalog, validate writes, and
+    /// keep the catalog bound observable at the HTTP boundary. This test
+    /// matters because store-only coverage cannot catch a wrong route, status
+    /// code, request shape, or fleet-revision invalidation.
+    #[tokio::test]
+    async fn helm_profile_catalog_routes_cover_crud_errors_and_bound() {
+        let harness = rest_harness::idle_helm().await;
+        let before = harness.manager.events().revision();
+
+        let (status, value) = request(&harness, "GET", "/api/profiles", None).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(value["profiles"].as_array().unwrap().len(), 4);
+        assert_eq!(value["default_profile"], serde_json::Value::Null);
+
+        let (status, value) = request(
+            &harness,
+            "POST",
+            "/api/profiles",
+            Some(serde_json::json!({
+                "name": "wrapper",
+                "invocation": "wrapper --agent",
+                "agent_kind": "generic",
+                "resume_template": null,
+            })),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CREATED);
+        let id = value["id"].as_str().unwrap().to_string();
+        assert!(harness.manager.events().revision() > before);
+        let after_create = harness.manager.events().revision();
+
+        let (status, value) = request(
+            &harness,
+            "POST",
+            &format!("/api/profiles/{id}"),
+            Some(serde_json::json!({
+                "name": "renamed",
+                "invocation": "wrapper --renamed",
+                "agent_kind": "generic",
+                "resume_template": null,
+            })),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(value["id"], id);
+        assert_eq!(value["name"], "renamed");
+        assert!(harness.manager.events().revision() > after_create);
+        let after_update = harness.manager.events().revision();
+
+        let (status, value) = request(
+            &harness,
+            "POST",
+            &format!("/api/profiles/{id}"),
+            Some(serde_json::json!({
+                "name": " ",
+                "invocation": "wrapper",
+                "agent_kind": "generic",
+                "resume_template": null,
+            })),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(value.as_str().unwrap().contains("must not be empty"));
+        assert_eq!(harness.manager.events().revision(), after_update);
+
+        let (status, value) = request(
+            &harness,
+            "POST",
+            "/api/profiles/unknown",
+            Some(serde_json::json!({
+                "name": "missing",
+                "invocation": "wrapper",
+                "agent_kind": "generic",
+                "resume_template": null,
+            })),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+        assert!(value.as_str().unwrap().contains("profile not found"));
+        assert_eq!(harness.manager.events().revision(), after_update);
+
+        let (status, value) =
+            request(&harness, "DELETE", &format!("/api/profiles/{id}"), None).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(value, serde_json::json!({}));
+        assert!(harness.manager.events().revision() > after_update);
+        let after_delete = harness.manager.events().revision();
+
+        let (status, value) = request(&harness, "DELETE", "/api/profiles/unknown", None).await;
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+        assert!(value.as_str().unwrap().contains("profile not found"));
+        assert_eq!(harness.manager.events().revision(), after_delete);
+
+        let starting_len = harness.store.profiles().await.unwrap().len();
+        for _ in starting_len..farhelm_proto::MAX_PROFILES {
+            assert!(matches!(
+                harness
+                    .store
+                    .create_profile(
+                        "wrapper".to_string(),
+                        "wrapper".to_string(),
+                        AgentKind::Generic,
+                        None,
+                    )
+                    .await
+                    .unwrap(),
+                crate::store::ProfileCreation::Created(_)
+            ));
+        }
+        let (status, value) = request(
+            &harness,
+            "POST",
+            "/api/profiles",
+            Some(serde_json::json!({
+                "name": "too-many",
+                "invocation": "wrapper",
+                "agent_kind": "generic",
+                "resume_template": null,
+            })),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(value.as_str().unwrap().contains("maximum"));
+        assert_eq!(harness.manager.events().revision(), after_delete);
+        assert_eq!(
+            harness.store.profiles().await.unwrap().len(),
+            farhelm_proto::MAX_PROFILES
+        );
+
+        harness
+            .store
+            .remember_profile_default("deleted-profile")
+            .await
+            .unwrap();
+        let (status, value) = request(&harness, "GET", "/api/profiles", None).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(value["default_profile"], "deleted-profile");
+        assert_eq!(
+            value["profiles"].as_array().unwrap().len(),
+            farhelm_proto::MAX_PROFILES
+        );
     }
 
     /// [`request`]'s POST half against an OWNED router, for the tests that
@@ -975,9 +1269,8 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// A profile-backed create is what makes a profile the host's
-    /// remembered default — and the default is then served back beside the
-    /// catalog.
+    /// A profile-backed create makes a profile the helm-wide remembered
+    /// default, which both catalog surfaces then return raw.
     ///
     /// This is the whole helm-owned half of profiles (PLAN_M6_75.md item 5)
     /// in one exchange: the create names a profile and no invocation (the
@@ -995,7 +1288,7 @@ mod tests {
     /// only thing in the request that can move the revision, and by exactly
     /// one.
     #[tokio::test]
-    async fn a_profile_backed_create_becomes_the_hosts_remembered_default() {
+    async fn a_profile_backed_create_becomes_the_helm_wide_remembered_default() {
         // The session the create will return, ALREADY in the host's list, so
         // recording it changes nothing (see this test's docs).
         let existing = farhelm_proto::SessionInfo {

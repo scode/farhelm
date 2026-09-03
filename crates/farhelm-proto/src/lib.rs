@@ -968,8 +968,8 @@ pub enum ProfileExistence {
     Deleted,
 }
 
-/// How many profiles one supervisor's catalog may hold (PLAN_M6_75.md items
-/// 3 and 4).
+/// How many profiles one catalog store may hold (PLAN_M6_75.md items 3 and
+/// 4).
 ///
 /// The bound is what makes [`ControlMsg::ListProfiles`]'s unpaginated reply
 /// SAFE rather than merely convenient: together with
@@ -988,19 +988,19 @@ pub enum ProfileExistence {
 /// the session list is served whole ([`LIST_SESSIONS_CAP`]): a picker that
 /// must show every option to be usable gains nothing from pages.
 ///
-/// ENFORCEMENT is the supervisor's create/update handlers (PLAN_M6_75.md
-/// step 5): a create past this bound is refused with
+/// Each current catalog store enforces this bound at its create boundary: a
+/// create past it is refused with
 /// [`ErrorKind::InvalidRequest`] naming the limit, the same shape the
 /// supervisor's other caller-supplied bounds use. This bump only fixes the
 /// number both sides reason about — like [`DETACH_REASON_STALLED`] before
 /// its emitters existed.
-pub const MAX_PROFILES_PER_HOST: usize = 128;
+pub const MAX_PROFILES: usize = 128;
 
 /// Combined byte cap on one profile's caller-supplied text — [`Profile`]'s
 /// `name` plus `invocation` plus every element of `resume_template`
 /// (PLAN_M6_75.md items 3 and 4).
 ///
-/// The per-record half of the bound [`MAX_PROFILES_PER_HOST`] completes;
+/// The per-record half of the bound [`MAX_PROFILES`] completes;
 /// neither alone is enough, since a catalog is oversized either by holding
 /// too many profiles or by holding a few enormous ones.
 ///
@@ -1010,13 +1010,147 @@ pub const MAX_PROFILES_PER_HOST: usize = 128;
 /// while a profile's are multiplied by the catalog bound before they ever
 /// reach a reply. 8 KiB is still three orders of magnitude beyond a real
 /// profile (`claude --resume {conversation}` is 30 bytes), and the product
-/// with `MAX_PROFILES_PER_HOST` leaves `ProfileList` an order of magnitude
+/// with `MAX_PROFILES` leaves `ProfileList` an order of magnitude
 /// of headroom under [`MAX_FRAME_LEN`] — pinned, by encoding an actual
 /// worst-case catalog rather than by multiplying, in
 /// `profile_bounds_keep_a_full_catalog_sendable`.
 pub const PROFILE_FIELD_CAP: usize = 8 * 1024;
 
-/// One agent profile as the supervisor holds it (PLAN_M6_75.md items 3 and
+/// Maximum number of argv elements in a resume template.
+pub const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
+
+/// Validate the user-controlled fields shared by every profile store.
+///
+/// This stays in the wire crate so helm and supervisor cannot accept
+/// different definitions. It deliberately performs only pure string and
+/// argv checks; integration execution and filesystem behavior remain outside
+/// the shared vocabulary.
+pub fn validate_profile_fields(
+    name: &str,
+    invocation: &str,
+    agent_kind: AgentKind,
+    resume_template: Option<&[String]>,
+) -> Result<(), String> {
+    let template_bytes: usize = resume_template
+        .iter()
+        .flat_map(|template| template.iter())
+        .map(String::len)
+        .sum();
+    let field_len = name.len() + invocation.len() + template_bytes;
+    if field_len > PROFILE_FIELD_CAP {
+        return Err(format!(
+            "profile name, invocation, and resume template together are {field_len} bytes, \
+             exceeding the {PROFILE_FIELD_CAP}-byte limit"
+        ));
+    }
+    if resume_template.is_some_and(|template| template.len() > RESUME_TEMPLATE_ELEMENT_CAP) {
+        return Err(format!(
+            "resume template has {} elements, exceeding the \
+             {RESUME_TEMPLATE_ELEMENT_CAP}-element limit",
+            resume_template.map_or(0, <[String]>::len)
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err("profile name must not contain control characters".to_string());
+    }
+    if name.trim().is_empty() {
+        return Err(
+            "profile name must not be empty or only whitespace; a profile is a NAMED definition \
+             and a blank label cannot be picked out of a list"
+                .to_string(),
+        );
+    }
+    if let Some(template) = resume_template {
+        validate_resume_template(template)?;
+    }
+    if invocation.contains('\0') {
+        return Err(
+            "profile invocation contains a NUL byte, which cannot survive being passed to a \
+             program"
+                .to_string(),
+        );
+    }
+    let argv = shell_words::split(invocation)
+        .map_err(|e| format!("profile invocation does not parse as a command line: {e}"))?;
+    ensure_executable_argv("profile invocation", &argv)?;
+    ensure_no_cwd_program("profile invocation", &argv)?;
+    if agent_kind != AgentKind::Generic
+        && resume_template
+            .is_some_and(|template| !template.iter().any(|element| element == "{conversation}"))
+    {
+        let kind = match agent_kind {
+            AgentKind::Claude => "claude",
+            AgentKind::Codex => "codex",
+            AgentKind::Generic => unreachable!(),
+        };
+        return Err(format!(
+            "an explicit resume template for the integrated agent kind {kind} must contain a \
+             {{conversation}} argv element; a placeholder-free template could only ever discard \
+             the conversation identity this session captures"
+        ));
+    }
+    Ok(())
+}
+
+/// Enforce the argv shape required before a profile can name a command.
+/// Keeping this check pure lets both stores reject empty or NUL-bearing
+/// arguments before any process-launching integration code runs.
+fn ensure_executable_argv(subject: &str, argv: &[String]) -> Result<(), String> {
+    let Some(program) = argv.first() else {
+        return Err(format!("{subject} is empty"));
+    };
+    if program.is_empty() {
+        return Err(format!(
+            "{subject}'s first element is empty, so it names no program to run; only the \
+             ARGUMENTS after it may be empty"
+        ));
+    }
+    if argv.iter().any(|element| element.contains('\0')) {
+        return Err(format!(
+            "{subject} contains a NUL byte, which cannot survive being passed to a program"
+        ));
+    }
+    Ok(())
+}
+
+/// Reject `{cwd}` in argv0 because substitution there would execute a
+/// directory rather than use it as a working-directory argument.
+fn ensure_no_cwd_program(subject: &str, argv: &[String]) -> Result<(), String> {
+    debug_assert!(!argv.is_empty(), "callers validate argv before this check");
+    if argv[0] == "{cwd}" {
+        return Err(format!(
+            "{subject}'s first element is {{cwd}}, so substituting the working directory would \
+             make it the PROGRAM this session tries to run; the placeholder belongs in an \
+             argument slot"
+        ));
+    }
+    Ok(())
+}
+
+/// Validate a stored resume argv without resolving or executing its program.
+/// The shared layer owns only structural rules; the supervisor later applies
+/// its integration-specific snapshot behavior.
+fn validate_resume_template(template: &[String]) -> Result<(), String> {
+    if template.is_empty() {
+        return Err(
+            "resume template is present but empty; omit it entirely to mean \"this kind's \
+             default\" or \"no resume invocation\""
+                .to_string(),
+        );
+    }
+    ensure_executable_argv("resume template", template)?;
+    if template[0] == "{conversation}" {
+        return Err(
+            "resume template's first element is {conversation}, so substituting the captured \
+             conversation identity would make it the PROGRAM this session tries to run; the \
+             placeholder belongs in an argument slot"
+                .to_string(),
+        );
+    }
+    ensure_no_cwd_program("resume template", template)
+}
+
+/// One agent profile as a catalog store holds it (PLAN_M6_75.md items 3 and
 /// 4): a named, editable definition of how to launch an agent, and how to
 /// resume one.
 ///
@@ -1024,9 +1158,8 @@ pub const PROFILE_FIELD_CAP: usize = 8 * 1024;
 /// way sessions get created — a user picks a profile rather than typing a
 /// command line — while the raw invocation path stays for the API, the e2e
 /// harness, and anyone who wants to run something a profile does not
-/// describe. Profiles are per-supervisor: they are not synced between hosts
-/// (post-v1), so a profile id only means anything to the host that minted
-/// it.
+/// describe. Catalog stores mint opaque stable ids; a host-scoped create is
+/// minted by its supervisor, while a helm-owned create is minted by helm.db.
 ///
 /// Deliberately NOT carrying an initial prompt: automatic prompt delivery is
 /// post-v1 and PLAN_M6_75.md keeps the field out of the schema on purpose,
@@ -2378,10 +2511,10 @@ pub enum ControlMsg {
     /// sorts locally, where it knows the locale.
     ///
     /// Unpaginated, unlike `ListSessions`, and that is arithmetic rather
-    /// than optimism: [`MAX_PROFILES_PER_HOST`] and [`PROFILE_FIELD_CAP`]
+    /// than optimism: [`MAX_PROFILES`] and [`PROFILE_FIELD_CAP`]
     /// together cap what this reply can encode to, far below
     /// [`MAX_FRAME_LEN`], so one page is ALWAYS enough. See
-    /// `MAX_PROFILES_PER_HOST`'s own docs for why pagination would be the
+    /// `MAX_PROFILES`'s own docs for why pagination would be the
     /// wrong trade for a hand-curated catalog, and for what an unbounded
     /// one would cost: a catalog too large to list is also too large to
     /// trim, since the listing is how a client finds what to delete.
@@ -2404,7 +2537,7 @@ pub enum ControlMsg {
     /// with [`ErrorKind::InvalidRequest`] naming the limit: this record's
     /// own text against [`PROFILE_FIELD_CAP`], and — for a create, which is
     /// the only verb that grows the catalog — the catalog's size against
-    /// [`MAX_PROFILES_PER_HOST`]. They are what keep `ProfileList`
+    /// [`MAX_PROFILES`]. They are what keep `ProfileList`
     /// sendable; see that variant's docs for why an unbounded catalog is a
     /// trap rather than merely untidy.
     CreateProfile {
@@ -6256,7 +6389,7 @@ mod tests {
         };
         let full = ControlMsg::ProfileList {
             req_id: 1,
-            profiles: (0..MAX_PROFILES_PER_HOST).map(fattest).collect(),
+            profiles: (0..MAX_PROFILES).map(fattest).collect(),
         };
         let frame = Frame::control(&full);
         assert!(
@@ -7849,6 +7982,29 @@ mod tests {
                     intent_key: None,
                 },
             }
+        );
+    }
+
+    /// The shared validator pins the safety rules both stores must enforce:
+    /// invalid labels and invocations are refused before either can persist a
+    /// profile, while a valid integrated definition remains accepted.
+    #[test]
+    fn profile_field_validation_is_pure_and_shared() {
+        assert!(validate_profile_fields("Claude", "claude", AgentKind::Claude, None).is_ok());
+        assert!(validate_profile_fields(" ", "claude", AgentKind::Claude, None).is_err());
+        assert!(validate_profile_fields("Claude\n", "claude", AgentKind::Claude, None).is_err());
+        assert!(validate_profile_fields("Claude", "", AgentKind::Claude, None).is_err());
+        assert!(
+            validate_profile_fields(
+                "Claude",
+                "claude",
+                AgentKind::Claude,
+                Some(&["claude".to_string()]),
+            )
+            .is_err()
+        );
+        assert!(
+            validate_profile_fields("Wrapper", "wrapper {cwd}", AgentKind::Generic, None,).is_ok()
         );
     }
 }
