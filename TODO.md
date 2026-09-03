@@ -73,6 +73,14 @@ everything not yet sorted, which carries no implication either way. Within a buc
   wait at terminal_backpressure.rs:289 — the same wait the `a_paused_replay_detaches…` sibling above timed out in on
   2026-09-02. Two members of this file failing at the same line under load says the wait's budget, not either test's
   logic, is the first thing to look at.
+- Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), again. On
+  2026-09-03, on a 4-vCPU sandbox with a `cargo build` looping beside the tests, 2 of 10 single runs and 1 of 3
+  full-binary runs at `--test-threads=4` against 0.3.0 timed out after 40 s waiting for `BINARY-MARKER`: the request
+  byte sent through the attachment never produced the fixture's reply within the budget. The fixture is already in raw
+  mode before it prints READY (#339), so the first suspect is the input path under load (`send_input`, the supervisor's
+  `send-keys` exchange, the fixture's read) rather than the fixture, and the second is the budget. Start at rung 1 of
+  `.agents/narrow-tests.md` on a loaded 4-vCPU box and keep the full transcript the harness panic prints; the sandbox
+  run that found this kept only a summary.
 - Put the tmux e2e suite back into the release gate, and un-ignore the four load-flaky tests, once the deflake entries
   above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs every test target
   EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or two of the
@@ -105,20 +113,6 @@ seams, the tmux attach boundary in the Rust e2e harness and fixed time budgets t
 popup's focus machinery a third on the browser side. The per-test entries under "near term" hold the fingerprints; the
 work below is what retires them as a class. Order is a suggestion, from cheapest and most certain to most speculative.
 
-- Make the e2e harness indifferent to the attach race. Attaching to a session returns a snapshot of the pane (tmux's
-  rendering of the screen: rows padded with spaces to the pane width, cursor-addressing sequences, invalid bytes
-  canonicalized) followed by the live byte stream, stitched wherever the attach landed in time. Tests were written
-  against the live shape because on a developer machine the attach wins; on a loaded box the fixture wins and the same
-  output arrives in the snapshot shape (`ESC[2;1H61` glued tokens, a 484-column argv row, a 0xff that is no longer
-  0xff). Four tests were fixed one at a time for this in the 0.3.0 stack (hexecho's tokenizer, both argv-width guards,
-  the invalid-byte fixture). Do it once instead: (1) a shared normalizer in `crates/farhelm/tests/e2e/harness.rs` that
-  `wait_for` can apply — strip CSI/two-byte escapes and trailing row padding — opt-in per wait, because some tests
-  deliberately look for escape sequences (bracketed paste, mouse modes); fold the tokenizer's `strip_escape_sequences`
-  and the argv guards' `trim_end` onto it; (2) an attach-then-trigger helper: fixtures that a test reads startup output
-  from print it ON REQUEST (a byte on raw-mode stdin, the way the `binary` script now does), and the helper attaches,
-  sends the trigger, then waits, so the interesting output is live by construction. Audit: grep `wait_for` calls against
-  `crates/farhelm/src/fake_agent.rs` scripts that print at startup. Prove it by repeating the affected tests on a loaded
-  4-vCPU box, not locally. Roughly half a day; no product code. Plan: `plans/deflake-attach-boundary.md` (effort: low).
 - One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
   relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
   the profiles popup's 250 + 120 ms settlement, the stub feed's socket wait, and every 5 s Playwright `expect`.

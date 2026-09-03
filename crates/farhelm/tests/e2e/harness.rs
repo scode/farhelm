@@ -61,6 +61,63 @@ impl TermSource for TermStream {
     }
 }
 
+/// Pane width used wherever a test reads the fake agent's argv marker.
+///
+/// Far wider than the suite's usual 80 because the marker carries two
+/// absolute tempdir paths plus injected settings JSON. A pane narrower than
+/// the line wraps it, and a replayed wrap comes back as a real newline;
+/// callers therefore fail loudly through [`argv_marker`] if this bound stops
+/// being sufficient.
+pub(crate) const WIDE_COLS: u16 = 500;
+
+/// Pane height; nothing here depends on it.
+pub(crate) const ROWS: u16 = 24;
+
+/// The marker the record-writing fixtures echo their own argv under.
+pub(crate) const ARGV_MARKER: &str = "FAKE-AGENT ARGV:";
+
+/// Extract the argv the fixture echoed on its most recent launch.
+///
+/// The LAST occurrence matters because a reattach after a relaunch replays
+/// earlier generations too, and the first marker would answer for the wrong
+/// generation. The width assertion is not paranoia: a wrapped line comes
+/// back from replay as a genuine newline, so without it this would silently
+/// return a prefix of the argv and every injection assertion would fail with
+/// the flag simply missing. Failing on the width names the fix: raise
+/// [`WIDE_COLS`].
+///
+/// The marker's own width counts toward the bound. The fixture prints it at
+/// column zero and the argv follows on the same row, so measuring only the
+/// argv would accept a line that had already wrapped by exactly the marker's
+/// length.
+///
+/// The normalizer trims trailing blanks BEFORE the bound is applied. When
+/// the fixture wins the race against the test's attach, the marker line
+/// arrives through the attach snapshot rather than live, and a snapshot row
+/// is padded with spaces out to the full pane width — a 484-character "line"
+/// for a 245-character argv in a 500-column pane. That padding is not
+/// wrapping: a row that really wrapped is full of argv characters to its last
+/// column, so the trimmed length still trips the bound for the case it exists
+/// to catch. The untrimmed check failed the 0.3.0-rc.1 release gate on exactly
+/// this snapshot shape.
+pub(crate) fn argv_marker(transcript: &[u8]) -> String {
+    let text = normalize_pane_text(transcript);
+    let start = text
+        .rfind(ARGV_MARKER)
+        .unwrap_or_else(|| panic!("no {ARGV_MARKER} in transcript:\n{text}"))
+        + ARGV_MARKER.len();
+    let line = text[start..]
+        .lines()
+        .next()
+        .expect("a marker is followed by at least a line ending")
+        .to_string();
+    assert!(
+        ARGV_MARKER.chars().count() + line.chars().count() < WIDE_COLS as usize,
+        "the argv line filled the pane and may have wrapped; raise WIDE_COLS: {line}"
+    );
+    line
+}
+
 /// The built farhelm binary: fake agent + launch shim in one artifact,
 /// exactly as production ships it.
 pub(crate) fn farhelm_bin() -> &'static str {
@@ -1157,7 +1214,7 @@ pub(crate) async fn harness_with_seams(
 /// the predicate gets one final chance because an agent's last output and
 /// pane-death notice can race. The panic text preserves the waited-for label,
 /// end reason, and lossy transcript for debugging.
-async fn wait_until<S: TermSource>(
+pub(crate) async fn wait_until<S: TermSource>(
     rx: &mut S,
     seen: &mut Vec<u8>,
     secs: u64,
@@ -1282,8 +1339,6 @@ const REPLAY_COMPLETE_RULE: &str = "this must be the first wait on a fresh attac
 /// `a_forced_tmux_pause_*` tests find that replay through its `ESC c` reset
 /// instead. The supervisor emits this marker even when the pane has no
 /// history, so a fresh attachment always has a boundary to receive.
-// Transitional until the follow-up PR converts call sites; that PR removes this allowance.
-#[allow(dead_code)]
 pub(crate) async fn wait_for_replay_complete(
     rx: &mut TermStream,
     seen: &mut Vec<u8>,
@@ -1395,7 +1450,8 @@ pub(crate) fn normalize_pane_text(bytes: &[u8]) -> String {
 /// matching as the default preserves those byte-level assertions while this
 /// helper makes snapshot-shaped text indifferent to cursor addresses and
 /// row padding.
-// Transitional until the follow-up PR converts call sites; that PR removes this allowance.
+// Opt-in primitive with no current caller, kept for the next test that reads
+// a startup-printed row through the normalizer.
 #[allow(dead_code)]
 pub(crate) async fn wait_for_normalized(
     rx: &mut TermStream,
@@ -1408,8 +1464,6 @@ pub(crate) async fn wait_for_normalized(
 
 /// Generic implementation for [`wait_for_normalized`], kept separate so
 /// normalization-aware matching can share the same test seam as raw waits.
-// Transitional until the follow-up PR converts call sites; that PR removes this allowance.
-#[allow(dead_code)]
 async fn wait_for_normalized_inner<S: TermSource>(
     rx: &mut S,
     seen: &mut Vec<u8>,

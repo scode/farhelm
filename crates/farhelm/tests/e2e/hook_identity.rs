@@ -46,24 +46,6 @@ use crate::harness::*;
 // Fixtures
 // ---------------------------------------------------------------------
 
-/// Pane width every session here is created and attached at.
-///
-/// Far wider than the suite's usual 80 because these tests read the
-/// fixture's `FAKE-AGENT ARGV:` marker, and that line carries two absolute
-/// tempdir paths plus the injected `--settings` JSON — several hundred
-/// characters. A pane narrower than the line would wrap it, and a replayed
-/// wrap comes back as a real newline (`capture-pane` is run without `-J`),
-/// so the assertions would read a truncated argv and fail for a reason
-/// that has nothing to do with injection. [`argv_marker`] asserts the line
-/// fit, so outgrowing this constant fails loudly instead of subtly.
-const WIDE_COLS: u16 = 500;
-
-/// Pane height; nothing here depends on it.
-const ROWS: u16 = 24;
-
-/// The marker the record-writing fixtures echo their own argv under.
-const ARGV_MARKER: &str = "FAKE-AGENT ARGV:";
-
 /// A capture harness whose supervisor is genuinely LISTENING on its unix
 /// socket, so a hook child process can dial it.
 ///
@@ -363,54 +345,6 @@ fn sole_hook_log_outcome(state: &std::path::Path, session_id: &str) -> String {
         .expect("every log line is `<unix-seconds> <outcome> ...`")
         .1
         .to_string()
-}
-
-/// The argv the fixture echoed on its most recent launch.
-///
-/// The LAST occurrence, because a reattach after a relaunch replays the
-/// previous run's markers too and the first one would answer for the wrong
-/// generation.
-///
-/// The width assertion is not paranoia: a wrapped line comes back from
-/// replay as a genuine newline, so this would silently return a prefix of
-/// the argv and every "the injected flag is present" assertion would fail
-/// with the flag simply missing. Failing on the width instead names the fix
-/// (raise [`WIDE_COLS`]).
-///
-/// The MARKER's own width counts toward that bound. The fixture prints it
-/// at column zero and the argv follows on the same row, so a bound that
-/// measured only the argv would pass a line that had already wrapped by
-/// exactly the marker's length — returning a suffix-truncated argv while
-/// claiming it fit.
-///
-/// Trailing blanks are trimmed BEFORE the bound is applied. When the
-/// fixture wins the race against the test's attach, the marker line arrives
-/// through the attach snapshot rather than live, and a snapshot row is
-/// padded with spaces out to the full pane width — a 484-character "line"
-/// for a 245-character argv in a 500-column pane. That padding is not
-/// wrapping: a row that
-/// really wrapped is full of argv characters to its last column, so the
-/// trimmed length still trips the bound for the case it exists to catch.
-/// The untrimmed check failed the 0.3.0-rc.1 release gate on exactly this
-/// snapshot shape.
-fn argv_marker(transcript: &[u8]) -> String {
-    let text = String::from_utf8_lossy(transcript);
-    let start = text
-        .rfind(ARGV_MARKER)
-        .unwrap_or_else(|| panic!("no {ARGV_MARKER} in transcript:\n{text}"))
-        + ARGV_MARKER.len();
-    let line = text[start..]
-        .lines()
-        .next()
-        .expect("a marker is followed by at least a line ending")
-        .trim_end_matches('\r')
-        .trim_end()
-        .to_string();
-    assert!(
-        ARGV_MARKER.chars().count() + line.chars().count() < WIDE_COLS as usize,
-        "the argv line filled the pane and may have wrapped; raise WIDE_COLS: {line}"
-    );
-    line
 }
 
 /// The value of every `--settings` flag in an argv marker line, in order.
