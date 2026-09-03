@@ -145,23 +145,43 @@ impl FloodProgress {
     }
 }
 
-/// Create a session running the `flood` script — the fast producer every
-/// backpressure test needs. Returns the workdir for the caller to hold,
-/// exactly like [`basic_session`].
-pub(crate) async fn flood_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
+/// Create the finite flood without starting it.
+///
+/// The three pause tests below need the attachment, its initial replay
+/// boundary, and the fixture's raw input mode established before any burst
+/// byte exists. Other fixtures deliberately start during session creation;
+/// this helper exists only for tests that need to own the start boundary.
+async fn gated_flood_session(h: &Harness, cols: u16) -> (SessionInfo, farhelm_teststate::TestDir) {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script flood"),
+            &agent_cmd("internal fake-agent --script flood-gated"),
             None,
-            80,
+            cols,
             24,
         )
         .await
         .expect("create");
     (session, work)
+}
+
+/// Cross a fresh attachment's replay boundary, then start its gated flood.
+///
+/// `ReplayComplete` must be the first wait because the harness's ordinary
+/// text waits consume it. `FAKE-AGENT READY` may have landed on either side
+/// of that boundary: finding it afterwards proves raw mode and the input gate
+/// are ready without making fixture startup win the attach race. Only then is
+/// the burst released and required to deliver one of its first 100 records.
+async fn start_gated_flood(h: &Harness, channel: u32, rx: &mut TermStream, seen: &mut Vec<u8>) {
+    wait_for_replay_complete(rx, seen, 30).await;
+    wait_for(rx, seen, "FAKE-AGENT READY", 30).await;
+    // Any single byte releases the gate; the raw-mode fixture echoes nothing,
+    // so the byte cannot be mistaken for the FLOOD markers these tests use
+    // as output boundaries.
+    h.client.send_input(channel, b"g".to_vec()).await;
+    wait_for_bytes(rx, seen, b"FLOOD-000000", 30).await;
 }
 
 /// Drain an attachment into `seen` for `window`, returning any detach
@@ -206,7 +226,8 @@ pub(crate) async fn drain_for(
 /// not the bounded stalled state. The quiet window rearms on every data
 /// frame, while the overall bound makes a backlog that never settles fail
 /// instead of waiting forever. Silence here does not acknowledge tmux's
-/// internal pause state; the producer is idle during this drain.
+/// internal pause state. Callers with a live producer must separately prove
+/// that output is still outstanding once the quiet boundary is reached.
 async fn drain_until_quiet(
     rx: &mut TermStream,
     seen: &mut Vec<u8>,
@@ -245,6 +266,62 @@ async fn drain_until_quiet(
                 seen.len()
             ),
         }
+    }
+}
+
+/// Prove that a paused gated flood became quiet before it completed.
+///
+/// Silence alone is vacuous for a finite producer. The final marker and last
+/// record are independent completion witnesses, so requiring both to remain
+/// absent after in-flight frames settle establishes that the attachment is
+/// quiet while terminal output is still owed to it.
+fn assert_flood_outstanding(seen: &[u8], what: &str) {
+    let finished = seen
+        .windows(b"FLOOD-DONE".len())
+        .any(|window| window == b"FLOOD-DONE");
+    let latest = flood_records(seen).last().copied();
+    assert!(
+        !finished && latest != Some(FLOOD_RECORDS - 1),
+        "{what}: the finite flood completed before paused delivery became quiet; \
+         latest={latest:?}, {} bytes seen",
+        seen.len()
+    );
+}
+
+/// Require a settled paused attachment to deliver no further terminal event.
+///
+/// [`drain_until_quiet`] finds the boundary after residual frames. This holds
+/// that boundary to a caller-selected instant, turning one quiet sample into
+/// an interval and failing on detach or an unexpected second replay marker as
+/// well as on terminal bytes.
+async fn assert_stays_quiet_until(
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    deadline: tokio::time::Instant,
+    what: &str,
+) {
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+    if remaining.is_zero() {
+        return;
+    }
+    match tokio::time::timeout(remaining, rx.recv()).await {
+        Ok(Some(TermEvent::Data(bytes))) => {
+            seen.extend_from_slice(&bytes);
+            panic!(
+                "{what}: terminal delivery continued after the paused stream had settled; \
+                 {} bytes seen, raw tail: {:?}",
+                seen.len(),
+                &seen[seen.len().saturating_sub(256)..]
+            )
+        }
+        Ok(Some(TermEvent::ReplayComplete)) => {
+            panic!("{what}: an unexpected ReplayComplete arrived after initial replay")
+        }
+        Ok(Some(TermEvent::Detached(reason))) => {
+            panic!("{what}: stream detached while paused: {reason}")
+        }
+        Ok(None) => panic!("{what}: stream closed while paused"),
+        Err(_) => {}
     }
 }
 
@@ -287,13 +364,15 @@ async fn wait_for_bytes(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &[u8], 
             }
             Ok(None) => panic!("stream closed without {needle:?} in {} bytes", seen.len()),
             Err(_) => panic!(
-                "timed out waiting for {needle:?}; {} bytes seen, last records: {:?}",
+                "timed out waiting for {needle:?}; {} bytes seen, last records: {:?}, raw tail: \
+                 {:?}",
                 seen.len(),
                 flood_records(&seen[seen.len().saturating_sub(4096)..])
                     .into_iter()
                     .rev()
                     .take(3)
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                &seen[seen.len().saturating_sub(256)..]
             ),
         }
     }
@@ -1057,20 +1136,51 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
     );
 }
 
-/// A pause held across a large replay, with `PauseOutput` re-sent
-/// repeatedly, must still detach — through the REAL attach/forwarder/
-/// connection stack, not a synthetic stand-in for it.
+/// A pause held on a live flood, with `PauseOutput` re-sent repeatedly,
+/// must still detach — through the REAL attach/forwarder/connection stack,
+/// not a synthetic stand-in for it.
 ///
 /// Two failures in one test, both of which every other pause test
 /// survives. First, the stall deadline must be ABSOLUTE: an
 /// implementation that restarts its timer per chunk, per phase, or on
 /// every observed pause message would keep this attachment alive forever
 /// while a client sat paused, which is exactly the unbounded pin the
-/// timeout exists to prevent. Second, the pause must gate the REPLAY
-/// itself and not merely the live pump — pausing mid-replay is the case
-/// where the forwarder has megabytes already in hand, so a version that
-/// consulted the pause only between live events would push all of it at a
-/// client that had said stop.
+/// timeout exists to prevent. Second, the pause has to gate output that is
+/// still being produced: the flood here is started through the attachment
+/// after it is live, so the stream the pause lands on is a producer in full
+/// flight, and the test requires it to be still outstanding (no final record,
+/// no `FLOOD-DONE`) when the detach arrives. An implementation that kept
+/// pushing after the pause would deliver the whole finite flood inside the
+/// stall interval and fail that check.
+///
+/// # What this test does NOT prove
+///
+/// That a pause gates a REPLAY in progress, as opposed to live output. An
+/// earlier revision tried: it seeded a retained history larger than the
+/// helm's per-terminal queue (about 11.6 MiB against an 8 MiB queue, at
+/// 1,024 columns) so the pause would land mid-replay. On loopback the
+/// supervisor pushes such a replay faster than one pause round trip, the
+/// helm's queue-overflow rule then detaches the terminal itself, and that
+/// detach carries the same `DETACH_REASON_STALLED` string as the
+/// supervisor's timer, so the test passed for the wrong reason (measured:
+/// the detach arrived 7 ms after the first pause, against a 3 s timer). A
+/// smaller replay fits in the queues before the pause can land. Proving
+/// replay gating end to end needs a supervisor-side seam that holds the
+/// forwarder mid-replay; without one, the replay half of the contract rests
+/// on the supervisor's own unit tests.
+///
+/// The one bound this test DOES put on time is a lower one: the detach must
+/// arrive no earlier than `stall_detach` after the first pause was sent, the
+/// earliest instant the supervisor's timer can fire. That is what tells the
+/// supervisor's detach apart from the helm client's overflow detach, which
+/// would come within milliseconds. It is a bound on when the detach is
+/// OBSERVED, not on when it was generated: an overflow could still pass it if
+/// this task were descheduled for the whole stall interval between the
+/// overflow and the read, which the continuous 300 ms drain loop makes
+/// implausible but does not exclude. Making the origin exact needs a
+/// test-only signal from one end (the supervisor reporting that its stall
+/// timer won for this attachment, or the helm client reporting that its
+/// terminal queue never overflowed), and that seam is not in this crate.
 ///
 /// The spam is what makes the first failure observable: `PauseOutput`
 /// repeated every 300ms is well inside the shortened timeout, so an
@@ -1107,8 +1217,7 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
 /// spammed client attached through the real stack genuinely gets detached
 /// with the right reason, rather than wedging forever.
 #[tokio::test]
-#[ignore = "load flake: its shared wait times out under a loaded runner (CI 2026-09-02, release gate 2026-09-03); TODO.md has the evidence"]
-async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam() {
+async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {
     let stall_detach = Duration::from_secs(3);
     let spam_period = Duration::from_millis(300);
 
@@ -1117,30 +1226,38 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
         ..SupervisorTimeouts::default()
     })
     .await;
-    // The flood fixture builds a full history quickly, so the reattach
-    // below has a large replay for the pause to land in the middle of.
-    let (session, _work) = flood_session(&h).await;
+    // At the ordinary 80 columns, the 12,000 retained rows are small enough
+    // to fit downstream before PauseOutput is processed. Gate `r` fills each
+    // 1,024-column row with nonblank content, keeping the product's real
+    // history-line limit while making its capture exceed the writer,
+    // transport, and helm queues combined.
+    let (session, _work) = gated_flood_session(&h, 80).await;
     let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
     let mut seen = Vec::new();
-    wait_for_bytes(&mut rx, &mut seen, b"FLOOD-000000", 30).await;
-    h.client.detach(chan).await;
+    // The flood is in full flight from here on, and is far larger than the
+    // stall interval lets through, so the pause below lands on a live
+    // producer rather than on an idle attachment.
+    start_gated_flood(&h, chan, &mut rx, &mut seen).await;
 
-    // Reattach and pause immediately, while the replay is still being
-    // written rather than after it has drained.
-    let (chan2, mut rx2) = h
-        .client
-        .attach(&session.id, 80, 24)
-        .await
-        .expect("reattach");
-    h.client.pause_output(chan2).await;
+    // Taken BEFORE the first pause is sent, so the supervisor's stall timer
+    // (which starts when it processes that pause) can only fire later than
+    // `stall_detach` measured from here. That lower bound is what tells the
+    // supervisor's stall detach apart from the helm client's own
+    // queue-overflow detach: both publish DETACH_REASON_STALLED, but an
+    // overflow needs output to keep arriving AFTER the pause, and the helm's
+    // 256-event terminal queue fills long before three seconds pass.
+    let first_pause = tokio::time::Instant::now();
+    h.client.pause_output(chan).await;
 
-    let mut replay = Vec::new();
     let mut reason = None;
     // Spam pause throughout, never resuming. Every repeat is inside the
-    // 3s maximum, so only an absolute deadline detaches at all.
+    // 3s maximum, so only an absolute deadline detaches at all. Draining
+    // meanwhile is deliberate: what arrives is only what was already in
+    // flight, and not reading it would trip the helm's own detach-not-block
+    // rule for an unrelated reason.
     for _ in 0..20 {
-        h.client.pause_output(chan2).await;
-        if let Some(seen_reason) = drain_for(&mut rx2, &mut replay, spam_period).await {
+        h.client.pause_output(chan).await;
+        if let Some(seen_reason) = drain_for(&mut rx, &mut seen, spam_period).await {
             reason = Some(seen_reason);
             break;
         }
@@ -1155,6 +1272,16 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
         farhelm_proto::DETACH_REASON_STALLED,
         "the detach must be the stall detach"
     );
+    let after_first_pause = first_pause.elapsed();
+    assert!(
+        after_first_pause >= stall_detach,
+        "the detach arrived {after_first_pause:?} after the first pause, before the supervisor's \
+         {stall_detach:?} stall timer could have fired: that is the helm client's queue-overflow \
+         detach, which means output kept flowing after the pause"
+    );
+    // The pause gated a live producer, not a finished one: the finite flood
+    // is still owed to this attachment when the supervisor cuts it off.
+    assert_flood_outstanding(&seen, "stall detach under pause spam");
 }
 
 /// A stall detaches exactly ONE attachment, leaving every other
@@ -1344,38 +1471,50 @@ async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() 
 ///
 /// Both branches are real coverage, and the read-ahead branch is the only
 /// end-to-end exercise of the forwarder's reset-then-replay path.
+///
+/// The flood starts only after this attachment crosses its initial replay
+/// boundary. Once one of the first 100 records arrives, the test pauses,
+/// drains residual frames to a quiet boundary, and proves the finite stream
+/// is still outstanding before holding the pause past tmux's window. That
+/// boundary keeps either branch from passing on a completed retained tail.
 #[tokio::test]
 async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
     let h = harness().await;
-    let (session, _work) = flood_session(&h).await;
+    let (session, _work) = gated_flood_session(&h, 80).await;
 
     let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
     let mut seen = Vec::new();
-    wait_for_bytes(&mut rx, &mut seen, b"FLOOD-000000", 30).await;
+    start_gated_flood(&h, chan, &mut rx, &mut seen).await;
 
     let paused_at = seen.len();
     let last_before_pause = flood_records(&seen)
         .last()
         .copied()
         .expect("test setup: records must have been delivered before the pause");
+    let pause_started = tokio::time::Instant::now();
     h.client.pause_output(chan).await;
 
-    // Hold the pause well past `pause-after` so tmux has to make its
-    // choice. Draining throughout is deliberate and not a contradiction:
-    // the pause stops the SUPERVISOR pulling from tmux, so what arrives
-    // here is only what was already in flight — and NOT reading it would
-    // instead trip the helm's own detach-not-block rule, ending the
-    // attachment for an unrelated reason.
-    let detached = drain_for(
+    // Empty frames already in flight before treating the pause as a
+    // boundary. The quiet interval proves delivery stopped; the completion
+    // witnesses prove that silence did not come from a finished producer.
+    drain_until_quiet(
         &mut rx,
         &mut seen,
-        Duration::from_secs(farhelm_supervisor::tmux::TMUX_PAUSE_AFTER_SECS + 5),
+        Duration::from_secs(1),
+        Duration::from_secs(30),
     )
     .await;
-    assert!(
-        detached.is_none(),
-        "a paused-but-live attachment must not be detached: {detached:?}"
-    );
+    assert_flood_outstanding(&seen, "deep-pause boundary");
+
+    // Hold the now-settled pause well past `pause-after` so tmux has to make
+    // its choice, and require the quiet boundary to hold throughout.
+    assert_stays_quiet_until(
+        &mut rx,
+        &mut seen,
+        pause_started + Duration::from_secs(farhelm_supervisor::tmux::TMUX_PAUSE_AFTER_SECS + 5),
+        "deep-pause boundary",
+    )
+    .await;
 
     h.client.resume_output(chan).await;
     let detached = drain_for(&mut rx, &mut seen, Duration::from_secs(20)).await;
@@ -1407,6 +1546,10 @@ async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
                  mean anything",
                 records.len()
             );
+            // From the last record delivered before the pause was REQUESTED,
+            // not from the quiet boundary: the residual frames that arrived
+            // while the pause took effect are part of the stream this branch
+            // claims was lossless, and a gap there would otherwise go unseen.
             let boundary = flood_records(&seen[..paused_at]).len().saturating_sub(1);
             assert_records_consecutive(
                 &records[boundary..],
@@ -1498,21 +1641,40 @@ async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
 /// above, and for a sharper one: asserting "no reset ever" across a
 /// multi-megabyte run would fail whenever unrelated load stalled the
 /// pipeline past `pause-after`, which is correct behavior, not a bug.
+///
+/// The gated producer starts only after this attachment is live. The pause
+/// then has to reach a quiet interval while the burst is still outstanding,
+/// and the records delivered after resume must continue across that exact
+/// boundary. A finished retained tail cannot satisfy either premise.
 #[tokio::test]
-#[ignore = "load flake: its shared wait times out under a loaded runner (release gate 2026-09-03); TODO.md has the evidence"]
 async fn shallow_pause_resumes_without_reset_or_replay() {
     let h = harness().await;
-    let (session, _work) = flood_session(&h).await;
+    let (session, _work) = gated_flood_session(&h, 80).await;
 
     let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
     let mut seen = Vec::new();
-    wait_for_bytes(&mut rx, &mut seen, b"FLOOD-000000", 30).await;
+    start_gated_flood(&h, chan, &mut rx, &mut seen).await;
 
     let paused_at = seen.len();
+    let pause_started = tokio::time::Instant::now();
     h.client.pause_output(chan).await;
-    // Comfortably inside tmux's own window, so it has no reason to cut
-    // this client off.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Settle inside tmux's own window, then keep the established quiet
+    // boundary through the rest of a 500 ms shallow pause.
+    drain_until_quiet(
+        &mut rx,
+        &mut seen,
+        Duration::from_millis(250),
+        Duration::from_secs(4),
+    )
+    .await;
+    assert_flood_outstanding(&seen, "shallow-pause boundary");
+    assert_stays_quiet_until(
+        &mut rx,
+        &mut seen,
+        pause_started + Duration::from_millis(500),
+        "shallow-pause boundary",
+    )
+    .await;
     h.client.resume_output(chan).await;
     let detached = drain_for(&mut rx, &mut seen, Duration::from_secs(10)).await;
     assert_eq!(
@@ -1537,6 +1699,9 @@ async fn shallow_pause_resumes_without_reset_or_replay() {
     // boundary rather than only after it, since a gap exactly at the seam
     // is the failure this test exists to rule out. Including the last
     // record delivered before the pause is what tests the seam itself.
+    // From the last record delivered before the pause was REQUESTED, not
+    // from the quiet boundary: the frames that arrived while the pause took
+    // effect are part of the stream this test claims was lossless.
     let boundary = flood_records(&seen[..paused_at]).len().saturating_sub(1);
     assert_records_consecutive(
         &records[boundary..],

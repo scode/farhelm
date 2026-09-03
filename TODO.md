@@ -23,11 +23,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   tag-build risk. First suspect is the budget or the helm-death detection racing the request under load, not the relay
   itself. Climb `.agents/narrow-tests.md`'s ladder from rung 3 (rung 1 does not reproduce) with `RUST_BACKTRACE=1` and
   the supervisor log, and either fix the latency or widen the oracle the way #299 did for its siblings.
-- Deflake `terminal_backpressure::a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam`
-  (crates/farhelm/tests/e2e). Failed once on a GitHub runner (CI run 33613878036, 2026-09-02, panicking at
-  terminal_backpressure.rs:289) in the `test` job for a PR that touched nothing on the terminal path, and passed on the
-  rerun. The test predates that PR. No local or sandbox reproduction has been attempted; start at rung 3 of
-  `.agents/narrow-tests.md` on a 4-vCPU box, since a single CI sighting says "load", not "logic".
 - Deflake three profiles-popup Playwright cases that fail only under load (e2e/tests/profiles.spec.ts). All three pass
   locally in both engines, repeatedly, and fail on a 4-vCPU sandbox running the spec with the default worker count
   beside a live helm, supervisor, and both browsers; seen 2026-09-03 at the 0.3.0-rc.1 tip, Chromium only. Start at rung
@@ -52,13 +47,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
   backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Start at rung 3 of
   `.agents/narrow-tests.md` on a 4-vCPU box.
-- Deflake `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e). Same
-  release-gate run as the entry above:
-  `timed out waiting for FLOOD-000000; 11619657 bytes seen, last records:
-  [799999, 799998, 799997]` from the shared
-  wait at terminal_backpressure.rs:289 — the same wait the `a_paused_replay_detaches…` sibling above timed out in on
-  2026-09-02. Two members of this file failing at the same line under load says the wait's budget, not either test's
-  logic, is the first thing to look at.
 - Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), again. On
   2026-09-03, on a 4-vCPU sandbox with a `cargo build` looping beside the tests, 2 of 10 single runs and 1 of 3
   full-binary runs at `--test-threads=4` against 0.3.0 timed out after 40 s waiting for `BINARY-MARKER`: the request
@@ -69,25 +57,26 @@ everything not yet sorted, which carries no implication either way. Within a buc
   run that found this kept only a summary. It then failed the same way on a GitHub-hosted runner (CI run 33716079614,
   the `test` job on a docs-only PR of this stack), so it is a CI flake, not only a sandbox one; kept transcripts from
   later sandbox runs show READY present, once in snapshot shape, and nothing at all after the request byte.
-- Deflake `terminal_backpressure::a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior` and
-  `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e), together with the two
-  `#[ignore]`d `terminal_backpressure` entries above: on 2026-09-03, on a loaded 4-vCPU sandbox running the full binary
-  at `--test-threads=4`, the deep-pause test failed 2 of 3 runs in the same shared wait with the same `FLOOD-000000`
-  fingerprint, and the memory test 1 of 3 (terminal_backpressure.rs:906). A third member at one wait says the wait's
-  budget under load is the thing to measure first; treat all four as one piece of work.
+- Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e): on
+  2026-09-03, on a loaded 4-vCPU sandbox running the full binary at `--test-threads=4`, it failed 1 of 3 runs on its 64
+  MiB in-process RSS assertion (terminal_backpressure.rs:906 at 0.3.0), not in the flood-start wait its siblings died
+  in. It then passed 21 loaded runs (one full-binary baseline plus 20 `terminal_backpressure::` module runs) while the
+  flood-start oracle was being fixed, so there is one sighting and no hypothesis; a first look is what else the test
+  process held in memory during that run (the three converted pause tests carry the 12 MiB finite flood; the memory test
+  has its own warm-up and continuous producer).
 - Deflake `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e): on 2026-09-03, on the
   same loaded sandbox, `timed out waiting for "FAKE-AGENT READY"` in 1 of 3 full-binary runs on 0.3.0 and 1 of 3 on the
   attach-boundary stack, never alone. No hypothesis yet; start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU
   box with the full transcript kept.
-- Put the tmux e2e suite back into the release gate, and un-ignore the three load-flaky tests still ignored, once the
+- Put the tmux e2e suite back into the release gate, and un-ignore the one load-flaky test still ignored, once the
   deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
   every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or
   two of the load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a
   different one, with the code they check unchanged; and
-  `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` and both `terminal_backpressure` tests above carry
-  `#[ignore]` so CI's full suite stops rolling the same dice (the delete fail-closed test was the fourth, un-ignored in
-  #355). The suite still runs in CI's `test` job on every ready PR and before a stack lands, so the gap is at tag time
-  only. Reversing both is the definition of done for the deflake work.
+  `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` carries `#[ignore]` so CI's full suite stops
+  rolling the same dice (the delete fail-closed test and the two `terminal_backpressure` tests were the other three,
+  un-ignored in #355 and #357). The suite still runs in CI's `test` job on every ready PR and before a stack lands, so
+  the gap is at tag time only. Reversing both is the definition of done for the deflake work.
 - Show the session dot as plainly grey when the agent is idle and its last output has been seen. Today the idle state
   can pass for the dim phase of the pulsing green, so "idle" is not obvious at a glance.
 - Add a blue dot state: the agent is idle but has produced output since the session was last looked at. Distinct from
@@ -112,13 +101,13 @@ popup's focus machinery a third on the browser side. The per-test entries under 
 work below is what retires them as a class. Order is a suggestion, from cheapest and most certain to most speculative.
 
 - One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
-  relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
-  the profiles popup's 250 + 120 ms settlement, the stub feed's socket wait, and every 5 s Playwright `expect`.
-  Introduce one factor the harness reads from the environment (something like `FARHELM_TEST_SLOW=3`, default 1) that
-  every wait multiplies by, and set it in CI's `test` job and the release gate; for Playwright, the same via
-  `expect.configure`/`test.setTimeout` from an env variable in `playwright.config.ts`. A measured latency probe at
-  harness start (time one trivial tmux control exchange) could set the factor automatically, but the env knob is the
-  first step because it separates "the machine is slow" from "the code is wrong" without touching a single test.
+  relay peer's 20 s `answer()`, terminal-flood's 30 s stall poll, the profiles popup's 250 + 120 ms settlement, the stub
+  feed's socket wait, and every 5 s Playwright `expect`. Introduce one factor the harness reads from the environment
+  (something like `FARHELM_TEST_SLOW=3`, default 1) that every wait multiplies by, and set it in CI's `test` job and the
+  release gate; for Playwright, the same via `expect.configure`/`test.setTimeout` from an env variable in
+  `playwright.config.ts`. A measured latency probe at harness start (time one trivial tmux control exchange) could set
+  the factor automatically, but the env knob is the first step because it separates "the machine is slow" from "the code
+  is wrong" without touching a single test.
 - Retries scoped to named tests, reported as flaky, not hidden. `cargo nextest` runs each test in its own process,
   supports `retries` per test through filtersets, and reports "flaky" as its own outcome in JUnit output; Playwright has
   per-project `retries`. A single load hiccup then stops being fatal to a gate while the ledger of what flaked stays
