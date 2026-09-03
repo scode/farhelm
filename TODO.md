@@ -52,12 +52,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
   backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Start at rung 3 of
   `.agents/narrow-tests.md` on a 4-vCPU box.
-- Deflake `a keyboard-focused selected tab keeps its accent fill instead of the neutral hover tint`
-  (e2e/tests/terminal-tabs.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, `toHaveCSS` read the hover
-  tint (`rgb(27, 48, 84)`) where the accent fill (`rgb(22, 41, 74)`) was expected, for 5 s. The pointer was presumably
-  still over the tab from the click that selected it, so hover won the cascade; whether that is the test's sequencing or
-  a real precedence bug is the first thing to settle, with the rule that keyboard focus on a selected tab must show the
-  accent even under hover. The tab styles were untouched by the stack that surfaced it.
 - Deflake `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e). Same
   release-gate run as the entry above:
   `timed out waiting for FLOOD-000000; 11619657 bytes seen, last records:

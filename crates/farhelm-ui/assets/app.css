@@ -3201,19 +3201,20 @@ samp {
   border-color: var(--accent-edge);
 }
 
-/* Every tab carries `.btn` too (see `TabStripItem` in tabs.rs), and both
-   `.btn:hover:not(:disabled)` and `.btn:focus-visible:not(:disabled)`
-   above OUTRANK `.tab.selected` on specificity — one class plus two
-   pseudo-classes beats two plain classes — regardless of which rule comes
-   later in the file. Without this pair, hovering OR keyboard-focusing the
-   selected tab replaced its accent fill with the neutral control-hover
-   tint, the same swallowed-selection failure `.session-row.selected`'s own
-   hover rule exists to prevent below. One more class than `.tab.selected`
-   alone, plus the same two pseudo-classes `.btn`'s rule has, is enough to
-   win the fill back for the accent family either way it was reached. */
-.tab.selected:hover:not(:disabled),
-.tab.selected:focus-visible:not(:disabled) {
+/* Every tab carries `.btn` too (see `TabStripItem` in tabs.rs), and its
+   hover/focus rules above outrank `.tab.selected` on specificity. A pointer
+   over a selected tab deliberately gets the lighter accent-hover fill: that
+   is the strip's ordinary hover affordance, not an error. Keyboard-visible
+   focus has a stronger contract, though. It restores the resting accent even
+   if the pointer is also over the tab, so selection remains legible to a
+   keyboard user. The focus selector comes second with equal specificity and
+   therefore wins only at that intersection. */
+.tab.selected:hover:not(:disabled) {
   background: var(--accent-fill-hover);
+}
+
+.tab.selected:focus-visible:not(:disabled) {
+  background: var(--accent-fill);
 }
 
 /* The close confirmation and the tab-operation error line both sit on
