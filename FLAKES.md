@@ -65,8 +65,12 @@ still holds).
 Failed once in the v0.3.0-rc.2 release gate on a GitHub-hosted runner: the delete that must fail closed succeeded
 instead. It passed three rc.1 gate runs on the same runner type, a 4-vCPU sandbox, and locally. The test waits for the
 launch shim to consume the session's spec, plants a replacement, makes the launch directory read-only, and expects the
-delete to fail on the artifact it cannot remove; under load the shim can plausibly consume the planted spec before the
-delete runs, leaving nothing to fail on. Disposition: open (TODO.md); `#[ignore]` as above.
+delete to fail on the artifact it cannot remove; at the time, the suspicion was that under load the shim consumed the
+planted spec before the delete ran, leaving nothing to fail on. Disposition: fixed in #355. The race was the test's, and
+not with the planted file: it planted `launch/<id>.json`, a name delete had not recognized since per-launch generations
+arrived (#37), so the test passed only when it ran ahead of the shim's read-and-unlink of the real `launch/<id>.0.json`;
+under load the shim won, delete found nothing to remove, and succeeded. The test now plants at the real path after that
+consume.
 
 ## 2026-09-03 — `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e)
 

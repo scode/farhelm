@@ -58,14 +58,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   still over the tab from the click that selected it, so hover won the cascade; whether that is the test's sequencing or
   a real precedence bug is the first thing to settle, with the rule that keyboard focus on a selected tab must show the
   accent even under hover. The tab styles were untouched by the stack that surfaced it.
-- Deflake `session_lifecycle::delete_fails_closed_when_a_launch_artifact_cannot_be_removed` (crates/farhelm/tests/e2e).
-  Failed once in the v0.3.0-rc.2 release gate (GitHub-hosted runner, the full suite at `--test-threads=4`, run
-  33700275724) with `delete must fail closed when a launch artifact cannot be removed: ()`, i.e. the delete SUCCEEDED;
-  it passed the three rc.1 gate runs on the same runner type, a 4-vCPU sandbox, and locally. The test waits for the
-  launch shim to consume the session's spec, plants a replacement, makes the launch directory read-only, and expects
-  delete to fail on the artifact it cannot remove. Under load the shim can plausibly consume the PLANTED spec before
-  delete runs, leaving nothing to fail on. First step: pin the spec so the shim cannot take it (or assert the planted
-  file still exists right before the delete), then decide whether the race is the test's or the shim's.
 - Deflake `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e). Same
   release-gate run as the entry above:
   `timed out waiting for FLOOD-000000; 11619657 bytes seen, last records:
@@ -93,15 +85,15 @@ everything not yet sorted, which carries no implication either way. Within a buc
   same loaded sandbox, `timed out waiting for "FAKE-AGENT READY"` in 1 of 3 full-binary runs on 0.3.0 and 1 of 3 on the
   attach-boundary stack, never alone. No hypothesis yet; start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU
   box with the full transcript kept.
-- Put the tmux e2e suite back into the release gate, and un-ignore the four load-flaky tests, once the deflake entries
-  above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs every test target
-  EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or two of the
-  load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a different one,
-  with the code they check unchanged; and `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once`, both
-  `terminal_backpressure` tests above, and
-  `session_lifecycle::delete_fails_closed_when_a_launch_artifact_cannot_be_removed` carry `#[ignore]` so CI's full suite
-  stops rolling the same dice. The suite still runs in CI's `test` job on every ready PR and before a stack lands, so
-  the gap is at tag time only. Reversing both is the definition of done for the deflake work.
+- Put the tmux e2e suite back into the release gate, and un-ignore the three load-flaky tests still ignored, once the
+  deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
+  every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or
+  two of the load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a
+  different one, with the code they check unchanged; and
+  `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` and both `terminal_backpressure` tests above carry
+  `#[ignore]` so CI's full suite stops rolling the same dice (the delete fail-closed test was the fourth, un-ignored in
+  #355). The suite still runs in CI's `test` job on every ready PR and before a stack lands, so the gap is at tag time
+  only. Reversing both is the definition of done for the deflake work.
 - Show the session dot as plainly grey when the agent is idle and its last output has been seen. Today the idle state
   can pass for the dim phase of the pulsing green, so "idle" is not obvious at a glance.
 - Add a blue dot state: the agent is idle but has produced output since the session was last looked at. Distinct from

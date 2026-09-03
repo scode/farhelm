@@ -5503,18 +5503,24 @@ async fn wait_for_shim_to_consume_spec(spec_path: &std::path::Path) {
 }
 
 /// Fail-closed artifact removal (SPEC.md/lore/2026-07-27-m2-process-tree-
-/// stop.md): a launch spec that cannot be removed must fail the WHOLE
+/// stop.md): a real launch spec that cannot be removed must fail the WHOLE
 /// delete, row and map entry intact — never silently proceed and lose the
 /// last handle on a file that may hold credentials. Removing WRITE
 /// permission on the launch directory itself (not the file) is what
 /// actually makes a file undeletable on POSIX: `unlink` needs write+exec
 /// on the containing directory, not any particular mode on the file.
 ///
+/// The replacement must use the generation-qualified path the supervisor
+/// actually owns. This test once planted the old unqualified `<id>.json`
+/// name; delete's `parse_launch_file_name` did not recognize it, so the
+/// sweep found no artifact to remove and correctly succeeded. Under load
+/// that looked like the shim consuming the replacement, but the test had
+/// never synchronized with the real `<id>.0.json` spec at all.
+///
 /// Skipped under euid 0: root bypasses directory permission checks
 /// entirely, which would make this test pass trivially without
 /// exercising the fail-closed path it exists to pin.
 #[tokio::test]
-#[ignore = "load flake: the shim can consume the planted spec before delete runs on a loaded runner (release gate 2026-09-03); TODO.md has the evidence"]
 async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
     // SAFETY: geteuid takes no arguments and cannot fail.
     if unsafe { libc::geteuid() } == 0 {
@@ -5528,8 +5534,12 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
     let (session, _work) = basic_session(&h).await;
 
     let launch_dir = h.state.path().join("launch");
-    let spec_path = launch_dir.join(format!("{}.json", session.id));
+    let spec_path = spec_path_for_launch(h.state.path(), &session.id, 0);
     wait_for_shim_to_consume_spec(&spec_path).await;
+    // `exec_launch_spec_with_seam` reads and unlinks this launch's spec
+    // exactly once before it execs the agent. This test never restarts the
+    // session, so that shim has already passed its sole consume step and
+    // cannot take the replacement planted at the same generation path.
     std::fs::write(&spec_path, b"{}").expect("plant a launch spec");
 
     use std::os::unix::fs::PermissionsExt;
@@ -5549,12 +5559,42 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         .expect("restore launch dir permissions");
 
     let err = result.expect_err("delete must fail closed when a launch artifact cannot be removed");
+    let failure = err
+        .downcast_ref::<SupervisorError>()
+        .expect("must carry a SupervisorError");
     assert_eq!(
-        err.downcast_ref::<SupervisorError>()
-            .expect("must carry a SupervisorError")
-            .kind,
+        failure.kind,
         ErrorKind::Internal,
         "an unremovable artifact is a server-side sweep problem, not a caller precondition"
+    );
+    // `Internal` alone is not enough: the teardown steps before the artifact
+    // sweep (process sweeping, tmux teardown, scope enumeration) report the
+    // same kind and would leave the same exited row behind, so an unrelated
+    // failure could impersonate this one. The message names the removal and
+    // the exact path, and the file it could not remove is still there.
+    assert!(
+        failure.message.starts_with("removing ")
+            && failure.message.contains(&spec_path.display().to_string()),
+        "the failure must be the artifact removal of {}, got: {}",
+        spec_path.display(),
+        failure.message
+    );
+    assert!(
+        spec_path.exists(),
+        "a delete that failed closed must leave the artifact it could not remove in place"
+    );
+    // The live supervisor keeps its map entry as well as the durable row; a
+    // fresh supervisor below proves the row, this proves the entry, and a
+    // regression that dropped the entry before returning the error would
+    // pass the row check alone.
+    let still_listed = h
+        .client
+        .list_sessions()
+        .await
+        .expect("list from the live supervisor after the failed delete");
+    assert!(
+        still_listed.sessions.iter().any(|s| s.id == session.id),
+        "the live supervisor must still list a session whose delete failed closed"
     );
 
     let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
