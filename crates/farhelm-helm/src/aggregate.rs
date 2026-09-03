@@ -104,13 +104,26 @@ use serde::Serialize;
 
 /// How a host is NAMED on a session row.
 ///
-/// M6 invents no host-naming surface (PLAN_M6.md's Out list), so this is a
-/// rendering of what the registry already holds rather than a stored
-/// display name: an ssh row is its destination, and the reserved local row
-/// — which has no destination by construction — is described rather than
-/// named. Kept in one function so every surface that shows a host (session
-/// rows, the hosts list) says the same thing about it.
-pub(crate) fn host_display_name(kind: HostKind, destination: Option<&str>) -> String {
+/// The alias, when present, IS the display name outright — a stored label
+/// that wins over the derivation below without qualification, including for
+/// the local row, and this is also the name `farhelm agent` resolution
+/// matches against (agent_requests.rs's `resolve_host`), which is why an
+/// aliased host's raw destination stops resolving.
+///
+/// Absent an alias, M6 invented no separate host-naming surface (PLAN_M6.md's
+/// Out list), so this falls back to a rendering of what the registry already
+/// holds: an ssh row is its destination, and the reserved local row — which
+/// has no destination by construction — is described rather than named.
+/// Kept in one function so every surface that shows a host (session rows,
+/// the hosts list, the agent relay) says the same thing about it.
+pub(crate) fn host_display_name(
+    kind: HostKind,
+    destination: Option<&str>,
+    alias: Option<&str>,
+) -> String {
+    if let Some(alias) = alias {
+        return alias.to_string();
+    }
     match kind {
         // Not the machine's hostname: the helm's own machine is wherever
         // the user is sitting, and SPEC.md's promise is that it is always
@@ -243,7 +256,11 @@ fn row_of(host: &HostSnapshot, identity: Option<&str>, info: SessionInfo) -> Ses
         info,
         host: host.id,
         host_identity: identity.map(str::to_string),
-        host_name: host_display_name(host.kind, host.destination.as_deref()),
+        host_name: host_display_name(
+            host.kind,
+            host.destination.as_deref(),
+            host.alias.as_deref(),
+        ),
         stale: !host.state.is_connected(),
     }
 }

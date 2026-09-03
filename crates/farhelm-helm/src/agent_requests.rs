@@ -1291,6 +1291,7 @@ fn agent_row_of_mutation(
             Some(crate::aggregate::host_display_name(
                 snapshot.kind,
                 snapshot.destination.as_deref(),
+                snapshot.alias.as_deref(),
             )),
             false,
         ),
@@ -1517,6 +1518,7 @@ mod tests {
             kind,
             name: name.to_string(),
             destination: None,
+            alias: None,
             identity: None,
             remote_farhelm: None,
             remote_state_dir: None,
@@ -3957,6 +3959,141 @@ mod tests {
                 assert!(
                     message.contains("user@builder") && message.contains("this machine"),
                     "the refusal lists the names that would have worked: {message}"
+                );
+            }
+            other => panic!("expected a NotFound refusal, got {other:?}"),
+        }
+    }
+
+    /// Spec: once a host carries an alias, `create --host <alias>` resolves
+    /// it exactly as the raw destination used to — `resolve_host` matches
+    /// `view.name`, and the alias IS that name once set
+    /// (`aggregate::host_display_name`), so this needs no code path of its
+    /// own to prove, only that the wire actually reaches the aliased host.
+    #[tokio::test]
+    async fn create_resolves_by_alias_once_one_is_set() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .update_alias(remote, Some("builder-alias"))
+            .await
+            .expect("alias the remote host");
+        // A direct store write, unlike the REST route, does not itself
+        // reach the manager's live snapshot — `set_alias`'s handler
+        // explicitly resyncs afterward (hosts.rs), and `resolve_host` reads
+        // `host_views`, which is built from that snapshot rather than the
+        // store. Skipping this would leave the alias written but invisible
+        // to resolution, silently testing nothing.
+        h.manager
+            .sync_registry()
+            .await
+            .expect("resync the manager after aliasing directly through the store");
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Create {
+                    host: Some("builder-alias".to_string()),
+                    cwd: "/srv/work".to_string(),
+                    profile_name: None,
+                    invocation: Some("sh".to_string()),
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+        match outcome {
+            AgentOutcome::Ok {
+                reply: AgentReply::Created { session },
+            } => {
+                // The mutation-reply projection (agent_requests.rs's own
+                // `Some(crate::aggregate::host_display_name(...))` call) is
+                // an INDEPENDENT derivation from the merged-listing one
+                // `session_rows_carry_the_alias_in_host_name` (hosts.rs)
+                // pins — asserting only `Created { .. }` above would still
+                // pass if that line were deleted while alias-based
+                // RESOLUTION kept working, since resolution and the
+                // reply's own host name are two different pieces of code.
+                assert_eq!(
+                    session.host.as_deref(),
+                    Some("builder-alias"),
+                    "the reply must name the host by its alias, not its destination"
+                );
+            }
+            other => panic!(
+                "the alias must resolve to the same host the raw destination used to name: {other:?}"
+            ),
+        }
+        assert_eq!(
+            seen.lock().expect("seen mutex").len(),
+            1,
+            "the create must have actually reached the remote host, not merely been accepted"
+        );
+    }
+
+    /// Spec: once a host is aliased, its RAW destination stops resolving —
+    /// the alias replaces it as the display name rather than adding a
+    /// second name for the same host — and the refusal's known-hosts list
+    /// shows the alias, since that is genuinely the only name left that
+    /// would have worked. This is host-aliases' one deliberate behavior
+    /// change to existing name resolution, so it gets its own test rather
+    /// than riding along with the alias-resolves case above.
+    #[tokio::test]
+    async fn create_on_the_raw_destination_is_refused_once_aliased() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_create_responder(peer, None);
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .update_alias(remote, Some("builder-alias"))
+            .await
+            .expect("alias the remote host");
+        // A direct store write, unlike the REST route, does not itself
+        // reach the manager's live snapshot — `set_alias`'s handler
+        // explicitly resyncs afterward (hosts.rs), and `resolve_host` reads
+        // `host_views`, which is built from that snapshot rather than the
+        // store. Skipping this would leave the alias written but invisible
+        // to resolution, silently testing nothing.
+        h.manager
+            .sync_registry()
+            .await
+            .expect("resync the manager after aliasing directly through the store");
+
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Create {
+                    host: Some("user@builder".to_string()),
+                    cwd: "/srv/work".to_string(),
+                    profile_name: None,
+                    invocation: Some("sh".to_string()),
+                    title: None,
+                    intent_key: None,
+                },
+            )
+            .await;
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::NotFound);
+                assert!(
+                    message.contains("user@builder"),
+                    "the refusal quotes the name that failed: {message}"
+                );
+                let known_hosts_part = message
+                    .split_once("known hosts: ")
+                    .map(|(_, rest)| rest)
+                    .expect("the refusal must list known hosts");
+                assert!(
+                    known_hosts_part.contains("builder-alias"),
+                    "the known-hosts list must show the ALIAS: {message}"
+                );
+                assert!(
+                    !known_hosts_part.contains("user@builder"),
+                    "the raw destination must no longer appear as a resolvable name: {message}"
                 );
             }
             other => panic!("expected a NotFound refusal, got {other:?}"),

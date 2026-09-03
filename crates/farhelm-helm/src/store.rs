@@ -75,6 +75,7 @@
 //! transaction as the write, so whichever caller loses gets a typed answer
 //! naming the winner instead of a durable collision.
 //!
+use crate::aggregate::host_display_name;
 use anyhow::Context;
 use farhelm_proto::{SessionInfo, SessionStatus};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
@@ -107,7 +108,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 15;
+const SCHEMA_VERSION: i64 = 16;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -152,10 +153,13 @@ pub enum HostKind {
     /// The one reserved row for the machine running the helm itself
     /// (SPEC.md: always present, never registered, never removable).
     /// [`HelmStore::open`] mints it if absent; no other writer may create
-    /// one. SSH-host MANAGEMENT mutations
-    /// ([`HelmStore::update_ssh_destination`], [`HelmStore::remove_ssh_host`])
-    /// refuse a [`HostKind::Local`] row outright — it is not user management
-    /// surface at all — but identity ([`HelmStore::record_first_contact`],
+    /// one. Its DESTINATION and its existence are not user management
+    /// surface: [`HelmStore::update_ssh_destination`] and
+    /// [`HelmStore::remove_ssh_host`] refuse a [`HostKind::Local`] row
+    /// outright. Everything else treats it like any other host —
+    /// [`HelmStore::update_alias`] accepts it exactly as it accepts an ssh
+    /// row (`plans/host-aliases.md`'s decisions section: "the local host
+    /// can be aliased too"), and identity ([`HelmStore::record_first_contact`],
     /// [`HelmStore::adopt_identity`]) and cache
     /// ([`HelmStore::replace_host_sessions`]) operations serve it on the
     /// same terms as any other host: the local host learns its identity and
@@ -197,6 +201,9 @@ pub struct HostRow {
     pub id: HostId,
     pub kind: HostKind,
     pub destination: Option<String>,
+    /// An optional user-facing label. When present it replaces the derived
+    /// destination or local label everywhere except the details view.
+    pub alias: Option<String>,
     pub remote_farhelm: Option<String>,
     pub remote_state_dir: Option<String>,
     /// The identity this host's supervisor reported at last contact —
@@ -224,6 +231,7 @@ pub struct HostRow {
 type RawHostRow = (
     HostId,
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -844,20 +852,42 @@ pub enum HostStoreError {
     /// literal sense: neither layer is load-bearing alone.
     #[error("{0:?} is not a usable ssh destination")]
     InvalidDestination(String),
+    /// An alias failed a LOCAL, syntax-only rule — a control character, or
+    /// the 64-character cap — checked before any comparison against other
+    /// hosts runs. A collision with another host's current display name is
+    /// a separate case ([`HostStoreError::AliasTaken`]); this variant never
+    /// carries one. The display text is safe to show directly to the
+    /// caller.
+    #[error("{0}")]
+    InvalidAlias(String),
+    /// A write would make two rows share one display name: a proposed alias
+    /// or destination matches another row's current alias, or (alias-clear
+    /// only) a row's restored derived name matches another row's current
+    /// alias. Returned by [`HelmStore::add_ssh_host`],
+    /// [`HelmStore::register_probed_ssh_host`], [`HelmStore::ensure_ssh_hosts`],
+    /// [`HelmStore::update_ssh_destination`], and [`HelmStore::update_alias`]
+    /// alike, which is why the message names no field — the caller did not
+    /// necessarily submit an alias at all. The payload is the other row's
+    /// current display name, not an internal id.
+    #[error("a host is already displayed as {0:?}")]
+    AliasTaken(String),
     /// A call named a [`HostId`] no row currently holds — including one
     /// that once existed and was removed.
     #[error("host {0} does not exist")]
     HostNotFound(HostId),
-    /// A call tried to edit or remove the reserved local row through the
-    /// ssh-host management API. The local row is not user management
-    /// surface at all (PLAN_M6.md item 4): it is synthesized once by
-    /// [`HelmStore::open`] and otherwise untouchable by every ssh-host
-    /// MANAGEMENT mutation — but not by identity ([`HelmStore::record_first_contact`],
-    /// [`HelmStore::adopt_identity`]) or cache
+    /// A call tried to retarget or remove the reserved local row through
+    /// the ssh-host management API. The local row's DESTINATION and its
+    /// existence are not user management surface (PLAN_M6.md item 4): it is
+    /// synthesized once by [`HelmStore::open`], never removable, and
+    /// [`HelmStore::update_ssh_destination`]/[`HelmStore::remove_ssh_host`]
+    /// refuse it outright. That is narrower than "untouchable": its alias
+    /// IS editable ([`HelmStore::update_alias`] accepts it like any other
+    /// host), and so are identity ([`HelmStore::record_first_contact`],
+    /// [`HelmStore::adopt_identity`]) and cache
     /// ([`HelmStore::replace_host_sessions`]) operations, which the local
     /// row needs on the same terms as any other host (it "learns its
     /// identity the same way" — PLAN_M6.md item 3).
-    #[error("the local host cannot be edited or removed")]
+    #[error("the local host's destination cannot be changed and it cannot be removed")]
     LocalHostImmutable,
     /// The stored identity no longer matches what a caller assumed it still
     /// was. Two distinct callers hit this: [`HelmStore::adopt_identity`]'s
@@ -922,6 +952,69 @@ pub enum HostStoreError {
         first: HostId,
         second: HostId,
     },
+}
+
+/// Canonicalize one optional host alias before it reaches durable storage.
+///
+/// Whitespace-only input clears the alias; every other accepted value is
+/// trimmed so display and agent resolution never disagree over invisible
+/// surrounding characters. Control characters are refused because an alias
+/// reaches line-oriented agent CLI output.
+fn validate_alias(alias: Option<&str>) -> Result<Option<String>, HostStoreError> {
+    let Some(alias) = alias else {
+        return Ok(None);
+    };
+    let alias = alias.trim();
+    if alias.is_empty() {
+        return Ok(None);
+    }
+    if alias.chars().any(char::is_control) {
+        return Err(HostStoreError::InvalidAlias(
+            "host alias must not contain control characters".to_string(),
+        ));
+    }
+    if alias.chars().count() > 64 {
+        return Err(HostStoreError::InvalidAlias(
+            "host alias must be at most 64 characters".to_string(),
+        ));
+    }
+    Ok(Some(alias.to_string()))
+}
+
+/// Whether `candidate` matches another row's current ALIAS — the narrow
+/// half of the display-name uniqueness rule, shared by every write that
+/// touches a DESTINATION rather than an alias: registering
+/// ([`HelmStore::add_ssh_host`], [`HelmStore::register_probed_ssh_host`],
+/// [`HelmStore::ensure_ssh_hosts`]), retargeting
+/// ([`HelmStore::update_ssh_destination`]), and restoring the derived name
+/// by clearing an alias ([`HelmStore::update_alias`]). Destination-versus-
+/// destination collisions are the `hosts_ssh_destination` partial unique
+/// index's job; this only needs to catch the cross-kind case an alias
+/// introduces, which is why it reads the `alias` column alone rather than
+/// every row's full derived display name (contrast `update_alias`'s SET
+/// path, which does need the wide comparison — see that function's own
+/// doc).
+///
+/// `exclude` is the row being written, when there is one to re-affirm its
+/// own value against (registration has none: the row does not exist yet).
+/// Every caller runs this inside the SAME transaction as the write it
+/// gates, which is what makes the check and the write atomic against a
+/// concurrent writer.
+fn alias_collision(
+    tx: &rusqlite::Transaction<'_>,
+    exclude: Option<HostId>,
+    candidate: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut other = tx
+        .prepare("SELECT alias FROM hosts WHERE (?1 IS NULL OR id != ?1) AND alias IS NOT NULL")
+        .context("reading other hosts' aliases before a display-name-affecting write")?;
+    let collision = other
+        .query_map(rusqlite::params![exclude], |row| row.get::<_, String>(0))
+        .context("querying other hosts' aliases")?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .find(|alias| alias == candidate);
+    Ok(collision)
 }
 
 /// The connection-defining fields an attempt was dialed under, carried
@@ -1149,6 +1242,10 @@ pub struct HelmStore {
 /// - 15: the helm-owned `profiles` catalog and one remembered-default row.
 ///   The old per-host rows are dropped without migration so the catalog starts
 ///   with the same four seeded profiles and an empty default.
+/// - 16: the nullable `hosts.alias` display label. See [`validate_alias`]
+///   and `update_alias` for why uniqueness is checked against every other
+///   host's current DISPLAY name (derived or aliased) rather than only
+///   other aliases.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1177,6 +1274,23 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         // though this schema had actually been applied to it — see
         // `open_fails_atomically_on_an_incompatible_preexisting_table`
         // below.
+        //
+        // The `PRAGMA user_version` this batch ends on MUST equal
+        // `SCHEMA_VERSION` exactly — it is a bare SQL literal because a
+        // string interpolated into this `execute_batch` cannot reference a
+        // Rust `const`, so nothing in the compiler catches the two drifting
+        // apart the way `version = SCHEMA_VERSION` just below (which only
+        // updates this function's in-memory belief) would suggest. A
+        // mismatch is SILENT here: this branch still reports success and the
+        // fresh database still has every column the current shape needs
+        // (this table literally includes `alias` below). It only surfaces on
+        // a LATER open, which reads the wrong stamp back, believes a
+        // migration is still owed, and reruns that migration's `ALTER TABLE
+        // ADD COLUMN` against a column this branch already created — failing
+        // loudly with "duplicate column name" on what looks like an
+        // unrelated reopen. This exact bug shipped once (a fresh database
+        // stamped 15 despite already carrying schema 16's `hosts.alias`
+        // column) and is why this comment exists.
         tx.execute_batch(&format!(
             "CREATE TABLE hosts (
                  id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1195,6 +1309,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- same transaction as the rows it describes
                  -- (HelmStore::replace_host_sessions).
                  cache_truncated  INTEGER NOT NULL DEFAULT 0,
+                 -- A user-chosen display name; NULL keeps the derived name
+                 -- (schema version 16). LAST in this list, matching where
+                 -- `ALTER TABLE hosts ADD COLUMN alias` lands it on a
+                 -- database migrating up to this version — SQLite always
+                 -- appends an added column, and a fresh-create branch
+                 -- putting it anywhere else would leave a migrated database
+                 -- with a different `sqlite_master` SQL text than a fresh
+                 -- one despite being schema-equivalent
+                 -- (`a_migrated_database_matches_a_freshly_created_one`
+                 -- compares that text byte for byte).
+                 alias            TEXT,
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -1340,7 +1465,10 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  list_sort     TEXT,
                  last_selected TEXT
              ) STRICT;
-             PRAGMA user_version = 15;",
+             -- Must equal SCHEMA_VERSION exactly — see the Rust comment
+             -- above this whole `execute_batch` call for what goes wrong
+             -- when the two drift.
+             PRAGMA user_version = 16;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1747,6 +1875,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         ))
         .context("migrating helm.db to schema version 15")?;
         version = 15;
+    }
+    if version == 15 {
+        tx.execute_batch("ALTER TABLE hosts ADD COLUMN alias TEXT; PRAGMA user_version = 16;")
+            .context("migrating helm.db to schema version 16")?;
+        version = 16;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2284,7 +2417,7 @@ impl HelmStore {
             let conn = conn.lock().expect("helm db mutex poisoned");
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, kind, destination, remote_farhelm, remote_state_dir, \
+                    "SELECT id, kind, destination, alias, remote_farhelm, remote_state_dir, \
                      host_identity, cache_truncated FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
@@ -2298,6 +2431,7 @@ impl HelmStore {
                         r.get(4)?,
                         r.get(5)?,
                         r.get(6)?,
+                        r.get(7)?,
                     ))
                 })
                 .context("querying hosts")?
@@ -2309,6 +2443,7 @@ impl HelmStore {
                         id,
                         kind,
                         destination,
+                        alias,
                         remote_farhelm,
                         remote_state_dir,
                         host_identity,
@@ -2318,6 +2453,7 @@ impl HelmStore {
                             id,
                             kind: HostKind::from_column(&kind)?,
                             destination,
+                            alias,
                             remote_farhelm,
                             remote_state_dir,
                             host_identity,
@@ -2355,6 +2491,16 @@ impl HelmStore {
     /// [`HostStoreError::InvalidDestination`] before anything is written;
     /// see that variant's docs for why the registry, and not only the ssh
     /// argv builder, takes a position on this.
+    ///
+    /// A destination matching another host's current ALIAS is refused as
+    /// [`HostStoreError::AliasTaken`], inside the same transaction as the
+    /// insert (`alias_collision`'s own doc explains why only aliases, not
+    /// every derived name, are compared here). Without this, a fresh
+    /// registration could land a row whose derived name collides with an
+    /// existing alias — nothing in the unique index would catch it, since
+    /// the index only knows about destinations — and `resolve_host` would
+    /// then correctly refuse the ambiguous name, silently breaking the
+    /// alias as an agent target.
     pub async fn add_ssh_host(
         &self,
         destination: &str,
@@ -2371,8 +2517,14 @@ impl HelmStore {
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<HostId> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let inserted = conn
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning add ssh host transaction")?;
+            if let Some(name) = alias_collision(&tx, None, &destination)? {
+                return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+            }
+            let inserted = tx
                 .execute(
                     // 'ssh' hardcoded directly, exactly as ensure_local_row
                     // hardcodes 'local' — this insert can only ever create
@@ -2390,7 +2542,9 @@ impl HelmStore {
                     destination,
                 )));
             }
-            Ok(conn.last_insert_rowid())
+            let host = tx.last_insert_rowid();
+            tx.commit().context("committing new ssh host")?;
+            Ok(host)
         })
         .await
         .context("add ssh host task panicked")?
@@ -2405,6 +2559,13 @@ impl HelmStore {
     /// boolean reports whether this transaction inserted the row, so a
     /// caller whose live-registry reconciliation fails can roll back only
     /// the row it owns rather than deleting a concurrent registration.
+    ///
+    /// A genuinely NEW destination matching another host's current ALIAS is
+    /// refused as [`HostStoreError::AliasTaken`] before the insert — see
+    /// [`HelmStore::add_ssh_host`]'s doc for why this check exists at all.
+    /// The CONVERGE branch (an already-registered destination) never runs
+    /// it: that branch never writes `destination`, so it cannot introduce a
+    /// new collision.
     pub async fn register_probed_ssh_host(
         &self,
         destination: &str,
@@ -2480,6 +2641,9 @@ impl HelmStore {
                         );
                     }
                 }
+                if let Some(name) = alias_collision(&tx, None, &destination)? {
+                    return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                }
                 tx.execute(
                     "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
                      host_identity) VALUES ('ssh', ?1, ?2, ?3, ?4)",
@@ -2523,6 +2687,15 @@ impl HelmStore {
     /// would disagree about its remote binary and state directory, and
     /// silently letting the first win would make the file's meaning depend
     /// on line order.
+    ///
+    /// An entry that is ACTUALLY NEW (not already registered) is refused as
+    /// [`HostStoreError::AliasTaken`], aborting the WHOLE batch, if its
+    /// destination matches another host's current alias — see
+    /// [`HelmStore::add_ssh_host`]'s doc for why. Checked only for entries
+    /// this call would actually insert: an entry that is already registered
+    /// changes nothing (ADDITIVE, above), so a pre-existing collision that
+    /// predates this call and that this call is not creating must not fail
+    /// an otherwise ordinary startup.
     pub async fn ensure_ssh_hosts(&self, entries: Vec<EnsureHost>) -> anyhow::Result<Vec<HostId>> {
         for (index, entry) in entries.iter().enumerate() {
             anyhow::ensure!(
@@ -2549,6 +2722,31 @@ impl HelmStore {
                 .context("beginning the ensure-hosts transaction")?;
             let mut added = Vec::new();
             for entry in &entries {
+                // Newness is checked FIRST, and separately from the
+                // conditional insert below, specifically so the alias
+                // check that follows applies only to entries this call
+                // would actually create — see this method's own doc for
+                // why an already-registered entry must not be blamed for a
+                // collision it did not introduce.
+                let already_registered = tx
+                    .query_row(
+                        "SELECT 1 FROM hosts WHERE kind = 'ssh' AND destination = ?1",
+                        rusqlite::params![entry.destination],
+                        |_| Ok(()),
+                    )
+                    .optional()
+                    .with_context(|| {
+                        format!(
+                            "checking whether {:?} is already registered",
+                            entry.destination
+                        )
+                    })?
+                    .is_some();
+                if !already_registered
+                    && let Some(name) = alias_collision(&tx, None, &entry.destination)?
+                {
+                    return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                }
                 // The same conditional insert `add_ssh_host` uses, for the
                 // same reason: "already registered" is the ordinary,
                 // expected outcome here, not an error to catch.
@@ -2644,6 +2842,24 @@ impl HelmStore {
                     Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
                 }
                 Some(HostKind::Ssh) => {
+                    // Only ALIASES are compared here — colliding with
+                    // another row's plain, unaliased destination is not
+                    // this check's job. That case is caught below by
+                    // `UPDATE OR IGNORE` against the `hosts_ssh_destination`
+                    // partial unique index and reported as
+                    // `DuplicateDestination`, the more specific refusal for
+                    // two ssh hosts fighting over the same literal
+                    // destination text. Widening this scan to every row's
+                    // DERIVED display name (as an earlier version of this
+                    // check did, by running it through
+                    // `host_display_name`) would report every ordinary
+                    // destination collision as an alias conflict even where
+                    // no alias is involved on either side, and would shadow
+                    // `DuplicateDestination` entirely since this check runs
+                    // first.
+                    if let Some(name) = alias_collision(&tx, Some(host), &destination)? {
+                        return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                    }
                     let changed = tx
                         .execute(
                             "UPDATE OR IGNORE hosts SET destination = ?2 WHERE id = ?1",
@@ -2662,6 +2878,106 @@ impl HelmStore {
         })
         .await
         .context("update ssh destination task panicked")?
+    }
+
+    /// Replace one host's optional alias and report whether its canonical
+    /// stored value changed. The uniqueness scan shares the write transaction
+    /// so an alias can never race another host into the display-name space.
+    ///
+    /// SETTING an alias is checked against every OTHER host's full current
+    /// display name (alias or derived) — the wide check, since a stored
+    /// alias is arbitrary text with no dedicated uniqueness index. CLEARING
+    /// one is checked the other way: this row's RESTORED derived name
+    /// (kind and destination, ignoring the alias about to be dropped)
+    /// against only other hosts' current aliases — the narrow check
+    /// `alias_collision` shares with registration and retargeting — because
+    /// a restored derived name can only collide with something that was
+    /// never a plain destination collision in the first place. Skipping
+    /// this on clear would let a host silently reclaim its raw destination
+    /// as a display name even while another host is already showing under
+    /// an alias identical to it.
+    pub async fn update_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<bool> {
+        let alias = validate_alias(alias).map_err(anyhow::Error::new)?;
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning update alias transaction")?;
+            let current: Option<(String, Option<String>, Option<String>)> = tx
+                .query_row(
+                    "SELECT kind, destination, alias FROM hosts WHERE id = ?1",
+                    rusqlite::params![host],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .context("looking up host before updating its alias")?;
+            let Some((kind, destination, current_alias)) = current else {
+                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+            };
+            let kind = HostKind::from_column(&kind)?;
+            if current_alias == alias {
+                tx.commit().context("committing unchanged alias")?;
+                return Ok(false);
+            }
+            match alias.as_deref() {
+                Some(candidate) => {
+                    let mut other = tx
+                        .prepare("SELECT kind, destination, alias FROM hosts WHERE id != ?1")
+                        .context("reading display names before updating an alias")?;
+                    let rows = other
+                        .query_map(rusqlite::params![host], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                            ))
+                        })
+                        .context("querying other host display names")?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    drop(other);
+                    // A row whose `kind` this build cannot decode is a
+                    // reason to REFUSE the write, not to silently drop that
+                    // row from the comparison: `list_hosts` fails the whole
+                    // registry read on the identical corruption, and an
+                    // alias committed against a registry this function
+                    // could not fully interpret is exactly the kind of
+                    // state the later manager sync would then fail to
+                    // reconcile against.
+                    let names = rows
+                        .into_iter()
+                        .map(|(kind, destination, alias)| {
+                            HostKind::from_column(&kind).map(|kind| {
+                                host_display_name(kind, destination.as_deref(), alias.as_deref())
+                            })
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    if let Some(name) = names.into_iter().find(|name| name == candidate) {
+                        return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                    }
+                }
+                None => {
+                    // Clearing restores this row's DERIVED name — compute
+                    // it exactly as `host_display_name` would once the
+                    // alias is gone, and run it through the same narrow
+                    // check `alias_collision` gives registration and
+                    // retargeting.
+                    let restored = host_display_name(kind, destination.as_deref(), None);
+                    if let Some(name) = alias_collision(&tx, Some(host), &restored)? {
+                        return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                    }
+                }
+            }
+            tx.execute(
+                "UPDATE hosts SET alias = ?2 WHERE id = ?1",
+                rusqlite::params![host, alias],
+            )
+            .context("updating host alias")?;
+            tx.commit().context("committing alias update")?;
+            Ok(true)
+        })
+        .await
+        .context("update alias task panicked")?
     }
 
     /// Forget a registered ssh host — SPEC.md's remove-merely-forgets
@@ -5143,6 +5459,7 @@ mod tests {
                  DROP TABLE remembered_profile;
                  DROP TABLE preferences;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
+                 ALTER TABLE hosts DROP COLUMN alias;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id    INTEGER PRIMARY KEY
@@ -5213,6 +5530,7 @@ mod tests {
                  ALTER TABLE session_cache ADD COLUMN activity_at INTEGER;
                  ALTER TABLE session_cache ADD COLUMN title_sort TEXT;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
+                 ALTER TABLE hosts DROP COLUMN alias;
                  -- IF EXISTS: the preferences table only exists one stack
                  -- level up; this fixture runs at both.
                  DROP TABLE IF EXISTS preferences;
@@ -5277,6 +5595,7 @@ mod tests {
                  DROP TABLE remembered_profile;
                  DROP TABLE preferences;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
+                 ALTER TABLE hosts DROP COLUMN alias;
                  ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
@@ -5563,9 +5882,11 @@ mod tests {
         }
     }
 
-    /// SPEC.md: the local host is never user management surface. Refusing
-    /// its removal is what keeps it always-present, not merely
-    /// usually-present.
+    /// SPEC.md: the local host is always present, never removable. Refusing
+    /// its removal is what keeps that true, not merely usually true — its
+    /// alias is editable (a separate, narrower exception; see
+    /// `update_alias_accepts_the_local_row`), but its existence is not up
+    /// for removal the way an ssh row's is.
     #[tokio::test]
     async fn remove_ssh_host_refuses_the_local_row() {
         let (_dir, store) = fresh_store().await;
@@ -5581,9 +5902,9 @@ mod tests {
         );
     }
 
-    /// The same refusal on the update path — SPEC.md: the local host is not
-    /// user management surface, and that must hold for every ssh-host
-    /// MANAGEMENT mutation, not just removal. (`add_ssh_host` cannot even
+    /// The same refusal on the update path — the local host's destination
+    /// is not editable, and that must hold for every ssh-host MANAGEMENT
+    /// mutation, not just removal. (`add_ssh_host` cannot even
     /// express `kind = 'local'`, so it needs no equivalent test — the
     /// invariant is structural there, not merely untested. The partial
     /// unique index and this crate's lifecycle tests already own that
@@ -6094,6 +6415,763 @@ mod tests {
             store.cached_sessions(host).await.unwrap(),
             Vec::new(),
             "cache must be empty for a host id that no longer exists"
+        );
+    }
+
+    // ---- Host aliases -----------------------------------------------------
+
+    /// [`validate_alias`]'s trim-and-clear rule: surrounding whitespace never
+    /// reaches storage, and an input that trims to nothing — empty or
+    /// whitespace-only — is a CLEAR, the same as sending no alias at all.
+    /// Pinned directly against the pure function rather than through a
+    /// store round trip, the same way `the_session_filter_matches_by_the_documented_rules`
+    /// pins `SessionFilter::matches` — no database needed to prove a string
+    /// transform.
+    #[test]
+    fn validate_alias_trims_and_empty_clears() {
+        assert_eq!(
+            validate_alias(Some("  My Box  ")).unwrap(),
+            Some("My Box".to_string())
+        );
+        assert_eq!(
+            validate_alias(Some("")).unwrap(),
+            None,
+            "empty clears the alias"
+        );
+        assert_eq!(
+            validate_alias(Some("   ")).unwrap(),
+            None,
+            "whitespace-only input clears too, since it trims to empty"
+        );
+        assert_eq!(
+            validate_alias(None).unwrap(),
+            None,
+            "no alias in the write at all is itself a clear"
+        );
+    }
+
+    /// A control character anywhere in the trimmed alias is refused outright
+    /// — never silently stripped — because an alias reaches `farhelm agent`'s
+    /// line-oriented stdout (known-hosts listings, refusal messages), and a
+    /// smuggled newline there forges a second line the same way an
+    /// unsanitized session id would (SPEC_impl.md makes the identical
+    /// argument for session ids).
+    #[test]
+    fn validate_alias_refuses_control_characters() {
+        let err = validate_alias(Some("bad\u{0007}name")).unwrap_err();
+        assert!(
+            matches!(&err, HostStoreError::InvalidAlias(msg) if msg == "host alias must not contain control characters"),
+            "got: {err:?}"
+        );
+        let err = validate_alias(Some("bad\nname")).unwrap_err();
+        assert!(
+            matches!(&err, HostStoreError::InvalidAlias(msg) if msg == "host alias must not contain control characters"),
+            "a newline is the exact byte this check exists to catch: {err:?}"
+        );
+    }
+
+    /// The 64-character cap counts CHARACTERS, not bytes — pinned with a
+    /// multi-byte string whose byte length exceeds 64 while its char count
+    /// is exactly the limit, which only passes if the check reads
+    /// `.chars().count()` rather than `.len()`.
+    #[test]
+    fn validate_alias_caps_at_64_characters() {
+        let sixty_five = "a".repeat(65);
+        let err = validate_alias(Some(&sixty_five)).unwrap_err();
+        assert!(
+            matches!(&err, HostStoreError::InvalidAlias(msg) if msg == "host alias must be at most 64 characters"),
+            "got: {err:?}"
+        );
+
+        let sixty_four = "a".repeat(64);
+        assert_eq!(
+            validate_alias(Some(&sixty_four)).unwrap(),
+            Some(sixty_four),
+            "the cap is inclusive: exactly 64 is accepted"
+        );
+
+        let sixty_four_multibyte = "é".repeat(64);
+        assert!(
+            sixty_four_multibyte.len() > 64,
+            "sanity: 64 two-byte characters is more than 64 BYTES"
+        );
+        assert_eq!(
+            validate_alias(Some(&sixty_four_multibyte)).unwrap(),
+            Some(sixty_four_multibyte),
+            "64 CHARACTERS must be accepted regardless of byte length"
+        );
+    }
+
+    /// `update_alias` reports whether the CANONICAL stored value actually
+    /// changed, not whether a write happened to run — a repeat of the same
+    /// trimmed value, or clearing an already-clear alias, must report
+    /// `false` so callers (the REST route) know not to bump the fleet
+    /// revision for a no-op. The trimmed value round-trips through
+    /// `list_hosts`, closing the loop `validate_alias_trims_and_empty_clears`
+    /// only proves in isolation.
+    #[tokio::test]
+    async fn update_alias_reports_changed_and_stores_the_trimmed_value() {
+        let (_dir, store) = fresh_store().await;
+        let host = store
+            .add_ssh_host("alias-round-trip@host", None, None)
+            .await
+            .unwrap();
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|h| h.id == host).unwrap();
+
+        let changed = store
+            .update_alias(host, Some("  My Box  "))
+            .await
+            .expect("set");
+        assert!(changed, "a real change must report true");
+        assert_eq!(
+            row(store.list_hosts().await.unwrap()).alias.as_deref(),
+            Some("My Box"),
+            "the TRIMMED value is what lands in the row"
+        );
+
+        let repeat = store
+            .update_alias(host, Some("  My Box  "))
+            .await
+            .expect("repeat");
+        assert!(
+            !repeat,
+            "writing the same value again, even re-trimmed, must report unchanged"
+        );
+
+        let cleared = store.update_alias(host, Some("")).await.expect("clear");
+        assert!(cleared, "clearing a set alias is a real change");
+        assert_eq!(row(store.list_hosts().await.unwrap()).alias, None);
+
+        let repeat_clear = store.update_alias(host, None).await.expect("repeat clear");
+        assert!(
+            !repeat_clear,
+            "clearing an already-clear alias must report unchanged, whether the caller sends \
+             an empty string or no alias at all"
+        );
+    }
+
+    /// Aliasing a host onto a string another host's ALIAS already holds is
+    /// refused, naming the taken host's current display name.
+    #[tokio::test]
+    async fn update_alias_rejects_a_collision_with_another_hosts_alias() {
+        let (_dir, store) = fresh_store().await;
+        let taken = store.add_ssh_host("taken@host", None, None).await.unwrap();
+        store
+            .update_alias(taken, Some("Shared Name"))
+            .await
+            .expect("seed the taken alias");
+        let contender = store
+            .add_ssh_host("contender@host", None, None)
+            .await
+            .unwrap();
+
+        let err = store
+            .update_alias(contender, Some("Shared Name"))
+            .await
+            .expect_err("aliasing onto another host's current alias must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "Shared Name"
+            ),
+            "must name the colliding host's display name: {err:#}"
+        );
+        let contender_row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == contender)
+            .unwrap();
+        assert_eq!(
+            contender_row.alias, None,
+            "a refused alias write must not touch the row"
+        );
+    }
+
+    /// Aliasing onto another host's DERIVED name — an unaliased ssh host's
+    /// raw destination, or the local row's default "this machine" — is
+    /// refused the same way as colliding with an explicit alias.
+    ///
+    /// This is the whole reason `update_alias` computes every OTHER row's
+    /// [`crate::aggregate::host_display_name`] rather than comparing the
+    /// raw `alias` column: checking aliases alone would let an ssh host
+    /// alias itself to another host's plain destination, or to "this
+    /// machine", and either would make `farhelm agent`'s name resolution
+    /// ambiguous the instant a real host happened to derive to that same
+    /// string.
+    #[tokio::test]
+    async fn update_alias_rejects_a_collision_with_another_hosts_derived_name() {
+        let (_dir, store) = fresh_store().await;
+        store.add_ssh_host("plain@host", None, None).await.unwrap();
+        let contender = store
+            .add_ssh_host("contender2@host", None, None)
+            .await
+            .unwrap();
+
+        let err = store
+            .update_alias(contender, Some("plain@host"))
+            .await
+            .expect_err("aliasing onto another host's raw destination must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "plain@host"
+            ),
+            "got: {err:#}"
+        );
+
+        let err = store
+            .update_alias(contender, Some("this machine"))
+            .await
+            .expect_err("aliasing onto the local row's derived name must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "this machine"
+            ),
+            "got: {err:#}"
+        );
+    }
+
+    /// A host may alias itself to its own current derived name —
+    /// `plans/host-aliases.md`'s decisions section settles this explicitly
+    /// (the product-facing `SPEC.md` update is a later PR's work), and it
+    /// falls out of the
+    /// implementation for free (the collision scan is `WHERE id != ?1`, so
+    /// the row being written is never compared against itself), but the
+    /// behavior is worth pinning directly: renaming a host to exactly what
+    /// it already displays as must not be mistaken for a collision.
+    #[tokio::test]
+    async fn update_alias_allows_a_host_to_alias_itself_to_its_own_derived_name() {
+        let (_dir, store) = fresh_store().await;
+        let host = store
+            .add_ssh_host("self-alias@host", None, None)
+            .await
+            .unwrap();
+        let changed = store
+            .update_alias(host, Some("self-alias@host"))
+            .await
+            .expect("a host may alias itself to its own derived name");
+        assert!(
+            changed,
+            "the alias column goes from NULL to a value, which IS a change, \
+             even though the DISPLAYED name does not move"
+        );
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == host)
+            .unwrap();
+        assert_eq!(row.alias.as_deref(), Some("self-alias@host"));
+    }
+
+    /// The local row accepts an alias exactly like an ssh row — unlike
+    /// `update_ssh_destination`, which refuses the local row outright
+    /// (`update_ssh_destination_refuses_the_local_row`), `update_alias` does
+    /// not special-case `HostKind::Local` at all, per
+    /// `plans/host-aliases.md`'s decisions section ("the local host can be
+    /// aliased too").
+    #[tokio::test]
+    async fn update_alias_accepts_the_local_row() {
+        let (_dir, store) = fresh_store().await;
+        let local_id = store.list_hosts().await.unwrap()[0].id;
+        let changed = store
+            .update_alias(local_id, Some("My Laptop"))
+            .await
+            .expect("alias the local row");
+        assert!(changed);
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == local_id)
+            .unwrap();
+        assert_eq!(row.alias.as_deref(), Some("My Laptop"));
+    }
+
+    /// `update_ssh_destination`'s mirror of `update_alias`'s collision
+    /// check: retargeting a destination onto another host's current ALIAS
+    /// must be refused the same way a destination-vs-destination collision
+    /// is (`update_ssh_destination_rejects_a_collision_with_another_host`),
+    /// or the display-name uniqueness invariant would only hold in one
+    /// direction — a destination edit could silently steal an alias out
+    /// from under the host wearing it.
+    #[tokio::test]
+    async fn update_ssh_destination_rejects_a_collision_with_another_hosts_alias() {
+        let (_dir, store) = fresh_store().await;
+        let aliased = store
+            .add_ssh_host("aliased@host", None, None)
+            .await
+            .unwrap();
+        store
+            .update_alias(aliased, Some("Shared Name"))
+            .await
+            .expect("seed the alias");
+        let mover = store.add_ssh_host("mover@host", None, None).await.unwrap();
+
+        let err = store
+            .update_ssh_destination(mover, "Shared Name")
+            .await
+            .expect_err("retargeting onto another host's alias must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "Shared Name"
+            ),
+            "must name the colliding alias: {err:#}"
+        );
+        let mover_row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == mover)
+            .unwrap();
+        assert_eq!(
+            mover_row.destination.as_deref(),
+            Some("mover@host"),
+            "a refused retarget must not touch the row"
+        );
+    }
+
+    /// A version-15 database — the schema immediately before `hosts.alias` —
+    /// migrates existing hosts to a `NULL` alias, and the column is usable
+    /// immediately afterward, not merely present.
+    ///
+    /// Downgraded from a freshly created (current-schema) store rather than
+    /// replayed from `plant_v1_database`, matching this file's other
+    /// "a version-N database" fixtures
+    /// (`a_version_5_bare_default_is_dropped_by_schema_15` and its
+    /// siblings) that anchor at the schema immediately preceding the
+    /// migration under test — schema 16 added exactly one column, so
+    /// downgrading is exactly reversing that single `ALTER TABLE`.
+    #[tokio::test]
+    async fn a_version_15_database_migrates_hosts_to_a_null_alias() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helm.db");
+        let host = {
+            let store = HelmStore::open(&path).await.expect("create");
+            store.add_ssh_host("v15@host", None, None).await.unwrap()
+        };
+        {
+            let conn = Connection::open(&path).expect("reopen raw");
+            conn.execute_batch(
+                "ALTER TABLE hosts DROP COLUMN alias;
+                 PRAGMA user_version = 15;",
+            )
+            .expect("downgrade to the version-15 shape");
+        }
+
+        let migrated = HelmStore::open(&path).await.expect("migrate");
+        let row = migrated
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == host)
+            .unwrap();
+        assert_eq!(
+            row.alias, None,
+            "an upgraded host starts with no alias on record"
+        );
+
+        let changed = migrated
+            .update_alias(host, Some("Post-Migration Name"))
+            .await
+            .expect("the migrated column must accept a write immediately");
+        assert!(changed);
+
+        drop(migrated);
+        let reopened = HelmStore::open(&path)
+            .await
+            .expect("reopen at the current version");
+        let row = reopened
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == host)
+            .unwrap();
+        assert_eq!(
+            row.alias.as_deref(),
+            Some("Post-Migration Name"),
+            "the alias set right after migrating must survive a reopen"
+        );
+    }
+
+    /// Registering a NEW destination that matches another host's current
+    /// alias is refused, naming the colliding alias, exactly like an
+    /// `update_ssh_destination` retarget onto the same value would be.
+    /// Without this, `POST /api/hosts` could land a row whose derived name
+    /// collides with an existing alias — nothing in the unique index would
+    /// catch it, since the index knows only about destinations — and
+    /// `resolve_host` would then correctly refuse the now-ambiguous name,
+    /// silently breaking the alias as an agent target.
+    #[tokio::test]
+    async fn add_ssh_host_rejects_a_destination_matching_another_hosts_alias() {
+        let (_dir, store) = fresh_store().await;
+        let aliased = store
+            .add_ssh_host("aliased-owner@host", None, None)
+            .await
+            .unwrap();
+        store
+            .update_alias(aliased, Some("Shared Name"))
+            .await
+            .expect("seed the alias");
+
+        let err = store
+            .add_ssh_host("Shared Name", None, None)
+            .await
+            .expect_err(
+                "registering a destination that collides with another host's alias must be refused",
+            );
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "Shared Name"
+            ),
+            "got: {err:#}"
+        );
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            2,
+            "a refused registration must not have created a row"
+        );
+    }
+
+    /// The same registration-time collision, through the discovery path
+    /// `provisioning/service.rs` calls after a successful probe —
+    /// independently, because `register_probed_ssh_host` shares no code
+    /// with `add_ssh_host`; fixing one would not fix the other.
+    #[tokio::test]
+    async fn register_probed_ssh_host_rejects_a_destination_matching_another_hosts_alias() {
+        let (_dir, store) = fresh_store().await;
+        let aliased = store
+            .add_ssh_host("probed-owner@host", None, None)
+            .await
+            .unwrap();
+        store
+            .update_alias(aliased, Some("Probed Name"))
+            .await
+            .expect("seed the alias");
+
+        let err = store
+            .register_probed_ssh_host("Probed Name", None, None, Some("identity-probed"))
+            .await
+            .expect_err("a freshly discovered destination colliding with another host's alias must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "Probed Name"
+            ),
+            "got: {err:#}"
+        );
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            2,
+            "a refused discovery-registration must not have created a row"
+        );
+    }
+
+    /// `register_probed_ssh_host`'s OTHER branch — converging fields onto an
+    /// ALREADY-registered destination — never runs the alias check at all,
+    /// because it never writes `destination` and so cannot introduce a new
+    /// collision. Pinned so a future edit that moved the check earlier
+    /// (before the existing-row branch) does not start refusing ordinary
+    /// reconnects to a host that happens to already collide with something
+    /// (a pre-existing state this call did not create and is not
+    /// responsible for policing).
+    #[tokio::test]
+    async fn register_probed_ssh_host_converging_an_existing_row_skips_the_alias_check() {
+        let (_dir, store) = fresh_store().await;
+        let existing = store
+            .add_ssh_host("converge-owner@host", None, None)
+            .await
+            .unwrap();
+        let local_id = store.list_hosts().await.unwrap()[0].id;
+        // A pre-existing collision this call did not create — planted
+        // directly through the raw connection, bypassing `update_alias`
+        // (which would itself now refuse to create it — that is the whole
+        // point of this fixup round), to stand in for a state from before
+        // this write path was hardened, e.g. a hand-edited database.
+        {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock().unwrap().execute(
+                    "UPDATE hosts SET alias = 'converge-owner@host' WHERE id = ?1",
+                    rusqlite::params![local_id],
+                )
+            })
+            .await
+            .unwrap()
+            .expect("plant a pre-existing collision on the local row");
+        }
+
+        let (host, inserted) = store
+            .register_probed_ssh_host("converge-owner@host", Some("farhelm-remote"), None, None)
+            .await
+            .expect(
+                "converging fields on an already-registered destination must not be refused, \
+                 even with a pre-existing collision elsewhere in the registry",
+            );
+        assert_eq!(
+            host, existing,
+            "must resolve to the SAME row, not insert a new one"
+        );
+        assert!(!inserted, "the row already existed");
+    }
+
+    /// `ensure_ssh_hosts` refuses a batch where one genuinely NEW entry
+    /// collides with an existing alias, and the refusal rolls back the
+    /// WHOLE batch — the entries before the colliding one must not have
+    /// committed either, preserving the method's documented all-or-nothing
+    /// guarantee.
+    #[tokio::test]
+    async fn ensure_ssh_hosts_rejects_a_batch_entry_matching_another_hosts_alias_atomically() {
+        let (_dir, store) = fresh_store().await;
+        let aliased = store
+            .add_ssh_host("ensure-owner@host", None, None)
+            .await
+            .unwrap();
+        store
+            .update_alias(aliased, Some("Ensure Name"))
+            .await
+            .expect("seed the alias");
+
+        let err = store
+            .ensure_ssh_hosts(vec![
+                EnsureHost {
+                    destination: "ensure-clean@host".to_string(),
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                },
+                EnsureHost {
+                    destination: "Ensure Name".to_string(),
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                },
+            ])
+            .await
+            .expect_err("a batch containing a colliding entry must be refused as a whole");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "Ensure Name"
+            ),
+            "got: {err:#}"
+        );
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|h| h.destination.as_deref() != Some("ensure-clean@host")),
+            "the EARLIER entry in the same batch must not have committed either — the whole \
+             transaction rolls back on the later entry's refusal"
+        );
+    }
+
+    /// An entry `ensure_ssh_hosts` finds ALREADY registered is left alone
+    /// even if its destination happens to equal another host's alias — a
+    /// pre-existing state the additive, startup-time call did not create
+    /// and must not fail an otherwise ordinary boot over. Only entries this
+    /// call would actually INSERT are checked.
+    #[tokio::test]
+    async fn ensure_ssh_hosts_does_not_refuse_an_already_registered_entry_over_a_pre_existing_collision()
+     {
+        let (_dir, store) = fresh_store().await;
+        // Both destinations registered while nothing is aliased, so
+        // neither registration collides with anything yet.
+        let owner = store
+            .add_ssh_host("pre-existing-owner@host", None, None)
+            .await
+            .unwrap();
+        store
+            .add_ssh_host("Pre Existing Name", None, None)
+            .await
+            .expect("the plain destination index does not itself forbid a second host");
+        // The collision is planted directly through the raw connection,
+        // bypassing `update_alias` (which would itself now refuse to
+        // create it — that is the whole point of this fixup round), to
+        // stand in for a state that predates this write path being
+        // hardened: a hand-edited database, or one aliased before this
+        // check existed.
+        {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock().unwrap().execute(
+                    "UPDATE hosts SET alias = 'Pre Existing Name' WHERE id = ?1",
+                    rusqlite::params![owner],
+                )
+            })
+            .await
+            .unwrap()
+            .expect("plant the pre-existing collision");
+        }
+
+        let added = store
+            .ensure_ssh_hosts(vec![EnsureHost {
+                destination: "Pre Existing Name".to_string(),
+                remote_farhelm: None,
+                remote_state_dir: None,
+            }])
+            .await
+            .expect("an already-registered entry must not be refused over a collision it did not create");
+        assert!(added.is_empty(), "nothing new was inserted: {added:?}");
+    }
+
+    /// Clearing an alias is checked too: the row's RESTORED derived name
+    /// (its own destination, once the alias is gone) must not collide with
+    /// another host's current alias. Reachable sequence this closes: host A
+    /// has destination `builder` and alias `workstation`; host B takes
+    /// alias `builder` while A displays as `workstation`; clearing A's
+    /// alias would otherwise silently restore the ambiguous `builder` name
+    /// on two hosts at once.
+    #[tokio::test]
+    async fn update_alias_clearing_rejects_a_collision_with_another_hosts_alias() {
+        let (_dir, store) = fresh_store().await;
+        let a = store.add_ssh_host("builder", None, None).await.unwrap();
+        store
+            .update_alias(a, Some("workstation"))
+            .await
+            .expect("alias A so its raw destination is free to be taken");
+        let b = store.add_ssh_host("b-host", None, None).await.unwrap();
+        store
+            .update_alias(b, Some("builder"))
+            .await
+            .expect("B takes A's now-unused derived name as its own alias");
+
+        let err = store
+            .update_alias(a, None)
+            .await
+            .expect_err("clearing A's alias would restore a name B is currently displaying as");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "builder"
+            ),
+            "got: {err:#}"
+        );
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == a)
+            .unwrap();
+        assert_eq!(
+            row.alias.as_deref(),
+            Some("workstation"),
+            "a refused clear must leave the alias exactly as it was"
+        );
+    }
+
+    /// The same clear-time collision for the LOCAL row: its derived name is
+    /// always "this machine" rather than a destination, but the check is
+    /// identical — restoring it must not collide with another host's
+    /// current alias either.
+    #[tokio::test]
+    async fn update_alias_clearing_the_local_row_rejects_a_collision_with_another_hosts_alias() {
+        let (_dir, store) = fresh_store().await;
+        let local_id = store.list_hosts().await.unwrap()[0].id;
+        store
+            .update_alias(local_id, Some("workstation"))
+            .await
+            .expect("alias the local row so its derived name is free to be taken");
+        let other = store.add_ssh_host("other@host", None, None).await.unwrap();
+        store
+            .update_alias(other, Some("this machine"))
+            .await
+            .expect("another host takes the local row's now-unused derived name");
+
+        let err = store.update_alias(local_id, None).await.expect_err(
+            "clearing the local row's alias would restore a name another host displays as",
+        );
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "this machine"
+            ),
+            "got: {err:#}"
+        );
+    }
+
+    /// A registry row this build cannot decode (an unrecognized `kind`,
+    /// reachable only by bypassing the API — see the "Schema invariants"
+    /// tests above) is a reason to REFUSE an alias write, not to silently
+    /// drop that row from the collision scan. `list_hosts` already fails
+    /// the whole registry read on the identical corruption; an alias
+    /// committed against a registry this function could not fully
+    /// interpret would leave the later manager sync to fail on a durable
+    /// change nothing could roll back.
+    #[tokio::test]
+    async fn update_alias_refuses_when_a_comparison_row_has_a_corrupt_kind() {
+        let (_dir, store) = fresh_store().await;
+        let host = store
+            .add_ssh_host("corrupt-scan@host", None, None)
+            .await
+            .unwrap();
+        {
+            // The same bypass `list_hosts_fails_loudly_on_a_corrupt_kind_bypassing_the_check`
+            // uses: the schema's column-level `CHECK (kind IN ('local',
+            // 'ssh'))` refuses this through any real writer (including a
+            // raw `INSERT`), so reaching the row this fixture needs means
+            // disabling CHECK enforcement on this one connection first —
+            // standing in for a hand-edited or pre-CHECK database file.
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                let conn = conn.lock().unwrap();
+                conn.pragma_update(None, "ignore_check_constraints", true)
+                    .expect("disable CHECK enforcement for this connection");
+                conn.execute(
+                    "INSERT INTO hosts (kind, destination) VALUES ('bogus', NULL)",
+                    [],
+                )
+                .expect("plant a corrupt kind bypassing the CHECK constraint")
+            })
+            .await
+            .unwrap();
+        }
+
+        let err = store
+            .update_alias(host, Some("New Name"))
+            .await
+            .expect_err("an alias write must refuse rather than silently skip an undecodable row");
+        assert!(
+            format!("{err:#}").contains("bogus"),
+            "error must name the corrupt kind, matching list_hosts's own error: {err:#}"
+        );
+        // `list_hosts` fails the SAME way on the SAME corruption
+        // (`list_hosts_fails_loudly_on_a_corrupt_kind_bypassing_the_check`)
+        // — checked here too, so a future edit could not "fix" this
+        // function by reading through a helper that quietly tolerates what
+        // the rest of the module refuses to.
+        assert!(
+            store.list_hosts().await.is_err(),
+            "list_hosts must fail on this fixture as well, not just update_alias"
+        );
+        // Read the alias column directly, bypassing the broken decode
+        // path entirely, since `list_hosts` cannot serve this host's row
+        // in isolation once ANY row in the registry is corrupt.
+        let conn = Arc::clone(&store.conn);
+        let alias: Option<String> = tokio::task::spawn_blocking(move || {
+            conn.lock().unwrap().query_row(
+                "SELECT alias FROM hosts WHERE id = ?1",
+                rusqlite::params![host],
+                |row| row.get(0),
+            )
+        })
+        .await
+        .unwrap()
+        .expect("read back the alias column directly");
+        assert_eq!(
+            alias, None,
+            "the refused write must not have changed this host's alias"
         );
     }
 
