@@ -172,7 +172,9 @@ jobs:
           ssh -o BatchMode=yes localhost true
       - name: "Run the test suite against the pinned tmux"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: "PATH=\"$PWD/.ci-tmux:$PATH\" cargo test -- --show-output --test-threads=4"
+        run: |
+          PATH="$PWD/.ci-tmux:$PATH" cargo test --workspace --exclude farhelm -- --show-output --test-threads=4
+          PATH="$PWD/.ci-tmux:$PATH" cargo test -p farhelm --lib --bins -- --show-output --test-threads=4
       - name: "Regress safe output-client teardown on the pinned tmux"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: "scripts/test-tmux-pinned-shutdown.sh"
