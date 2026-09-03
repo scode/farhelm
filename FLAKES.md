@@ -118,5 +118,29 @@ and the 0xff assertion never ran. What the timeout shows is only that the reques
 `send_input`, the supervisor's `send-keys` exchange, the fixture's read and write, the output's trip back) did not
 complete within the budget; the transcript that would localize it was not kept. The input path, the behavior #339's
 hardening was aimed at, is the first hypothesis, not an established cause. The load was harsher than a release runner's,
-where the build finishes before the tests start, so the measured rate is not directly representative. Disposition: open
-(TODO.md).
+where the build finishes before the tests start, so the measured rate is not directly representative. Then it failed the
+same way on a GitHub-hosted runner, in CI's `test` job for a docs-only PR of the same stack (run 33716079614, the only
+failure in 337 tests), so the stall is not an artifact of the sandbox's load. Disposition: open (TODO.md).
+
+## 2026-09-03 — `hook_identity::a_hook_outside_a_farhelm_session_does_nothing_silently` (crates/farhelm/tests/e2e)
+
+Same loaded sandbox runs as the entry above: 1 of 3 full-binary runs on 0.3.0 and 1 of 10 loaded `hook_identity::`
+module runs on the attach-boundary stack, `write the payload: Broken pipe` from `assert_silent`. The hook under test has
+nothing to do and exits without reading its stdin; under load it was gone before the test wrote the payload, so the
+write hit a closed pipe and the test panicked on the very behavior it asserts. Disposition: fixed in #353 (the payload
+write tolerates a broken pipe; the exit status and captured output still decide).
+
+## 2026-09-03 — `terminal_backpressure::a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior` and `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e)
+
+Same loaded sandbox, full binary at `--test-threads=4` on 0.3.0: the deep-pause test failed 2 of 3 runs in the file's
+shared wait (`timed out waiting for FLOOD-000000; ~12 MB seen, last records [799999, ...]`), the same wait and the same
+fingerprint as the two `#[ignore]`d siblings above; the memory test failed 1 of 3. Neither failed in the three loaded
+full runs on the attach-boundary stack the same day, so the rate is noisy. A third member at the same wait strengthens
+the reading that the wait's budget under load, not any one test, is the thing to look at. Disposition: open (TODO.md,
+folded into the backpressure entries).
+
+## 2026-09-03 — `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e)
+
+Same loaded sandbox: 1 of 3 full-binary runs on 0.3.0 (before the locale fix, so alongside four locale-caused failures)
+and 1 of 3 on the attach-boundary stack, `timed out waiting for "FAKE-AGENT READY"` after the test's attach at a
+degenerate pane size. Never alone. Nothing about the cause is known beyond the fingerprint. Disposition: open (TODO.md).
