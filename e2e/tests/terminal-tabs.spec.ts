@@ -1998,14 +1998,12 @@ async function resolveToken(page: Page, token: string): Promise<string> {
 }
 
 /**
- * A specificity regression: `.btn:focus-visible:not(:disabled)` and
- * `.tab.selected` are both one-class-plus-two-pseudo-classes selectors, so
- * without an explicit `.tab.selected:focus-visible` override the rule that
- * happens to come LATER in app.css wins by source order alone — which was
- * `.btn`'s neutral hover/focus fill, silently erasing the selected tab's
- * accent the instant a keyboard user tabbed onto it (a mouse hover was
- * already covered by the sibling `.tab.selected:hover` rule; only the
- * keyboard path was missing).
+ * Keyboard focus and pointer hover are independent states here. A selected
+ * tab keeps the lighter accent-hover fill under a pointer on its own, but a
+ * keyboard user must still read selection as the resting accent even when
+ * their pointer happens to be over the tab. The test therefore establishes
+ * their intersection rather than relying on the mouse position a prior click
+ * happened to leave behind.
  *
  * `.focus()` on the target rather than a full `Tab` key crawl to it, same
  * reasoning as chrome.spec.ts's own focus-visible test: a script `.focus()`
@@ -2022,7 +2020,7 @@ async function resolveToken(page: Page, token: string): Promise<string> {
  * focus does not matter; the explicit `.focus()` that follows is what
  * lands it on the tab under test.
  */
-test("a keyboard-focused selected tab keeps its accent fill instead of the neutral hover tint", async ({
+test("a keyboard-focused selected tab keeps its resting accent even while hovered", async ({
   page,
   request,
 }) => {
@@ -2035,11 +2033,13 @@ test("a keyboard-focused selected tab keeps its accent fill instead of the neutr
     await expect(agentTab).toHaveClass(/selected/);
 
     const accentFill = await resolveToken(page, "--accent-fill");
-    const controlHoverBg = await resolveToken(page, "--control-hover-bg");
-    // A sanity check on the fixture itself: if these two tokens ever
-    // collided, the assertion below would pass whether or not the fix
-    // held, and this test would stop meaning anything.
-    expect(accentFill).not.toBe(controlHoverBg);
+    const accentFillHover = await resolveToken(page, "--accent-fill-hover");
+    // A sanity check on the fixture itself: the two states this test
+    // distinguishes are the resting accent and the accent-hover fill. If
+    // those tokens ever collided, both assertions below would pass whether
+    // or not keyboard focus restored the accent, and this test would stop
+    // meaning anything.
+    expect(accentFill).not.toBe(accentFillHover);
 
     // A bare `.focus()` here is not enough: the row-open click above
     // (inside `openSessionWithTabs`) leaves the browser's own input
@@ -2052,9 +2052,28 @@ test("a keyboard-focused selected tab keeps its accent fill instead of the neutr
     // focuses — so the following `.focus()` on the tab reads as keyboard
     // arrival the way chrome.spec.ts's own focus-visible test does when
     // nothing but page load preceded it.
+    // A prior mount can legitimately leave the selected tab focused. Clear
+    // that state before sampling ordinary hover; the later Tab-plus-focus
+    // sequence is the distinct keyboard-visible state this test specifies.
+    await agentTab.evaluate((node) => (node as HTMLElement).blur());
+    await agentTab.hover();
+    // `.btn` transitions its background for 100ms. `hover()` only starts
+    // that fade, so a direct style read can catch an interpolated color under
+    // load instead of the semantic ordinary-hover endpoint.
+    await expect(agentTab).toHaveCSS("background-color", accentFillHover);
+    expect(await agentTab.evaluate((node) => node.matches(":focus-visible"))).toBe(false);
+
     await page.keyboard.press("Tab");
     await agentTab.focus();
+    // Hover after moving focus: this pins the real overlap at issue without
+    // using a click, which would replace the keyboard modality the test needs
+    // WebKit to expose through `:focus-visible`.
+    await agentTab.hover();
     await expect(agentTab).toHaveCSS("background-color", accentFill);
+    expect(
+      await agentTab.evaluate((node) => node.matches(":focus-visible")),
+      "the test must establish keyboard-visible focus",
+    ).toBe(true);
   } finally {
     if (id) await cleanupSession(request, id);
   }
