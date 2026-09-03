@@ -80,7 +80,19 @@ everything not yet sorted, which carries no implication either way. Within a buc
   mode before it prints READY (#339), so the first suspect is the input path under load (`send_input`, the supervisor's
   `send-keys` exchange, the fixture's read) rather than the fixture, and the second is the budget. Start at rung 1 of
   `.agents/narrow-tests.md` on a loaded 4-vCPU box and keep the full transcript the harness panic prints; the sandbox
-  run that found this kept only a summary.
+  run that found this kept only a summary. It then failed the same way on a GitHub-hosted runner (CI run 33716079614,
+  the `test` job on a docs-only PR of this stack), so it is a CI flake, not only a sandbox one; kept transcripts from
+  later sandbox runs show READY present, once in snapshot shape, and nothing at all after the request byte.
+- Deflake `terminal_backpressure::a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior` and
+  `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e), together with the two
+  `#[ignore]`d `terminal_backpressure` entries above: on 2026-09-03, on a loaded 4-vCPU sandbox running the full binary
+  at `--test-threads=4`, the deep-pause test failed 2 of 3 runs in the same shared wait with the same `FLOOD-000000`
+  fingerprint, and the memory test 1 of 3 (terminal_backpressure.rs:906). A third member at one wait says the wait's
+  budget under load is the thing to measure first; treat all four as one piece of work.
+- Deflake `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e): on 2026-09-03, on the
+  same loaded sandbox, `timed out waiting for "FAKE-AGENT READY"` in 1 of 3 full-binary runs on 0.3.0 and 1 of 3 on the
+  attach-boundary stack, never alone. No hypothesis yet; start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU
+  box with the full transcript kept.
 - Put the tmux e2e suite back into the release gate, and un-ignore the four load-flaky tests, once the deflake entries
   above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs every test target
   EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or two of the
