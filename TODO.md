@@ -27,6 +27,30 @@ Within a bucket, no order.
   terminal_backpressure.rs:289) in the `test` job for a PR that touched nothing on the terminal path, and passed on the
   rerun. The test predates that PR. No local or sandbox reproduction has been attempted; start at rung 3 of
   `.agents/narrow-tests.md` on a 4-vCPU box, since a single CI sighting says "load", not "logic".
+- Deflake three profiles-popup Playwright cases that fail only under load (e2e/tests/profiles.spec.ts). All three pass
+  locally in both engines, repeatedly, and fail on a 4-vCPU sandbox running the spec with the default worker count
+  beside a live helm, supervisor, and both browsers; seen 2026-09-03 at the 0.3.0-rc.1 tip, Chromium only. Start at rung
+  3 of `.agents/narrow-tests.md` on a 4-vCPU box; rung 1 does not reproduce any of them.
+  - `the profiles popup follows its focus and Escape dismissal contract`: after `locator.focus()` moves focus to the
+    host details toggle, the popup is still mounted 5 s later. The focus-out classifier answers `Unknown` when its
+    `document.activeElement` eval overruns the 370 ms settlement budget, and `Unknown` never dismisses; the rc.1 code
+    retries such an obligation six times at 150 ms and then drops it, and on this box that was still not enough. Either
+    the budget scales with observed bridge latency, or a dropped obligation is retried on the next focus event rather
+    than forgotten.
+  - `unknown then transit waits for the pending focus request`: the popup is gone by the time the test looks 400 ms
+    later. This test drives the classifier through the `window.__farhelmTestProfiles` hooks (`classificationErrors`,
+    held requests); the retry loop added for the case above re-classifies while those hooks are still armed, and under
+    load the retry's sample lands after the held request is released. The test and the retry need one story about which
+    classification the hook is holding.
+  - `stale focus-out classifiers cannot clear newer obligations`: "the page never opened feed socket #1 (saw 0)" — the
+    stubbed feed harness in `helpers/fleet.ts` (`stubFeed`) never saw the page's socket within its wait. Harness, not
+    product; the same helper serves every profiles test, so the first look is the wait's length under load.
+- Deflake `a client that stops draining is detached with the stall reason after the full stall interval`
+  (e2e/tests/terminal-flood.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, the poll "the attachment
+  must cross HIGH_WATER and pause before the stall clock can start" saw zero pauses in 30 s: the flood never built
+  enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
+  backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Start at rung 3 of
+  `.agents/narrow-tests.md` on a 4-vCPU box.
 
 ## Maybe later
 
