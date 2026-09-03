@@ -200,6 +200,35 @@ async function clonedId(page: Page, timeout = 30_000): Promise<string> {
   return match![1];
 }
 
+/**
+ * Run every cleanup step even when an earlier one throws, then surface all
+ * failures together rather than letting the first one hide the rest.
+ *
+ * The two alias tests below have several independently fallible teardown
+ * steps (closing the driver page, deleting a session, deleting a profile)
+ * ahead of the one that matters most — restoring the shared fleet host's
+ * alias — inside a single `finally` block. A plain sequential `finally`
+ * abandons every step after the first thrown exception, which is exactly
+ * how the alias restore two tests ago could be skipped by an unrelated
+ * `cleanupSession` failure. This runs the whole list regardless, and
+ * raises one aggregate error afterward if anything failed, so a broken
+ * step still gets reported instead of silently swallowing its neighbors'
+ * outcomes.
+ */
+async function runCleanupSteps(steps: Array<() => Promise<void>>): Promise<void> {
+  const failures: unknown[] = [];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`${failures.length} cleanup step(s) failed: ${failures.map(String).join("; ")}`);
+  }
+}
+
 test.describe("agent relay: an agent clones its own session across hosts", () => {
   test.beforeAll(async ({ request }) => {
     test.setTimeout(180_000);
@@ -493,6 +522,215 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
       if (source) await cleanupSession(request, source.id);
       if (sourceProfile) await cleanupProfile(request, sourceProfile);
       fs.rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Spec: once a host carries an alias, cross-host naming resolves it —
+   * `$farhelm clone this session onto <alias>` reaches the aliased host
+   * exactly as naming its raw destination used to
+   * (`aggregate::host_display_name`: the alias IS the display name once
+   * set). This is the browser-level pin of the same rule
+   * `agent_requests.rs`'s `create_resolves_by_alias_once_one_is_set` proves
+   * at the Rust level, run here against the real second host and the real
+   * CLI rather than a fabricated fleet.
+   *
+   * The source session lives on the LOCAL host this time — the reverse of
+   * the clone direction every test above uses — because the host under
+   * test has to be the TARGET being named, and this suite's only
+   * alias-safe target is the harness's shared ssh host: aliasing the local
+   * row instead would rename "this machine" out from under every other
+   * spec that assumes it, including the three tests above.
+   */
+  test("clones onto the remote host by its alias", async ({ context, request }) => {
+    requireFleet();
+    test.setTimeout(180_000);
+
+    const stamp = Date.now();
+    const name = `agent-relay-alias-${stamp}`;
+    const alias = `relay-alias-${stamp}`;
+    const remote = await remoteHost(request);
+    const local = await localHost(request);
+    const work = stackScratchDir(`agent-relay-alias-${stamp}-`);
+    // Captured before this test writes anything, so the restore below puts
+    // back the host's REAL prior value (ordinarily `null`, but this does
+    // not assume that) rather than a guess.
+    const originalAlias: string | null = remote.alias ?? null;
+
+    // The alias restore is its OWN, OUTERMOST try/finally, independent of
+    // every other cleanup step below — it is the one piece of teardown
+    // that leaks into every OTHER test on the shared fleet host if
+    // skipped, so it must run even when an unrelated step (closing the
+    // driver page, deleting the session or profile) throws first.
+    try {
+      const set = await request.post(`/api/hosts/${remote.id}/alias`, { data: { alias } });
+      expect(set.ok(), `aliasing the remote host: ${await set.text()}`).toBe(true);
+
+      let sourceProfile: string | undefined;
+      let source: { id: string } | undefined;
+      let cloned: string | undefined;
+      let driver: Page | undefined;
+      try {
+        sourceProfile = (
+          await createProfile(request, {
+            name,
+            invocation: relayAgentInvocation(),
+            agent_kind: "claude",
+          })
+        ).id;
+        source = await createSession(request, {
+          title: `relay-alias-${stamp}`,
+          cwd: work,
+          host: local.id,
+          profile_id: sourceProfile,
+        });
+
+        driver = await context.newPage();
+        await openRelayTerminal(driver, source.id);
+        await submitPrompt(driver, `$farhelm clone this session onto ${alias}`, 200);
+        cloned = await clonedId(driver);
+
+        const listing = await request.get("/api/sessions?include_archived=true");
+        expect(listing.ok(), `GET /api/sessions: ${listing.status()}`).toBe(true);
+        const rows = (await listing.json()).sessions;
+        const row = rows.find((entry: any) => entry.id === cloned);
+        expect(row, `the clone must be in the merged listing: ${JSON.stringify(rows)}`).toBeTruthy();
+        expect(row.host, "the clone lands on the ALIASED host's registry row").toBe(remote.id);
+        expect(row.host_name, "the clone's row names the host by its alias").toBe(alias);
+      } finally {
+        const capturedCloned = cloned;
+        const capturedSource = source;
+        const capturedProfile = sourceProfile;
+        await runCleanupSteps([
+          async () => {
+            await driver?.close();
+          },
+          async () => {
+            if (capturedCloned) await cleanupSession(request, capturedCloned);
+          },
+          async () => {
+            if (capturedSource) await cleanupSession(request, capturedSource.id);
+          },
+          // See the first test in this file for why the remembered default
+          // is deliberately NOT cleaned up here too.
+          async () => {
+            if (capturedProfile) await cleanupProfile(request, capturedProfile);
+          },
+          async () => {
+            fs.rmSync(work, { recursive: true, force: true });
+          },
+        ]);
+      }
+    } finally {
+      const cleared = await request.post(`/api/hosts/${remote.id}/alias`, {
+        data: { alias: originalAlias },
+      });
+      expect(
+        cleared.ok(),
+        `restoring the shared fleet host's alias: ${await cleared.text()}`,
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * Spec: once a host is aliased, its RAW destination stops resolving — it
+   * is refused exactly like any other unregistered name, and the refusal's
+   * known-hosts list shows the alias rather than the address it replaced.
+   * The browser-level pin of `agent_requests.rs`'s
+   * `create_on_the_raw_destination_is_refused_once_aliased`, run here
+   * against the real second host and the real CLI.
+   */
+  test("cloning onto the remote host's raw destination is refused once aliased", async ({
+    context,
+    request,
+  }) => {
+    requireFleet();
+    test.setTimeout(180_000);
+
+    const stamp = Date.now();
+    const name = `agent-relay-unaliased-${stamp}`;
+    const alias = `relay-hides-${stamp}`;
+    const remote = await remoteHost(request);
+    const local = await localHost(request);
+    const work = stackScratchDir(`agent-relay-unaliased-${stamp}-`);
+    const rawDestination = remote.destination as string;
+    // Captured before this test writes anything — see the previous test's
+    // own comment for why this is not assumed to be `null`.
+    const originalAlias: string | null = remote.alias ?? null;
+
+    // Same nesting as the previous test, for the same reason: the alias
+    // restore is the one piece of teardown that leaks into every OTHER
+    // test on the shared fleet host if an unrelated cleanup step throws
+    // first, so it gets its own outermost try/finally.
+    try {
+      const set = await request.post(`/api/hosts/${remote.id}/alias`, { data: { alias } });
+      expect(set.ok(), `aliasing the remote host: ${await set.text()}`).toBe(true);
+
+      let sourceProfile: string | undefined;
+      let source: { id: string } | undefined;
+      let driver: Page | undefined;
+      try {
+        sourceProfile = (
+          await createProfile(request, {
+            name,
+            invocation: relayAgentInvocation(),
+            agent_kind: "claude",
+          })
+        ).id;
+        source = await createSession(request, {
+          title: `relay-unaliased-${stamp}`,
+          cwd: work,
+          host: local.id,
+          profile_id: sourceProfile,
+        });
+
+        driver = await context.newPage();
+        await openRelayTerminal(driver, source.id);
+        const before = await (await request.get("/api/sessions?include_archived=true")).json();
+
+        await submitPrompt(driver, `$farhelm clone this session onto ${rawDestination}`, 200);
+        await waitForFlatText(driver, "CLONE-ERROR:");
+        const transcript = await flatTermText(driver);
+        expect(transcript).toContain(rawDestination);
+        expect(
+          transcript,
+          "the known-hosts list must show the ALIAS the raw destination was replaced by",
+        ).toContain(alias);
+        expect(
+          transcript,
+          "a refused clone must not report a session id — that is what a silent fallback would look like",
+        ).not.toContain("CLONED:");
+
+        const after = await (await request.get("/api/sessions?include_archived=true")).json();
+        const ids = new Set(before.sessions.map((row: any) => row.id));
+        const created = after.sessions.filter((row: any) => !ids.has(row.id));
+        expect(created, `a refused clone must create nothing: ${JSON.stringify(created)}`).toEqual([]);
+      } finally {
+        const capturedSource = source;
+        const capturedProfile = sourceProfile;
+        await runCleanupSteps([
+          async () => {
+            await driver?.close();
+          },
+          async () => {
+            if (capturedSource) await cleanupSession(request, capturedSource.id);
+          },
+          async () => {
+            if (capturedProfile) await cleanupProfile(request, capturedProfile);
+          },
+          async () => {
+            fs.rmSync(work, { recursive: true, force: true });
+          },
+        ]);
+      }
+    } finally {
+      const cleared = await request.post(`/api/hosts/${remote.id}/alias`, {
+        data: { alias: originalAlias },
+      });
+      expect(
+        cleared.ok(),
+        `restoring the shared fleet host's alias: ${await cleared.text()}`,
+      ).toBe(true);
     }
   });
 });

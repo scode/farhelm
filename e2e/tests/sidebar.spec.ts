@@ -3452,3 +3452,269 @@ test("resizing the viewport closes an open row menu", async ({ page, request }) 
     await cleanupSession(request, session.id);
   }
 });
+
+// =====================================================================
+// Host aliases: setting a shorter label from the row menu and watching it
+// propagate to every surface that names a host — the host panel row, the
+// session row's host slot, and the create form's host selector — while the
+// details view keeps the real destination visible underneath (SPEC.md's
+// Topology paragraph). `agent-relay.spec.ts` covers the CLI-facing half
+// (resolving a create by alias, and the raw destination refusing once
+// aliased) against the suite's REAL second host; the two tests below are
+// display-propagation only and need no live ssh connection to prove, so
+// both the remote host and its session are fabricated through route
+// interception instead — see each test's own doc for why that is the
+// right call here specifically.
+// =====================================================================
+
+/**
+ * Setting a host's alias from the row menu propagates to every CLIENT
+ * surface that reads it — the panel row, the create form's host selector,
+ * and the session row's host slot — with the EXACT text, never leaving the
+ * raw destination visible beside the alias; clearing restores the
+ * destination in the same three places. Both directions are checked with
+ * exact-text matches throughout, not merely `toContain`-shaped ones.
+ *
+ * Deliberately NARROWED to client rendering and refetch wiring, not
+ * end-to-end alias propagation: the mocked `/api/sessions` route below
+ * computes `host_name` from this test's OWN `alias` variable, so this test
+ * would still pass even if the real helm never derived a session's
+ * `host_name` from its host's alias at all. That independent derivation is
+ * what `sessions_tests.rs`'s `get_session_carries_the_hosts_alias` and
+ * `hosts.rs`'s `session_rows_carry_the_alias_in_host_name` pin at the Rust
+ * level, and what `agent-relay.spec.ts`'s alias cases exercise end to end
+ * against the suite's real second host. What only a browser can prove —
+ * and what this test is actually for — is that the UI, once told (through
+ * these two routes) that a host's alias changed, redraws every one of
+ * these three surfaces correctly and re-fetches them on the right trigger
+ * (the mutation's own refetch for the first two, a reload standing in for
+ * the session list's own poll for the third).
+ *
+ * The remote host and its session are entirely FABRICATED via route
+ * interception rather than driven against a real second supervisor, for
+ * the reason above and to avoid touching the suite's shared
+ * ssh-to-localhost fixture host that `agent-relay.spec.ts` and
+ * `terminal-multihost.spec.ts` already coordinate lifecycle for — aliasing
+ * that real, cross-file fixture from a third place is a bigger risk than a
+ * rendering test calls for. The alias mutation itself still goes through
+ * the real client code path (the row menu, the shared inline editor,
+ * `api::set_alias`'s real POST) — only the SERVER side is a stand-in,
+ * following the same `page.route("**\/api/hosts", ...)` fetch-and-splice
+ * pattern `terminal-multihost.spec.ts` already uses for host-row fixtures
+ * that do not need a live connection.
+ */
+test("aliasing a remote host renames it everywhere but the details view", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  const hostId = 84001;
+  const destination = "user@aliasable-mock";
+  // Mutated by the fabricated alias route below and read by every other
+  // fabricated route, so every fixture agrees on the host's CURRENT display
+  // name across the several requests one test drives.
+  let alias: string | null = null;
+  const displayName = () => alias ?? destination;
+  const hostFixture = () => ({
+    id: hostId,
+    kind: "ssh",
+    destination,
+    alias,
+    name: displayName(),
+    identity: "identity-aliasable-mock",
+    remote_farhelm: null,
+    remote_state_dir: null,
+    state: {
+      phase: "connected",
+      identity: "identity-aliasable-mock",
+      build_version: "0.1.0",
+      refresh: { status: "ok", sessions: 1 },
+    },
+  });
+
+  await page.route("**/api/hosts", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.hosts = [...body.hosts.filter((host: any) => host.kind === "local"), hostFixture()];
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(`**/api/hosts/${hostId}/alias`, async (route) => {
+    const submitted = route.request().postDataJSON() as { alias: string | null };
+    alias = submitted.alias;
+    await route.fulfill({
+      status: 200,
+      headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+      json: { ...hostFixture(), incarnation: 1 },
+    });
+  });
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+      json: {
+        sessions: [
+          {
+            id: "aliasable-mock-session",
+            title: "mock-remote-session",
+            cwd: "/srv/work",
+            invocation: "sleep 300",
+            host: hostId,
+            host_name: displayName(),
+          },
+        ],
+        total: 1,
+        matching: 1,
+        truncated: false,
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openHostsPanel(page);
+  // By `data-host-id`, not by the `.host-name` text this test is about to
+  // change — a locator filtered on the CURRENT name would stop matching
+  // its own row the moment the alias takes effect.
+  const hostRow = page.locator(`[data-host-id="${hostId}"]`);
+  await expect(hostRow).toBeVisible({ timeout: 20_000 });
+  await expect(hostRow.locator(".host-name")).toHaveText(destination);
+
+  await openHostMenu(hostRow);
+  await hostRow.locator(".host-alias").click();
+  const input = hostRow.locator(".host-destination-input");
+  await expect(input).toBeVisible();
+  await expect(input).toHaveValue("");
+  await input.fill("Build Box");
+  await hostRow.locator(".host-save-destination").click();
+
+  // The panel row picks up the rename immediately — `HostsPanel`'s own doc
+  // calls this "on_changed", an explicit refetch a mutation asks for rather
+  // than waiting out the poll. The create form's selector shares the SAME
+  // `hosts` signal, so no separate wait is needed for it to agree.
+  await expect(hostRow.locator(".host-name")).toHaveText("Build Box");
+  await page.locator(".new-session-button").click();
+  await expect(page.locator(".create-session-form")).toBeVisible();
+  // Anchored, not a bare substring match: an option that showed "Build Box
+  // (user@aliasable-mock)" — the alias with the raw destination still
+  // exposed beside it — would satisfy `hasText: "Build Box"` but is exactly
+  // the leak this assertion exists to catch.
+  await expect(
+    page.locator(".create-session-host option", { hasText: /^Build Box$/ }),
+  ).toHaveCount(1);
+
+  // The session row's host slot rides a SEPARATE signal (`/api/sessions`,
+  // not `/api/hosts`) that the alias mutation's own refetch does not touch
+  // — a reload is what proves it settled, rather than guessing this
+  // suite's background poll cadence. Expect a harmless
+  // "no such session: aliasable-mock-session" line in the helm's log after
+  // this: auto-select tries to attach the fabricated row's terminal, which
+  // the real backend correctly refuses since the session does not exist
+  // there — the row's listed fields are what this test is about, not its
+  // terminal.
+  await page.reload();
+  const sessionRow = row(page, "aliasable-mock-session");
+  await expect(sessionRow).toBeVisible({ timeout: 20_000 });
+  await expect(sessionRow.locator(".session-host")).toHaveText("Build Box");
+
+  // The details view is the one place an alias never hides the real
+  // destination.
+  await openHostsPanel(page);
+  await expect(hostRow.locator(".host-destination-detail")).toHaveText(
+    `destination: ${destination}`,
+  );
+
+  // Clearing restores the destination everywhere the alias had replaced it
+  // — re-checking all three surfaces again, not only the panel row: a fix
+  // that repopulated the panel correctly but left the session list or the
+  // create form's selector on the stale alias would otherwise pass.
+  await openHostMenu(hostRow);
+  await hostRow.locator(".host-alias").click();
+  await expect(input).toHaveValue("Build Box");
+  await input.fill("");
+  await hostRow.locator(".host-save-destination").click();
+  await expect(hostRow.locator(".host-name")).toHaveText(destination);
+  await expect(hostRow.locator(".host-destination-detail")).toHaveCount(0);
+
+  await page.locator(".new-session-button").click();
+  await expect(page.locator(".create-session-form")).toBeVisible();
+  await expect(
+    page.locator(".create-session-host option", { hasText: new RegExp(`^${destination}$`) }),
+  ).toHaveCount(1);
+
+  await page.reload();
+  await expect(sessionRow).toBeVisible({ timeout: 20_000 });
+  await expect(sessionRow.locator(".session-host")).toHaveText(destination);
+});
+
+/**
+ * The local row accepts an alias too (SPEC.md's Topology paragraph: "the
+ * local host can carry one too") and the panel shows it. Narrower than the
+ * remote case above on purpose: that test already owns the wider
+ * surface-propagation assertions (session row, create-form selector,
+ * details-view destination line, clearing), and repeating all of them here
+ * for the local row would prove the same client-side wiring a second time
+ * rather than anything specific to the local row's own exception.
+ *
+ * Fabricated the same way as the remote case, for the same reason: this is
+ * a display check, not a connectivity one, and mocking means no real state
+ * on the actual local row (a fixture every OTHER spec file in this suite
+ * also reads) is ever touched.
+ */
+test("aliasing the local host shows it in the host panel", async ({ page, request }) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  const localId = await localHostId(request);
+  let alias: string | null = null;
+
+  await page.route("**/api/hosts", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.hosts = body.hosts.map((host: any) =>
+      host.id === localId ? { ...host, alias, name: alias ?? "this machine" } : host,
+    );
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(`**/api/hosts/${localId}/alias`, async (route) => {
+    const submitted = route.request().postDataJSON() as { alias: string | null };
+    alias = submitted.alias;
+    await route.fulfill({
+      status: 200,
+      headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+      json: {
+        id: localId,
+        kind: "local",
+        destination: null,
+        alias,
+        name: alias ?? "this machine",
+        identity: null,
+        remote_farhelm: null,
+        remote_state_dir: null,
+        state: { phase: "connected", identity: null, build_version: "0.1.0", refresh: { status: "ok", sessions: 0 } },
+        incarnation: 1,
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openHostsPanel(page);
+  // By `data-host-id`, for the same reason the remote test above uses it:
+  // stable across the very rename this test performs.
+  const hostRow = page.locator(`[data-host-id="${localId}"]`);
+  await expect(hostRow).toBeVisible({ timeout: 20_000 });
+  await expect(hostRow.locator(".host-name")).toHaveText("this machine");
+
+  await openHostMenu(hostRow);
+  await hostRow.locator(".host-alias").click();
+  const input = hostRow.locator(".host-destination-input");
+  await expect(input).toBeVisible();
+  await input.fill("My Laptop");
+  await hostRow.locator(".host-save-destination").click();
+
+  await expect(hostRow.locator(".host-name")).toHaveText("My Laptop");
+  // The local row never shows a destination line, aliased or not — there is
+  // no real destination to reveal.
+  await expect(hostRow.locator(".host-destination-detail")).toHaveCount(0);
+});

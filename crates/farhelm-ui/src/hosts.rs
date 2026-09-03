@@ -55,7 +55,7 @@ use dioxus::prelude::*;
 
 use crate::api::{
     Commit, ProbeResponse, ProvisioningOperation, ProvisioningSubmission, adopt_host,
-    probe_ssh_host, provision_host, remove_host, retry_host, set_host_destination,
+    probe_ssh_host, provision_host, remove_host, retry_host, set_alias, set_host_destination,
 };
 use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::menu_panel::{
@@ -726,7 +726,7 @@ pub(crate) fn HostsPanel(
     // the row's controls, so two open at once would be two half-finished
     // decisions competing for the same space.
     let mut confirming_remove = use_signal(|| None::<HostId>);
-    let mut editing = use_signal(|| None::<HostId>);
+    let mut editing = use_signal(|| None::<(HostId, EditField)>);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
     // One disclosure controls every row. It stays client-local and resets on
@@ -889,18 +889,36 @@ pub(crate) fn HostsPanel(
     };
 
     let edit_base = base.clone();
-    let on_edit_submit = move |(host, destination): (HostId, String)| {
+    let on_edit_submit = move |(host, field, value): (HostId, EditField, String)| {
+        let submission = match resolve_edit_submission(field, &value) {
+            Ok(submission) => submission,
+            Err(error) => {
+                errors.write().insert(host, error);
+                return;
+            }
+        };
         let base = edit_base.clone();
         let started = run(
             host,
-            Box::pin(async move { set_host_destination(&base, host, &destination).await }),
+            Box::pin(async move {
+                match submission {
+                    EditSubmission::Destination(destination) => {
+                        set_host_destination(&base, host, &destination).await
+                    }
+                    EditSubmission::Alias(alias) => set_alias(&base, host, alias).await,
+                }
+            }),
         );
         // Closed once the request is actually OUT: its outcome lands in this
         // row's error line either way, so leaving the field open would only
         // invite a second submit of the same edit. A submit that was refused
         // leaves the field exactly as typed instead — closing it would
         // discard a draft nothing had been done with.
-        if started && editing.peek().as_ref() == Some(&host) {
+        if started
+            && editing
+                .peek()
+                .is_some_and(|(editing_host, _)| editing_host == host)
+        {
             editing.set(None);
         }
     };
@@ -1025,7 +1043,9 @@ pub(crate) fn HostsPanel(
                             key: "{host.id}",
                             controls: HostRowControls {
                                 confirming_remove: *confirming_remove.read() == Some(host.id),
-                                editing: *editing.read() == Some(host.id),
+                                edit_field: editing
+                                    .read()
+                                    .and_then(|(id, field)| (id == host.id).then_some(field)),
                                 menu_open: *host_menu_open.read() == Some(host.id),
                             },
                             activity: HostRowActivity {
@@ -1074,7 +1094,7 @@ pub(crate) fn HostsPanel(
                             destination_draft,
                             on_retry: on_retry.clone(),
                             on_adopt: on_adopt.clone(),
-                            on_edit_start: move |(id, destination): (HostId, String)| {
+                            on_edit_start: move |(id, field, value): (HostId, EditField, String)| {
                                 if ops.busy_now()
                                     || provisioning_busy_hosts.peek().contains(&id)
                                 {
@@ -1096,8 +1116,8 @@ pub(crate) fn HostsPanel(
                                     filter_open.set(false);
                                 }
                                 details_open.set(true);
-                                destination_draft.set(destination);
-                                editing.set(Some(id));
+                                destination_draft.set(value);
+                                editing.set(Some((id, field)));
                             },
                             on_edit_submit: on_edit_submit.clone(),
                             on_edit_cancel: move |_| editing.set(None),
@@ -1176,9 +1196,15 @@ pub(crate) fn HostsPanel(
 /// only when [`adoptable`] names an identity; provisioning commands mirror
 /// the permanently mounted provisioning component's current offers; and
 /// `Edit`/`Remove` only appear on an ssh row (see `HostRow`'s own doc for why
-/// an unmanageable kind gets neither). The separator before `Remove` is
-/// drawn in the rsx, not modeled here — see `MenuOrder` in `menu_panel`
-/// for why a separator is never counted as an item.
+/// an unmanageable kind gets neither). `Alias` is offered independent of host
+/// KIND — including the local row, which cannot `Edit` or `Remove` but can
+/// still be given a shorter label (SPEC.md's Topology paragraph: "the local
+/// host can carry one too") — but it IS gated, on whether this helm build
+/// sent an `alias` key at all (`Host.alias`'s own doc on the compatibility
+/// signal). The separator before `Remove` is drawn in the rsx, not modeled
+/// here — see
+/// `MenuOrder` in `menu_panel` for why a separator is never counted as an
+/// item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum HostMenuAction {
     Retry,
@@ -1187,6 +1213,7 @@ enum HostMenuAction {
     AutomaticSetup,
     Update,
     Edit,
+    Alias,
     Remove,
 }
 
@@ -1195,13 +1222,14 @@ enum HostMenuAction {
 /// identical reason: the canonical order lives in one place so the
 /// rendered list and the navigable list cannot disagree about what "the
 /// first item" or "the last item" means.
-const HOST_MENU_ACTIONS: [HostMenuAction; 7] = [
+const HOST_MENU_ACTIONS: [HostMenuAction; 8] = [
     HostMenuAction::Retry,
     HostMenuAction::Adopt,
     HostMenuAction::Rerun,
     HostMenuAction::AutomaticSetup,
     HostMenuAction::Update,
     HostMenuAction::Edit,
+    HostMenuAction::Alias,
     HostMenuAction::Remove,
 ];
 
@@ -1228,6 +1256,7 @@ type HostMenuWiring = menu_panel::MenuWiring<HostMenuAction, HostId, { HOST_MENU
 fn host_menu_order(
     adoptable: bool,
     manageable: bool,
+    alias_supported: bool,
     provisioning: ProvisioningMenuState,
 ) -> HostMenuOrder {
     HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| match action {
@@ -1237,7 +1266,68 @@ fn host_menu_order(
         HostMenuAction::AutomaticSetup => provisioning.automatic_setup,
         HostMenuAction::Update => provisioning.update,
         HostMenuAction::Edit | HostMenuAction::Remove => manageable,
+        // Unlike Edit/Remove, gated by host KIND, this is gated by whether
+        // THIS HELM sent an `alias` key at all (`Host.alias`'s own doc) —
+        // an older helm has no `/api/hosts/{id}/alias` route to submit to.
+        HostMenuAction::Alias => alias_supported,
     })
+}
+
+/// Which host field the shared inline editor is changing. Keeping the
+/// selection with the edit state makes submit, cancel, and error handling
+/// identical while preserving the different API fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditField {
+    Destination,
+    Alias,
+}
+
+/// Match the helm's alias boundary before a request leaves the browser.
+///
+/// The helm remains authoritative for collisions, but local syntax failures
+/// should preserve the draft and avoid a needless round trip.
+fn validate_alias_draft(value: &str) -> Result<Option<String>, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().any(char::is_control) {
+        return Err("host alias must not contain control characters".to_string());
+    }
+    if value.chars().count() > 64 {
+        return Err("host alias must be at most 64 characters".to_string());
+    }
+    Ok(Some(value.to_string()))
+}
+
+/// One inline-editor submission, resolved to the shape its own API call
+/// needs — a raw destination string, or a canonicalized (possibly absent)
+/// alias.
+///
+/// Exists so `on_edit_submit`'s dispatch (`match submission { ... }`) is a
+/// plain move into an already-decided value rather than a second place that
+/// has to re-derive which field is live.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EditSubmission {
+    Destination(String),
+    Alias(Option<String>),
+}
+
+/// The `EditField` switch itself: decide what a submitted draft means before
+/// any network call is made.
+///
+/// Pulled out of the submit handler as a pure function so the branch is
+/// unit-testable without an async runtime or a rendered component — the
+/// handler's only job past this point is picking the matching API call. The
+/// destination field is NOT canonicalized here: the helm is authoritative
+/// for ssh syntax (`validate_alias_draft`'s own doc makes the parallel
+/// argument for aliases), so a destination draft passes through verbatim
+/// and only an alias draft is checked client-side.
+fn resolve_edit_submission(field: EditField, value: &str) -> Result<EditSubmission, String> {
+    match field {
+        EditField::Destination => Ok(EditSubmission::Destination(value.to_string())),
+        EditField::Alias => validate_alias_draft(value).map(EditSubmission::Alias),
+    }
 }
 
 /// The host row menu toggle's accessible name: the host's display name (or
@@ -1292,8 +1382,17 @@ fn host_row_class(menu_open: bool) -> &'static str {
 struct HostRowControls {
     /// Whether this row is showing the in-place forget-this-host prompt.
     confirming_remove: bool,
-    /// Whether this row is showing its destination field instead of controls.
-    editing: bool,
+    /// `Some(field)` while this row is showing the shared inline editor
+    /// instead of controls, naming WHICH field it is editing; `None`
+    /// otherwise. One field rather than a separate `editing: bool` plus a
+    /// standalone `edit_field: Option<EditField>` prop (the shape this
+    /// component used to take): the two were always computed from the same
+    /// signal at the same call site, so splitting them apart only invented
+    /// an impossible-but-representable state (`editing: true` with
+    /// `edit_field: None`) that the render had to paper over with a
+    /// `.unwrap_or(EditField::Destination)` fallback nothing could actually
+    /// exercise.
+    edit_field: Option<EditField>,
     /// Whether this row's "⋯" menu is the (at most one, across sessions AND
     /// hosts) open one.
     menu_open: bool,
@@ -1368,16 +1467,26 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// and cannot be removed at all (the helm refuses both with a 409). A row of
 /// an unrecognized KIND is treated as unmanageable for the same reason:
 /// offering a verb the helm would refuse teaches the user something false
-/// about what is possible.
+/// about what is possible. `edit alias` is the one exception to the KIND
+/// split specifically: every kind gets it, local row included, because
+/// alias support does not depend on what a row IS the way edit/remove do —
+/// it is gated instead by whether this helm build's reply even carries an
+/// `alias` field at all (`Host.alias`'s outer option; see
+/// [`HostMenuAction`]'s own doc). The helm stays fully authoritative over
+/// each SUBMITTED value regardless — invalid syntax, a display-name
+/// collision, or a host that vanished mid-edit are all still refused, and
+/// this row renders that refusal exactly like it renders a rejected
+/// destination edit (the shared `on_edit_submit` error line).
 ///
 /// `retry` is offered in every state, connected included. It costs one
 /// attempt, and the state it is most needed in — `retired`, whose actor is
 /// gone — is precisely the one where nothing else brings the host back.
 ///
-/// The host NAME is peer/user-supplied text (an ssh destination) and is
-/// rendered through the same isolation every other such value gets: a
-/// destination able to reorder the row around it could make a remove button
-/// appear to belong to a different host than it does.
+/// The host NAME is peer/user-supplied text (an ssh destination, or the
+/// locally-typed alias replacing it) and is rendered through the same
+/// isolation every other such value gets: a destination or an alias able to
+/// reorder the row around it could make a remove button appear to belong to
+/// a different host than it does.
 ///
 /// `data-host-id`/`data-host-phase`/`data-host-kind` are the browser suite's
 /// handles, on the wrapper rather than on the status so a test can find a row
@@ -1406,14 +1515,18 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// ## The menu, and what stays outside it
 ///
 /// `retry`/`adopt`, the currently truthful provisioning commands,
-/// `edit destination`, and `remove` render inside one
+/// `edit destination`, `edit alias`, and `remove` render inside one
 /// "⋯" menu (`.host-row-menu` toggle, `.host-row-menu-panel` panel) built on
 /// the same generic mechanics the session row's menu uses (`menu_panel`) —
 /// see that module's own doc for what is shared and why. The name, phase
-/// status, and muted toggle stay on the row line. Destination editing and
-/// removal confirmation use full-width blocks below it; while either is
-/// open the toggle stays in its trailing gutter but is disabled, preventing
-/// a competing command without making the row jump horizontally.
+/// status, and muted toggle stay on the row line. Destination editing,
+/// alias editing, and removal confirmation use full-width blocks below it;
+/// while any is open the toggle stays in its trailing gutter but is
+/// disabled, preventing a competing command without making the row jump
+/// horizontally. Destination and alias editing share the same block —
+/// `HostDestinationForm`, generalized over [`EditField`] — because they are
+/// the same shaped interaction (one text field, submit, cancel, an error
+/// line) with different validation and a different API call underneath.
 ///
 /// Every actionable item closes the menu when chosen. Provisioning commands
 /// additionally open the global details disclosure before sending their
@@ -1437,7 +1550,10 @@ fn HostRow(
     host: Host,
     /// Whether automatic local setup replaces the ordinary remedy slot.
     local_setup: bool,
-    /// Which control surface this row is showing (grouped state).
+    /// Which control surface this row is showing, and which field the
+    /// shared inline editor is on when it is the one showing (grouped
+    /// state — see [`HostRowControls::edit_field`]'s own doc for why the
+    /// two used to be two separate props and no longer are).
     controls: HostRowControls,
     /// What the management verbs are doing to this row (grouped state).
     activity: HostRowActivity,
@@ -1450,8 +1566,8 @@ fn HostRow(
     destination_draft: Signal<String>,
     on_retry: EventHandler<HostId>,
     on_adopt: EventHandler<(HostId, String)>,
-    on_edit_start: EventHandler<(HostId, String)>,
-    on_edit_submit: EventHandler<(HostId, String)>,
+    on_edit_start: EventHandler<(HostId, EditField, String)>,
+    on_edit_submit: EventHandler<(HostId, EditField, String)>,
     on_edit_cancel: EventHandler<()>,
     on_remove_start: EventHandler<HostId>,
     on_remove_confirm: EventHandler<HostId>,
@@ -1466,7 +1582,7 @@ fn HostRow(
 ) -> Element {
     let HostRowControls {
         confirming_remove,
-        editing,
+        edit_field,
         menu_open,
     } = controls;
     let HostRowActivity {
@@ -1481,6 +1597,13 @@ fn HostRow(
     // present, never registered, never removed. An unrecognized kind is not
     // management surface either — see this component's docs.
     let manageable = host.kind == HostKind::Ssh;
+    // The OUTER option on `Host.alias` is the compatibility signal (see its
+    // own doc): a helm old enough to predate the field omits the JSON key
+    // entirely rather than sending `null`, and offering the editor against
+    // one would submit to a route that helm never registered. Distinct from
+    // `manageable`, which gates on host KIND rather than on what this
+    // particular helm build understands.
+    let alias_supported = host.alias.is_some();
     let kind_attribute = match host.kind {
         HostKind::Local => "local",
         HostKind::Ssh => "ssh",
@@ -1495,13 +1618,27 @@ fn HostRow(
     let remedy = state_remedy(&host.state);
     let detail = state_detail(&host.state);
     let shown_name = display_peer(&host.name);
-    let edit_start = (id, host.destination.clone().unwrap_or_default());
+    let edit_start = (
+        id,
+        EditField::Destination,
+        host.destination.clone().unwrap_or_default(),
+    );
+    let alias_edit_start = (
+        id,
+        EditField::Alias,
+        host.alias.clone().flatten().unwrap_or_default(),
+    );
     // This render's menu item list — see `host_menu_order`'s own doc. Read
     // every render, not only while the menu is open, because the `use_effect`
     // below has to notice an item withdrawn (a poll turning `adoptable` off)
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
-    let menu_order = host_menu_order(adoptable_now, manageable, provisioning_menu);
+    let menu_order = host_menu_order(
+        adoptable_now,
+        manageable,
+        alias_supported,
+        provisioning_menu,
+    );
     let provisioning_disabled = busy || provisioning_menu.planning;
 
     // ===== This row's own "⋯" menu state ================================
@@ -1610,9 +1747,14 @@ fn HostRow(
     // `menu_panel::reconcile_menu_focus`'s own doc for the general rule
     // this applies.
     use_effect(use_reactive(
-        (&adoptable_now, &manageable, &provisioning_menu),
-        move |(adoptable, manageable, provisioning_menu)| {
-            let order = host_menu_order(adoptable, manageable, provisioning_menu);
+        (
+            &adoptable_now,
+            &manageable,
+            &alias_supported,
+            &provisioning_menu,
+        ),
+        move |(adoptable, manageable, alias_supported, provisioning_menu)| {
+            let order = host_menu_order(adoptable, manageable, alias_supported, provisioning_menu);
             item_handles
                 .write()
                 .retain(|action, _| order.position(*action).is_some());
@@ -1721,7 +1863,7 @@ fn HostRow(
                     button {
                         r#type: "button",
                         class: "btn host-row-menu",
-                        disabled: editing || confirming_remove,
+                        disabled: edit_field.is_some() || confirming_remove,
                         aria_label: host_menu_label(&host.name),
                         aria_expanded: menu_open,
                         aria_haspopup: "menu",
@@ -1761,7 +1903,7 @@ fn HostRow(
                         },
                         "⋯"
                     }
-                    if menu_open && !editing && !confirming_remove {
+                    if menu_open && edit_field.is_none() && !confirming_remove {
                         div {
                             class: "host-row-menu-panel",
                             style: menu_panel_placement_style(placement()),
@@ -1968,6 +2110,40 @@ fn HostRow(
                                         },
                                         "edit destination"
                                     }
+                                }
+                                // Gated on `alias_supported` (host JSON's
+                                // `alias` key, not host KIND — see
+                                // `HostMenuAction`'s own doc), independent of
+                                // `manageable`, so this one button sits
+                                // outside the `manageable` split rather than
+                                // inside either branch: aliases are supported
+                                // for local and ssh rows alike, and a copy
+                                // inside each branch would be two places to
+                                // keep in sync for one item.
+                                if alias_supported {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn host-row-menu-item host-alias",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Alias) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(menu_wiring, HostMenuAction::Alias, element.data())
+                                        },
+                                        onfocusin: move |_| menu_focus.set(menu_order.position(HostMenuAction::Alias)),
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(&evt, menu_order.position(HostMenuAction::Alias), menu_wiring, &id);
+                                        },
+                                        onclick: move |_| {
+                                            if !busy {
+                                                on_edit_start.call(alias_edit_start.clone());
+                                            }
+                                        },
+                                        "edit alias"
+                                    }
+                                }
+                                if manageable {
                                     // The boundary before the destructive
                                     // item — see `list::row`'s own separator
                                     // for the accessibility argument, which
@@ -2060,15 +2236,28 @@ fn HostRow(
                     }
                 }
             }
-            if editing {
+            if let Some(field) = edit_field {
                 HostDestinationForm {
                     draft: destination_draft,
                     busy,
-                    on_submit: move |destination| on_edit_submit.call((id, destination)),
+                    alias: field == EditField::Alias,
+                    on_submit: move |destination| {
+                        on_edit_submit.call((id, field, destination));
+                    },
                     on_cancel: move |_| on_edit_cancel.call(()),
                 }
             }
             if details_open {
+                if host.alias.clone().flatten().is_some() && let Some(destination) = host.destination.as_deref() {
+                    // The one place an alias never hides the real
+                    // destination — which makes it exactly the wrong place
+                    // to lose this module's peer-text safety boundary; see
+                    // `destination_detail_parts`'s own doc.
+                    PeerLine {
+                        class: "host-destination-detail",
+                        parts: destination_detail_parts(destination),
+                    }
+                }
                 PeerLine { class: "host-detail", parts: detail }
                 if !local_setup && let Some(remedy) = remedy {
                     PeerLine { class: "host-remedy", parts: remedy }
@@ -2100,13 +2289,38 @@ fn HostRow(
     }
 }
 
-/// The in-place destination field for one ssh row.
+/// The in-place field editor for one host row — despite the name, shared
+/// between the destination edit AND the alias edit (`alias: bool` selects
+/// which), one text field with the same submit/cancel/error shape either
+/// way. Not renamed to something field-neutral because the CSS classes it
+/// renders (`.host-destination-form`, `.host-destination-input`,
+/// `.host-save-destination`) are load-bearing browser-suite selectors
+/// across several spec files; changing the component's Rust name costs
+/// nothing, but changing those strings would touch every test that already
+/// drives this form.
 ///
-/// A plain `<input type="text">`, unlike the rename control's textarea: a
-/// destination is a single line by construction, and the helm refuses the
-/// shapes that matter (empty, option-shaped, NUL-carrying) at the registry
-/// boundary — so nothing is validated here and whatever is typed goes as
-/// typed, with the refusal coming from the authority that owns the rule.
+/// A plain `<input type="text">`, unlike the rename control's textarea:
+/// both a destination and an alias are single lines by construction. The
+/// two fields' VALIDATION contracts differ, though, and each is enforced
+/// where it is authoritative:
+/// - **Destination**: nothing is validated here at all. The helm refuses
+///   the shapes that matter (empty, option-shaped, NUL-carrying) at the
+///   registry boundary, so whatever is typed goes as typed, with the
+///   refusal coming from the authority that owns the rule.
+/// - **Alias**: `validate_alias_draft` mirrors the helm's own rules
+///   (trim, empty-clears, the 64-character cap, no control characters)
+///   BEFORE a request leaves the browser, to save a round trip on an
+///   obvious mistake — but the helm remains authoritative for collisions,
+///   which nothing client-side can check.
+///
+/// Both fields still turn off every form of browser text "correction"
+/// (autocomplete/autocorrect/autocapitalize/spellcheck) for the same
+/// underlying reason, reached two different ways: a destination is
+/// EXECUTED as part of an ssh command line, where a silently capitalized
+/// hostname or a swallowed keystroke dials the wrong machine, while an
+/// alias is a label a person chose on purpose — a "helpful" browser rewrite
+/// would submit text the user did not type and never asked to see
+/// corrected.
 ///
 /// The draft belongs to the panel for the reason `rename::RenameForm`
 /// records: this form is unmounted by re-renders the user did not cause (a
@@ -2116,6 +2330,8 @@ fn HostRow(
 fn HostDestinationForm(
     mut draft: Signal<String>,
     busy: bool,
+    /// Selects alias-specific affordances while preserving one editor shape.
+    alias: bool,
     on_submit: EventHandler<String>,
     on_cancel: EventHandler<()>,
 ) -> Element {
@@ -2132,11 +2348,16 @@ fn HostDestinationForm(
             input {
                 r#type: "text",
                 class: "host-destination-input",
-                // An ssh destination is literal text that gets EXECUTED as
-                // part of a command line, never prose, so every browser
-                // "correction" is off for the reason the create form's
-                // command fields record: a silently capitalized hostname or
-                // a swallowed suggestion keystroke dials the wrong machine.
+                placeholder: if alias { "host alias" } else { "ssh destination" },
+                // Every browser text "correction" is off for both fields
+                // this input can be — see this component's own doc for why
+                // the two reasons differ: a destination gets EXECUTED as
+                // part of a command line (a silently capitalized hostname
+                // or a swallowed suggestion keystroke dials the wrong
+                // machine, the same argument the create form's command
+                // fields make), while an alias is a label the user chose on
+                // purpose and a "helpful" rewrite would submit text they
+                // never typed.
                 autocomplete: "off",
                 autocorrect: "off",
                 autocapitalize: "none",
@@ -2187,6 +2408,24 @@ struct AddOffer {
 /// Keep probe and manual diagnostics inside the peer-text boundary.
 fn probe_error_parts(error: String) -> Vec<DetailPart> {
     vec![DetailPart::Peer(error)]
+}
+
+/// The details-view "destination: ..." line an aliased host shows —
+/// extracted to a pure function, in the same shape as
+/// [`probe_error_parts`], so the peer-text boundary on this specific value
+/// is pinned by a plain unit test rather than only by rendering the whole
+/// row.
+///
+/// This is the ONE place an alias never hides the real destination
+/// (SPEC.md's Topology paragraph), which makes it exactly the wrong place
+/// to let that destination bypass this module's escaping and isolation:
+/// the row's own NAME gets the identical treatment (`HostRow`'s own doc),
+/// and a destination is exactly as peer/registry-supplied as a name is.
+fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
+    vec![
+        DetailPart::text("destination: "),
+        DetailPart::peer(destination),
+    ]
 }
 
 /// The add-host form: discover first, then either keep the answering
@@ -2401,6 +2640,22 @@ mod tests {
         assert_eq!(shown, "ssh failed <U+202E>spoof<U+200B>");
     }
 
+    /// The details-view destination line is the ONE place an alias never
+    /// hides the real destination, which makes it exactly the surface a
+    /// directional override or an invisible character could misuse to make
+    /// that destination read as something other than what it is — pinned
+    /// here the same way `probe_errors_cross_the_peer_text_boundary` pins
+    /// the add form's peer text, and needed for the same reason: a raw
+    /// interpolated string would have let this line bypass the escaping
+    /// and isolation the row's own NAME already gets.
+    #[test]
+    fn destination_details_cross_the_peer_text_boundary() {
+        let shown = detail_text(&destination_detail_parts(
+            "host\u{202E}spoof\u{200B}.example",
+        ));
+        assert_eq!(shown, "destination: host<U+202E>spoof<U+200B>.example");
+    }
+
     /// A host in the given state, with the rest of the row as plain as
     /// possible — every assertion below is about the state alone.
     fn host(state: HostPhase) -> Host {
@@ -2408,6 +2663,7 @@ mod tests {
             id: 1,
             kind: HostKind::Ssh,
             destination: Some("user@box".to_string()),
+            alias: None,
             name: "user@box".to_string(),
             identity: None,
             remote_farhelm: None,
@@ -2630,63 +2886,81 @@ mod tests {
     /// pins for the session row, applied to the host menu's management and
     /// provisioning commands.
     ///
-    /// With no provisioning offer, an adoptable ssh host has four commands
-    /// and an ordinary ssh host has three. The reserved local row (never `manageable` — see
+    /// With no provisioning offer, an adoptable ssh host has five commands
+    /// and an ordinary ssh host has four (alias joined the count once it
+    /// stopped depending on `manageable` — see below). The reserved local
+    /// row (never `manageable` — see
     /// [`HostRow`]'s own doc) drops `edit` and `remove` entirely regardless,
     /// which must move `adopt`'s position rather than leave a gap where
     /// `edit` would have sat — the same packing `MenuOrder::pack` guarantees
     /// for the session row.
     #[test]
     fn the_host_menu_follows_manageability_and_adoptability() {
-        use HostMenuAction::{Adopt, AutomaticSetup, Edit, Remove, Rerun, Retry, Update};
+        use HostMenuAction::{Adopt, Alias, AutomaticSetup, Edit, Remove, Rerun, Retry, Update};
 
-        // Ssh, adoptable: every item, in the declared order.
-        let ssh_adoptable = host_menu_order(true, true, ProvisioningMenuState::default());
-        assert_eq!(ssh_adoptable.len(), 4);
+        // Ssh, adoptable: every item, in the declared order. Every case
+        // below passes `alias_supported: true` — a modern helm — except the
+        // dedicated case at the end of this test, which is the only thing
+        // that argument controls.
+        let ssh_adoptable = host_menu_order(true, true, true, ProvisioningMenuState::default());
+        assert_eq!(ssh_adoptable.len(), 5);
         assert_eq!(ssh_adoptable.get(0), Some(Retry));
         assert_eq!(ssh_adoptable.get(1), Some(Adopt));
         assert_eq!(ssh_adoptable.get(2), Some(Edit));
-        assert_eq!(ssh_adoptable.get(3), Some(Remove));
+        assert_eq!(ssh_adoptable.get(3), Some(Alias));
+        assert_eq!(ssh_adoptable.get(4), Some(Remove));
         assert_eq!(ssh_adoptable.last(), Some(Remove));
 
         // Ssh, not adoptable (the ordinary case: most phases offer no
-        // adopt): `adopt` drops out and `edit`/`remove` shift up to fill
-        // the gap rather than leaving one at position 2.
-        let ssh_plain = host_menu_order(false, true, ProvisioningMenuState::default());
-        assert_eq!(ssh_plain.len(), 3);
+        // adopt): `adopt` drops out and `edit`/`alias`/`remove` shift up to
+        // fill the gap rather than leaving one at position 2.
+        let ssh_plain = host_menu_order(false, true, true, ProvisioningMenuState::default());
+        assert_eq!(ssh_plain.len(), 4);
         assert_eq!(ssh_plain.get(0), Some(Retry));
         assert_eq!(ssh_plain.get(1), Some(Edit));
-        assert_eq!(ssh_plain.get(2), Some(Remove));
+        assert_eq!(ssh_plain.get(2), Some(Alias));
+        assert_eq!(ssh_plain.get(3), Some(Remove));
         assert_eq!(ssh_plain.position(Adopt), None);
 
         // The local row's identity-mismatch menu shape: unmanageable, so
-        // `edit`/`remove` never appear regardless of `adoptable`. This is a
-        // real, reachable state — the local row's connection actor compares
-        // its recorded and reported identities exactly like an ssh row's
-        // (`farhelm-helm::manager`), so a local supervisor restarted behind
-        // a changed install lands here too — not a hypothetical `pack` has
-        // to merely tolerate. `host_menu_order` takes `adoptable` and
-        // `manageable` as two independent facts rather than encoding "local
-        // implies never adoptable" itself, which is what lets this case be
-        // exercised directly instead of only through the ssh fixtures above.
-        let local = host_menu_order(true, false, ProvisioningMenuState::default());
-        assert_eq!(local.len(), 2);
+        // `edit`/`remove` never appear regardless of `adoptable` — but
+        // `alias` does (SPEC.md's Topology paragraph: "the local host can
+        // carry one too"), which is the one item `manageable` does not gate.
+        // This is a real, reachable state — the local row's connection
+        // actor compares its recorded and reported identities exactly like
+        // an ssh row's (`farhelm-helm::manager`), so a local supervisor
+        // restarted behind a changed install lands here too — not a
+        // hypothetical `pack` has to merely tolerate. `host_menu_order`
+        // takes `adoptable` and `manageable` as two independent facts
+        // rather than encoding "local implies never adoptable" itself,
+        // which is what lets this case be exercised directly instead of
+        // only through the ssh fixtures above.
+        let local = host_menu_order(true, false, true, ProvisioningMenuState::default());
+        assert_eq!(local.len(), 3);
         assert_eq!(local.get(0), Some(Retry));
         assert_eq!(local.get(1), Some(Adopt));
+        assert_eq!(local.get(2), Some(Alias));
         assert_eq!(local.position(Edit), None);
         assert_eq!(local.position(Remove), None);
 
-        // The ordinary local row: just the unconditional retry item.
-        let local_plain = host_menu_order(false, false, ProvisioningMenuState::default());
-        assert_eq!(local_plain.len(), 1);
+        // The ordinary local row: retry and alias, unconditionally.
+        let local_plain = host_menu_order(false, false, true, ProvisioningMenuState::default());
+        assert_eq!(local_plain.len(), 2);
         assert_eq!(local_plain.get(0), Some(Retry));
-        assert_eq!(local_plain.last(), Some(Retry));
+        assert_eq!(local_plain.get(1), Some(Alias));
+        assert_eq!(local_plain.last(), Some(Alias));
 
         // A failed remote update offers rerun and update between identity
         // actions and destination management. Remove remains last, after
-        // the visual destructive separator rendered by the row.
+        // the visual destructive separator rendered by the row; alias sits
+        // just ahead of it in the row's markup, OUTSIDE the `manageable`
+        // block edit/remove render inside — its own, unconditional block
+        // between them (`HostRow`'s own doc, "The menu, and what stays
+        // outside it") — which is exactly why it survives independent of
+        // `manageable` below.
         let failed_remote = host_menu_order(
             false,
+            true,
             true,
             ProvisioningMenuState {
                 rerun: Some(ProvisioningOperation::Update),
@@ -2694,14 +2968,16 @@ mod tests {
                 ..ProvisioningMenuState::default()
             },
         );
-        assert_eq!(failed_remote.len(), 5);
+        assert_eq!(failed_remote.len(), 6);
         assert_eq!(failed_remote.get(1), Some(HostMenuAction::Rerun));
         assert_eq!(failed_remote.get(2), Some(HostMenuAction::Update));
+        assert_eq!(failed_remote.get(4), Some(Alias));
         assert_eq!(failed_remote.last(), Some(Remove));
 
         // Structural coverage deliberately enables every conditional action:
         // the canonical array, not the current lifecycle, owns keyboard order.
         let all_actions = host_menu_order(
+            true,
             true,
             true,
             ProvisioningMenuState {
@@ -2711,14 +2987,101 @@ mod tests {
                 planning: false,
             },
         );
-        assert_eq!(all_actions.len(), 7);
+        assert_eq!(all_actions.len(), 8);
         assert_eq!(all_actions.get(0), Some(Retry));
         assert_eq!(all_actions.get(1), Some(Adopt));
         assert_eq!(all_actions.get(2), Some(Rerun));
         assert_eq!(all_actions.get(3), Some(AutomaticSetup));
         assert_eq!(all_actions.get(4), Some(Update));
         assert_eq!(all_actions.get(5), Some(Edit));
-        assert_eq!(all_actions.get(6), Some(Remove));
+        assert_eq!(all_actions.get(6), Some(Alias));
+        assert_eq!(all_actions.get(7), Some(Remove));
+
+        // An older helm whose `GET /api/hosts` reply omits the `alias` key
+        // entirely (`Host.alias`'s outer `None`) must never be offered the
+        // editor — it has no `/api/hosts/{id}/alias` route to submit to.
+        // Every other action is unaffected: `alias_supported` is orthogonal
+        // to `manageable` and `adoptable`, exactly like the two are to each
+        // other above.
+        let alias_unsupported =
+            host_menu_order(true, true, false, ProvisioningMenuState::default());
+        assert_eq!(alias_unsupported.len(), 4);
+        assert_eq!(alias_unsupported.get(0), Some(Retry));
+        assert_eq!(alias_unsupported.get(1), Some(Adopt));
+        assert_eq!(alias_unsupported.get(2), Some(Edit));
+        assert_eq!(alias_unsupported.get(3), Some(Remove));
+        assert_eq!(alias_unsupported.position(Alias), None);
+        assert_eq!(alias_unsupported.last(), Some(Remove));
+    }
+
+    /// The client-side mirror of the helm's alias validation
+    /// (`store::validate_alias` — same trim, same empty-clears rule, same
+    /// control-character and length checks, same messages) so a syntax
+    /// failure is caught before a round trip, without the two ever being
+    /// allowed to drift on the RULES: the helm remains the authority that
+    /// decides whether a value is accepted at all, since only it can see
+    /// every other host's current display name.
+    #[test]
+    fn validate_alias_draft_mirrors_the_helms_rules() {
+        assert_eq!(
+            validate_alias_draft("  My Box  "),
+            Ok(Some("My Box".to_string()))
+        );
+        assert_eq!(validate_alias_draft(""), Ok(None), "empty clears the alias");
+        assert_eq!(
+            validate_alias_draft("   "),
+            Ok(None),
+            "whitespace-only input clears the alias, same as empty"
+        );
+        assert_eq!(
+            validate_alias_draft("bad\u{0007}name"),
+            Err("host alias must not contain control characters".to_string())
+        );
+        assert_eq!(
+            validate_alias_draft("bad\nname"),
+            Err("host alias must not contain control characters".to_string()),
+            "a newline is a control character too — the exact byte an alias must never carry, \
+             since `farhelm agent` prints host names on stdout"
+        );
+        let sixty_five = "a".repeat(65);
+        assert_eq!(
+            validate_alias_draft(&sixty_five),
+            Err("host alias must be at most 64 characters".to_string())
+        );
+        let sixty_four = "a".repeat(64);
+        assert_eq!(
+            validate_alias_draft(&sixty_four),
+            Ok(Some(sixty_four)),
+            "the cap is inclusive: exactly 64 characters is accepted"
+        );
+    }
+
+    /// The `EditField` switch itself, isolated from the async submit
+    /// handler that dispatches on it: a destination draft passes through
+    /// untouched (the helm is the ssh-syntax authority), while an alias
+    /// draft is run through [`validate_alias_draft`] first, and a refused
+    /// alias draft must not silently fall back to being treated as a
+    /// destination.
+    #[test]
+    fn resolve_edit_submission_switches_on_the_field() {
+        assert!(matches!(
+            resolve_edit_submission(EditField::Destination, "  not trimmed  "),
+            Ok(EditSubmission::Destination(d)) if d == "  not trimmed  "
+        ));
+        assert!(matches!(
+            resolve_edit_submission(EditField::Alias, "  My Box  "),
+            Ok(EditSubmission::Alias(Some(a))) if a == "My Box"
+        ));
+        assert!(matches!(
+            resolve_edit_submission(EditField::Alias, ""),
+            Ok(EditSubmission::Alias(None))
+        ));
+        assert_eq!(
+            resolve_edit_submission(EditField::Alias, "bad\u{0007}name"),
+            Err("host alias must not contain control characters".to_string()),
+            "a refused alias draft must surface validate_alias_draft's own error, not a \
+             destination-shaped one"
+        );
     }
 
     /// The value an adopt SENDS is the raw one; the value it SHOWS is
@@ -3136,6 +3499,7 @@ mod tests {
             id,
             kind: HostKind::Ssh,
             destination: Some("user@box".to_string()),
+            alias: None,
             name: "user@box".to_string(),
             identity: None,
             remote_farhelm: None,
@@ -3164,8 +3528,8 @@ mod tests {
             let destination_draft = use_signal(String::new);
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
-            let on_edit_start = use_callback(|_: (HostId, String)| {});
-            let on_edit_submit = use_callback(|_: (HostId, String)| {});
+            let on_edit_start = use_callback(|_: (HostId, EditField, String)| {});
+            let on_edit_submit = use_callback(|_: (HostId, EditField, String)| {});
             let on_edit_cancel = use_callback(|_: ()| {});
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
@@ -3178,7 +3542,7 @@ mod tests {
                     local_setup: false,
                     controls: HostRowControls {
                         confirming_remove: false,
-                        editing: false,
+                        edit_field: None,
                         menu_open: false,
                     },
                     activity: HostRowActivity {
@@ -3247,8 +3611,8 @@ mod tests {
             let destination_draft = use_signal(String::new);
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
-            let on_edit_start = use_callback(|_: (HostId, String)| {});
-            let on_edit_submit = use_callback(|_: (HostId, String)| {});
+            let on_edit_start = use_callback(|_: (HostId, EditField, String)| {});
+            let on_edit_submit = use_callback(|_: (HostId, EditField, String)| {});
             let on_edit_cancel = use_callback(|_: ()| {});
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
@@ -3265,7 +3629,7 @@ mod tests {
                         local_setup: false,
                         controls: HostRowControls {
                             confirming_remove: confirming == id,
-                            editing: false,
+                            edit_field: None,
                             menu_open: false,
                         },
                         activity: HostRowActivity {

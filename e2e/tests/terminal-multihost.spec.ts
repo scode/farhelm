@@ -1101,8 +1101,12 @@ test.describe("multi-host", () => {
 
   /**
    * Automatic setup occupies its canonical slot after Retry in the truthful
-   * local setup menu. The two-item fixture pins ordering and both wrap
-   * boundaries without fabricating mutually exclusive provisioning offers.
+   * local setup menu. The three-item fixture pins ordering and both wrap
+   * boundaries without fabricating mutually exclusive provisioning offers;
+   * the third item is "edit alias", offered on the local row like any
+   * other (plans/host-aliases.md), which is what the wrap boundaries now
+   * land on — automatic setup sits between, so its slot is proven by the
+   * arrow step from Retry rather than by End.
    */
   test("automatic-setup-menu-order: keyboard navigation includes the conditional setup command", async ({
     page,
@@ -1148,17 +1152,20 @@ test.describe("multi-host", () => {
     await expect(row.locator(".provisioning-error")).toContainText("automatic setup needs retry");
     await openHostMenu(row);
     const items = row.getByRole("menuitem");
-    await expect(items).toHaveText(["retry", "set up automatically"]);
+    await expect(items).toHaveText(["retry", "set up automatically", "edit alias"]);
     const retry = row.locator(".host-retry");
     const automatic = row.locator(".provisioning-auto-setup");
+    const alias = row.locator(".host-alias");
 
     await expect(retry).toBeFocused();
-    await page.keyboard.press("End");
+    await page.keyboard.press("ArrowDown");
     await expect(automatic).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(alias).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(retry).toBeFocused();
     await page.keyboard.press("ArrowUp");
-    await expect(automatic).toBeFocused();
+    await expect(alias).toBeFocused();
     await page.keyboard.press("Home");
     await expect(retry).toBeFocused();
   });

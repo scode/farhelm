@@ -145,9 +145,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
 - Add "replace" on sessions: like clone, but the new session takes the old one's place instead of duplicating it. A
   fresh session and a fresh agent process, with the same directory, host, and the rest of the settings. Plan:
   `plans/replace-session.md` (medium).
-- Add host aliases, so a machine can carry a shorter label. The default label stays the hostname or IP as entered; when
-  an alias is set it is shown everywhere instead, except in the host details view, which keeps the real name. Plan:
-  `plans/host-aliases.md` (medium).
 
 ## Systematic deflake
 

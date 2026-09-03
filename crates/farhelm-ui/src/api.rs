@@ -2149,6 +2149,28 @@ pub(crate) async fn set_host_destination(
     Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
+/// Replace or clear a host's display alias (`POST /api/hosts/{id}/alias`).
+///
+/// The nullable field is intentionally sent as JSON `null` to distinguish a
+/// clear from an older server response that omitted the additive field.
+pub(crate) async fn set_alias(
+    base: &str,
+    host: HostId,
+    alias: Option<String>,
+) -> Result<Commit, String> {
+    let url = format!("{base}/api/hosts/{host}/alias");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "alias": alias })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(commit_of::<Host>(resp, "the hosts list below").await)
+}
+
 /// Forget a registered host (`DELETE /api/hosts/{id}`).
 ///
 /// SPEC.md's remove-merely-forgets contract: the registry row and the
