@@ -96,6 +96,20 @@ everything not yet sorted, which carries no implication either way. Within a buc
   same loaded sandbox, `timed out waiting for "FAKE-AGENT READY"` in 1 of 3 full-binary runs on 0.3.0 and 1 of 3 on the
   attach-boundary stack, never alone. No hypothesis yet; start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU
   box with the full transcript kept.
+- Deflake `session_rename::a_renamed_title_survives_a_supervisor_restart` (crates/farhelm/tests/e2e): on 2026-09-03, in
+  1 of 3 loaded full-binary runs at `--test-threads=4` on a 4-vCPU sandbox (a `cargo build` looping beside the tests),
+  the restart helper it shares with `create_idempotency.rs` panicked in its own setup check, "the replacement must hold
+  the state directory's claim, or it reconciles nothing and this test would pass for the wrong reason". One sighting,
+  never alone, no hypothesis beyond the fingerprint: the replacement supervisor did not win the state directory's claim
+  in time under load. Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box with the full transcript kept.
+- Deflake two more profiles cases seen once each in a full browser-suite run on a 4-vCPU sandbox on 2026-09-03 (both
+  engines, no extra load beside the suite itself):
+  `only layout changes after a profiles opening invalidate its
+  geometry` (Chromium) and
+  `a saved profile is what the next editor sees, before the re-read lands` (WebKit, which also failed twice in ten
+  loaded runs during the profiles attempt above). Same spec, same box, same day as the three cases above; nothing about
+  either cause is known beyond the names. Start at rung 1 of `.agents/narrow-tests.md` with `--repeat-each` on the
+  engine that failed.
 - Put the tmux e2e suite back into the release gate, and un-ignore the two load-flaky tests still ignored, once the
   deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
   every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or

@@ -191,3 +191,19 @@ reproduced two of the three: `unknown then transit waits for the pending focus r
 attempted fix (an exhausted `Unknown` retried on the next focus event, ordinal-named test hooks, a quiescence wait
 before arming holds, a 30 s `stubFeed` socket wait) passed the stale case but made the pending-focus case fail 11/20 on
 Chromium, so it was not shipped. Disposition: open (TODO.md, with the attempt's shape and rates).
+
+## 2026-09-03 — `session_rename::a_renamed_title_survives_a_supervisor_restart` (crates/farhelm/tests/e2e)
+
+Loaded 4-vCPU sandbox, full binary at `--test-threads=4` beside a looping `cargo build`: 1 of 3 runs panicked in the
+restart helper's own setup assertion in `create_idempotency.rs`, "the replacement must hold the state directory's claim,
+or it reconciles nothing and this test would pass for the wrong reason". The replacement supervisor did not hold the
+claim when the helper checked, under load. Never seen alone; nothing else known. Disposition: open (TODO.md).
+
+## 2026-09-03 — two more profiles cases (e2e/tests/profiles.spec.ts)
+
+A full browser-suite run on a 4-vCPU sandbox (both engines, no load beside the suite):
+`only layout changes after a
+profiles opening invalidate its geometry` failed once on Chromium and
+`a saved profile is what the next editor sees,
+before the re-read lands` once on WebKit, beside the three known profiles
+cases; the latter had also failed twice in ten loaded runs earlier that day. Disposition: open (TODO.md).
