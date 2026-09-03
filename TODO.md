@@ -4,10 +4,11 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Four buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "near term" is what should be picked up next; "maybe later" is wanted but
-not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either way.
-Within a bucket, no order.
+Five buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
+the decision is made, only the work remains; "near term" is what should be picked up next; "systematic deflake" is the
+plan for making the test suites stop failing under load as a class, distinct from the per-test deflake entries under
+"near term" that it is meant to retire; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is
+everything not yet sorted, which carries no implication either way. Within a bucket, no order.
 
 ## Definite simplification
 
@@ -81,6 +82,60 @@ Within a bucket, no order.
   `session_lifecycle::delete_fails_closed_when_a_launch_artifact_cannot_be_removed` carry `#[ignore]` so CI's full suite
   stops rolling the same dice. The suite still runs in CI's `test` job on every ready PR and before a stack lands, so
   the gap is at tag time only. Reversing both is the definition of done for the deflake work.
+
+## Systematic deflake
+
+Context for every entry here: cutting 0.3.0 on 2026-09-02/03 produced fourteen distinct test failures that reproduced
+only under load (a 4-vCPU sandbox running the browser suite beside a live stack, or the GitHub-hosted 4-vCPU release
+runner running the Rust suite beside its own build), never on a developer machine. Three tag builds of rc.1 and two of
+rc.2 failed on a different one or two of them each time. They were not evenly spread: almost all of them came from two
+seams, the tmux attach boundary in the Rust e2e harness and fixed time budgets tuned for a fast box, with the profiles
+popup's focus machinery a third on the browser side. The per-test entries under "near term" hold the fingerprints; the
+work below is what retires them as a class. Order is a suggestion, from cheapest and most certain to most speculative.
+
+- Make the e2e harness indifferent to the attach race. Attaching to a session returns a snapshot of the pane (tmux's
+  rendering of the screen: rows padded with spaces to the pane width, cursor-addressing sequences, invalid bytes
+  canonicalized) followed by the live byte stream, stitched wherever the attach landed in time. Tests were written
+  against the live shape because on a developer machine the attach wins; on a loaded box the fixture wins and the same
+  output arrives in the snapshot shape (`ESC[2;1H61` glued tokens, a 484-column argv row, a 0xff that is no longer
+  0xff). Four tests were fixed one at a time for this in the 0.3.0 stack (hexecho's tokenizer, both argv-width guards,
+  the invalid-byte fixture). Do it once instead: (1) a shared normalizer in `crates/farhelm/tests/e2e/harness.rs` that
+  `wait_for` can apply — strip CSI/two-byte escapes and trailing row padding — opt-in per wait, because some tests
+  deliberately look for escape sequences (bracketed paste, mouse modes); fold the tokenizer's `strip_escape_sequences`
+  and the argv guards' `trim_end` onto it; (2) an attach-then-trigger helper: fixtures that a test reads startup output
+  from print it ON REQUEST (a byte on raw-mode stdin, the way the `binary` script now does), and the helper attaches,
+  sends the trigger, then waits, so the interesting output is live by construction. Audit: grep `wait_for` calls against
+  `crates/farhelm/src/fake_agent.rs` scripts that print at startup. Prove it by repeating the affected tests on a loaded
+  4-vCPU box, not locally. Roughly half a day; no product code.
+- One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
+  relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
+  the profiles popup's 250 + 120 ms settlement, the stub feed's socket wait, and every 5 s Playwright `expect`.
+  Introduce one factor the harness reads from the environment (something like `FARHELM_TEST_SLOW=3`, default 1) that
+  every wait multiplies by, and set it in CI's `test` job and the release gate; for Playwright, the same via
+  `expect.configure`/`test.setTimeout` from an env variable in `playwright.config.ts`. A measured latency probe at
+  harness start (time one trivial tmux control exchange) could set the factor automatically, but the env knob is the
+  first step because it separates "the machine is slow" from "the code is wrong" without touching a single test.
+- Retries scoped to named tests, reported as flaky, not hidden. `cargo nextest` runs each test in its own process,
+  supports `retries` per test through filtersets, and reports "flaky" as its own outcome in JUnit output; Playwright has
+  per-project `retries`. A single load hiccup then stops being fatal to a gate while the ledger of what flaked stays
+  visible. Nextest also removes the "one hung test wedges the binary" failure shape. Adopt it for the e2e suite first;
+  keep plain `cargo test` working for the developer loop.
+- Tier by sensitivity, not by suite. The 0.3.0 emergency cut removed the whole tmux e2e suite from the release gate (see
+  the "put the tmux e2e suite back" entry above); the durable form is a "load-sensitive" tier — a nextest test group or
+  a Playwright tag — that the gate runs with retries or on a quieter runner, while everything else gates as before.
+  Membership starts as the per-test entries under "near term" and shrinks as they are fixed.
+- Run the gate's suite where it is not competing with the release build. The tag build runs the suite inside the build
+  job on a 4-vCPU runner while the release build itself is warm; `--test-threads=2` there, or a separate job on a larger
+  runner, is a cheap experiment that may remove most of the load by itself. Measure before and after.
+- Find harness bugs under load early, not at the end. Every deterministic harness mistake in the 0.3.0 stack (a
+  fabricated reply without the build stamp latching skew, a click target the popup could cover, a test hook consumed by
+  the wrong mount) was found by the sandbox run hours after it was written. Give ready PRs a loaded run (the browser
+  suite on a 4-vCPU runner, drafts excluded as today) and add a nightly `--repeat-each` hunt over the load-sensitive
+  tier so new members are caught before they block a tag.
+- Product-side policies that only show under load, worth their own decisions rather than test tweaks: the profiles
+  popup's "an unknown focus classification never dismisses" rule leaves the popup open on a slow renderer (retries were
+  bolted on; the real fix is retrying on the next focus event instead of dropping), and the launch shim consuming a
+  planted spec before a delete runs (pin the spec or make delete's fail-closed check independent of shim timing).
 
 ## Maybe later
 
