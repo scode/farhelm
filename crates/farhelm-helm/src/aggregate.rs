@@ -199,6 +199,25 @@ pub(crate) struct SessionRow {
     /// to be refused — this flag is the first half, and
     /// `crate::route_session` is the second.
     pub(crate) stale: bool,
+    /// The activity stamp that was current the last time some client had
+    /// this session open (`store::HelmStore::seen_activity`'s per-session
+    /// answer), or `None` when nothing is currently recorded — either
+    /// because no client has ever opened the session, or because a client
+    /// manually marked it unread (`store::HelmStore::clear_seen` DELETES
+    /// the row rather than writing a sentinel, so the two cases are
+    /// indistinguishable here on purpose: SPEC.md, Status defines "unseen"
+    /// from the absence of a stamp either way). Compared against
+    /// `SessionInfo::effective_activity` on the CLIENT to decide whether
+    /// the idle dot draws grey (seen) or blue (unseen output).
+    ///
+    /// ALWAYS serialized, `host_identity`'s shape and reason exactly: a
+    /// client must be able to tell "this helm says never seen" (`null`) from
+    /// "this helm predates the field" (key absent), because only the former
+    /// may draw the unseen-blue dot and offer the read/unread toggle — an
+    /// old helm's idle rows draw the SAME grey every other idle row does;
+    /// what they lose is only the toggle and the possibility of the blue
+    /// variant, never a distinct legacy colour.
+    pub(crate) seen_activity_at: Option<i64>,
 }
 
 /// The whole merged list, in the JSON shape `GET /api/sessions` answers
@@ -251,7 +270,12 @@ pub(crate) struct SessionListBody {
 /// helm.db without the actor being reconciled, so a snapshot-side copy
 /// would sit at `NULL` for most hosts most of the time (the same reasoning
 /// `hosts`' module doc gives for joining the two reads in `host_views`).
-fn row_of(host: &HostSnapshot, identity: Option<&str>, info: SessionInfo) -> SessionRow {
+fn row_of(
+    host: &HostSnapshot,
+    identity: Option<&str>,
+    info: SessionInfo,
+    seen_activity_at: Option<i64>,
+) -> SessionRow {
     SessionRow {
         info,
         host: host.id,
@@ -261,6 +285,7 @@ fn row_of(host: &HostSnapshot, identity: Option<&str>, info: SessionInfo) -> Ses
             host.destination.as_deref(),
             host.alias.as_deref(),
         ),
+        seen_activity_at,
         stale: !host.state.is_connected(),
     }
 }
@@ -451,6 +476,26 @@ async fn session_list_staged(
     // in one transaction, and two separate reads could pair a newly capped
     // cache's rows with its pre-cap "complete" flag.
     let slice = store.cached_slice(&scope).await?;
+    // The seen-state join for `SessionRow::seen_activity_at`: one read of
+    // every id this reply could possibly carry — cache-served rows and
+    // identity-less hosts' in-memory ones alike — gathered before either
+    // build loop below rather than looked up per row, so a fleet-sized
+    // listing costs one `session_seen` query instead of one per session.
+    // Unlike the identity join above, there is no read-ordering hazard here
+    // to document: a `mark_seen`/`clear_seen` racing this read merely shows
+    // up on the next poll instead of this one, the same staleness every
+    // other field in this reply already tolerates.
+    let mut seen_ids: Vec<String> = slice
+        .rows
+        .iter()
+        .map(|cached| cached.info.id.clone())
+        .collect();
+    for snapshot in &snapshots {
+        if let Some(live) = &snapshot.live_sessions {
+            seen_ids.extend(live.iter().map(|info| info.id.clone()));
+        }
+    }
+    let seen_activity = store.seen_activity(&seen_ids).await?;
     for cached in slice.rows {
         // The archive switch is applied as a SCOPE, on the stored flag,
         // before the payload is looked at.
@@ -462,10 +507,12 @@ async fn session_list_staged(
             // is a window during removal; its rows have nowhere to hang.
             continue;
         };
+        let seen = seen_activity.get(&cached.info.id).copied();
         view.push(row_of(
             host,
             identities.get(&cached.host).and_then(Option::as_deref),
             cached.info,
+            seen,
         ));
     }
     // A cache-serving host's cap flag comes from the CACHE (the same
@@ -501,7 +548,8 @@ async fn session_list_staged(
             if info.archived && !filter.includes_archived() {
                 continue;
             }
-            view.push(row_of(snapshot, identity, info.clone()));
+            let seen = seen_activity.get(&info.id).copied();
+            view.push(row_of(snapshot, identity, info.clone(), seen));
         }
     }
     // When provenance exists, one catalog read resolves every row before
@@ -547,6 +595,7 @@ mod tests {
             host,
             host_identity: None,
             host_name: "this machine".to_string(),
+            seen_activity_at: None,
             stale: false,
         }
     }
@@ -1002,6 +1051,65 @@ mod tests {
             "a mid-request identity write must not be attributed to rows \
              sampled beside it — stale identity mismatches safely, a fresh \
              one would falsely match"
+        );
+    }
+
+    /// `SessionRow::seen_activity_at`'s listing join (SPEC.md, Status): a
+    /// marked session's row carries exactly the stamp `HelmStore::mark_seen`
+    /// recorded, an unmarked (or manually marked-unread) one carries `None`,
+    /// and both are true JSON `null`/value pairs at the wire — not merely
+    /// equal `Option`s in Rust — because the field's whole contract is that
+    /// a client can tell "never seen" from "this helm predates the field"
+    /// by whether the KEY is present at all.
+    #[tokio::test]
+    async fn the_listing_carries_each_sessions_seen_stamp() {
+        use crate::rest_harness;
+
+        let harness = rest_harness::helm_listing(vec![
+            rest_harness::session("seen-1", 1_700_000_000),
+            rest_harness::session("unseen-1", 1_700_000_100),
+        ])
+        .await;
+        harness
+            .store
+            .mark_seen("seen-1", 1_700_000_000)
+            .await
+            .expect("mark seen-1 seen");
+
+        let list = session_list(
+            &harness.manager,
+            &harness.store,
+            &store::SessionFilter::default(),
+            store::ListSort::Created,
+        )
+        .await
+        .expect("the list reads");
+
+        let seen = list
+            .sessions
+            .iter()
+            .find(|row| row.info.id == "seen-1")
+            .expect("the marked session is in the reply");
+        assert_eq!(seen.seen_activity_at, Some(1_700_000_000));
+        let unseen = list
+            .sessions
+            .iter()
+            .find(|row| row.info.id == "unseen-1")
+            .expect("the unmarked session is in the reply");
+        assert_eq!(unseen.seen_activity_at, None);
+
+        // The wire-shape half of the contract: a never-seen row's key must
+        // be PRESENT and `null`, not simply absent the way an ordinary
+        // `Option` field would serialize by default with `skip_serializing_if`
+        // — `SessionRow` carries none for this field, which is what this
+        // pins.
+        let json = serde_json::to_value(unseen).expect("serialize the row");
+        assert_eq!(
+            json.get("seen_activity_at"),
+            Some(&serde_json::Value::Null),
+            "an unseen row's key must be present and null, never absent — a \
+             client tells \"never seen\" from \"this helm predates the \
+             field\" by exactly that distinction"
         );
     }
 }
