@@ -38,6 +38,29 @@ pub(crate) use std::task::{Context, Poll};
 pub(crate) use std::time::Duration;
 pub(crate) use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+/// The receive surface needed by the shared terminal waiters.
+///
+/// `TermStream` keeps its event queue private and cannot be constructed
+/// outside `farhelm-helm`, so the e2e harness uses this crate-private trait to
+/// run the same drain logic against scripted event sources in unit tests.
+pub(crate) trait TermSource {
+    /// Receive the next event, preserving the source's end-of-stream value.
+    async fn recv(&mut self) -> Option<TermEvent>;
+
+    /// Receive one event only when it is already queued for draining.
+    fn try_recv(&mut self) -> Result<TermEvent, tokio::sync::mpsc::error::TryRecvError>;
+}
+
+impl TermSource for TermStream {
+    async fn recv(&mut self) -> Option<TermEvent> {
+        TermStream::recv(self).await
+    }
+
+    fn try_recv(&mut self) -> Result<TermEvent, tokio::sync::mpsc::error::TryRecvError> {
+        TermStream::try_recv(self)
+    }
+}
+
 /// The built farhelm binary: fake agent + launch shim in one artifact,
 /// exactly as production ships it.
 pub(crate) fn farhelm_bin() -> &'static str {
@@ -1127,25 +1150,29 @@ pub(crate) async fn harness_with_seams(
     }
 }
 
-/// Drain terminal events until `needle` has appeared in the accumulated
-/// output, failing the test after `secs`. Everything received is
-/// appended to `seen`, so callers can make further assertions on the
-/// transcript after the call returns.
+/// Drain terminal events until `pred` accepts the accumulated transcript.
 ///
-/// A `Detached` event ends the stream but is not itself a failure: when
-/// an agent exits, its last output and the pane-death notice race, and
-/// the bytes may already be in hand. So the needle is re-checked after
-/// the stream ends and only then reported missing.
-pub(crate) async fn wait_for(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &str, secs: u64) {
+/// The predicate rescans the whole buffer after every received event. A
+/// `Detached` event ends the stream, but queued data behind it is drained and
+/// the predicate gets one final chance because an agent's last output and
+/// pane-death notice can race. The panic text preserves the waited-for label,
+/// end reason, and lossy transcript for debugging.
+async fn wait_until<S: TermSource>(
+    rx: &mut S,
+    seen: &mut Vec<u8>,
+    secs: u64,
+    what: &str,
+    mut pred: impl FnMut(&[u8]) -> bool,
+) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
     let mut ended: Option<String> = None;
     loop {
-        if String::from_utf8_lossy(seen).contains(needle) {
+        if pred(seen) {
             return;
         }
         if let Some(reason) = ended {
             panic!(
-                "stream ended ({reason}) without {needle:?}; transcript so far:\n{}",
+                "stream ended ({reason}) without {what}; transcript so far:\n{}",
                 String::from_utf8_lossy(seen)
             );
         }
@@ -1170,11 +1197,34 @@ pub(crate) async fn wait_for(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &s
             }
             Ok(None) => ended = Some("closed".to_string()),
             Err(_) => panic!(
-                "timed out waiting for {needle:?}; transcript so far:\n{}",
+                "timed out waiting for {what}; transcript so far:\n{}",
                 String::from_utf8_lossy(seen)
             ),
         }
     }
+}
+
+/// Drain terminal events until `needle` has appeared in the accumulated
+/// output, failing the test after `secs`. Everything received is
+/// appended to `seen`, so callers can make further assertions on the
+/// transcript after the call returns.
+///
+/// A `Detached` event ends the stream but is not itself a failure: when
+/// an agent exits, its last output and the pane-death notice race, and
+/// the bytes may already be in hand. So the needle is re-checked after
+/// the stream ends and only then reported missing. This now runs on the
+/// shared [`wait_until`] drain core.
+pub(crate) async fn wait_for(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &str, secs: u64) {
+    wait_for_inner(rx, seen, needle, secs).await;
+}
+
+/// Generic implementation for [`wait_for`], kept separate so the harness's
+/// drain and predicate can be tested with a scripted source.
+async fn wait_for_inner<S: TermSource>(rx: &mut S, seen: &mut Vec<u8>, needle: &str, secs: u64) {
+    wait_until(rx, seen, secs, &format!("{needle:?}"), |seen| {
+        String::from_utf8_lossy(seen).contains(needle)
+    })
+    .await;
 }
 
 /// Like [`wait_for`], but ordered: first wait until `first` appears, then
@@ -1194,39 +1244,182 @@ pub(crate) async fn wait_for_after(
     then: &str,
     secs: u64,
 ) {
+    wait_for_after_inner(rx, seen, first, then, secs).await;
+}
+
+/// Generic implementation for [`wait_for_after`], kept separate so its
+/// ordering predicate and diagnostics can be tested with a scripted source.
+async fn wait_for_after_inner<S: TermSource>(
+    rx: &mut S,
+    seen: &mut Vec<u8>,
+    first: &str,
+    then: &str,
+    secs: u64,
+) {
+    wait_until(
+        rx,
+        seen,
+        secs,
+        &format!("{then:?} after {first:?}"),
+        |seen| {
+            let text = String::from_utf8_lossy(seen);
+            text.find(first)
+                .is_some_and(|idx| text[idx + first.len()..].contains(then))
+        },
+    )
+    .await;
+}
+
+const REPLAY_COMPLETE_RULE: &str = "this must be the first wait on a fresh attachment, because wait_for and wait_for_after consume the marker";
+
+/// Return the byte offset where this attachment's live stream begins.
+///
+/// This must be the FIRST wait on a fresh attachment: `wait_for` and
+/// `wait_for_after` swallow `ReplayComplete`, so calling this helper after
+/// either one can only time out. It bounds this attachment's initial
+/// catch-up and nothing later; a forced tmux pause can replay history into an
+/// already-live attachment without another marker, so the three
+/// `a_forced_tmux_pause_*` tests find that replay through its `ESC c` reset
+/// instead. The supervisor emits this marker even when the pane has no
+/// history, so a fresh attachment always has a boundary to receive.
+// Transitional until the follow-up PR converts call sites; that PR removes this allowance.
+#[allow(dead_code)]
+pub(crate) async fn wait_for_replay_complete(
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    secs: u64,
+) -> usize {
+    wait_for_replay_complete_inner(rx, seen, secs).await
+}
+
+/// Generic implementation for [`wait_for_replay_complete`], kept separate so
+/// the marker boundary can be tested with a scripted source.
+async fn wait_for_replay_complete_inner<S: TermSource>(
+    rx: &mut S,
+    seen: &mut Vec<u8>,
+    secs: u64,
+) -> usize {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    let mut ended: Option<String> = None;
     loop {
-        let text = String::from_utf8_lossy(seen).into_owned();
-        if let Some(idx) = text.find(first)
-            && text[idx + first.len()..].contains(then)
-        {
-            return;
-        }
-        if let Some(reason) = ended {
-            panic!(
-                "stream ended ({reason}) without {then:?} after {first:?}; transcript so far:\n\
-                 {text}"
-            );
-        }
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
-            // See `wait_for`'s twin arm just above: presentation-only, not
-            // asserted on by this transcript scan.
-            Ok(Some(TermEvent::ReplayComplete)) => {}
+            Ok(Some(TermEvent::ReplayComplete)) => return seen.len(),
             Ok(Some(TermEvent::Detached(reason))) => {
                 while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
                     seen.extend_from_slice(&bytes);
                 }
-                ended = Some(reason);
+                panic!(
+                    "stream ended ({reason}) before ReplayComplete; {REPLAY_COMPLETE_RULE}; transcript so far:\n{}",
+                    String::from_utf8_lossy(seen)
+                );
             }
-            Ok(None) => ended = Some("closed".to_string()),
-            Err(_) => {
-                panic!("timed out waiting for {then:?} after {first:?}; transcript so far:\n{text}")
-            }
+            Ok(None) => panic!(
+                "stream ended (closed) before ReplayComplete; {REPLAY_COMPLETE_RULE}; transcript so far:\n{}",
+                String::from_utf8_lossy(seen)
+            ),
+            Err(_) => panic!(
+                "timed out waiting for ReplayComplete; {REPLAY_COMPLETE_RULE}; transcript so far:\n{}",
+                String::from_utf8_lossy(seen)
+            ),
         }
     }
+}
+
+/// Remove terminal presentation escapes and snapshot-only row padding, so a
+/// test can read pane text without caring whether it arrived through the
+/// attach snapshot or the live stream.
+///
+/// Lossy UTF-8 first, then every ECMA-48 escape sequence is removed whole.
+/// The grammar covered: a CSI sequence (`ESC [`, then parameter bytes
+/// `0x30..=0x3f` and intermediate bytes `0x20..=0x2f`, then one final byte
+/// `0x40..=0x7e`) and a plain escape (`ESC`, zero or more intermediate bytes
+/// `0x20..=0x2f`, then one final byte `0x30..=0x7e`), so `ESC(B` goes as a
+/// unit, not as `ESC(` with a `B` left behind to glue onto a token. A
+/// sequence the text cuts short (a lone trailing ESC, a CSI with no final
+/// byte) is dropped up to the cut; an ESC followed by something that cannot
+/// be a final byte (a non-ASCII character, say) drops only the ESC and keeps
+/// the character intact. Then every line loses its trailing spaces and the
+/// `\r` before its newline: that is the padding a snapshot row carries out
+/// to the pane width, which is not part of what any fixture printed.
+///
+/// What it does NOT do: it does not touch invalid bytes, because they are
+/// already gone by the time text exists (that is what the live boundary from
+/// [`wait_for_replay_complete`] is for), and it does not parse string-type
+/// sequences such as OSC, because tmux does not emit them around a pane
+/// redraw and guessing at their terminators would risk swallowing real
+/// output.
+pub(crate) fn normalize_pane_text(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let is_intermediate = |b: u8| (0x20..=0x2f).contains(&b);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_ref();
+    while let Some(at) = rest.find('\x1b') {
+        out.push_str(&rest[..at]);
+        let after = &rest.as_bytes()[at + 1..];
+        let mut end = 0;
+        if after.first() == Some(&b'[') {
+            end = 1;
+            while after
+                .get(end)
+                .is_some_and(|b| (0x30..=0x3f).contains(b) || is_intermediate(*b))
+            {
+                end += 1;
+            }
+            if after.get(end).is_some_and(|b| (0x40..=0x7e).contains(b)) {
+                end += 1;
+            }
+        } else {
+            while after.get(end).is_some_and(|b| is_intermediate(*b)) {
+                end += 1;
+            }
+            if after.get(end).is_some_and(|b| (0x30..=0x7e).contains(b)) {
+                end += 1;
+            }
+        }
+        // `end` only ever advanced over ASCII bytes, so it is a char boundary.
+        rest = &rest[at + 1 + end..];
+    }
+    out.push_str(rest);
+    out.split('\n')
+        .map(|line| line.trim_end_matches([' ', '\r']))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Wait for `needle` in the normalized pane transcript.
+///
+/// This is opt-in because the default [`wait_for`] remains a raw matcher:
+/// existing tests deliberately inspect escape sequences, including
+/// bracketed-paste enablement and alternate-screen ordering. Keeping raw
+/// matching as the default preserves those byte-level assertions while this
+/// helper makes snapshot-shaped text indifferent to cursor addresses and
+/// row padding.
+// Transitional until the follow-up PR converts call sites; that PR removes this allowance.
+#[allow(dead_code)]
+pub(crate) async fn wait_for_normalized(
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    needle: &str,
+    secs: u64,
+) {
+    wait_for_normalized_inner(rx, seen, needle, secs).await;
+}
+
+/// Generic implementation for [`wait_for_normalized`], kept separate so
+/// normalization-aware matching can share the same test seam as raw waits.
+// Transitional until the follow-up PR converts call sites; that PR removes this allowance.
+#[allow(dead_code)]
+async fn wait_for_normalized_inner<S: TermSource>(
+    rx: &mut S,
+    seen: &mut Vec<u8>,
+    needle: &str,
+    secs: u64,
+) {
+    wait_until(rx, seen, secs, &format!("{needle:?}"), |seen| {
+        normalize_pane_text(seen).contains(needle)
+    })
+    .await;
 }
 
 /// Extract complete records from the counter fixture without decoding
@@ -1746,4 +1939,206 @@ pub(crate) fn marked_pids(session_id: &str) -> Vec<u32> {
         }
     }
     pids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    /// A deterministic event source for testing wait behavior without a
+    /// production `TermStream`, which has no public constructor.
+    struct ScriptedSource {
+        events: VecDeque<TermEvent>,
+        pending: bool,
+    }
+
+    impl ScriptedSource {
+        /// Build a source that returns the supplied events in order.
+        fn new(events: impl IntoIterator<Item = TermEvent>) -> Self {
+            Self {
+                events: events.into_iter().collect(),
+                pending: false,
+            }
+        }
+
+        /// Build a source whose receive operation remains pending until the
+        /// caller's timeout expires.
+        fn pending() -> Self {
+            Self::then_pending([])
+        }
+
+        /// Build a source that delivers `events` in order and then stays
+        /// pending, the shape of a live attachment that has gone quiet:
+        /// what a wait sees when the thing it waits for never comes.
+        fn then_pending(events: impl IntoIterator<Item = TermEvent>) -> Self {
+            Self {
+                events: events.into_iter().collect(),
+                pending: true,
+            }
+        }
+    }
+
+    impl TermSource for ScriptedSource {
+        async fn recv(&mut self) -> Option<TermEvent> {
+            match self.events.pop_front() {
+                Some(event) => Some(event),
+                None if self.pending => std::future::pending().await,
+                None => None,
+            }
+        }
+
+        fn try_recv(&mut self) -> Result<TermEvent, tokio::sync::mpsc::error::TryRecvError> {
+            self.events
+                .pop_front()
+                .ok_or(tokio::sync::mpsc::error::TryRecvError::Empty)
+        }
+    }
+
+    /// The normalizer must remove complete CSI and two-byte escapes without
+    /// leaving a final byte glued to the first meaningful token.
+    #[test]
+    fn normalize_pane_text_removes_whole_sequences_and_nothing_else() {
+        assert_eq!(normalize_pane_text(b"\x1b(B61 7f"), "61 7f");
+        assert_eq!(normalize_pane_text(b"\x1b[1A61"), "61");
+        assert_eq!(normalize_pane_text(b"\x1b[?25f61 \x1b[0m7a"), "61 7a");
+        assert_eq!(normalize_pane_text(b"\x1b=61"), "61");
+        assert_eq!(normalize_pane_text(b"61\x1b"), "61");
+        assert_eq!(normalize_pane_text(b"61\x1b[2;1"), "61");
+        assert_eq!(normalize_pane_text("\x1bé 61".as_bytes()), "é 61");
+        assert_eq!(normalize_pane_text(b"plain 61 7f"), "plain 61 7f");
+    }
+
+    /// Snapshot rows contain terminal positioning and width padding; the
+    /// normalized form must expose only the text a test means to read.
+    #[test]
+    fn normalize_pane_text_trims_snapshot_row_padding() {
+        assert_eq!(
+            normalize_pane_text(b"\x1b[2;1HREADY       \r\nPROMPT   \r\n"),
+            "READY\nPROMPT\n"
+        );
+    }
+
+    /// The returned replay boundary must point exactly between the initial
+    /// catch-up bytes and the first live event.
+    #[tokio::test]
+    async fn wait_for_replay_complete_returns_pre_marker_offset() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"snapshot".to_vec()),
+            TermEvent::ReplayComplete,
+            TermEvent::Data(b"live".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        let live_from = wait_for_replay_complete_inner(&mut source, &mut seen, 1).await;
+        assert_eq!(live_from, b"snapshot".len());
+        assert_eq!(seen, b"snapshot");
+    }
+
+    /// A detach before the marker must explain that the helper was required
+    /// to be the first wait on this fresh attachment.
+    #[tokio::test]
+    #[should_panic(expected = "this must be the first wait on a fresh attachment")]
+    async fn wait_for_replay_complete_reports_missing_marker_rule() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"snapshot".to_vec()),
+            TermEvent::Detached("taken over".to_string()),
+        ]);
+        let mut seen = Vec::new();
+        let _ = wait_for_replay_complete_inner(&mut source, &mut seen, 1).await;
+    }
+
+    /// Raw waits must match a needle split across independently delivered
+    /// terminal chunks.
+    #[tokio::test]
+    async fn wait_for_matches_across_chunk_boundaries() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"nee".to_vec()),
+            TermEvent::Data(b"dle".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        wait_for_inner(&mut source, &mut seen, "needle", 1).await;
+        assert_eq!(seen, b"needle");
+    }
+
+    /// An ordinary wait timeout must name the raw needle that was missing.
+    #[tokio::test]
+    #[should_panic(expected = "timed out waiting for \"needle\"")]
+    async fn wait_for_timeout_names_needle() {
+        let mut source = ScriptedSource::pending();
+        let mut seen = Vec::new();
+        wait_for_inner(&mut source, &mut seen, "needle", 0).await;
+    }
+
+    /// Ordered waits must preserve the requirement that the second marker
+    /// occurs after the first, even when both arrive in separate chunks.
+    #[tokio::test]
+    async fn wait_for_after_matches_across_chunk_boundaries() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"first".to_vec()),
+            TermEvent::Data(b"then".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        wait_for_after_inner(&mut source, &mut seen, "first", "then", 1).await;
+        assert_eq!(seen, b"firstthen");
+    }
+
+    /// An ordered wait timeout must retain both marker labels in its
+    /// diagnostic so the missing ordering edge is identifiable.
+    #[tokio::test]
+    #[should_panic(expected = "timed out waiting for \"then\" after \"first\"")]
+    async fn wait_for_after_timeout_names_markers() {
+        let mut source = ScriptedSource::pending();
+        let mut seen = Vec::new();
+        wait_for_after_inner(&mut source, &mut seen, "first", "then", 0).await;
+    }
+
+    /// The normalized wait must match a needle that exists ONLY after
+    /// escape removal and row-padding trim, across chunk boundaries, while
+    /// leaving the raw bytes in `seen` for any later byte-level assertion.
+    /// A raw `contains` implementation, or one that normalizes only the
+    /// newest chunk, fails this.
+    #[tokio::test]
+    async fn wait_for_normalized_matches_only_after_normalization() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"\x1b[2;1HREA".to_vec()),
+            TermEvent::Data(b"DY     \r\n".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        wait_for_normalized_inner(&mut source, &mut seen, "READY\n", 1).await;
+        assert_eq!(seen, b"\x1b[2;1HREADY     \r\n");
+        assert!(!String::from_utf8_lossy(&seen).contains("READY\n"));
+    }
+
+    /// The first-wait rule, exercised the way it is actually broken: a
+    /// `wait_for` consumes the marker, and the boundary wait after it can
+    /// only time out. Its timeout must name the rule, because a bare
+    /// "timed out waiting for ReplayComplete" reads like a supervisor bug.
+    #[tokio::test]
+    #[should_panic(expected = "timed out waiting for ReplayComplete; this must be the first wait")]
+    async fn wait_for_replay_complete_after_a_consuming_wait_names_the_rule() {
+        let mut source = ScriptedSource::then_pending([
+            TermEvent::Data(b"snapshot".to_vec()),
+            TermEvent::ReplayComplete,
+            TermEvent::Data(b"FAKE-AGENT READY".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        wait_for_inner(&mut source, &mut seen, "READY", 1).await;
+        let _ = wait_for_replay_complete_inner(&mut source, &mut seen, 0).await;
+    }
+
+    /// A `Detached` ends the stream but is not itself a failure: data still
+    /// queued behind it is drained and the predicate gets one last chance,
+    /// because an agent's final output and the pane-death notice race.
+    /// Dropping either the drain or the recheck would revive that race.
+    #[tokio::test]
+    async fn wait_for_finds_a_needle_queued_behind_detached() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"bye".to_vec()),
+            TermEvent::Detached("pane died".to_string()),
+            TermEvent::Data(b" needle".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        wait_for_inner(&mut source, &mut seen, "needle", 1).await;
+        assert_eq!(seen, b"bye needle");
+    }
 }
