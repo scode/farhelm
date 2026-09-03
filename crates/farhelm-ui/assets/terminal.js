@@ -836,17 +836,27 @@
    * the operative values everywhere but the browser suite. Read once per
    * mount into that mount's own object: nothing here is shared between
    * islands, and a test that forgets to clear the global still only
-   * affects the page it set it on. `targetEl` confines a held marker to the
-   * island a focus test intends to delay; otherwise another terminal mounting
-   * first could consume the one-shot hold and turn the test into a timing race.
+   * affects the page it set it on.
+   *
+   * Two shapes of hold, chosen by whether the test names a `targetEl`:
+   *
+   * - Without one, EVERY mount on the page holds. The replay specs depend
+   *   on this: a tab session mounts two islands, and a remount after
+   *   navigating away is a new mount, and each of those must hold its own
+   *   catch-up open. A version of this hook that held only the first mount
+   *   per page left those tests waiting on an island that never held.
+   * - With one, only that island holds, and only its FIRST mount: the focus
+   *   tests that delay the primary terminal need exactly one held reveal,
+   *   and a later remount of the same element consuming a fresh hold would
+   *   turn their timing into a race.
    */
   function replayControls(el) {
     const overrides = window.__farhelmTestReplay || {};
+    const targeted = !!overrides.targetEl;
     const ownsHold =
       !!overrides.holdMarker &&
-      !overrides.holdConsumed &&
-      (!overrides.targetEl || overrides.targetEl === el);
-    if (ownsHold) overrides.holdConsumed = true;
+      (!targeted || (overrides.targetEl === el && !overrides.holdConsumed));
+    if (ownsHold && targeted) overrides.holdConsumed = true;
     return {
       holdMarker: ownsHold,
       heldReason: null,
