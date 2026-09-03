@@ -72,27 +72,30 @@ everything not yet sorted, which carries no implication either way. Within a buc
   came in 40 s. So tmux acknowledged the `send-keys` command and the raw-mode fixture never received the byte, or never
   produced its reply. The fix is product work, needing a maintainer decision: make the input-delivery contract detect or
   recover from a `send-keys` that tmux acknowledges without the pane seeing it (or find why the pane does not). Neither
-  widening the 40 s wait nor changing the fixture addresses the measurement.
+  widening the 40 s wait nor changing the fixture addresses the measurement. The test carries `#[ignore]` since
+  2026-09-03, after failing 3 of 9 GitHub runs of one stack in a day, the same move the other load flakes got; the fix
+  un-ignores it.
 - Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e): on
   2026-09-03, on a loaded 4-vCPU sandbox running the full binary at `--test-threads=4`, it failed 1 of 3 runs on its 64
   MiB in-process RSS assertion (terminal_backpressure.rs:906 at 0.3.0), not in the flood-start wait its siblings died
   in. It then passed 21 loaded runs (one full-binary baseline plus 20 `terminal_backpressure::` module runs) while the
   flood-start oracle was being fixed, so there is one sighting and no hypothesis; a first look is what else the test
-  process held in memory during that run (the three converted pause tests carry the 12 MiB finite flood; the memory test
-  has its own warm-up and continuous producer).
+  process held in memory during that run (the module runs 16 tests, 4 threads, each with a 12 MiB flood).
 - Deflake `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e): on 2026-09-03, on the
   same loaded sandbox, `timed out waiting for "FAKE-AGENT READY"` in 1 of 3 full-binary runs on 0.3.0 and 1 of 3 on the
   attach-boundary stack, never alone. No hypothesis yet; start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU
   box with the full transcript kept.
-- Put the tmux e2e suite back into the release gate, and un-ignore the one load-flaky test still ignored, once the
+- Put the tmux e2e suite back into the release gate, and un-ignore the two load-flaky tests still ignored, once the
   deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
   every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or
   two of the load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a
   different one, with the code they check unchanged; and
-  `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` carries `#[ignore]` so CI's full suite stops
-  rolling the same dice (the delete fail-closed test and the two `terminal_backpressure` tests were the other three,
-  un-ignored in #355 and #357). The suite still runs in CI's `test` job on every ready PR and before a stack lands, so
-  the gap is at tag time only. Reversing both is the definition of done for the deflake work.
+  `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` and
+  `session_lifecycle::non_utf8_terminal_output_survives_live_stream` carry `#[ignore]` so CI's full suite stops rolling
+  the same dice (the delete fail-closed test and the two `terminal_backpressure` tests were ignored too, and were
+  un-ignored in #355 and #357; the invalid-byte test joined the list after its stall was localized to the input path and
+  failed 3 of 9 GitHub runs of this stack in one day). The suite still runs in CI's `test` job on every ready PR and
+  before a stack lands, so the gap is at tag time only. Reversing both is the definition of done for the deflake work.
 - Show the session dot as plainly grey when the agent is idle and its last output has been seen. Today the idle state
   can pass for the dim phase of the pulsing green, so "idle" is not obvious at a glance.
 - Add a blue dot state: the agent is idle but has produced output since the session was last looked at. Distinct from
@@ -117,13 +120,13 @@ popup's focus machinery a third on the browser side. The per-test entries under 
 work below is what retires them as a class. Order is a suggestion, from cheapest and most certain to most speculative.
 
 - One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
-  relay peer's 20 s `answer()`, terminal-flood's 30 s stall poll, the profiles popup's 250 + 120 ms settlement, the stub
-  feed's socket wait, and every 5 s Playwright `expect`. Introduce one factor the harness reads from the environment
-  (something like `FARHELM_TEST_SLOW=3`, default 1) that every wait multiplies by, and set it in CI's `test` job and the
-  release gate; for Playwright, the same via `expect.configure`/`test.setTimeout` from an env variable in
-  `playwright.config.ts`. A measured latency probe at harness start (time one trivial tmux control exchange) could set
-  the factor automatically, but the env knob is the first step because it separates "the machine is slow" from "the code
-  is wrong" without touching a single test.
+  relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
+  the profiles popup's 250 + 120 ms settlement, the stub feed's socket wait, and every 5 s Playwright `expect`.
+  Introduce one factor the harness reads from the environment (something like `FARHELM_TEST_SLOW=3`, default 1) that
+  every wait multiplies by, and set it in CI's `test` job and the release gate; for Playwright, the same via
+  `expect.configure`/`test.setTimeout` from an env variable in `playwright.config.ts`. A measured latency probe at
+  harness start (time one trivial tmux control exchange) could set the factor automatically, but the env knob is the
+  first step because it separates "the machine is slow" from "the code is wrong" without touching a single test.
 - Retries scoped to named tests, reported as flaky, not hidden. `cargo nextest` runs each test in its own process,
   supports `retries` per test through filtersets, and reports "flaky" as its own outcome in JUnit output; Playwright has
   per-project `retries`. A single load hiccup then stops being fatal to a gate while the ledger of what flaked stays
