@@ -1331,7 +1331,7 @@ fn altscreen() -> anyhow::Result<()> {
 /// deliberately outside this contract: tmux may canonicalize invalid
 /// source bytes when it stores the terminal grid.
 ///
-/// The invalid byte is held back until a line arrives on stdin rather than
+/// The invalid byte is held back until a byte arrives on stdin rather than
 /// written at startup, because the test that reads it attaches AFTER
 /// creating the session. Under load the fixture used to win that race,
 /// the byte landed in the attach snapshot (where tmux is allowed to
@@ -1339,15 +1339,26 @@ fn altscreen() -> anyhow::Result<()> {
 /// the live stream preserved it failed with nothing actually wrong. Output
 /// caused by input sent through an attachment is live by construction.
 fn binary() -> anyhow::Result<()> {
+    use std::io::Read as _;
+
     let mut out = std::io::stdout().lock();
+    // Raw mode BEFORE the ready marker, for the reason `hexecho` documents:
+    // the test sends its request the instant it sees READY, so the mode has
+    // to be in force by then. Raw mode is what makes the request a single
+    // byte rather than a line: in the pty's default canonical mode the
+    // kernel holds input until a line terminator it recognizes, which
+    // turned "send one newline through the attachment" into a dependency on
+    // how tmux and the line discipline spell that newline, and on a loaded
+    // release runner the marker once never came at all.
+    set_raw_mode()?;
     out.write_all(b"FAKE-AGENT READY\r\n")?;
     out.flush()?;
 
-    let mut line = String::new();
+    let mut request = [0u8; 1];
     // EOF reads as `Ok(0)`, and a closed stdin is not a request: emitting
     // the marker then would let a torn-down pane "prove" that input crossed
     // an attachment that never sent any.
-    if std::io::stdin().lock().read_line(&mut line)? == 0 {
+    if std::io::stdin().lock().read(&mut request)? == 0 {
         return Ok(());
     }
     out.write_all(b"\xffBINARY-MARKER\r\n")?;
