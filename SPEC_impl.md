@@ -1341,6 +1341,28 @@ reports a failed listing rather than a silently shortened one.
   host-unreachable notice, so that read is served from the cache and marked stale, while a reachable host's detail is
   always fetched live — the cache exists for the stale list, not as a general serving layer. The live path reads the
   owner's whole list, which is the only list the wire serves.
+- `POST /api/sessions/{id}/replace` (SPEC.md's "replace") is a composition of the create and delete this section already
+  describes, not a third code path: it routes the source by owner lookup exactly like any other lifecycle operation,
+  reads the source's row live from the owning host (the same live read `clone_for_agent`'s agent-CLI clone performs, and
+  for the same reason — the cache is for the stale list, never a source for a fresh mutation), derives a `CreateMode`
+  from that row through a function (`sessions::mode_from_source`) shared with `clone_for_agent`, then calls
+  `do_create_session` followed by a delete, reusing the ONE `(claim, client)` pair the owner lookup produced for both
+  calls rather than re-routing before the delete. The shared derivation takes a fallback policy as an argument because
+  the two callers disagree about what a dangling snapshotted profile should do: the agent-CLI clone refuses it (a raw
+  invocation may name a binary absent on another machine), while replace falls back to the source's raw invocation,
+  because replace never changes machine — the refusal clone needs has no failure mode to guard against here. The create
+  half carries the same idempotency-replay veto `clone_for_agent` gives its own create: a same-host replace with no
+  overrides can reconstruct the source's own creation fingerprint, so a caller reusing the source's key would otherwise
+  receive the source row BACK as the "replacement" — this route refuses that reply with `Conflict` before any
+  bookkeeping runs, rather than deleting the session it was just handed back. Create runs before delete so a failed
+  create leaves the source untouched. A delete that fails AFTER a successful create is reported one of two ways
+  depending on whether the failure is a DEFINITE answer: an explicit supervisor refusal, or a delete that never reached
+  the wire at all, means the source was not removed, and the reply names both ids and says both sessions still exist; a
+  delete that reached the wire and then lost its answer (the connection dying after the frame was sent, or any other
+  post-send ending this client cannot interpret) is NOT definite — the supervisor may have completed it — so the reply
+  instead says the replacement exists and that the source's fate is unknown and must be checked before deleting it again
+  or retrying. Neither shape ever rolls the create back (killing an agent the caller just asked for) or claims success
+  (hiding a session, or an uncertainty, the caller needs to see).
 - Host management commits durably first and converges the live actors after, so each verb states how it fails closed:
   add rolls its row back if no actor could be started (a registered host with no actor is invisible and un-dialed, while
   its destination is taken); retarget converges instead of rolling back, because the durable write is what the user

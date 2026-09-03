@@ -1279,6 +1279,65 @@ impl CreateMode {
     }
 }
 
+/// What [`mode_from_source`] does when a source session's snapshotted
+/// profile is no longer in the helm's catalog.
+///
+/// The two current callers want opposite answers to the exact same
+/// question, which is why the choice is a parameter rather than a second
+/// copy of the derivation: the agent-CLI clone (`agent_requests::clone_for_agent`)
+/// refuses, because a command line written for one machine may not run on
+/// another (SPEC.md's agent-verbs section states this explicitly) — while
+/// `replace` falls back, because it never changes machine, so the fallback
+/// clone refuses is safe there and matches what the UI's own clone already
+/// shows the user for the same dangling-profile case.
+pub(crate) enum DanglingProfilePolicy {
+    /// Refuse outright, naming the vanished profile.
+    Refuse,
+    /// Silently use the source's raw invocation instead.
+    FallBackToRaw,
+}
+
+/// Derive a create's [`CreateMode`] from an existing session's row, the way
+/// both `clone_for_agent` and `replace` need to: a profiled source follows
+/// its snapshot by helm-wide id (so a rename does not move it), and a
+/// source with no profile uses its raw invocation. What happens when the
+/// snapshot's id is no longer in the catalog is `policy`'s call — see
+/// [`DanglingProfilePolicy`] for why the two callers disagree about it.
+///
+/// `source` must come from a LIVE read of the owning host's session list
+/// (`manager::drain_sessions`), never from the helm's cache: a cached row
+/// can describe a title, directory, or profile snapshot the session no
+/// longer has, and a derived mode built from stale data would carry that
+/// staleness into a brand-new session.
+pub(crate) async fn mode_from_source(
+    state: &AppState,
+    source: &farhelm_proto::SessionInfo,
+    policy: DanglingProfilePolicy,
+) -> anyhow::Result<CreateMode> {
+    let Some(snapshot) = &source.source_profile else {
+        return Ok(CreateMode::Raw(source.invocation.clone()));
+    };
+    let profiles = state.store.profiles().await?;
+    match profiles
+        .iter()
+        .find(|profile| profile.id == snapshot.id)
+        .cloned()
+    {
+        Some(profile) => Ok(CreateMode::resolved_profile(profile, &profiles)),
+        None => match policy {
+            DanglingProfilePolicy::Refuse => Err(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: format!(
+                    "cannot clone profile {:?}: its snapshotted id {} is no longer in the helm \
+                     catalog",
+                    snapshot.name, snapshot.id
+                ),
+            })),
+            DanglingProfilePolicy::FallBackToRaw => Ok(CreateMode::Raw(source.invocation.clone())),
+        },
+    }
+}
+
 /// Resolve a create body's mode, refusing the two ambiguous shapes.
 ///
 /// Both refusals are `InvalidRequest` — a 400 — and both are worth making
@@ -1883,6 +1942,210 @@ pub(crate) async fn mark_seen(
             }
             axum::Json(serde_json::json!({})).into_response()
         }
+        Err(e) => http_error(e),
+    }
+}
+
+/// The body of `POST /api/sessions/{id}/replace`: only an optional
+/// idempotency key, forwarded to the CREATE half of the operation (see
+/// [`do_replace_session`]).
+///
+/// The delete half deliberately gets no key of its own: a browser fires one
+/// request per confirmation and never retries a replace on its own, so the
+/// one place a retry can land is the create — see `do_replace_session`'s own
+/// doc for what a retry after a fully successful replace answers instead.
+#[derive(Deserialize)]
+pub(crate) struct ReplaceReq {
+    intent_key: Option<String>,
+}
+
+/// One replace: a fresh session with the source's cwd, title, and agent
+/// (SPEC.md's "replace", contrasted there with restart), then the source's
+/// removal.
+///
+/// ## Why create comes before delete, and the two failures are asymmetric
+///
+/// If the create fails, the source is untouched — nothing was lost, and the
+/// error is the create's own (a vanished directory, an unreachable host, a
+/// profile that resolves to nothing).
+///
+/// If the create SUCCEEDS and the delete then fails, the reply names both
+/// ids either way, but what it CLAIMS about the source depends on whether
+/// the delete's own failure is a definite answer or not. An explicit
+/// supervisor refusal, or a delete that never left this process at all
+/// (`SupervisorTransportError::NotSent`), is definite: the source was not
+/// removed, and the reply says both sessions still exist. A delete that
+/// reached the wire and then lost its answer (`SentUnanswered`, or any
+/// other post-send ending this client cannot interpret) is NOT definite —
+/// the supervisor may have completed it — so the reply says only that the
+/// replacement exists and that the source's fate is unknown and must be
+/// checked before anyone deletes it again or retries. Neither shape ever
+/// rolls the create back (that would kill an agent the user just asked
+/// for) or claims success (that would hide a session, or an uncertainty,
+/// the user needs to see).
+///
+/// ## One connection for the whole operation
+///
+/// The `(claim, client)` pair [`route_session`] resolves for the source id
+/// is reused for BOTH the create and the delete — no second owner lookup
+/// before the delete. That keeps the operation's two mutations coherent
+/// with each other (same connection, not "whichever install answers by the
+/// time the delete goes out"), the same coherence-over-freshness argument
+/// `route_session`'s own doc makes for a single call, extended across the
+/// two calls this route composes.
+///
+/// ## Idempotency, and why only the create half needs it
+///
+/// `intent_key` reaches [`do_create_session`] exactly as an ordinary create
+/// would, so a retried request cannot double-create. The delete half has no
+/// such protection and needs none in practice — a browser fires one request
+/// per confirmation and does not retry on its own. A retry sent AFTER a
+/// fully successful replace answers 404 for the (now-deleted) source,
+/// through the ordinary `route_session` refusal that precedes everything
+/// else here; this route makes no attempt to look idempotent past that
+/// point, and none is needed.
+pub(crate) async fn do_replace_session(
+    state: &AppState,
+    id: &str,
+    intent_key: Option<String>,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let (claim, client) = route_session(state, id).await?;
+    // Read LIVE from the owning host, exactly as `clone_for_agent` does and
+    // for the same reason: the helm's cache is for the stale list, not a
+    // serving layer, and a replace built from a cached row could copy a
+    // title or working directory the session no longer has.
+    let source = manager::drain_sessions(&client)
+        .await?
+        .sessions
+        .into_iter()
+        .find(|session| session.id == id)
+        .ok_or_else(|| {
+            anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::NotFound,
+                message: "this session's own host no longer lists it, so there is nothing to \
+                          replace"
+                    .to_string(),
+            })
+        })?;
+    let mode = mode_from_source(state, &source, DanglingProfilePolicy::FallBackToRaw).await?;
+    let created = do_create_session(
+        state,
+        &claim,
+        &client,
+        CreateSpec {
+            cwd: source.cwd,
+            mode,
+            // Copied verbatim, empty string included — the same rule
+            // `clone_for_agent` follows and for the same reason: deriving a
+            // title from the directory instead would silently rename the
+            // replacement, the one difference between the two rows a user
+            // reading them side by side would notice first.
+            title: Some(source.title),
+            cols: default_cols(),
+            rows: default_rows(),
+            intent_key,
+            // `SessionInfo` (the only view this route has of the source)
+            // carries neither field — see `clone_for_agent`'s own "KNOWN
+            // GAP" doc for why a raw source's integration overrides cannot
+            // be forwarded here either, and why fixing that is not local to
+            // this function.
+            agent_kind: None,
+            resume_template: None,
+            // Unlike an ordinary REST create, replace DOES have a session an
+            // idempotency replay can collide with: the SOURCE itself. A
+            // same-host replace with no field overrides reconstructs the
+            // exact fingerprint that created the source in the first place
+            // (same cwd, title, profile id or invocation, default
+            // dimensions, no parent), so a caller that reuses the source's
+            // own creation key hits a legitimate reservation REPLAY at the
+            // target, which answers with the SOURCE row rather than a new
+            // one. Accepting that reply would go on to send `DeleteSession`
+            // for the very id just "created", forget it, and report success
+            // with a `SessionInfo` describing the session it just deleted —
+            // violating every promise replace makes (new id, fresh
+            // conversation, a replacement left alive). See
+            // `clone_for_agent`'s identical veto, which this mirrors for the
+            // identical reason.
+            accept_result: Some(Box::new({
+                let source_id = id.to_string();
+                move |created: &farhelm_proto::SessionInfo| {
+                    if created.id != source_id {
+                        return Ok(());
+                    }
+                    Err(anyhow::Error::new(SupervisorError {
+                        kind: ErrorKind::Conflict,
+                        message: "the idempotency key replayed the create that made the source \
+                                  session, so no replacement was made; retry the replace with a \
+                                  key that has not been used on this host, or with none at all"
+                            .to_string(),
+                    }))
+                }
+            })),
+        },
+    )
+    .await?;
+    if let Err(delete_error) = client.delete_session(id).await {
+        // Two shapes of failure here, and they earn different words because
+        // they answer a different question: did the delete happen?
+        //
+        // An EXPLICIT refusal — the supervisor received `DeleteSession` and
+        // answered with its own `ControlMsg::Error` (`SupervisorError`), or
+        // the request never reached the wire at all
+        // (`SupervisorTransportError::NotSent`) — is a DEFINITE answer: the
+        // original was not removed, full stop, and "both sessions still
+        // exist" is simply true.
+        //
+        // Anything else this client can produce from a delete — the
+        // connection dying after the frame was enqueued
+        // (`SentUnanswered`), or an unexpected reply this client's own
+        // wrapper does not recognize — is NOT a definite answer: the
+        // supervisor may have completed the deletion and only the
+        // confirmation was lost. Reporting "both sessions still exist" in
+        // that case would be inventing a fact this side cannot have; the
+        // honest reply says the replacement is real and that the source's
+        // fate must be CHECKED rather than assumed either way.
+        let refusal_is_definite = crate::find_cause::<SupervisorError>(&delete_error).is_some()
+            || matches!(
+                crate::find_cause::<crate::SupervisorTransportError>(&delete_error),
+                Some(crate::SupervisorTransportError::NotSent)
+            );
+        let message = if refusal_is_definite {
+            format!(
+                "created replacement session {} but could not remove the original {id}: \
+                 {delete_error:#}; both sessions still exist",
+                created.id
+            )
+        } else {
+            format!(
+                "created replacement session {} but whether the original {id} was removed is \
+                 unknown after {delete_error:#}; the replacement exists — check {id} before \
+                 deleting it or retrying",
+                created.id
+            )
+        };
+        return Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::Internal,
+            message,
+        }));
+    }
+    forget_session(state, &claim, id).await;
+    Ok(created)
+}
+
+/// `POST /api/sessions/{id}/replace` — recreate `id` under a brand-new id on
+/// the same host, in the same directory, with the same title and agent, then
+/// remove `id` (SPEC.md's "replace"; see [`do_replace_session`] for the
+/// operation and its failure rule).
+pub(crate) async fn replace_session(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<ReplaceReq>,
+) -> impl IntoResponse {
+    match do_replace_session(&state, &id, req.intent_key).await {
+        Ok(session) => match browser_session_ready(&session) {
+            Ok(()) => axum::Json(session).into_response(),
+            Err(error) => http_error(error),
+        },
         Err(e) => http_error(e),
     }
 }
