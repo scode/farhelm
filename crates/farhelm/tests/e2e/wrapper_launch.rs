@@ -332,7 +332,10 @@ fn assert_wrapper_got(session_id: &str, cwd: &std::path::Path) {
 /// it this would silently return a prefix of the argv and every "the
 /// injected flag is present" assertion would fail with the flag simply
 /// missing. Failing on the width instead names the fix (raise
-/// [`WIDE_COLS`]).
+/// [`WIDE_COLS`]). Trailing blanks are trimmed before the bound for the
+/// reason `hook_identity`'s copy documents: a marker line that arrived
+/// through the attach snapshot is padded to the full pane width, which is
+/// not wrapping.
 fn argv_marker(transcript: &[u8]) -> String {
     let text = String::from_utf8_lossy(transcript);
     let start = text
@@ -344,6 +347,7 @@ fn argv_marker(transcript: &[u8]) -> String {
         .next()
         .expect("a marker is followed by at least a line ending")
         .trim_end_matches('\r')
+        .trim_end()
         .to_string();
     assert!(
         ARGV_MARKER.chars().count() + line.chars().count() < WIDE_COLS as usize,
