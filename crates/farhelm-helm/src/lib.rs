@@ -532,6 +532,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(sessions::archive_session),
         )
         .route(
+            "/api/sessions/{id}/replace",
+            axum::routing::post(sessions::replace_session),
+        )
+        .route(
             "/api/sessions/{id}",
             get(sessions::get_session).delete(sessions::delete_session),
         )

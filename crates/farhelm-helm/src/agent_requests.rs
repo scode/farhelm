@@ -1034,6 +1034,12 @@ async fn create_for_agent(
 ///
 /// ## Agent resolution, with no silent fallback
 ///
+/// Derived by `sessions::mode_from_source` under
+/// `sessions::DanglingProfilePolicy::Refuse` — the shared derivation
+/// `replace` also uses, under the opposite policy (see that function's own
+/// doc for the mechanics both callers share). Spelled out here for what
+/// makes THIS caller's choice of `Refuse` the right one:
+///
 /// 1. **A profiled source follows its snapshot by helm-wide ID on every
 ///    host.** A rename does not change the selection. A deleted id is
 ///    refused before the target call, never substituted by the old name or
@@ -1101,29 +1107,12 @@ async fn clone_for_agent(
             })
         })?;
 
-    let mode = match &source.source_profile {
-        // Profile ids belong to this helm, not to a host. Following the
-        // snapshot by id preserves the selected profile across renames and
-        // refuses deletion without substituting another profile by name.
-        Some(snapshot) => {
-            let profiles = state.store.profiles().await?;
-            let profile = profiles
-                .iter()
-                .find(|profile| profile.id == snapshot.id)
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow::Error::new(crate::SupervisorError {
-                        kind: ErrorKind::InvalidRequest,
-                        message: format!(
-                            "cannot clone profile {:?}: its snapshotted id {} is no longer in the helm catalog",
-                            snapshot.name, snapshot.id
-                        ),
-                    })
-                })?;
-            crate::sessions::CreateMode::resolved_profile(profile, &profiles)
-        }
-        None => crate::sessions::CreateMode::Raw(source.invocation.clone()),
-    };
+    let mode = crate::sessions::mode_from_source(
+        state,
+        &source,
+        crate::sessions::DanglingProfilePolicy::Refuse,
+    )
+    .await?;
     let (host, host_name) = resolve_host(state, origin, request.host).await?;
     let (claim, client) = crate::sessions::host_client(state, host)?;
     // See `create_for_agent`'s own note on why both logged values are safe.
