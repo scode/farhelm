@@ -1457,8 +1457,20 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
     let mut stdin = Some(child.0.stdin.take().expect("piped stdin"));
     {
         let pipe = stdin.as_mut().expect("just installed");
-        pipe.write_all(payload).expect("write the payload");
-        pipe.flush().expect("flush the payload");
+        // A hook with nothing to do exits without reading its stdin, and on a
+        // loaded box it can be gone before this write lands: the read end is
+        // closed and the write fails with EPIPE (observable as an error rather
+        // than a signal, since Rust ignores SIGPIPE). That is the silent early
+        // exit the callers are asserting on, not a failed write, so it is
+        // tolerated here and the exit status and captured output below decide
+        // the test. Seen twice in six loaded full-binary runs on a 4-vCPU
+        // sandbox on 2026-09-03; never on a developer machine, where the
+        // write always wins.
+        match pipe.write_all(payload).and_then(|()| pipe.flush()) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("write the payload: {error}"),
+        }
     }
     if !hold_stdin {
         stdin = None;
