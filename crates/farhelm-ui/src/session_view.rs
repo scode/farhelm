@@ -830,6 +830,83 @@ pub(crate) fn SessionView(
         }
     });
 
+    // Automatic "mark seen" (SPEC.md, Status): this session becoming the
+    // open one, or the open session's activity stamp advancing, both
+    // record the CURRENT effective activity as seen.
+    //
+    // Keyed on (id, effective-activity, ELIGIBLE) — never on the seen
+    // stamp itself, and that exclusion is deliberate: it is what makes a
+    // manual mark-unread on the OPEN session STICK until the user
+    // navigates away and back or new output arrives. The stamp a
+    // mark-unread clears is exactly the value this effect would otherwise
+    // re-write, so keying on the stamp (or on anything derived from it,
+    // like the unseen predicate) would immediately undo the user's own
+    // clear the very next time this memo recomputed.
+    //
+    // `eligible` — !stale && !ended && the helm sends the field at all —
+    // is folded into the key rather than left as a plain effect-body guard
+    // (review STATE-1): a session that goes stale and recovers, or a
+    // helm-capability transition (an upgrade landing mid-session, say),
+    // can flip eligibility with the id and effective-activity UNCHANGED,
+    // and a guard alone would leave the effect never re-firing to act on
+    // that transition at all. Folding it into the key makes the
+    // transition itself a re-fire, the same way the id and activity
+    // already are.
+    //
+    // Edge case this widening introduces: a transient staleness blip on
+    // the OPEN session (the connection hiccups and recovers with no new
+    // activity behind it) now toggles `eligible` false-then-true-again,
+    // which re-fires the effect even though nothing the user did or the
+    // session produced actually changed. If the session was manually
+    // marked unread moments before the blip, this re-fire re-marks it
+    // seen — silently overriding a manual clear that a merely cosmetic
+    // reconnection should not have touched. Accepted: a stale round trip
+    // this brief is rare, and the alternative (excluding staleness
+    // recovery from the key) would leave STATE-1's real target — a
+    // session that arrives already stale, or on a helm that gains the
+    // capability mid-session — stuck showing an automatic mark it can
+    // never actually issue.
+    let mark_key = use_memo(move || {
+        let session = current.read();
+        let eligible = seen_effect_eligible(&session);
+        (session.id.clone(), session.effective_activity(), eligible)
+    });
+    let mark_seen_base = base.clone();
+    use_effect(move || {
+        let (id, effective_activity, eligible) = mark_key();
+        if !eligible {
+            return;
+        }
+        // `has_unseen_output` is read via `peek`, not folded into the key
+        // above, for the same reason the guard below it always was: it
+        // depends on the seen stamp, which must not become part of the
+        // reactive key (see the memo's own comment). Skipping the write
+        // when the session already reads seen (review DATA-1) avoids a
+        // redundant PUT — the store's own change-detection already makes
+        // it a no-op server-side, but there is no reason to queue one.
+        if current.peek().has_unseen_output() != Some(true) {
+            return;
+        }
+        let log_id = id.clone();
+        crate::api::queue_seen_write(
+            &mark_seen_base,
+            &id,
+            Some(effective_activity),
+            move |result| {
+                // Silent by contract (SPEC.md, Errors and diagnostics): unlike
+                // the manual toggle, a lost automatic mark costs nothing worse
+                // than a dot that is one open-and-close cycle behind, and the
+                // next successful write (automatic or manual) corrects it.
+                if let Err(error) = result {
+                    dioxus::logger::tracing::warn!(
+                        target: "seen-state",
+                        "could not mark session {log_id} seen: {error}"
+                    );
+                }
+            },
+        );
+    });
+
     // The feed's consumer (PLAN_M6_75.md item 6). A revision notification
     // says only that something changed, so this view re-reads what it shows:
     // its own session always, and the host registry only while the session
@@ -1886,6 +1963,21 @@ fn visible_archive_error(archived: bool, error: Option<String>) -> Option<String
     if archived { None } else { error }
 }
 
+/// Whether `session` is a candidate for the automatic "mark seen" effect
+/// at all — independent of whether it currently has anything unseen.
+///
+/// Pulled out as its own function (rather than inlined in the effect's
+/// `use_memo` key) so the eligibility computation itself is unit-testable
+/// without mounting `SessionView`, and folded into that memo's KEY rather
+/// than left as a plain effect-body guard: a session that goes stale and
+/// recovers, or a helm-capability transition, can flip this with the id
+/// and effective-activity unchanged, and only a key-level change makes
+/// Dioxus re-run the effect to act on that transition — see the effect's
+/// own comment for the edge case this trades for.
+fn seen_effect_eligible(session: &Session) -> bool {
+    !session.stale && !session.status.has_ended() && session.seen_activity_at.is_some()
+}
+
 /// Where this session's status badge belongs on the consolidated header
 /// surface, computed from exactly ONE call to `status_badge` and split into
 /// the two destinations a caller can render: `(stale band, header)`.
@@ -1908,7 +2000,11 @@ fn visible_archive_error(archived: bool, error: Option<String>) -> Option<String
 /// The last-activity age is routed by [`activity_destination`] rather than
 /// by this function, and the separation is deliberate — see there.
 fn status_badge_destination(session: &Session) -> (Option<StatusBadge>, Option<StatusBadge>) {
-    let badge = status_badge(&session.status, session.annotation.as_deref());
+    let badge = status_badge(
+        &session.status,
+        session.annotation.as_deref(),
+        session.has_unseen_output(),
+    );
     if session.stale {
         (badge, None)
     } else {
@@ -2037,6 +2133,7 @@ mod tests {
                 host_name: None,
                 stale: false,
                 source_profile: None,
+                seen_activity_at: None,
             }
         }
         let before = Session {
@@ -2253,6 +2350,7 @@ mod tests {
                 host_name: None,
                 stale,
                 source_profile: None,
+                seen_activity_at: None,
             }
         }
 
@@ -2340,6 +2438,7 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            seen_activity_at: None,
         };
         assert_eq!(
             status_badge_destination(&unknown),
@@ -2402,6 +2501,97 @@ mod tests {
         assert!(
             restart_button_label(RestartOffer::FallbackTemplate).contains("resume command"),
             "a configured fallback is its own thing, distinct from both"
+        );
+    }
+
+    /// `seen_effect_eligible`'s three independent gates (review STATE-1's
+    /// contract), pinned directly rather than only through a browser test:
+    /// staleness, having ended, and a helm predating the field each
+    /// independently make a session ineligible for the automatic mark, and
+    /// clearing any ONE of them alone (with the other two left clean)
+    /// restores eligibility.
+    #[test]
+    fn seen_effect_eligibility_gates_on_staleness_ended_and_capability() {
+        fn base() -> Session {
+            Session {
+                id: "sess".to_string(),
+                title: "t".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: crate::SessionStatus::Idle,
+                annotation: None,
+                restart_offer: crate::RestartOffer::FreshOnly,
+                created_at: 0,
+                last_activity_at: 0,
+                archived: false,
+                tabs: Vec::new(),
+                host: None,
+                host_identity: None,
+                host_name: None,
+                stale: false,
+                source_profile: None,
+                seen_activity_at: Some(None),
+            }
+        }
+        assert!(
+            seen_effect_eligible(&base()),
+            "the ordinary case: idle, not stale, capability present"
+        );
+        assert!(
+            !seen_effect_eligible(&Session {
+                stale: true,
+                ..base()
+            }),
+            "a stale session must not auto-mark"
+        );
+        assert!(
+            !seen_effect_eligible(&Session {
+                status: crate::SessionStatus::Exited { exit_code: Some(0) },
+                ..base()
+            }),
+            "an ended session must not auto-mark"
+        );
+        assert!(
+            !seen_effect_eligible(&Session {
+                seen_activity_at: None,
+                ..base()
+            }),
+            "a helm that predates the field offers nothing to mark"
+        );
+    }
+
+    /// The automatic effect's whole firing decision (review DATA-1): even
+    /// an eligible session must not queue a write when it already reads
+    /// seen — only `seen_effect_eligible(session) && session.
+    /// has_unseen_output() == Some(true)` together decide the effect
+    /// actually acts, and this pins the SECOND half, which
+    /// `seen_effect_eligible`'s own test does not cover.
+    #[test]
+    fn an_eligible_but_already_seen_session_has_nothing_to_write() {
+        let already_seen = Session {
+            id: "sess".to_string(),
+            title: "t".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: crate::SessionStatus::Idle,
+            annotation: None,
+            restart_offer: crate::RestartOffer::FreshOnly,
+            created_at: 0,
+            last_activity_at: 1_700_000_000,
+            archived: false,
+            tabs: Vec::new(),
+            host: None,
+            host_identity: None,
+            host_name: None,
+            stale: false,
+            source_profile: None,
+            seen_activity_at: Some(Some(1_700_000_000)),
+        };
+        assert!(seen_effect_eligible(&already_seen));
+        assert_eq!(
+            already_seen.has_unseen_output(),
+            Some(false),
+            "the fixture's premise: nothing unseen"
         );
     }
 }

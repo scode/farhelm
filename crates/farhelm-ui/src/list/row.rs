@@ -683,7 +683,11 @@ pub(super) fn SessionRow(
     // renders no badge ELEMENT at all rather than an empty one — see
     // `status_badge`'s own docs for why an empty badge box would be the
     // same mistake in CSS.
-    let badge = status_badge(&session.status, session.annotation.as_deref());
+    let badge = status_badge(
+        &session.status,
+        session.annotation.as_deref(),
+        session.has_unseen_output(),
+    );
     // The browser suite's stable wire token for locality, the same role
     // `data-host-kind` plays in the host panel: a plain string rather than
     // `Debug`'s derived spelling, so a rename of the enum's variants (their
@@ -1855,6 +1859,10 @@ pub(super) fn row_specimen(id: &str) -> Session {
         host_name: None,
         stale: false,
         source_profile: None,
+        // Old-helm default: most existing row tests predate this field and
+        // must keep seeing no toggle and the pre-plan colours unless a test
+        // overrides it via `..row_specimen(id)`.
+        seen_activity_at: None,
     }
 }
 

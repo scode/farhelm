@@ -333,6 +333,25 @@ visible, because an exit code, the stop annotation, and the reason an agent neve
 pulse is a claim about the present, so it stands down wherever the status is a last-known report rather than a live one:
 a session on an unreachable host shows a still dot whatever its status says.
 
+The dot's colour is one of four, not three: running pulses green; waiting is red, since it is the one live status that
+is a request directed at a human and belongs with the other attention colours rather than beside "nothing is wrong";
+idle is grey when its last output has been seen; idle is blue when it has not. Seen state is one stored fact per session
+— an activity stamp recorded the last time some client looked at it, or nothing at all if no client ever has — kept by
+the helm and shared by every client the same way the list order and the last-selected session are (see Session list): no
+client keeps its own copy, and opening the same session from a second client sees the same colour the first one does. A
+session reads UNSEEN whenever its most recent activity is newer than that recorded stamp, or nothing is recorded at all;
+otherwise it reads SEEN.
+
+The stamp is set automatically in two moments — opening a session records its current activity as seen, and that
+session's activity advancing while it stays open re-records the new value — with which client did the opening, and
+whether its window has focus or its tab is visible, both ignored: a session sitting in a background tab is still
+recorded as seen the same way a foregrounded one is. It can also be set or cleared by hand: a "mark unread"/"mark read"
+toggle, reachable from the session's row, sets or clears the stamp directly. A manual mark unread on the session
+currently open STICKS — the automatic rule does not immediately re-record it as seen — until the user leaves and returns
+to it, or new output arrives. A failed automatic mark is logged but silent, the same best-effort exception the
+list-order/last-selection preference gets (see Errors and diagnostics); a failed manual toggle surfaces to the row like
+any other operation.
+
 Beside the status, a session shows how long ago it was last active as a short relative age (`2m`, `3h`), with the full
 timestamp available on the row; that is what makes the list's recently-active order legible instead of implicit. The age
 is a difference between two machines' clocks and is only as good as they are, so it is never the only place the
@@ -609,10 +628,13 @@ worktree, workspace, or branch as part of spawning — if the agent wants a `jj 
 ## Errors and diagnostics
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
-  operation succeeded when it failed. The helm-side preference (list order and last selection) is the one exception:
-  persistence is best-effort, failures are logged but silent because losing next-launch convenience must not turn a
+  operation succeeded when it failed. Two best-effort exceptions log a failure but stay silent rather than surfacing it:
+  the helm-side preference (list order and last selection), because losing next-launch convenience must not turn a
   choice that already took effect into a failed current operation, and a helm that lost the preference falls back to the
-  defaults.
+  defaults; and the automatic "mark seen" a session's own opening or activity advance triggers (see Status), because a
+  lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the next
+  successful write. The manual "mark unread"/"mark read" toggle is not covered by either exception — a failed toggle
+  surfaces like any other operation.
 - Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
   low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
   while the global details disclosure shows the evidence and remedies behind the phase.

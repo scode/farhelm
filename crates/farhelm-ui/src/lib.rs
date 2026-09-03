@@ -509,6 +509,23 @@ pub struct Session {
     /// an `Option` as `None`, which is also what a helm predating the field
     /// sends. Both readings agree: no profile is known for this session.
     pub source_profile: Option<SourceProfile>,
+    /// The activity stamp that was current the last time some client had
+    /// this session open — the helm's `session_seen` row, denormalized onto
+    /// every list/detail row exactly the way `host_identity` is (SPEC.md,
+    /// Status).
+    ///
+    /// Double-`Option` for the same reason `host_identity` is, and decoded
+    /// through the same [`double_option`] helper: the OUTER `None` means
+    /// "this helm predates the field" (the key was absent), while `Some`
+    /// carries the helm's real answer — `Some(None)` for "never seen" and
+    /// `Some(Some(stamp))` for a recorded one. Only an outer `Some` offers
+    /// the unseen-blue dot and the read/unread toggle at all; an old helm's
+    /// idle rows draw the SAME grey every other idle row draws — there is no
+    /// separate legacy colour, only the absence of the toggle and of the
+    /// blue variant. [`Session::has_unseen_output`] is the predicate every
+    /// renderer should read instead of this field directly.
+    #[serde(default, deserialize_with = "double_option")]
+    pub seen_activity_at: Option<Option<i64>>,
 }
 
 impl Session {
@@ -535,23 +552,51 @@ impl Session {
             self.created_at
         }
     }
+
+    /// Whether this session has output nobody has looked at yet (SPEC.md,
+    /// Status), or `None` when the helm predates `seen_activity_at` and the
+    /// question cannot be answered at all.
+    ///
+    /// `Some(true)` covers two cases the wire deliberately does not
+    /// distinguish: a session never seen by any client (`Some(None)`,
+    /// "any activity is newer than nothing") and one seen at some earlier
+    /// stamp that [`Session::effective_activity`] has since moved past. A
+    /// stamp equal to the current effective activity reads as SEEN, not
+    /// unseen — the boundary matters for the auto-mark effect
+    /// (`session_view.rs`), which writes exactly that equal value and must
+    /// not immediately read its own write back as still-unseen.
+    ///
+    /// This predicate says nothing about whether a caller should DRAW the
+    /// unseen state — `status::status_badge` also asks the session's status,
+    /// since running and waiting ignore this flag entirely (a pulsing dot
+    /// already says "look here").
+    pub(crate) fn has_unseen_output(&self) -> Option<bool> {
+        self.seen_activity_at.map(|seen| match seen {
+            None => true,
+            Some(seen_at) => self.effective_activity() > seen_at,
+        })
+    }
 }
 
 /// Deserialize a field whose key PRESENCE carries meaning separately from
-/// its value — `Session::host_identity` and `Host::alias` both use it: an
-/// absent key stays the outer `None` (via `#[serde(default)]`), while a
-/// present key — `null` included — lands in `Some(inner)`. Serde's stock
-/// `Option<Option<T>>` handling cannot express this: it decodes `null` and
-/// "absent" to the same outer `None`, which is exactly the collapse both
-/// fields' contracts forbid. Deliberately NOT generic over `T`: every field
-/// that uses it wants a `String`, and the concrete signature keeps the wire
-/// shape it implements in plain sight rather than hiding it behind a type
-/// parameter.
-fn double_option<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+/// its value — `Session::host_identity`, `Host::alias`, and
+/// `Session::seen_activity_at` all use it — where an absent key stays the
+/// outer `None` (via `#[serde(default)]`), while a present key — `null`
+/// included — lands in `Some(inner)`. Serde's stock `Option<Option<T>>`
+/// handling cannot express this: it decodes `null` and "absent" to the same
+/// outer `None`, which is exactly the collapse every one of those fields'
+/// contracts forbids.
+///
+/// Generic over `T` since a second field needing this exact shape is what
+/// made it worth sharing; the wire shape it implements is still in plain
+/// sight at each call site, in the concrete `Option<Option<T>>` the field
+/// itself declares.
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
 {
-    Option::<String>::deserialize(deserializer).map(Some)
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// Mirror of the helm's `source_profile` object (farhelm-proto's
@@ -1881,6 +1926,65 @@ mod tests {
         assert_eq!(present.host_identity, Some(Some("install-a".to_string())));
     }
 
+    /// `Session::seen_activity_at`'s three wire shapes (review TEST-2),
+    /// pinned through REAL JSON rather than only through Rust-literal
+    /// `Option<Option<_>>` fixtures the way
+    /// `has_unseen_output_reads_absence_staleness_and_the_equal_boundary`
+    /// does — `host_identity_decodes_absent_null_and_present_distinctly`'s
+    /// mirror for this field, and the one place a `double_option` decode
+    /// bug in either direction (collapsing absent into null, or vice
+    /// versa) would actually be caught: the two collapse into the SAME
+    /// `has_unseen_output()` answer for one of the three shapes (absent and
+    /// null both classify unseen), so a test that only asserted the
+    /// classification, never the decode, could not tell them apart.
+    #[test]
+    fn seen_activity_at_decodes_absent_null_and_present_distinctly() {
+        let body = |seen_activity_at: Option<serde_json::Value>| {
+            let mut json = serde_json::json!({
+                "id": "s1",
+                "title": "demo",
+                "cwd": "/tmp",
+                "invocation": "agent",
+                "last_activity_at": 1_700_000_100,
+            });
+            if let Some(value) = seen_activity_at {
+                json["seen_activity_at"] = value;
+            }
+            json
+        };
+        let absent: Session = serde_json::from_value(body(None)).unwrap();
+        assert_eq!(
+            absent.seen_activity_at, None,
+            "a missing key is \"this helm predates the field\""
+        );
+        assert_eq!(
+            absent.has_unseen_output(),
+            None,
+            "and that must read as unanswerable, not as unseen"
+        );
+
+        let null: Session = serde_json::from_value(body(Some(serde_json::Value::Null))).unwrap();
+        assert_eq!(
+            null.seen_activity_at,
+            Some(None),
+            "an explicit null is a real answer: never seen"
+        );
+        assert_eq!(
+            null.has_unseen_output(),
+            Some(true),
+            "and that must read as unseen, distinctly from the absent case above"
+        );
+
+        let present: Session =
+            serde_json::from_value(body(Some(serde_json::json!(1_700_000_100)))).unwrap();
+        assert_eq!(present.seen_activity_at, Some(Some(1_700_000_100)));
+        assert_eq!(
+            present.has_unseen_output(),
+            Some(false),
+            "a stamp equal to the current activity is seen"
+        );
+    }
+
     /// `Host::alias`'s three wire shapes decode to three distinct values —
     /// `Session::host_identity`'s mirror of the same `double_option` contract,
     /// pinned separately because it is what gates whether `hosts.rs` offers
@@ -2291,6 +2395,7 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            seen_activity_at: None,
         };
 
         assert_eq!(
@@ -2321,6 +2426,66 @@ mod tests {
             unknown.last_activity_at, 0,
             "the fallback is DERIVED at read time and never written back — a stored \
              guess would be indistinguishable from an observation afterwards"
+        );
+    }
+
+    /// `Session::has_unseen_output`'s three-way answer (SPEC.md, Status):
+    /// unanswerable on an old helm,
+    /// unseen for a session nobody has ever looked at OR whose activity has
+    /// moved since the last look, and seen otherwise — including at the
+    /// exact boundary where a stamp equals the current effective activity,
+    /// which the auto-mark effect depends on reading as SEEN so it does not
+    /// immediately contradict its own write.
+    #[test]
+    fn has_unseen_output_reads_absence_staleness_and_the_equal_boundary() {
+        let at = |seen_activity_at: Option<Option<i64>>, last_activity_at: i64| Session {
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Idle,
+            annotation: None,
+            restart_offer: RestartOffer::FreshOnly,
+            created_at: 1_700_000_000,
+            last_activity_at,
+            archived: false,
+            tabs: Vec::new(),
+            host: None,
+            host_identity: None,
+            host_name: None,
+            stale: false,
+            source_profile: None,
+            seen_activity_at,
+        };
+
+        assert_eq!(
+            at(None, 1_700_000_100).has_unseen_output(),
+            None,
+            "an old helm that never sent the key leaves the question unanswerable, \
+             never a guessed true or false"
+        );
+        assert_eq!(
+            at(Some(None), 1_700_000_100).has_unseen_output(),
+            Some(true),
+            "never seen at all reads as unseen — any activity is newer than nothing"
+        );
+        assert_eq!(
+            at(Some(Some(1_700_000_050)), 1_700_000_100).has_unseen_output(),
+            Some(true),
+            "a stamp OLDER than the current activity is unseen: output arrived after \
+             the last look"
+        );
+        assert_eq!(
+            at(Some(Some(1_700_000_100)), 1_700_000_100).has_unseen_output(),
+            Some(false),
+            "a stamp EQUAL to the current activity is seen, not unseen — the boundary \
+             the auto-mark effect's own write must read back as settled"
+        );
+        assert_eq!(
+            at(Some(Some(1_700_000_150)), 1_700_000_100).has_unseen_output(),
+            Some(false),
+            "a stamp newer than the current activity (a mark that raced an older \
+             read) is still seen, never negative unseen-ness"
         );
     }
 }

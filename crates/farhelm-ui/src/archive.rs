@@ -155,6 +155,7 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            seen_activity_at: None,
         }
     }
 }

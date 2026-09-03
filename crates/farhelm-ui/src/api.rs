@@ -1676,6 +1676,255 @@ pub(crate) async fn archive_session(base: &str, id: &str) -> Result<Session, Str
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
 
+/// PUT the seen-state endpoint for one session: `Some(stamp)` marks it seen
+/// as of that activity stamp, `None` clears the mark (a manual "mark
+/// unread" — SPEC.md, Status). Same empty-object success body as
+/// `stop_session`, so the same `Ok(())`.
+///
+/// The low-level one-shot request only. Every caller reaches it through
+/// [`queue_seen_write`], never directly: two independent callers can want
+/// to write this session's seen state at once — the automatic mark on
+/// open/activity-advance (`session_view.rs`) and the manual toggle (the
+/// row's menu and dot, `list/row.rs`) — and spawning each as its own
+/// unsynchronized request would let them race, with no guarantee the
+/// LATER intent is the one that survives on the helm. `queue_seen_write`
+/// is what rules that out.
+pub(crate) async fn mark_seen(
+    base: &str,
+    id: &str,
+    seen_activity_at: Option<i64>,
+) -> Result<(), String> {
+    let url = format!("{base}/api/sessions/{}/seen", encode_path_segment(id));
+    let body = serde_json::json!({ "seen_activity_at": seen_activity_at });
+    let resp = send(client().put(&url).json(&body)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("PUT", &url, resp).await);
+    }
+    Ok(())
+}
+
+/// One session's slice of the seen-state write queue: the newest locally
+/// chosen value, whether a writer currently owns it, and what to do with
+/// that writer's eventual result.
+///
+/// `report` is captured fresh on every [`SeenWrites::record`] call and
+/// travels with `latest`, not with whichever caller happened to start the
+/// writer: when a manual toggle supersedes an automatic mark that is
+/// already in flight, the automatic caller's silent-log preference must
+/// not win just because it got there first — the LATEST intent decides
+/// both the value sent and how its outcome is reported, matching this
+/// queue's whole latest-wins contract (see [`SeenWrites`]).
+///
+/// `Option`, not a bare `SeenWriteReport`, because [`SeenWrites::next_to_send`]
+/// TAKES it rather than cloning: a report runs at most once ever (it is a
+/// `FnOnce`), so there is nothing to hand back a second time, and a slot
+/// mid-flight with its report already taken is exactly what lets a
+/// superseding [`SeenWrites::record`] install a fresh one in its place
+/// without disturbing the value the writer is still out delivering.
+struct SeenWriteSlot {
+    latest: Option<i64>,
+    report: Option<SeenWriteReport>,
+    in_flight: bool,
+}
+
+/// What to do with a seen-state write's settled outcome, captured at the
+/// moment the write is queued rather than baked into `mark_seen` itself —
+/// SPEC.md's Errors section makes this a MANUAL-vs-automatic distinction,
+/// not a per-endpoint one: a manual toggle (`list/view.rs`'s `on_mark_seen`)
+/// surfaces a failure to the row's error line like any other operation,
+/// while the automatic mark (`session_view.rs`) stays silent, logging only.
+/// A plain closure rather than a concrete UI type (`Signal`, `HashMap`) so
+/// this module keeps its documented "returns `Result<_, String>`, the
+/// caller decides how to show it" contract (see the module doc) — the
+/// caller's closure is free to capture whatever reactive state it needs.
+///
+/// `FnOnce`, not `Fn`: it is called at most once (the final settle of one
+/// write chain) and never again, so there is no reason to demand repeat-
+/// callable captures — a caller whose report needs `&mut` access to what
+/// it captured (`Signal::write`, for one) would otherwise be forced into
+/// interior mutability for no benefit. No `Send` bound, deliberately: a
+/// `Signal` capture is not `Send` (see [`SEEN_WRITES`]'s own doc), and this
+/// queue's `thread_local!` storage is what makes that fine to require.
+type SeenWriteReport = Box<dyn FnOnce(Result<(), String>)>;
+
+/// The seen-state write queue's whole state: a latest-wins slot per session
+/// id, styled directly on [`PreferenceWrites`] but keyed dynamically
+/// (sessions come and go over a tab's lifetime, unlike the two fixed
+/// preference fields) rather than over a closed enum.
+///
+/// Exists to close the race findings (SYSTEMS-1/DATA-1) raised against the
+/// first cut of this feature: the automatic mark-on-open effect and the
+/// manual read/unread toggle both write the SAME endpoint for the SAME
+/// session, and independently spawned requests can be delivered out of
+/// order. Without serialization, a manual "mark unread" click could be
+/// followed on the wire by an automatic "mark seen" that had merely been
+/// issued earlier and was slower to land, silently reverting the user's
+/// explicit choice. The fix is exactly [`PreferenceWrites`]'s: at most one
+/// PUT per session is ever in flight, and a value recorded while one is out
+/// is sent AFTER it settles — so requests for the same session reach the
+/// helm in the order they were queued, never the order their network calls
+/// happen to finish. A slot is pruned once its queue drains (unlike
+/// `PreferenceWrites`'s two fields, kept forever): an idle per-session slot
+/// held for a tab's whole lifetime would otherwise leak.
+#[derive(Default)]
+struct SeenWrites(std::collections::HashMap<String, SeenWriteSlot>);
+
+impl SeenWrites {
+    /// Record a new local choice for `id`. Returns whether the caller must
+    /// start a writer (none is running for this id yet).
+    fn record(&mut self, id: &str, value: Option<i64>, report: SeenWriteReport) -> bool {
+        if let Some(slot) = self.0.get_mut(id) {
+            slot.latest = value;
+            slot.report = Some(report);
+            if slot.in_flight {
+                return false;
+            }
+            slot.in_flight = true;
+            return true;
+        }
+        self.0.insert(
+            id.to_string(),
+            SeenWriteSlot {
+                latest: value,
+                report: Some(report),
+                in_flight: true,
+            },
+        );
+        true
+    }
+
+    /// The value (and how to report it) the writer should send next —
+    /// always the newest recorded, exactly as `PreferenceWrites::next_to_send`.
+    ///
+    /// TAKES the report out of the slot (see [`SeenWriteSlot`]'s own doc):
+    /// a `record` racing in after this call simply installs a fresh one,
+    /// which is what makes this safe to call again on the next loop
+    /// iteration if [`Self::finished`] says the value just sent was
+    /// superseded.
+    fn next_to_send(&mut self, id: &str) -> Option<(Option<i64>, SeenWriteReport)> {
+        let slot = self.0.get_mut(id)?;
+        let report = slot.report.take()?;
+        Some((slot.latest, report))
+    }
+
+    /// A PUT carrying `sent` settled. Returns whether the writer must go
+    /// again because a newer value was recorded while it was out — in
+    /// which case `sent`'s outcome must NOT be reported (it is no longer
+    /// the answer anyone asked for; see `spawn_seen_writer`). When nothing
+    /// newer arrived, this was the final settle for the current chain: the
+    /// slot is pruned and the caller reports the outcome through the
+    /// `SeenWriteReport` [`Self::next_to_send`] handed back alongside
+    /// `sent`.
+    fn finished(&mut self, id: &str, sent: Option<i64>) -> bool {
+        let Some(slot) = self.0.get(id) else {
+            return false;
+        };
+        if slot.latest != sent {
+            return true;
+        }
+        self.0.remove(id);
+        false
+    }
+
+    /// The writer was cancelled mid-request (its task dropped): release the
+    /// id so a later write can start a replacement, exactly
+    /// `PreferenceWrites::writer_lost`'s reasoning.
+    fn writer_lost(&mut self, id: &str) {
+        if let Some(slot) = self.0.get_mut(id) {
+            slot.in_flight = false;
+        }
+    }
+}
+
+thread_local! {
+    /// The process-wide seen-state write queue.
+    ///
+    /// `thread_local!`, not [`PREFERENCE_WRITES`]'s `static` `Mutex` — and
+    /// that is a real difference, not a style choice: a report closure
+    /// captures a `Signal`, and dioxus `Signal`s use `UnsyncStorage` (a
+    /// `Rc`/`RefCell` pair) rather than an atomically-shared one, so they
+    /// are not `Send` and cannot live behind a `Mutex` that must itself be
+    /// safe to share across threads. `thread_local!` sidesteps the
+    /// requirement entirely instead of forcing every report closure's
+    /// captures to prove `Send`: this queue is only ever touched from
+    /// component render/effect code and from the writer tasks
+    /// `spawn_forever` schedules for it, and dioxus keeps ALL of a
+    /// `VirtualDom`'s own spawned tasks on one thread regardless of how
+    /// many worker threads the surrounding async runtime otherwise has
+    /// (visible directly in `dioxus::core::spawn_forever`'s own signature,
+    /// which takes no `Send` bound on the future either — the same
+    /// guarantee this queue leans on).
+    static SEEN_WRITES: std::cell::RefCell<SeenWrites> = std::cell::RefCell::new(SeenWrites::default());
+}
+
+fn with_seen_writes<R>(f: impl FnOnce(&mut SeenWrites) -> R) -> R {
+    SEEN_WRITES.with(|cell| f(&mut cell.borrow_mut()))
+}
+
+/// Clear `writer_lost` on drop unless the writer finished cleanly — see
+/// [`WriterGuard`], which this mirrors exactly for the seen-state queue.
+struct SeenWriterGuard {
+    id: String,
+    armed: bool,
+}
+
+impl Drop for SeenWriterGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            with_seen_writes(|writes| writes.writer_lost(&self.id));
+        }
+    }
+}
+
+/// Queue a seen-state write for `id` and see that it reaches the helm, in
+/// order relative to every other write this session issues for the SAME
+/// id — the entry point every caller of `mark_seen` must use instead of
+/// calling it directly (see [`SeenWrites`] for why, and its own doc for
+/// what a bypass would risk).
+///
+/// `report` runs at most once, with the FINAL settled result for this
+/// session's write chain — never for a value a later call superseded
+/// before it was ever sent. The automatic mark passes a closure that only
+/// logs a failure; the manual toggle passes one that writes the row's
+/// error line, matching every other row operation (SPEC.md, Errors and
+/// diagnostics).
+pub(crate) fn queue_seen_write(
+    base: &str,
+    id: &str,
+    seen_activity_at: Option<i64>,
+    report: impl FnOnce(Result<(), String>) + 'static,
+) {
+    let report: SeenWriteReport = Box::new(report);
+    let should_spawn = with_seen_writes(|writes| writes.record(id, seen_activity_at, report));
+    if should_spawn {
+        spawn_seen_writer(base.to_string(), id.to_string());
+    }
+}
+
+/// Start the one writer task a claimed id gets — `spawn_preference_writer`'s
+/// shape exactly, including the `spawn_forever` rationale (a component
+/// unmounting on the way out of a view must not cancel its own write).
+fn spawn_seen_writer(base: String, id: String) {
+    dioxus::core::spawn_forever(async move {
+        let mut guard = SeenWriterGuard {
+            id: id.clone(),
+            armed: true,
+        };
+        loop {
+            let Some((value, report)) = with_seen_writes(|writes| writes.next_to_send(&id)) else {
+                break;
+            };
+            let result = mark_seen(&base, &id, value).await;
+            let superseded = with_seen_writes(|writes| writes.finished(&id, value));
+            if !superseded {
+                report(result);
+                break;
+            }
+        }
+        guard.armed = false;
+    });
+}
+
 /// DELETE a session. See `stop_session`'s docs — same error-surfacing
 /// shape (including the body-read-failure context), different verb and
 /// endpoint.
@@ -3188,5 +3437,136 @@ mod preference_write_tests {
         assert!(!queue.finished(PreferenceField::Sort, "title", true));
         assert_eq!(queue.dirty(PreferenceField::Sort), None);
         assert_eq!(queue.begin_replay(PreferenceField::Sort), None);
+    }
+}
+
+/// The seen-state write queue's ordering contract, pinned on the pure state
+/// machine — [`preference_write_tests`]'s twin for [`SeenWrites`] (review
+/// SYSTEMS-1/DATA-1): the whole reason this queue exists is that an
+/// automatic mark and a manual toggle can both want to write the SAME
+/// session's seen state at once, and only the LATEST one queued may ever
+/// actually settle as the reported outcome.
+#[cfg(test)]
+mod seen_write_tests {
+    use super::SeenWrites;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Drives one writer-loop iteration exactly the way `spawn_seen_writer`
+    /// does, minus the actual network call: dequeue, "send" (the caller
+    /// supplies the settlement outcome), and report only if `finished` says
+    /// this attempt was not superseded. Returns whether the writer must
+    /// loop again (a newer value was recorded mid-flight).
+    fn settle_one(queue: &mut SeenWrites, id: &str, outcome: Result<(), String>) -> Option<bool> {
+        let (sent, report) = queue.next_to_send(id)?;
+        let superseded = queue.finished(id, sent);
+        if !superseded {
+            report(outcome);
+        }
+        Some(superseded)
+    }
+
+    /// Every `(label, outcome)` pair a test's report closures recorded, in
+    /// call order — named so clippy's `type_complexity` lint has a target
+    /// to point at instead of the inline nested-generic spelling.
+    type ReportedOutcomes = Rc<RefCell<Vec<(&'static str, Result<(), String>)>>>;
+
+    /// A manual value recorded while an automatic one is already in flight
+    /// is sent AFTER the automatic PUT settles, and the automatic PUT's own
+    /// outcome is never reported — the guarantee that rules out a slower
+    /// automatic "mark seen" landing on the wire after a faster manual
+    /// "mark unread" and silently reverting it (SYSTEMS-1).
+    #[test]
+    fn a_later_value_recorded_mid_flight_is_sent_after_and_the_earlier_outcome_is_dropped() {
+        let mut queue = SeenWrites::default();
+        let reported: ReportedOutcomes = Rc::new(RefCell::new(Vec::new()));
+        let report_for = |label: &'static str| {
+            let reported = Rc::clone(&reported);
+            Box::new(move |result: Result<(), String>| {
+                reported.borrow_mut().push((label, result));
+            })
+        };
+
+        assert!(
+            queue.record("sess-1", Some(1_700_000_000), report_for("automatic")),
+            "the first write starts a writer"
+        );
+        // The writer dequeues the automatic mark — capturing its report
+        // now, exactly as `spawn_seen_writer` does before its `await` — but
+        // has not yet learned whether it settled.
+        let (sent, automatic_report) = queue
+            .next_to_send("sess-1")
+            .expect("the automatic mark to send");
+        assert_eq!(sent, Some(1_700_000_000));
+
+        // A manual clear arrives while that PUT is still out.
+        assert!(
+            !queue.record("sess-1", None, report_for("manual")),
+            "a write while one is in flight must NOT start a second writer"
+        );
+
+        // The automatic PUT NOW settles successfully — but `finished` must
+        // say it was superseded, and the writer must therefore never call
+        // its report at all (mirroring `spawn_seen_writer`'s own `if
+        // !superseded` guard — calling it here would be testing a shape the
+        // production code never takes).
+        assert!(
+            queue.finished("sess-1", sent),
+            "settling a superseded value must send the writer around again"
+        );
+        drop(automatic_report);
+        assert!(
+            reported.borrow().is_empty(),
+            "a superseded write's own outcome must never be reported"
+        );
+
+        // The writer loops: the manual clear is next, and it settles
+        // cleanly — the only outcome that should ever have been reported.
+        assert_eq!(
+            settle_one(&mut queue, "sess-1", Ok(())),
+            Some(false),
+            "the final settle must not claim it was superseded"
+        );
+        assert_eq!(
+            reported.borrow().as_slice(),
+            &[("manual", Ok(()))],
+            "only the LATEST intent's outcome is ever reported, and it must be reported exactly once"
+        );
+        assert!(
+            queue.next_to_send("sess-1").is_none(),
+            "a drained slot must be pruned, not left idle forever"
+        );
+    }
+
+    /// Two independent sessions never share a writer or a report — the
+    /// per-session keying that lets an unrelated session's write proceed
+    /// without waiting behind this one's.
+    #[test]
+    fn two_sessions_do_not_share_a_writer() {
+        let mut queue = SeenWrites::default();
+        assert!(queue.record("sess-1", Some(1), Box::new(|_| {})));
+        assert!(
+            queue.record("sess-2", Some(2), Box::new(|_| {})),
+            "a write for a different session starts its own writer even \
+             with sess-1's write in flight"
+        );
+    }
+
+    /// A cancelled writer (its task dropped mid-request) releases the id
+    /// but a record made before the cancellation is still there to be sent
+    /// by whichever later write claims a fresh writer.
+    #[test]
+    fn a_lost_writer_releases_the_id_without_losing_the_queued_value() {
+        let mut queue = SeenWrites::default();
+        assert!(queue.record("sess-1", Some(1), Box::new(|_| {})));
+        // The writer dequeues but the task is dropped before it can call
+        // `finished` — modeled here directly via `writer_lost`, the guard's
+        // own drop path.
+        let _ = queue.next_to_send("sess-1");
+        queue.writer_lost("sess-1");
+        assert!(
+            queue.record("sess-1", Some(2), Box::new(|_| {})),
+            "the next write must be able to start a replacement writer"
+        );
     }
 }
