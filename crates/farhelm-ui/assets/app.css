@@ -222,7 +222,6 @@
      `.host-status.unreachable` for why several things are amber rather
      than red), `danger` the destructive-or-failed family. */
   --ok: #7fd88f; /* running, connected, step completed */
-  --ok-dim: #5f8f6b; /* the same family, one notch quieter: live but idle */
 
   --warn: #d8b45f; /* the amber label/badge tone */
   --warn-bright: #e0d090; /* amber PROSE, which needs more lift than a badge does */
@@ -1992,31 +1991,61 @@ samp {
   flex: 0 0 auto;
 }
 
-/* The three live statuses (PLAN_M6_75.md item 3) are TWO groups, not three
-   equal ones, and the grouping is the whole design.
+/* The three live statuses (PLAN_M6_75.md item 3; recoloured by
+   plans/session-dot-read-state.md) are no longer one calm-green pair plus a
+   blue outlier — SEEN is what reads as calm now, and running is the only
+   status that still gets green on its own.
 
-   Running and idle are the same green in two weights: both mean "this
-   session is fine, leave it alone", and they differ only in how busy it is
-   — a distinction worth showing and not worth interrupting anyone for. A
-   list of healthy sessions therefore reads as one calm colour, which is
-   what makes the third stand out at all. */
+   Running keeps the healthy colour to itself: it is the one live state that
+   needs no further comparison against anything, so a glance across a fleet
+   can treat green as "working, leave it alone" without qualification. */
 .status-badge.running {
   color: var(--ok);
 }
 
+/* Idle, seen, draws in the same muted foreground `exited` does — visibly
+   NOT green (this session is not doing anything right now) and NOT the
+   accent or an attention colour (nothing is asking for a look), just quiet
+   chrome. `--fg-1` rather than a new, dimmer token: it is already the
+   colour every other quiet status word on a row uses, and its contrast
+   against every row surface is already load-bearing elsewhere (see its own
+   definition in the foregrounds block above), so reusing it costs nothing a
+   fresh token would have needed proving from scratch. */
 .status-badge.idle {
-  color: var(--ok-dim);
+  color: var(--fg-1);
 }
 
-/* Waiting deliberately leaves the green family. It is the one live status
-   that is a REQUEST — an agent has asked something and is getting nothing
-   back — and SPEC.md's promise for this milestone is exactly that such a
-   session is findable at a glance across a fleet. Blue rather than a
-   warning colour: nothing is wrong, somebody is just needed, and red or
-   amber here would compete with `error` and `interrupted`, which report
-   actual failures. */
-.status-badge.waiting {
+/* Idle WITH output nobody has looked at is the one new live state this plan
+   adds, and it reuses `--info` rather than inventing a colour: the token's
+   old job (waiting) has moved to red above, so this is its only live-status
+   use now, and "the fleet drew your attention here at some point" is close
+   enough in kind to "waiting" that reusing the token's established blue is
+   more legible than a second, unrelated blue would be. `status.rs` emits
+   BOTH classes on the same element (`class: "idle unseen"`, joined onto the
+   shared `status-badge` class by `StatusBadgeView`), so this three-class
+   selector outranks the plain two-class `.status-badge.idle` rule above by
+   specificity alone — that ordering does not depend on which rule is
+   declared first in this file. */
+.status-badge.idle.unseen {
   color: var(--info);
+}
+
+/* Waiting moves into the red family (plans/session-dot-read-state.md): it
+   is the one live status that is a REQUEST directed at a human, which makes
+   it categorically different from "healthy" (green) or "nothing is wrong,
+   somebody is just needed at their own pace" (the blue this token used to
+   carry, now the unseen-idle rule above) — a red DOT beside a session's
+   title is the loudest live colour this sheet has, and waiting is the one
+   live state that earns it. `--danger` rather than `--danger-strong`:
+   `error` already claims `--danger-strong` for a state that IS a failure
+   (SPEC.md is explicit that waiting is not), and the two reds are close
+   enough that reusing the failure shade for "someone is needed" would blur
+   a distinction this sheet otherwise keeps — a DOT beside a live session and
+   a WORD on an ended one are different shapes in different places, so the
+   two are distinguishable by where and how they render even sharing a red
+   family, without needing two visually distinct reds to do it. */
+.status-badge.waiting {
+  color: var(--danger);
 }
 
 .status-badge.exited {

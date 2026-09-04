@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------
 
 import { expect, test } from "@playwright/test";
-import { SESSION_LISTING } from "./helpers/fleet";
+import { hideSeenState, SESSION_LISTING } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import {
   FAKE_AGENT_INVOCATION,
@@ -145,6 +145,15 @@ test("an interrupted session's view leads with the resume offer, and declining c
 // rather than the view's own button: the property is about what the LIST
 // shows while a restart runs, and the button lives on the other page. What
 // restarts the session is irrelevant to it.
+//
+// `LIVE_BADGE` matches the bare status word — never the idle-unseen
+// annotation, which this test's own subject has nothing to do with, so
+// `hideSeenState` keeps this session's row from ever growing the "idle —
+// new output" text it would otherwise genuinely earn (SPEC.md, Status: a
+// session created here and never opened is unseen from the moment a real
+// classifier settles it into idle, exactly what this fixture is). Widening
+// `LIVE_BADGE` instead would have been the wrong fix: that constant is
+// shared, and every other caller's assertion is about the plain live word.
 test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => {
   // The sampling window alone is 20 seconds, and it sits between a real
   // create and a real restart — comfortably past the 60-second default.
@@ -158,6 +167,7 @@ test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => 
     expect(created.ok(), "creating the session under test").toBe(true);
     id = (await created.json()).id;
 
+    await hideSeenState(page);
     await page.goto("/");
     const badge = rowByTitle(page, title).locator(".status-badge");
     // A DEFINITE status first: the rule under test is about not losing one,
