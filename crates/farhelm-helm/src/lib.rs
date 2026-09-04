@@ -536,6 +536,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(sessions::get_session).delete(sessions::delete_session),
         )
         .route(
+            "/api/sessions/{id}/seen",
+            axum::routing::put(sessions::mark_seen),
+        )
+        .route(
             "/api/sessions/{id}/tabs",
             axum::routing::post(sessions::open_tab),
         )
