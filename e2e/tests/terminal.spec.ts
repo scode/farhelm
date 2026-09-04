@@ -3578,6 +3578,84 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   await expect(openButton).toHaveAccessibleName(/running/);
 });
 
+// The idle half of the status dot's four states (SPEC.md, Status), proven
+// only through the browser for the same reason the running case above is:
+// `status.rs`'s unit tests pin the class/text pairing in the abstract, but
+// only a real page can show whether the CSS rule that colour names actually
+// paints, and whether the class the row computes from `has_unseen_output`
+// is the one that reaches the DOM.
+test("an idle session already seen draws a grey dot with the plain word", async ({ page }) => {
+  const session = liveDotListing({
+    status: { state: "idle" },
+    // Seen at exactly the reported activity: SPEC.md's boundary reads this
+    // as seen, not unseen (`Session::has_unseen_output`'s own contract —
+    // equal is settled, not stale).
+    seen_activity_at: Math.floor(Date.now() / 1000) - LIVE_DOT_ACTIVITY_AGE_SECS,
+  });
+  await page.route(SESSION_LISTING, (route) =>
+    fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ sessions: [session], total: 1, truncated: false }),
+    }),
+  );
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${session.id}"]`);
+  const badge = row.locator(".status-badge.idle");
+  await expect(badge).toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await expect(row.locator(".status-badge.idle.unseen")).toHaveCount(
+    0,
+    "a seen idle session must not also carry the unseen modifier class",
+  );
+  await expect(badge).toHaveText("idle");
+  // `--fg-1` (#9199a7 = rgb(145, 153, 167)), the muted foreground `exited`
+  // also uses (`app.css`'s idle-seen rationale comment) — checked as the
+  // actual computed colour, not merely "not green", so a regression to the
+  // wrong quiet token still fails this.
+  expect(
+    await badge.locator(".status-dot").evaluate((element) => getComputedStyle(element).color),
+  ).toBe("rgb(145, 153, 167)");
+});
+
+test("an idle session with unseen output draws a blue dot and reads idle — new output", async ({
+  page,
+}) => {
+  const session = liveDotListing({
+    status: { state: "idle" },
+    // Never seen: `Session::has_unseen_output` reads absence the same way
+    // it reads a stamp OLDER than the reported activity — either way, unseen.
+    seen_activity_at: null,
+  });
+  await page.route(SESSION_LISTING, (route) =>
+    fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ sessions: [session], total: 1, truncated: false }),
+    }),
+  );
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${session.id}"]`);
+  const badge = row.locator(".status-badge.idle.unseen");
+  await expect(badge).toHaveCount(1, {
+    timeout: 10_000,
+  });
+  // The text change is as load-bearing as the colour: it is what a screen
+  // reader and this very assertion both actually read, where the colour
+  // alone carries nothing to either.
+  await expect(badge).toHaveText("idle — new output");
+  await expect(row.locator(".session-row-open")).toHaveAccessibleName(/idle — new output/);
+  // `--info` (#6fb8f0 = rgb(111, 184, 240)) — the token waiting used to own,
+  // reused here since waiting's own colour moved to red (`app.css`'s own
+  // rationale comment for `.status-badge.idle.unseen`).
+  expect(
+    await badge.locator(".status-dot").evaluate((element) => getComputedStyle(element).color),
+  ).toBe("rgb(111, 184, 240)");
+});
+
 // The pulse is a claim about RIGHT NOW, and a stale session cannot make it.
 //
 // A stale row's status is the helm's last-known report from a host nobody

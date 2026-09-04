@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, archive_session, delete_session,
-    fetch_hosts, fetch_session, fetch_sessions, rename_session, stop_session,
+    fetch_hosts, fetch_session, fetch_sessions, queue_seen_write, rename_session, stop_session,
 };
 use crate::app_bar::AppBar;
 use crate::archive::confirmation as archive_confirmation;
@@ -2077,6 +2077,44 @@ pub(crate) fn ListView(
             host_menu_open.set(None);
         }
     });
+    let mark_seen_base = base.clone();
+    // The row's read/unread toggle — the menu item and the dot both funnel
+    // here (SPEC.md, Status). Routed through `queue_seen_write` rather than
+    // a bare `mark_seen` call, unlike this handler's own earlier shape: the
+    // automatic mark-on-open effect (`session_view.rs`) writes the SAME
+    // endpoint for the SAME session, and only the shared queue guarantees
+    // this manual write can never be overtaken by an older automatic one
+    // still in flight — see `queue_seen_write`'s own doc. No `pending`/
+    // `begin_row_op` guard either, since a toggle is not a destructive
+    // lifecycle op and `SessionRow` already refuses the click while its own
+    // `busy` flag is set — this handler only ever needs to queue the write.
+    //
+    // Unlike every OTHER handler's silent, log-only failure path
+    // (`api::mark_seen`'s own doc explains why the automatic mark stays
+    // silent), a MANUAL toggle's failure surfaces to the row's error line
+    // exactly like `on_stop`/`on_delete`/`on_archive`/`on_rename_submit`
+    // above (SPEC.md, Errors and diagnostics) — the user asked for this one
+    // directly, so losing it silently would be exactly the kind of
+    // succeeded-when-it-failed illusion that section forbids.
+    let on_mark_seen = move |(id, seen_activity_at): (String, Option<i64>)| {
+        let report_id = id.clone();
+        queue_seen_write(
+            &mark_seen_base,
+            &id,
+            seen_activity_at,
+            move |result| match result {
+                Ok(()) => {
+                    errors.write().remove(&report_id);
+                }
+                Err(error) => {
+                    errors
+                        .write()
+                        .insert(report_id.clone(), format!("seen: {error}"));
+                }
+            },
+        );
+    };
+    let on_mark_seen = use_callback(on_mark_seen);
     let on_stop = use_callback(on_stop);
     let on_delete = use_callback(on_delete);
     let confirm_delete = use_callback(confirm_delete);
@@ -2661,6 +2699,7 @@ pub(crate) fn ListView(
                                 rename_draft,
                                 on_open: guarded_open,
                                 on_clone,
+                                on_mark_seen,
                                 on_stop,
                                 on_delete,
                                 on_confirm_delete: confirm_delete,

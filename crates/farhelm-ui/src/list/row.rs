@@ -45,14 +45,25 @@ struct RowControlVisibility {
     stop: bool,
     archive: bool,
     delete: bool,
+    /// Whether the mark-read/mark-unread item is offered — the ONE field
+    /// here whose condition is not a pure function of `archived`. It needs
+    /// both the row's LIVE
+    /// status (running, waiting, or idle — an ended session has no dot and
+    /// no meaningful unseen state to toggle) and whether the helm sent
+    /// `seen_activity_at` at all (an old helm offers no toggle it cannot
+    /// answer PUT requests for), so the caller computes it from the whole
+    /// `Session` rather than this function deriving it from `archived`
+    /// alone.
+    mark_seen: bool,
 }
 
-fn row_control_visibility(archived: bool) -> RowControlVisibility {
+fn row_control_visibility(archived: bool, mark_seen: bool) -> RowControlVisibility {
     RowControlVisibility {
         rename: true,
         stop: !archived,
         archive: !archived,
         delete: true,
+        mark_seen,
     }
 }
 
@@ -76,6 +87,12 @@ fn row_control_visibility(archived: bool) -> RowControlVisibility {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum MenuAction {
     Rename,
+    /// Toggle the row's seen state — "mark read" or "mark unread" depending
+    /// on the CURRENT predicate, never a fixed label. Inserted right after
+    /// `Rename`: both are metadata edits on the row rather than lifecycle
+    /// actions, so grouping them ahead of Stop/Archive/Delete keeps that
+    /// distinction visible in the menu's own order.
+    MarkSeen,
     Clone,
     Stop,
     Archive,
@@ -88,8 +105,9 @@ enum MenuAction {
 /// `MenuOrder` and the rendered list cannot disagree about what "the
 /// first item" or "the last item" means — the two places arrow keys and
 /// the open-intent both resolve against.
-const MENU_ACTIONS: [MenuAction; 5] = [
+const MENU_ACTIONS: [MenuAction; 6] = [
     MenuAction::Rename,
+    MenuAction::MarkSeen,
     MenuAction::Clone,
     MenuAction::Stop,
     MenuAction::Archive,
@@ -116,6 +134,7 @@ type MenuOrder = menu_panel::MenuOrder<MenuAction, { MENU_ACTIONS.len() }>;
 fn session_menu_order(controls: RowControlVisibility) -> MenuOrder {
     MenuOrder::pack(MENU_ACTIONS, |action| match action {
         MenuAction::Rename => controls.rename,
+        MenuAction::MarkSeen => controls.mark_seen,
         MenuAction::Clone => true,
         MenuAction::Stop => controls.stop,
         MenuAction::Archive => controls.archive,
@@ -647,6 +666,15 @@ pub(super) fn SessionRow(
     on_archive: EventHandler<Session>,
     on_confirm_archive: EventHandler<String>,
     on_cancel_archive: EventHandler<String>,
+    /// The read/unread toggle's click, from either the menu item or the
+    /// row's own dot (SPEC.md, Status): the session id and
+    /// the target `seen_activity_at` to PUT — `Some(effective_activity)` to
+    /// mark read, `None` to mark unread. A tuple like `on_rename_start`
+    /// rather than the whole `Session` like `on_clone`/`on_archive`: the
+    /// caller needs nothing else about the row, and computing the target
+    /// value here (where the current unseen predicate is already in scope)
+    /// keeps `ListView` from having to re-derive it.
+    on_mark_seen: EventHandler<(String, Option<i64>)>,
     on_rename_start: EventHandler<(String, String)>,
     on_rename_submit: EventHandler<(String, String)>,
     on_rename_cancel: EventHandler<()>,
@@ -683,11 +711,15 @@ pub(super) fn SessionRow(
     // renders no badge ELEMENT at all rather than an empty one — see
     // `status_badge`'s own docs for why an empty badge box would be the
     // same mistake in CSS.
-    let badge = status_badge(
-        &session.status,
-        session.annotation.as_deref(),
-        session.has_unseen_output(),
-    );
+    //
+    // Computed once and shared with `controls` below: the badge's colour and
+    // the menu's mark-read/mark-unread offer are two independent consumers
+    // that must describe the SAME verdict about this row's unseen output.
+    // Calling `has_unseen_output` once and handing both consumers the
+    // result is what makes that agreement structural rather than a
+    // convention two call sites have to maintain by hand.
+    let unseen = session.has_unseen_output();
+    let badge = status_badge(&session.status, session.annotation.as_deref(), unseen);
     // The browser suite's stable wire token for locality, the same role
     // `data-host-kind` plays in the host panel: a plain string rather than
     // `Debug`'s derived spelling, so a rename of the enum's variants (their
@@ -712,7 +744,35 @@ pub(super) fn SessionRow(
     let cancel_archive_id = session.id.clone();
     let rename_start = (session.id.clone(), session.title.clone());
     let rename_submit_id = session.id.clone();
-    let controls = row_control_visibility(session.archived);
+    // The toggle is offered on a LIVE row (running, waiting, idle — SPEC.md;
+    // an ended session has no dot and no meaningful unseen state) whose helm
+    // answered the seen-state question at all (`unseen.is_some()`); staleness
+    // is deliberately NOT part of this predicate — a session on an
+    // unreachable host still has a last-known dot to toggle, and the route
+    // that serves this write is itself helm-local with nothing to refuse for
+    // an unreachable host (SPEC_impl.md's `session_seen` paragraph).
+    let offers_mark_seen = session.status.is_live() && unseen.is_some();
+    let controls = row_control_visibility(session.archived, offers_mark_seen);
+    // "mark read" when the row currently has unseen output, "mark unread"
+    // otherwise — the label follows the CURRENT predicate every render,
+    // never a value captured once.
+    let mark_seen_label = if unseen == Some(true) {
+        "mark read"
+    } else {
+        "mark unread"
+    };
+    // The value this row's toggle click sends: clearing the seen stamp
+    // (`None`) when marking unread, or the row's current effective activity
+    // (`Some`) when marking read — `api::mark_seen`'s own contract.
+    let mark_seen_target = (
+        session.id.clone(),
+        (unseen == Some(true)).then(|| session.effective_activity()),
+    );
+    // A second clone for the dot's own click closure below: the menu
+    // item's closure and the dot's are two independent `move` closures
+    // in the same render, and each needs to own a copy of the target
+    // rather than fight the other for the one original.
+    let dot_mark_seen_target = mark_seen_target.clone();
     let menu_id = session.id.clone();
     // This render's item list, derived from the same visibility answer
     // that decides whether each item renders at all — an archived row's
@@ -750,6 +810,7 @@ pub(super) fn SessionRow(
     // each hold their own clone.
     let toggle_key_id = session.id.clone();
     let rename_key_id = session.id.clone();
+    let mark_seen_key_id = session.id.clone();
     let clone_key_id = session.id.clone();
     let stop_key_id = session.id.clone();
     let archive_key_id = session.id.clone();
@@ -950,7 +1011,10 @@ pub(super) fn SessionRow(
         close_menu: on_menu_toggle,
     };
     // The item set can change UNDER an open menu: archiving a session
-    // withdraws stop and archive while the panel stays up. Rename and
+    // withdraws stop and archive while the panel stays up, and a session
+    // ending (or, in principle, an old-helm connection losing the seen-state
+    // field mid-session — not reachable in practice, but the predicate does
+    // not assume otherwise) withdraws mark-seen the same way. Rename and
     // delete keep their DOM nodes across that change (Dioxus diffs them
     // in place), so nothing re-registers them and the withdrawn items'
     // handles would otherwise sit in the map retaining detached nodes,
@@ -959,9 +1023,9 @@ pub(super) fn SessionRow(
     // click path because no click is involved — the listing simply
     // reports a different session.
     //
-    // `use_reactive` because `session.archived` is a plain prop value:
-    // an effect body that merely closed over it would run once with the
-    // first render's answer and never again.
+    // `use_reactive` because `session.archived`/`offers_mark_seen` are plain
+    // prop-derived values: an effect body that merely closed over them would
+    // run once with the first render's answer and never again.
     //
     // Stale FOCUS is reconciled by ACTION identity rather than by comparing
     // the stored position against the new list's length — see
@@ -972,43 +1036,46 @@ pub(super) fn SessionRow(
     // shares the mechanics rather than a second, narrower copy of them).
     let archived = session.archived;
     let withdrawal_close_id = session.id.clone();
-    use_effect(use_reactive((&archived,), move |(archived,)| {
-        let order = session_menu_order(row_control_visibility(archived));
-        item_handles
-            .write()
-            .retain(|action, _| order.position(*action).is_some());
-        let focused_position = *menu_focus.peek();
-        // `menu_open` is this render's own belief about whether THIS row's
-        // menu is the open one — passed through so `reconcile_menu_focus`
-        // can gate `Withdrawn` on it (F4/COR-SESSION-WITHDRAWAL-REOPEN):
-        // `on_menu_toggle` below is an ordinary click TOGGLE, not an
-        // idempotent close, and calling it when some OTHER dismissal (a
-        // layout closer, a newer host-menu choice) has already closed this
-        // row's menu since this prop was computed would reopen it instead.
-        match menu_panel::reconcile_menu_focus(
-            *previous_menu_order.peek(),
-            order,
-            focused_position,
-            menu_open,
-        ) {
-            menu_panel::MenuFocusReconciliation::Unchanged => {}
-            menu_panel::MenuFocusReconciliation::Moved(position) => {
-                menu_focus.set(Some(position));
+    use_effect(use_reactive(
+        (&archived, &offers_mark_seen),
+        move |(archived, offers_mark_seen)| {
+            let order = session_menu_order(row_control_visibility(archived, offers_mark_seen));
+            item_handles
+                .write()
+                .retain(|action, _| order.position(*action).is_some());
+            let focused_position = *menu_focus.peek();
+            // `menu_open` is this render's own belief about whether THIS row's
+            // menu is the open one — passed through so `reconcile_menu_focus`
+            // can gate `Withdrawn` on it (F4/COR-SESSION-WITHDRAWAL-REOPEN):
+            // `on_menu_toggle` below is an ordinary click TOGGLE, not an
+            // idempotent close, and calling it when some OTHER dismissal (a
+            // layout closer, a newer host-menu choice) has already closed this
+            // row's menu since this prop was computed would reopen it instead.
+            match menu_panel::reconcile_menu_focus(
+                *previous_menu_order.peek(),
+                order,
+                focused_position,
+                menu_open,
+            ) {
+                menu_panel::MenuFocusReconciliation::Unchanged => {}
+                menu_panel::MenuFocusReconciliation::Moved(position) => {
+                    menu_focus.set(Some(position));
+                }
+                // No surviving item to aim focus at. Left as-is rather than
+                // cleared here: closing through `on_menu_toggle` is what the
+                // dismissal effect below keys its focus-return on
+                // (`was_inside`), and clearing `menu_focus` first would make
+                // that check see nothing to return focus FROM. Only ever
+                // reached while `menu_open` is true (see the call above), so
+                // this toggle call is always a genuine close of THIS row's own
+                // open menu, never a reopen.
+                menu_panel::MenuFocusReconciliation::Withdrawn => {
+                    on_menu_toggle.call(withdrawal_close_id.clone());
+                }
             }
-            // No surviving item to aim focus at. Left as-is rather than
-            // cleared here: closing through `on_menu_toggle` is what the
-            // dismissal effect below keys its focus-return on
-            // (`was_inside`), and clearing `menu_focus` first would make
-            // that check see nothing to return focus FROM. Only ever
-            // reached while `menu_open` is true (see the call above), so
-            // this toggle call is always a genuine close of THIS row's own
-            // open menu, never a reopen.
-            menu_panel::MenuFocusReconciliation::Withdrawn => {
-                on_menu_toggle.call(withdrawal_close_id.clone());
-            }
-        }
-        previous_menu_order.set(order);
-    }));
+            previous_menu_order.set(order);
+        },
+    ));
     // Every close funnels through here, whichever path caused it —
     // Escape, Tab, a click on the toggle, or one of `ListView`'s
     // automatic dismissals (a sidebar scroll or resize, the hosts panel
@@ -1121,7 +1188,24 @@ pub(super) fn SessionRow(
                             span { class: "archived-badge", "archived" }
                         }
                         if let Some(badge) = badge {
-                            StatusBadgeView { badge }
+                            // The row's own dot doubles as the mark-read/
+                            // mark-unread MOUSE shortcut (SPEC.md, Status)
+                            // — the keyboard-operable path is the `…` menu
+                            // item above, which shares `mark_seen_target`/
+                            // `mark_seen_label`. `dot_title` alone decides
+                            // whether the dot LOOKS clickable, so both must
+                            // stay `None`/no-op together for a row that does
+                            // not offer the toggle.
+                            StatusBadgeView {
+                                badge,
+                                dot_onclick: move |_| {
+                                    if !offers_mark_seen || busy {
+                                        return;
+                                    }
+                                    on_mark_seen.call(dot_mark_seen_target.clone());
+                                },
+                                dot_title: offers_mark_seen.then(|| mark_seen_label.to_string()),
+                            }
                         }
                         // The locality slot (2026-09-03): between the
                         // badges and the age, so the title
@@ -1613,6 +1697,50 @@ pub(super) fn SessionRow(
                                         "rename"
                                     }
                                 }
+                                // Offered whenever `offers_mark_seen` says so
+                                // (live row, helm answers the seen-state
+                                // question) — see `RowControlVisibility`'s own
+                                // doc. The LABEL follows the CURRENT unseen
+                                // predicate every render, never a value
+                                // captured at mount, so a session that
+                                // produces output while its menu happens to
+                                // be open relabels itself the moment the next
+                                // listing read lands.
+                                if controls.mark_seen {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn session-row-menu-item session-row-mark-seen",
+                                        role: "menuitem",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(MenuAction::MarkSeen) { "0" } else { "-1" },
+                                        onmounted: move |element| {
+                                            remember_menu_item(
+                                                menu_wiring,
+                                                MenuAction::MarkSeen,
+                                                element.data(),
+                                            )
+                                        },
+                                        onfocusin: move |_| {
+                                            menu_focus.set(menu_order.position(MenuAction::MarkSeen));
+                                        },
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| {
+                                            handle_menu_key(
+                                                &evt,
+                                                menu_order.position(MenuAction::MarkSeen),
+                                                menu_wiring,
+                                                &mark_seen_key_id,
+                                            );
+                                        },
+                                        onclick: move |_| {
+                                            if busy {
+                                                return;
+                                            }
+                                            on_mark_seen.call(mark_seen_target.clone());
+                                        },
+                                        "{mark_seen_label}"
+                                    }
+                                }
                                 // Offered on EVERY row, archived included,
                                 // unconditionally — see
                                 // `RowControlVisibility`'s own doc for why
@@ -1880,12 +2008,13 @@ mod tests {
     #[test]
     fn archived_rows_keep_metadata_controls_without_lifecycle_controls() {
         assert_eq!(
-            row_control_visibility(true),
+            row_control_visibility(true, false),
             RowControlVisibility {
                 rename: true,
                 stop: false,
                 archive: false,
                 delete: true,
+                mark_seen: false,
             }
         );
     }
@@ -1909,7 +2038,10 @@ mod tests {
     /// row's last item is delete at position 2, not at 4.
     #[test]
     fn menu_order_follows_the_retention_state_rather_than_a_fixed_numbering() {
-        let active = session_menu_order(row_control_visibility(false));
+        // `mark_seen: false` throughout — this test is about the archive
+        // dimension specifically; `mark_seen_sits_right_after_rename_when_offered`
+        // below is where MarkSeen's own predicate and position are pinned.
+        let active = session_menu_order(row_control_visibility(false, false));
         assert_eq!(active.len(), 5);
         assert_eq!(active.get(0), Some(MenuAction::Rename));
         assert_eq!(active.get(1), Some(MenuAction::Clone));
@@ -1921,7 +2053,7 @@ mod tests {
         assert_eq!(active.position(MenuAction::Clone), Some(1));
         assert_eq!(active.position(MenuAction::Delete), Some(4));
 
-        let archived = session_menu_order(row_control_visibility(true));
+        let archived = session_menu_order(row_control_visibility(true, false));
         assert_eq!(archived.len(), 3);
         assert_eq!(archived.get(0), Some(MenuAction::Rename));
         assert_eq!(archived.get(1), Some(MenuAction::Clone));
@@ -1937,6 +2069,36 @@ mod tests {
         // open menu.
         assert_eq!(archived.position(MenuAction::Stop), None);
         assert_eq!(archived.position(MenuAction::Archive), None);
+    }
+
+    /// MarkSeen's own dimension, independent of the archive one the test
+    /// above covers: offered or not, it sits right after Rename — the
+    /// plan's stated position — in EVERY retention state, and withdrawn
+    /// entirely reads exactly like Stop/Archive being withdrawn (no
+    /// position at all, not a disabled one).
+    #[test]
+    fn mark_seen_sits_right_after_rename_when_offered() {
+        let offered = session_menu_order(row_control_visibility(false, true));
+        assert_eq!(offered.len(), 6);
+        assert_eq!(offered.get(0), Some(MenuAction::Rename));
+        assert_eq!(offered.get(1), Some(MenuAction::MarkSeen));
+        assert_eq!(offered.get(2), Some(MenuAction::Clone));
+        assert_eq!(offered.position(MenuAction::MarkSeen), Some(1));
+
+        let offered_archived = session_menu_order(row_control_visibility(true, true));
+        assert_eq!(offered_archived.len(), 4);
+        assert_eq!(offered_archived.get(0), Some(MenuAction::Rename));
+        assert_eq!(offered_archived.get(1), Some(MenuAction::MarkSeen));
+        assert_eq!(offered_archived.get(2), Some(MenuAction::Clone));
+        assert_eq!(offered_archived.get(3), Some(MenuAction::Delete));
+
+        let withdrawn = session_menu_order(row_control_visibility(false, false));
+        assert_eq!(
+            withdrawn.position(MenuAction::MarkSeen),
+            None,
+            "an ended session, or one whose helm never answered the seen-state \
+             question, offers no toggle at all"
+        );
     }
 
     /// `menu_label` composes `"session actions for …"` around whatever
@@ -1969,6 +2131,7 @@ mod tests {
             let rename_draft = use_signal(String::new);
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
+            let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(|_: String| {});
@@ -1999,6 +2162,7 @@ mod tests {
                     rename_draft,
                     on_open,
                     on_clone,
+                    on_mark_seen,
                     on_stop,
                     on_delete,
                     on_confirm_delete,
@@ -2054,6 +2218,7 @@ mod tests {
             let rename_draft = use_signal(String::new);
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
+            let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(|_: String| {});
@@ -2086,6 +2251,7 @@ mod tests {
                         rename_draft,
                         on_open,
                         on_clone,
+                        on_mark_seen,
                         on_stop,
                         on_delete,
                         on_confirm_delete,

@@ -300,8 +300,10 @@ available host name stays visible for as long as locality is unknown — only a 
 since that is the one verdict actually established; a legacy row with no host name at all still shows none, which is an
 allowed absence rather than a promise this row invents one. The working directory and the launch command are shown
 abbreviated, with their full, untouched values always available on the row (a tooltip on the web and desktop clients);
-an abbreviation is never the only place a value is recorded. Exactly how a row lays out its lines and pixels is an
-implementation choice, covered in SPEC_impl.md rather than here.
+an abbreviation is never the only place a value is recorded. A row's own actions menu, beyond the lifecycle operations
+above, also offers a mark read / mark unread toggle — reachable there or by clicking the dot itself — that sets the
+session's seen state directly (see Status). Exactly how a row lays out its lines and pixels is an implementation choice,
+covered in SPEC_impl.md rather than here.
 
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. Host actions open on demand from the row menu, and one global details control reveals the version, identity, session

@@ -27,7 +27,7 @@
 //! each one currently have" — and every operation built on that (arrow
 //! navigation, Home/End, filing a freshly-mounted item's handle, moving focus
 //! to a computed position) is IDENTICAL once that question can be asked,
-//! whether the answer is the session row's five actions or the host row's
+//! whether the answer is the session row's six actions or the host row's
 //! four (today's maxima, not assumptions baked in
 //! anywhere here — see `MenuOrder`'s own doc for why `N` is still a
 //! per-row compile-time constant rather than a shared one). Rather
@@ -1174,9 +1174,9 @@ pub(crate) fn closed_toggle_key_intent(key: &Key) -> Option<MenuOpenIntent> {
 /// `None` is the re-entry case rather than the opening one.)
 ///
 /// Wrapping rather than stopping at the ends: both rows' menus are short
-/// enough to see whole (five items at most, for either row), so running
-/// off the bottom and reappearing at the top costs nothing and saves a
-/// direction change. An out-of-range `current`
+/// enough to see whole in one glance, so running off the bottom and
+/// reappearing at the top costs nothing and saves a direction change. An
+/// out-of-range `current`
 /// (an index from a render whose item set has since changed) is treated
 /// as "not on an item" rather than clamped, so the next arrow re-enters
 /// the list at a defined end instead of landing somewhere derived from a
