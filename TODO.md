@@ -122,17 +122,22 @@ everything not yet sorted, which carries no implication either way. Within a buc
   failed 3 of 9 GitHub runs of this stack in one day). The suite still runs in CI's `test` job on every ready PR and
   before a stack lands, so the gap is at tag time only. Reversing both is the definition of done for the deflake work.
 - Show the session dot as plainly grey when the agent is idle and its last output has been seen. Today the idle state
-  can pass for the dim phase of the pulsing green, so "idle" is not obvious at a glance.
+  can pass for the dim phase of the pulsing green, so "idle" is not obvious at a glance. Plan:
+  `plans/session-dot-read-state.md` (medium; one plan for this and the two entries below, which share the seen state).
 - Add a blue dot state: the agent is idle but has produced output since the session was last looked at. Distinct from
-  grey (idle, seen) and from the pulsing green (active).
+  grey (idle, seen) and from the pulsing green (active). Plan: `plans/session-dot-read-state.md` (medium).
 - Add "mark unread" and "mark read": toggle the dot between blue and grey by clicking the dot itself, and from the
-  session row's popup menu, where the item reads "mark read" or "mark unread" depending on the current state.
+  session row's popup menu, where the item reads "mark read" or "mark unread" depending on the current state. Plan:
+  `plans/session-dot-read-state.md` (medium).
 - Make local versus remote obvious in the sidebar: an icon for local vs remote (which icon is not decided), and a more
   prominent hostname, probably moved up to the session name row with some visual weight (details to be settled later).
+  Plan: `plans/sidebar-local-vs-remote.md` (low).
 - Add "replace" on sessions: like clone, but the new session takes the old one's place instead of duplicating it. A
-  fresh session and a fresh agent process, with the same directory, host, and the rest of the settings.
+  fresh session and a fresh agent process, with the same directory, host, and the rest of the settings. Plan:
+  `plans/replace-session.md` (medium).
 - Add host aliases, so a machine can carry a shorter label. The default label stays the hostname or IP as entered; when
-  an alias is set it is shown everywhere instead, except in the host details view, which keeps the real name.
+  an alias is set it is shown everywhere instead, except in the host details view, which keeps the real name. Plan:
+  `plans/host-aliases.md` (medium).
 
 ## Systematic deflake
 
