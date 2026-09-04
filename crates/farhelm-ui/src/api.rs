@@ -1925,6 +1925,41 @@ fn spawn_seen_writer(base: String, id: String) {
     });
 }
 
+/// Replace a session: a brand-new session with the source's cwd, title, and
+/// agent, then the source removed — SPEC.md's "replace", contrasted there
+/// with restart (replace's whole point is a NEW id and a discarded
+/// conversation; restart keeps both).
+///
+/// Mints its own idempotency key per call — the way `create_session`'s
+/// caller mints one — but INTERNALLY rather than as an argument. Unlike
+/// `CreateSessionForm`, a row's confirm click has no editable state a key
+/// could go stale against while it is being minted (see `create_form.rs`'s
+/// key-rebinding loop for what that guards there), so one mint immediately
+/// before the one POST is enough; there is nothing to re-bind against.
+///
+/// The reply's `id` differs from `id` on success — that is the whole point
+/// of replace, not a surprise for the caller to guard against. A failure
+/// can originate from either half the helm route composes (the create, or
+/// the delete that runs after a successful create); either way the message
+/// is `refusal_text`'s ordinary contract, the same as every other endpoint
+/// here — the helm's own body, raw apart from surrounding whitespace, with
+/// the shared method/URL/status fallback for a body that is empty or
+/// unreadable. On a delete-after-create failure specifically, that body
+/// names BOTH ids, and says either that both sessions still exist (the
+/// delete was definitely refused) or that the source's removal is unknown
+/// and must be checked (the delete's own reply was lost) — see
+/// `do_replace_session`'s doc on the helm side for which is which.
+pub(crate) async fn replace_session(base: &str, id: &str) -> Result<Session, String> {
+    let intent_key = mint_intent_key().await?;
+    let url = format!("{base}/api/sessions/{}/replace", encode_path_segment(id));
+    let body = serde_json::json!({ "intent_key": intent_key });
+    let resp = send(client().post(&url).json(&body)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json::<Session>().await.map_err(|e| e.to_string())
+}
+
 /// DELETE a session. See `stop_session`'s docs — same error-surfacing
 /// shape (including the body-read-failure context), different verb and
 /// endpoint.

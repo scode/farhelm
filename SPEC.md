@@ -207,7 +207,7 @@ session itself — **error** when the agent process could not be started at all 
 
 ### Lifecycle operations
 
-The client supports: create, open, rename, restart, clone, stop, archive, delete.
+The client supports: create, open, rename, restart, clone, replace, stop, archive, delete.
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
   Terminal tabs keep running, and the session remains with its terminal still viewable.
@@ -232,6 +232,15 @@ The client supports: create, open, rename, restart, clone, stop, archive, delete
   Cloning does not deduplicate titles — a duplicate is allowed, the same as any other create. Clone is offered on
   archived sessions too: it is the only way to get a new, running agent out of one without restarting (and thereby
   unarchiving) the original.
+- **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and agent (a
+  profile while the source's profile is still the one it names, otherwise the source's raw invocation, exactly as clone
+  resolves it) — and then DELETES the source; it never archives it. Confirmed directly from the row menu, with one
+  inline confirmation and nothing to edit first, since the whole point is the same settings. Contrast restart, which
+  keeps the session's own id and its conversation: restart continues a session, replace starts one over under the same
+  settings. If the create fails, the source is untouched. If the create succeeds and the removal that follows fails, the
+  reply names both sessions; whether the source is still there depends on how the removal failed, and the user checks or
+  removes it by hand. Replace is offered wherever clone is offered, archived sessions included — an archived source has
+  no agent to kill, only a record to delete.
 - **Archive** hides the session from the default list and shuts down everything in it — agent and terminal tabs — with
   confirmation when anything is still running. Archived sessions keep their metadata; their terminal contents are gone
   (see Terminal experience). Restart on an archived session unarchives it and recovers the conversation where the agent
@@ -596,7 +605,8 @@ about the session's own host, so there is one answer to what an agent sees. The 
 attached to this session", reported as such, with opening the session in a client as the remedy — never a silent
 fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive — on the
 asking session or on any session named by id, with the helm applying its ordinary rules to the operation exactly as it
-would for a client request.
+would for a client request. There is no `farhelm agent replace`: an agent replacing its own session would be killing
+itself mid-request, which is a design question this version leaves open rather than answers by accident.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on any host, and `farhelm agent clone` copies the asking session onto any host —

@@ -38,6 +38,7 @@ pub(super) struct RowState {
     pub(super) busy: bool,
     pub(super) confirming: bool,
     pub(super) confirming_archive: bool,
+    pub(super) confirming_replace: bool,
     pub(super) renaming: bool,
     pub(super) nav_disabled: bool,
     /// Whether this row's actions menu is the at-most-one open row menu,
