@@ -254,6 +254,31 @@ jobs:
     runs-on: ubicloud
     steps:
       - uses: actions/checkout@v4
+      # The runner image ships about 62 GB of toolchains on a 72 GB disk,
+      # which leaves this job roughly 3 GB once its cache is restored — and
+      # the asset check below builds the UI twice through dx into a fresh
+      # target tree, 5.6 GB of output when the UI crate has changed. On
+      # 2026-09-03 that filled the disk and killed the runner mid-step, twice,
+      # with no log served (a job that dies that way uploads nothing, not
+      # even its finished steps). Main never noticed because its cached
+      # asset tree had nothing to rebuild and the step ran in under a
+      # minute. Nothing below uses any of these: this job's toolchain is
+      # rustup's, its packages come from apt, and dx fetches its own wasm
+      # tooling. Sizes are what the same image reported the day this was
+      # written; the point is that together they free about 30 GB.
+      - name: Free the image's unused toolchains
+        run: |
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /usr/local/.ghcup \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/lib/jvm \
+            /usr/local/share/powershell \
+            /usr/local/julia* \
+            /usr/share/miniconda
+          df -h /
       - uses: actions/cache@v4
         with:
           path: |
