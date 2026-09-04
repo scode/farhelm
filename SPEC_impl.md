@@ -1075,10 +1075,10 @@ reports a failed listing rather than a silently shortened one.
 
 ## Helm internals
 
-- State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities), last-known
-  session cache (survives helm restarts per SPEC.md), the helm-wide profile catalog and its one remembered default,
-  recoverable web token, hashed browser device sessions, and the one client preference (list order, last-selected
-  session) every client shares.
+- State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities, and optional
+  aliases), last-known session cache (survives helm restarts per SPEC.md), the helm-wide profile catalog and its one
+  remembered default, recoverable web token, hashed browser device sessions, and the one client preference (list order,
+  last-selected session) every client shares.
 - The `profiles` table is bounded on both axes — 128 profiles per helm, 8 KiB of caller-supplied text per profile — so
   the unpaginated catalog reply stays predictably bounded. The schema migration that creates it seeds Claude Code and
   Codex in plain and permission-skipping variants exactly once, so edits and deletions remain durable. A profile names
@@ -1088,15 +1088,27 @@ reports a failed listing rather than a silently shortened one.
   per reply before browser JSON or session-cache storage; missing ids become `Deleted`, and ids whose current names
   differ from the snapshot become `Renamed`. Profile writes are last-write-wins and carry no definition fingerprint.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
-  if absent, never user management surface, never removable. It exists specifically so the local host has a cache row to
-  serve stale sessions from when its own supervisor is down — the plan's first draft made this row optional, and review
-  caught that a row-less local host would have nowhere to cache into, breaking the very promise (stale sessions survive
-  a down host) the cache exists to keep. An SSH row also carries optional `remote_farhelm`/`remote_state_dir` fields
-  (the argv fields M1's `--remote-farhelm`/`--remote-state-dir` carried), `None` meaning "use the remote's own default",
-  not "unset for now". Two distinct SQL mechanisms enforce two distinct invariants here, not one: the `hosts` table's
-  own `CHECK` constraint is what pins the local row's NULL destination/remote-field shape, while separate partial unique
-  indexes enforce at most one local row, uniqueness of an SSH row's destination among SSH rows, and — see below — at
-  most one row claiming any given host identity.
+  if absent, never registered, retargeted, or removed through the ssh-host management API, so its destination and its
+  existence are not user management surface — but its alias is user-editable on the same terms as any other host's. It
+  exists specifically so the local host has a cache row to serve stale sessions from when its own supervisor is down —
+  the plan's first draft made this row optional, and review caught that a row-less local host would have nowhere to
+  cache into, breaking the very promise (stale sessions survive a down host) the cache exists to keep. An SSH row also
+  carries optional `remote_farhelm`/`remote_state_dir` fields (the argv fields M1's
+  `--remote-farhelm`/`--remote-state-dir` carried), `None` meaning "use the remote's own default", not "unset for now".
+  Two distinct SQL mechanisms enforce two distinct invariants here, not one: the `hosts` table's own `CHECK` constraint
+  is what pins the local row's NULL destination/remote-field shape, while separate partial unique indexes enforce at
+  most one local row, uniqueness of an SSH row's destination among SSH rows, and — see below — at most one row claiming
+  any given host identity.
+- A host alias is nullable display data: when set it replaces the derived SSH destination or local `this machine` label.
+  Setting one is checked against every OTHER host's current display name, alias or derived — a stored alias is arbitrary
+  text with no uniqueness index of its own, so this is the only check that can catch it colliding with anything. Every
+  write that instead touches a DESTINATION (registering, retargeting, or clearing an alias to restore the derived name)
+  is checked only against other hosts' current ALIASES: destination-versus-destination collisions are already the
+  `hosts_ssh_destination` partial unique index's job, so checking against every display name there would just re-detect
+  what the index already refuses, under the wrong error. Skipping the destination-side check entirely, though, would let
+  a registration, a retarget, or a clear reintroduce the exact ambiguous name an alias write had just been refused for.
+  The alias rides the manager's host snapshot with the destination and connection state, so session rows, single-session
+  reads, and agent relay views derive one coherent name without each joining the registry.
 - A host's `host_identity` is `NULL` until first contact ever succeeds for that row — including the local row, which is
   minted with no identity and learns one the same way any other host does. Recording it is split into two operations so
   silent identity merging is structurally impossible at the storage layer (SPEC.md: never silently merge): first contact

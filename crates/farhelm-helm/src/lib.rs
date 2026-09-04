@@ -592,6 +592,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::set_destination),
         )
         .route(
+            "/api/hosts/{id}/alias",
+            axum::routing::post(hosts::set_alias),
+        )
+        .route(
             "/api/hosts/{id}/adopt",
             axum::routing::post(hosts::adopt_host),
         )
@@ -1693,8 +1697,11 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
     if let Some(refusal) = find_cause::<store::HostStoreError>(e) {
         return match refusal {
             store::HostStoreError::HostNotFound(_) => ErrorKind::NotFound,
-            store::HostStoreError::InvalidDestination(_) => ErrorKind::InvalidRequest,
+            store::HostStoreError::InvalidDestination(_) | store::HostStoreError::InvalidAlias(_) => {
+                ErrorKind::InvalidRequest
+            }
             store::HostStoreError::DuplicateDestination(_)
+            | store::HostStoreError::AliasTaken(_)
             | store::HostStoreError::LocalHostImmutable
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }

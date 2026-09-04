@@ -3,9 +3,9 @@
 //! Everything the UI's hosts panel needs and nothing it does not: the
 //! registry's own facts, each host's live connection state with the
 //! evidence that makes it actionable (both versions on skew, both
-//! identities on a mismatch, the twin on a duplicate), and the five
+//! identities on a mismatch, the twin on a duplicate), and the six
 //! mutations SPEC.md's host management consists of — add, retarget,
-//! remove, adopt, retry.
+//! remove, adopt, retry, alias.
 //!
 //! ## Two reads, joined
 //!
@@ -53,6 +53,9 @@ pub(crate) struct HostView {
     pub(crate) kind: &'static str,
     /// `None` for the local row, always `Some` for an ssh row.
     pub(crate) destination: Option<String>,
+    /// The stored optional alias, kept distinct from `name` so clients can
+    /// edit it without trying to reverse the derived display label.
+    pub(crate) alias: Option<String>,
     /// [`host_display_name`]'s rendering — the same string session rows
     /// carry in `host_name`, so a row and its host chip never disagree.
     pub(crate) name: String,
@@ -319,8 +322,13 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     HostKind::Local => "local",
                     HostKind::Ssh => "ssh",
                 },
-                name: host_display_name(snapshot.kind, snapshot.destination.as_deref()),
+                name: host_display_name(
+                    snapshot.kind,
+                    snapshot.destination.as_deref(),
+                    snapshot.alias.as_deref(),
+                ),
                 destination: snapshot.destination.clone(),
+                alias: snapshot.alias.clone(),
                 identity: registry.and_then(|row| row.host_identity.clone()),
                 remote_farhelm: registry.and_then(|row| row.remote_farhelm.clone()),
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
@@ -378,6 +386,41 @@ pub(crate) struct HostSpec {
     pub(crate) remote_farhelm: Option<String>,
     #[serde(default)]
     pub(crate) remote_state_dir: Option<String>,
+}
+
+/// The body of `POST /api/hosts/{id}/alias`.
+///
+/// `null` (and a whitespace-only string after store canonicalization) clears
+/// the optional label; the dedicated shape prevents a typo from looking like
+/// a destination edit.
+///
+/// The `alias` key is REQUIRED — `{}` is a decode failure, not a clear —
+/// which is why the field goes through `deserialize_required_alias` rather
+/// than a bare `Option<String>`. Serde's derive macro treats any
+/// `Option<T>`-typed field as implicitly `#[serde(default)]`: without the
+/// custom deserializer, a body of `{}` would decode identically to an
+/// explicit `{"alias": null}` and this route would silently treat a caller's
+/// missing field as a request to clear the alias.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AliasSpec {
+    #[serde(deserialize_with = "deserialize_required_alias")]
+    pub(crate) alias: Option<String>,
+}
+
+/// Decode `AliasSpec.alias`, requiring the key to be present while still
+/// accepting JSON `null`.
+///
+/// Delegates to `Option<String>`'s own `Deserialize` impl — the decoding
+/// behavior is unchanged — but supplying ANY `#[serde(deserialize_with)]`
+/// at all is what disables serde's implicit "missing `Option` field means
+/// `None`" default; see `AliasSpec`'s own doc for why that default is wrong
+/// here specifically.
+fn deserialize_required_alias<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
 }
 
 /// `POST /api/hosts` — register an ssh destination.
@@ -518,6 +561,62 @@ pub(crate) async fn set_destination(
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
         Err(e) => http_error(e),
+    }
+}
+
+/// The alias `state.manager`'s live snapshot currently publishes for
+/// `host`, or `None` if the host has no snapshot (removed, or never
+/// reconciled). Used by [`set_alias`] to decide whether a sync actually
+/// made the alias observable, rather than trusting the store's own
+/// changed/unchanged bookkeeping — see that function's own doc for why the
+/// two can disagree.
+fn published_alias(state: &AppState, host: HostId) -> Option<String> {
+    state
+        .manager
+        .snapshots()
+        .into_iter()
+        .find(|snapshot| snapshot.id == host)
+        .and_then(|snapshot| snapshot.alias)
+}
+
+/// `POST /api/hosts/{id}/alias` — replace the display alias without changing
+/// where the manager dials. Synchronizing the registry republishes the alias
+/// into snapshots, and a real change explicitly wakes every event client.
+///
+/// The bump is based on whether the PUBLISHED snapshot's alias actually
+/// changed across this call's own sync, not on `update_alias`'s store-level
+/// `changed` return. Those two can disagree: if an earlier request wrote the
+/// same value durably but its OWN sync then failed (the branch just above
+/// returns before ever reaching a bump), a retry of that same value reports
+/// `changed = false` from the store — nothing new was written — while this
+/// retry's sync is nonetheless the first one to actually reach the
+/// manager's snapshot and, through it, every subscribed client. Bumping
+/// only on the store's flag would leave those clients stale indefinitely;
+/// comparing the snapshot before and after this call's sync catches the
+/// retry regardless of what the store itself reports.
+pub(crate) async fn set_alias(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<AliasSpec>,
+) -> impl IntoResponse {
+    let serialized = state.manager.host_write_lock(host).await;
+    if let Err(error) = state.store.update_alias(host, spec.alias.as_deref()).await {
+        return http_error(error);
+    }
+    let before = published_alias(&state, host);
+    if let Err(error) = state.manager.sync_registry().await {
+        return http_error(error.context(format!(
+            "host {host}'s alias was changed but could not be synchronized"
+        )));
+    }
+    let after = published_alias(&state, host);
+    drop(serialized);
+    if before != after {
+        state.manager.events().bump();
+    }
+    match host_view(&state, host).await {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
     }
 }
 
@@ -1126,6 +1225,437 @@ mod tests {
         assert_eq!(
             sessions["total"], 0,
             "the removed host's cached sessions went with it"
+        );
+    }
+
+    /// Setting an alias makes the listing report it as `name`, with
+    /// `destination` untouched — the alias replaces only the display label,
+    /// never the identity the manager actually dials — and the `alias` key
+    /// itself carries the value back so a client can prefill the editor
+    /// without reverse-engineering it out of `name`.
+    #[tokio::test]
+    async fn setting_an_alias_renames_the_listing_without_touching_the_destination() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@aliasable" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+
+        let (status, body, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Build Box" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(body["name"], "Build Box");
+        assert_eq!(body["alias"], "Build Box");
+        assert_eq!(
+            body["destination"], "user@aliasable",
+            "the alias must never change what the helm actually dials"
+        );
+
+        let (_, hosts, _) = call(&harness, "GET", "/api/hosts", None).await;
+        let listed = hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == host)
+            .expect("the aliased host is still listed");
+        assert_eq!(listed["name"], "Build Box");
+        assert_eq!(listed["alias"], "Build Box");
+        assert_eq!(listed["destination"], "user@aliasable");
+    }
+
+    /// Clearing an alias with an explicit JSON `null` restores the derived
+    /// name — the raw destination, for an ssh row — and the `alias` key
+    /// itself goes back to `null` rather than disappearing from the reply.
+    #[tokio::test]
+    async fn clearing_an_alias_with_null_restores_the_derived_name() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@clearable" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Temporary Name" })),
+        )
+        .await;
+
+        let (status, body, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": null })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(
+            body["name"], "user@clearable",
+            "clearing the alias falls back to the raw destination"
+        );
+        assert_eq!(body["alias"], serde_json::Value::Null);
+    }
+
+    /// Aliasing onto another host's current display name is a conflict
+    /// naming that host — the REST wrapper around the store's
+    /// `AliasTaken` refusal, pinned here on the SAME-destination-string
+    /// case (`update_alias_rejects_a_collision_with_another_hosts_alias`
+    /// and its sibling in `store.rs` cover the derived-name and mirror
+    /// cases at the store layer).
+    #[tokio::test]
+    async fn aliasing_onto_another_hosts_name_is_a_conflict() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@rival-name" })),
+        )
+        .await;
+        let rival = added["id"].as_i64().unwrap();
+        harness.await_refreshed(rival).await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@contender" })),
+        )
+        .await;
+        let contender = added["id"].as_i64().unwrap();
+        harness.await_refreshed(contender).await;
+
+        let (status, _, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{contender}/alias"),
+            Some(serde_json::json!({ "alias": "user@rival-name" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{text}");
+        assert!(
+            text.contains("user@rival-name"),
+            "the refusal must name the host already wearing that name: {text}"
+        );
+    }
+
+    /// The alias route bumps the fleet's revision on a real change and
+    /// stays silent on a repeat of the same value — the REST-level pin of
+    /// `update_alias_reports_changed_and_stores_the_trimmed_value`'s
+    /// `changed` return, since `set_alias` only calls `events().bump()`
+    /// when the store reports a real change (a registry reconcile that
+    /// changes no host's shape is itself a no-op bump-wise; see
+    /// `events.rs`).
+    #[tokio::test]
+    async fn setting_an_alias_bumps_the_revision_only_on_a_real_change() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@revision-check" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+
+        let events = Arc::clone(harness.manager.events());
+        let before = events.revision();
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Revision Box" })),
+        )
+        .await;
+        let after_set = events.revision();
+        assert!(
+            after_set > before,
+            "a real alias change must bump the revision so every client redraws the name"
+        );
+
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Revision Box" })),
+        )
+        .await;
+        assert_eq!(
+            events.revision(),
+            after_set,
+            "repeating the same alias must not bump again"
+        );
+    }
+
+    /// The local row accepts an alias through the REST route too — the
+    /// store-level acceptance (`update_alias_accepts_the_local_row` in
+    /// `store.rs`) reaching all the way through `set_alias`'s handler.
+    #[tokio::test]
+    async fn the_local_host_accepts_an_alias() {
+        let harness = lone_local_helm().await;
+        let local = rest_harness::local_id(&harness.store).await;
+
+        let (status, body, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{local}/alias"),
+            Some(serde_json::json!({ "alias": "My Laptop" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(body["name"], "My Laptop");
+        assert_eq!(body["alias"], "My Laptop");
+    }
+
+    /// A session's `host_name` follows its host's alias — the manager
+    /// snapshot's alias reaching the session view the same way it reaches
+    /// the hosts listing's `name`, so a session row and the host panel
+    /// never disagree about what a host is called.
+    #[tokio::test]
+    async fn session_rows_carry_the_alias_in_host_name() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@session-alias" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.fleet.edit(host, |script| {
+            script.identity = Some("identity-session-alias".to_string());
+            script.sessions = vec![rest_harness::session("aliased-session", 100)];
+        });
+        harness
+            .manager
+            .retry_now(host)
+            .await
+            .expect("the host exists");
+        harness
+            .await_refreshed_as(host, "identity-session-alias", 1)
+            .await;
+
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Session Host" })),
+        )
+        .await;
+
+        let (_, sessions, _) = call(&harness, "GET", "/api/sessions", None).await;
+        let row = sessions["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == "aliased-session")
+            .expect("the aliased host's session is listed");
+        assert_eq!(row["host_name"], "Session Host");
+    }
+
+    /// `HostView.alias` must be present in the JSON for EVERY row, `null`
+    /// when unset — a client has to be able to tell "this helm supports
+    /// aliases and this host has none" from "this key was never sent"
+    /// without inspecting `name`, and the two would be indistinguishable if
+    /// an unset alias were simply omitted.
+    #[tokio::test]
+    async fn the_alias_key_is_always_present_even_when_unset() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@no-alias" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+
+        let (_, hosts, _) = call(&harness, "GET", "/api/hosts", None).await;
+        for row in hosts["hosts"].as_array().unwrap() {
+            assert!(
+                row.as_object().unwrap().contains_key("alias"),
+                "every row, aliased or not, must carry the `alias` key: {row}"
+            );
+        }
+        let unaliased = hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == host)
+            .unwrap();
+        assert_eq!(unaliased["alias"], serde_json::Value::Null);
+    }
+
+    /// `HostStoreError::InvalidAlias` must reach the client as 400, not
+    /// fall through to a generic 500 — the one mapping in
+    /// `find_cause::<HostStoreError>` (`lib.rs`) nothing else exercises
+    /// through this route: `AliasTaken` is proven at 409 elsewhere in this
+    /// file, and every other host-management route already pins the shared
+    /// `HostNotFound` -> 404 branch.
+    #[tokio::test]
+    async fn an_invalid_alias_is_refused_with_400_and_leaves_the_stored_alias_untouched() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@invalid-alias" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Kept Name" })),
+        )
+        .await;
+
+        for invalid in ["a".repeat(65), "bad\u{0007}name".to_string()] {
+            let (status, _, text) = call(
+                &harness,
+                "POST",
+                &format!("/api/hosts/{host}/alias"),
+                Some(serde_json::json!({ "alias": invalid })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid:?}: {text}");
+        }
+
+        let (_, hosts, _) = call(&harness, "GET", "/api/hosts", None).await;
+        let row = hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == host)
+            .unwrap();
+        assert_eq!(
+            row["alias"], "Kept Name",
+            "a refused write must leave the previously stored alias exactly as it was"
+        );
+    }
+
+    /// `AliasSpec.alias` is REQUIRED — a body of `{}` is a decode failure
+    /// (422, axum's ordinary `JsonRejection` for a missing field), never a
+    /// silent clear. Plain `Option<String>` fields are implicitly
+    /// `#[serde(default)]` under serde's derive macro, which would make
+    /// `{}` decode identically to an explicit `{"alias": null}`;
+    /// `AliasSpec`'s own doc explains the fix.
+    #[tokio::test]
+    async fn an_alias_body_missing_the_key_is_refused_and_leaves_the_stored_alias_untouched() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@missing-alias-key" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Untouched Name" })),
+        )
+        .await;
+
+        let (status, _, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "a body with no `alias` key at all must be refused, not treated as a clear: {text}"
+        );
+
+        let (_, hosts, _) = call(&harness, "GET", "/api/hosts", None).await;
+        let row = hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == host)
+            .unwrap();
+        assert_eq!(
+            row["alias"], "Untouched Name",
+            "`{{}}` must not have cleared the existing alias"
+        );
+    }
+
+    /// A retry of the SAME alias, after an earlier attempt's store write
+    /// landed but its synchronization never reached the manager (standing
+    /// in for a failed sync by writing through the store directly, which
+    /// this harness's route never does on its own), must still bump the
+    /// revision — this retry's own sync is what finally makes the change
+    /// observable, even though the STORE itself reports no change on this
+    /// second write. `set_alias`'s own doc explains why bumping only on the
+    /// store's `changed` flag would leave every already-subscribed client
+    /// stale indefinitely in exactly this sequence.
+    #[tokio::test]
+    async fn retrying_the_same_alias_after_a_stranded_write_still_bumps_once_synced() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@stranded-alias" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+
+        // Simulate attempt 1's outcome directly: the store write landed,
+        // but (standing in for a synchronization failure) the manager's
+        // published snapshot never caught up, because nothing here called
+        // `sync_registry`.
+        let landed = harness
+            .store
+            .update_alias(host, Some("Stranded Name"))
+            .await
+            .expect("the durable write itself succeeds");
+        assert!(landed, "sanity: this is a real change to the stored column");
+
+        let events = Arc::clone(harness.manager.events());
+        let before = events.revision();
+
+        // Attempt 2: the SAME value, through the real route. The store
+        // reports no change (it already holds "Stranded Name"), but this
+        // call's own sync is the first one to actually publish it.
+        let (status, body, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/alias"),
+            Some(serde_json::json!({ "alias": "Stranded Name" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(body["alias"], "Stranded Name");
+        assert!(
+            events.revision() > before,
+            "the retry's own sync is what makes the alias observable for the first time; every \
+             already-subscribed client depends on this bump to ever see it"
         );
     }
 

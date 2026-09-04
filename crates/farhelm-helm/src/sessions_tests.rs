@@ -636,6 +636,50 @@ async fn get_session_passes_a_non_empty_tabs_list_through() {
     );
 }
 
+/// `GET /api/sessions/{id}` derives `host_name` from
+/// `aggregate::host_display_name` on its OWN call
+/// (`sessions.rs:1481`), independently of the merged-listing route's
+/// derivation — the two share a function, not a code path, so a future
+/// regression at this call specifically would leave list rows renamed
+/// while a session's own detail view kept showing the destination.
+/// `hosts.rs`'s `session_rows_carry_the_alias_in_host_name` pins the
+/// listing side; this pins the detail side.
+#[tokio::test]
+async fn get_session_carries_the_hosts_alias() {
+    let harness =
+        rest_harness::helm_listing(vec![rest_harness::session("aliased-detail", 1_700_000_000)])
+            .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness
+        .store
+        .update_alias(local, Some("Aliased Detail Host"))
+        .await
+        .expect("alias the local host");
+    // A direct store write does not itself reach the manager's live
+    // snapshot — see `hosts.rs`'s `set_alias` for why a real client always
+    // resyncs after writing through the route.
+    harness
+        .manager
+        .sync_registry()
+        .await
+        .expect("resync after aliasing directly through the store");
+    let app = harness.router();
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/sessions/aliased-detail")
+        .header("host", "127.0.0.1:7433")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = tower::ServiceExt::oneshot(app, request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["host_name"], "Aliased Detail Host");
+}
+
 /// The helm is a passthrough for classification, and PLAN_M3.md item 2
 /// is the first change that makes that claim testable with something
 /// the helm could plausibly get wrong: `interrupted` is a status

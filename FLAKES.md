@@ -224,3 +224,27 @@ navigation, and the second `fulfill` finds the route already answered. Not chase
 WebKit produces the second dispatch, and the other three `forceBuildSkew` callers (`feed.spec.ts`) passed throughout
 both runs, so whatever triggers it is rare and not obviously tied to this one test's own body. Disposition: open
 (TODO.md).
+
+## 2026-09-03 — `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail` (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs)
+
+Seen during the host-alias feature's finishing-work run on a 4-vCPU sandbox:
+`cargo test -- --show-output
+--test-threads=4` failed this one test (338 passed, 1 failed) with "a consumed sentinel is
+deleted once its Error outcome commits durably". The launch-sentinel and supervisor code this test exercises was
+untouched by that work. Reproduced alone immediately after —
+`cargo test -p farhelm --test e2e
+launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail -- --exact
+--show-output --test-threads=1`
+— and it passed. One isolated pass does not distinguish a test race from a load-triggered product or harness defect, so
+no cause is claimed beyond the observed fingerprint: fails under a loaded `--test-threads=4` full-binary run, passes
+alone. Not chased further. Disposition: open (TODO.md).
+
+## 2026-09-03 — `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts), also on Chromium
+
+The identical failure the entry above this one already tracks — `Error: route.fulfill: Route is already handled!` inside
+`forceBuildSkew` — recurred during the host-alias feature's finishing-work run, this time on
+`chromium-sidebar --repeat-each=3` (1 of 168 executions) rather than the WebKit-only sighting previously logged. Same
+test, same helper, same error text and call site (`helpers/fleet.ts:696`); `sidebar.spec.ts` was touched only by adding
+two new, unrelated tests at the end of the file in that run. This widens the earlier entry's engine scope from
+WebKit-only to both engines, which the next person chasing it should know before assuming it is WebKit-specific.
+Disposition: still open (TODO.md); the existing entry's diagnosis stands.
