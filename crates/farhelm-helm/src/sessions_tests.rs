@@ -902,6 +902,1049 @@ async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
     peer.await.unwrap();
 }
 
+// ===== `POST /api/sessions/{id}/replace` (SPEC.md's "replace") ====
+//
+// One route composed of a create and a delete on the SAME connection, so
+// the tests below exercise it as that composition rather than as a new
+// primitive: each scripted peer answers a `CreateSession` and then a
+// `DeleteSession` in that order (except the refusal cases, which never
+// reach the second), matching `do_replace_session`'s own call order.
+
+/// Build the single-host harness a replace test needs, WITHOUT waiting for
+/// its first refresh the way `spliced_helm`/`spliced_helm_listing` do —
+/// callers get `(harness, local host id)` back immediately so a peer can be
+/// spawned with `harness.fleet` already in hand, and wait for the refresh
+/// themselves once that peer is running.
+///
+/// Every happy-path replace test needs that `fleet` handle for a reason
+/// specific to this route: [`crate::sessions::record_session`]'s underlying
+/// `remember_session` fires an IMMEDIATE background refresh for every
+/// `Unknown`-status create (see that function's own doc — "ask for it NOW
+/// rather than at the end of the refresh interval"), and that refresh's
+/// `ListSessions` is answered from THIS harness's scripted `HostScript`,
+/// not from whatever the peer just told the client it created. A real
+/// supervisor's own list already reflects a session the instant after it
+/// created it, so the race is harmless in production — but a scripted peer
+/// whose list never moves can lose exactly the row `record_session` just
+/// wrote to that same refresh's wholesale cache replace, before the
+/// route's own delete half ever runs. Every test below keeps the script in
+/// step with `harness.fleet.edit` right after acknowledging a create, which
+/// is what this helper exists to make possible: `spliced_helm`'s own
+/// construction hands out no fleet reference before the connection is
+/// already up and refreshed.
+async fn spliced_replace_harness(
+    peer: tokio::io::DuplexStream,
+    sessions: Vec<farhelm_proto::SessionInfo>,
+) -> (rest_harness::Harness, store::HostId) {
+    let harness = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions,
+            peer: Some(peer),
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    (harness, local)
+}
+
+/// The simplest replace: a live, raw-invocation source. SPEC.md's contract
+/// is a NEW id carrying the source's cwd, title, and invocation, with the
+/// old id gone from the list at once — this pins that promise against the
+/// real handler and a scripted supervisor.
+#[tokio::test]
+async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        // The create half: cwd, title, and invocation copied verbatim from
+        // the source; no profile, no overrides, no idempotency key (the
+        // request body below sends none).
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            parent: None,
+            profile_name: None,
+            cwd,
+            invocation,
+            source_profile,
+            title,
+            intent_key,
+            agent_kind,
+            resume_template,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(cwd, "/sess-1");
+        assert_eq!(invocation, Some("agent".to_string()));
+        assert_eq!(source_profile, None);
+        assert_eq!(title, Some("sess-1".to_string()));
+        assert_eq!(intent_key, None);
+        assert_eq!(agent_kind, None);
+        assert_eq!(resume_template, None);
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/sess-1".into(),
+            invocation: "agent".into(),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        // See `spliced_replace_harness`'s doc: the fixture is updated BEFORE
+        // the reply that tells the client about it, matching what a REAL
+        // supervisor's own list would already show if asked — a background
+        // refresh this create's `Unknown` status triggers can otherwise read
+        // this harness's still-stale scripted list before the peer gets
+        // here and overwrite the row `record_session` just wrote.
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        // The delete half: the OLD id, sent only once the new one exists.
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        // Same ordering rule as the create half, mirrored for the delete:
+        // the fixture drops the source before the reply that tells the
+        // client it is gone.
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(session.id, "sess-2");
+    assert_eq!(session.cwd, "/sess-1");
+    assert_eq!(session.title, "sess-1");
+    assert_eq!(session.invocation, "agent");
+
+    // Waits for the background refresh this create's `Unknown` status
+    // triggered to actually finish (`refresh_to_completion`'s own doc: the
+    // second request arriving proves the first has committed), so this
+    // assertion proves the STABLE fixture state rather than winning — or
+    // losing — a scheduling race against that refresh.
+    harness.refresh_to_completion(local).await;
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-2"],
+        "the old id must be gone and the new one routable at once, with no \
+         wait for a refresh"
+    );
+
+    peer.await.unwrap();
+}
+
+/// A CREATE reply that replays the SOURCE's own id is refused before any
+/// delete is sent — the reachable idempotency-key-reuse case
+/// `do_replace_session`'s own `accept_result` veto exists to catch,
+/// mirroring `clone_for_agent`'s identical guard.
+///
+/// The collision is real, not merely hostile-peer input: a same-host
+/// replace with no field overrides reconstructs the EXACT fingerprint the
+/// source's own creation used (same cwd, title, raw invocation or profile,
+/// default dimensions, no parent), so a caller that reuses the source's own
+/// creation key hits a legitimate reservation REPLAY at the target, which
+/// answers with the source row rather than a new one. Accepting that reply
+/// would send `DeleteSession` for the id just "created", forget it, and
+/// report success describing the session it had just destroyed — violating
+/// every promise replace makes. This pins the refusal instead.
+#[tokio::test]
+async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        // A REPLAY: the target answers with the SOURCE's own row rather
+        // than a new one, exactly as a supervisor's fingerprint match would
+        // for a create key already used to make "sess-1" itself.
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: SessionInfo {
+                    parent: None,
+                    archived: false,
+                    id: "sess-1".into(),
+                    title: "sess-1".into(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    creation_seq: None,
+                    cwd: "/sess-1".into(),
+                    invocation: "agent".into(),
+                    status: farhelm_proto::SessionStatus::Running,
+                    annotation: None,
+                    restart_offer: farhelm_proto::RestartOffer::default(),
+                    tabs: Vec::new(),
+                    source_profile: None,
+                },
+            }))
+            .await
+            .unwrap();
+        // No `DeleteSession` must follow: `do_create_session`'s veto refuses
+        // BEFORE any bookkeeping (see `CreateSpec::accept_result`'s own
+        // "Two phases" doc), so `do_replace_session` never reaches its own
+        // delete call — this peer reads nothing more.
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({"intent_key": "reused-key"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains("no replacement was made") && body.contains("a key that has not been used"),
+        "the refusal must tell the caller which key mistake to fix: {body}"
+    );
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-1"],
+        "a rejected replay must leave the source exactly as it was — no delete was ever sent"
+    );
+
+    peer.await.unwrap();
+}
+
+/// A profile-backed source's replacement follows the SAME profile — the
+/// happy path `mode_from_source` shares with `clone_for_agent`, exercised
+/// here through the REST route instead of the agent relay.
+#[tokio::test]
+async fn replace_of_a_profile_backed_session_follows_its_profile() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, ProfileSnapshot, SessionInfo, SourceProfile};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let source = farhelm_proto::SessionInfo {
+        source_profile: Some(farhelm_proto::SourceProfile {
+            id: "starter-claude".to_string(),
+            name: "claude".to_string(),
+            existence: farhelm_proto::ProfileExistence::Unresolved,
+        }),
+        ..rest_harness::session("sess-1", 1_700_000_000)
+    };
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            invocation,
+            source_profile,
+            agent_kind,
+            resume_template,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        // `starter-claude` is one of the two seeded starter profiles every
+        // fresh `helm.db` carries (`store.rs`'s `STARTER_PROFILES`), so the
+        // fixture below can name it with no profile-creation setup of its
+        // own.
+        assert_eq!(invocation, Some("claude".to_string()));
+        assert_eq!(
+            source_profile,
+            Some(ProfileSnapshot {
+                id: "starter-claude".to_string(),
+                name: "claude".to_string(),
+            })
+        );
+        assert_eq!(agent_kind, Some(farhelm_proto::AgentKind::Claude));
+        assert_eq!(resume_template, None);
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/sess-1".into(),
+            invocation: "claude".into(),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            // The exact `existence` the supervisor sends here does
+            // not matter: `do_create_session` recomputes it against
+            // the live catalog before this reaches the caller (see
+            // `resolve_session_profiles`), so `Unresolved` is the
+            // ordinary placeholder every other fixture in this file
+            // uses.
+            source_profile: Some(SourceProfile {
+                id: "starter-claude".to_string(),
+                name: "claude".to_string(),
+                existence: farhelm_proto::ProfileExistence::Unresolved,
+            }),
+        };
+        // See `spliced_replace_harness`'s doc: fixture updated before reply.
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(session.id, "sess-2");
+    assert_eq!(
+        session.source_profile.as_ref().map(|p| p.id.as_str()),
+        Some("starter-claude")
+    );
+
+    peer.await.unwrap();
+}
+
+/// A source whose snapshotted profile has been DELETED still replaces,
+/// falling back to its raw invocation — the deliberate DIVERGENCE from
+/// `clone_for_agent`'s own
+/// `profile_clone_with_a_dangling_snapshot_never_contacts_the_target`: the
+/// agent-CLI clone refuses this exact shape because a raw invocation
+/// written for one machine may not run on another, while replace never
+/// changes machine, so the refusal clone needs has nothing to guard against
+/// here. Pinned so this divergence is not "fixed" into a refusal later.
+#[tokio::test]
+async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invocation() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let source = farhelm_proto::SessionInfo {
+        invocation: "sh -c 'echo hi'".to_string(),
+        source_profile: Some(farhelm_proto::SourceProfile {
+            id: "deleted-profile".to_string(),
+            name: "Former agent".to_string(),
+            existence: farhelm_proto::ProfileExistence::Unresolved,
+        }),
+        ..rest_harness::session("sess-1", 1_700_000_000)
+    };
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            invocation,
+            source_profile,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(invocation, Some("sh -c 'echo hi'".to_string()));
+        assert_eq!(
+            source_profile, None,
+            "a raw fallback carries no profile provenance"
+        );
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/sess-1".into(),
+            invocation: "sh -c 'echo hi'".into(),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        // See `spliced_replace_harness`'s doc: fixture updated before reply.
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(session.invocation, "sh -c 'echo hi'");
+
+    peer.await.unwrap();
+}
+
+/// An archived source is a legitimate replace target (SPEC.md's Replace
+/// bullet: there is no agent to kill on one, only a record to delete). The
+/// replacement is an ordinary, RUNNING create — archiving is never a
+/// create-time flag.
+#[tokio::test]
+async fn replace_of_an_archived_session_creates_a_fresh_replacement() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let source = farhelm_proto::SessionInfo {
+        archived: true,
+        ..rest_harness::session("sess-1", 1_700_000_000)
+    };
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(cwd, "/sess-1");
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/sess-1".into(),
+            invocation: "agent".into(),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        // See `spliced_replace_harness`'s doc: fixture updated before reply.
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(session.id, "sess-2");
+    assert!(!session.archived, "a replacement is never born archived");
+
+    peer.await.unwrap();
+}
+
+/// If the create fails, the source is untouched: the handler returns before
+/// ever sending a delete, and the row stays listed exactly as it was — the
+/// "nothing was lost" half of `do_replace_session`'s asymmetric failure
+/// rule (see its own doc).
+#[tokio::test]
+async fn a_create_refusal_leaves_the_source_listed() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, Frame};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        writer
+            .write_frame(&Frame::control(&ControlMsg::Error {
+                req_id,
+                message: "working directory does not exist: /sess-1".into(),
+                kind: ErrorKind::InvalidRequest,
+            }))
+            .await
+            .unwrap();
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("does not exist"), "{body}");
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(row_ids(&value), vec!["sess-1"]);
+
+    peer.await.unwrap();
+}
+
+/// An EXPLICIT supervisor refusal of the delete, after a successful create,
+/// must not hide either session: the reply names both ids and says both
+/// rows stay listed, definitely — `do_replace_session`'s asymmetric
+/// failure rule (see its own doc), for the branch where the refusal itself
+/// proves the delete did not happen. Rolling the create back would kill an
+/// agent the caller just asked for, and plain failure would hide a session
+/// the caller was never told still exists.
+#[tokio::test]
+async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_both_rows() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/sess-1".into(),
+            invocation: "agent".into(),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        // See `spliced_replace_harness`'s doc: this test's whole point is
+        // what the LIST shows after the failure below, so the fixture must
+        // not itself be the reason "sess-2" is missing from it — updated
+        // before the reply, like every other successful create in this file.
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        // No fixture change here: the supervisor REFUSED the delete, so
+        // "sess-1" genuinely still exists on the (simulated) far end too —
+        // unlike the happy-path tests, this peer must NOT remove it.
+        writer
+            .write_frame(&Frame::control(&ControlMsg::Error {
+                req_id,
+                message: "supervisor lost the process table entry".into(),
+                kind: ErrorKind::Internal,
+            }))
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "{body}"
+    );
+    assert!(body.contains("sess-1"), "must name the source: {body}");
+    assert!(body.contains("sess-2"), "must name the replacement: {body}");
+    assert!(
+        body.contains("both sessions still exist"),
+        "an explicit supervisor refusal is a DEFINITE answer, not an unknown outcome: {body}"
+    );
+
+    // See `replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old`'s
+    // own comment on why this waits for the create's background refresh to
+    // finish before reading the list.
+    harness.refresh_to_completion(local).await;
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    let mut ids = row_ids(&value);
+    ids.sort();
+    assert_eq!(
+        ids,
+        vec!["sess-1".to_string(), "sess-2".to_string()],
+        "both sessions must stay listed until the user removes the old one by hand"
+    );
+
+    peer.await.unwrap();
+}
+
+/// A delete whose frame reaches the peer, but whose CONNECTION ends before
+/// any reply comes back, is NOT the same failure as an explicit refusal —
+/// `do_replace_session`'s own doc draws the line between them. The
+/// supervisor may have completed the deletion and lost only the
+/// confirmation, so the reply must not claim the source definitely still
+/// exists (unlike the explicit-refusal test above); it must say the
+/// replacement is real and that the source's fate needs checking.
+///
+/// Dropping the PEER's own `reader`/`writer` does NOT model this: this
+/// harness's spliced relay deliberately keeps the manager-side connection
+/// open after a scripted peer's own exchange ends (`rest_harness`'s own
+/// module doc — "a spliced peer's EXIT is deliberately not propagated"),
+/// so a peer that simply stops talking leaves `client.delete_session`
+/// waiting forever rather than failing it. The connection has to be killed
+/// from the OUTSIDE instead — `ScriptedFleet::kill_connection`, the same
+/// primitive the reconnect-path tests use — timed with a handshake so it
+/// fires only once the delete frame has genuinely reached the peer.
+#[tokio::test]
+async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcome() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    // Signals that the delete frame has been read, so the connection is
+    // only killed once the request has GENUINELY reached the peer — killing
+    // it any earlier would test `NotSent`, not `SentUnanswered`.
+    let (delete_seen_tx, delete_seen_rx) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/sess-1".into(),
+            invocation: "agent".into(),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { session_id, .. } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        // The supervisor APPLIES the delete — the fixture drops "sess-1",
+        // modeling that reality — but never gets to answer: the test kills
+        // the connection out from under this exchange the moment it learns
+        // the frame arrived (see `delete_seen_tx` below), which is what
+        // actually produces `SupervisorTransportError::SentUnanswered` on
+        // the client side.
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        let _ = delete_seen_tx.send(());
+    });
+
+    harness.await_refreshed(local).await;
+    let kill_fleet = harness.fleet.clone();
+    let (status, body) = {
+        let post = post_text(
+            &harness,
+            "/api/sessions/sess-1/replace",
+            serde_json::json!({}),
+        );
+        let kill = async move {
+            delete_seen_rx
+                .await
+                .expect("peer dropped before reading the delete");
+            kill_fleet.kill_connection(local);
+        };
+        let (response, ()) = tokio::join!(post, kill);
+        response
+    };
+    assert_eq!(
+        status,
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "{body}"
+    );
+    assert!(body.contains("sess-1"), "must name the source: {body}");
+    assert!(body.contains("sess-2"), "must name the replacement: {body}");
+    assert!(
+        !body.contains("both sessions still exist"),
+        "a lost reply is not proof the source survived: {body}"
+    );
+    assert!(
+        body.contains("unknown") && body.contains("check"),
+        "the honest reply says the outcome is unknown and must be checked before cleanup: {body}"
+    );
+
+    peer.await.unwrap();
+}
+
+/// A replace on a session whose host is unreachable is refused, with the
+/// state named, before anything is created — the same owner-lookup refusal
+/// every lifecycle operation gets (`route_session`), exercised here through
+/// `/replace`.
+#[tokio::test]
+async fn replace_on_an_unreachable_host_is_refused_before_anything_is_created() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@breaks",
+            rest_harness::HostScript {
+                identity: Some("identity-original".to_string()),
+                sessions: vec![rest_harness::session("sess-1", 100)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert!(body.contains("unreachable-reprobing"), "{body}");
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-1"],
+        "nothing may be created while the source's host is unreachable"
+    );
+}
+
+/// `intent_key` reaches the create half exactly as an ordinary create's
+/// does: retried under the same key, the create REPLAYS rather than
+/// minting a second session. The only place a retry can meaningfully land
+/// is after a delete failure — a fully successful replace 404s the source
+/// on any later retry (see `do_replace_session`'s own doc) — so this test
+/// chains the retry off exactly that state, and the peer script plays the
+/// supervisor's own idempotent reply by hand (this helm keeps no local
+/// dedup of its own; the guarantee is entirely the supervisor's).
+#[tokio::test]
+async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creates_only_once() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/sess-1".into(),
+            invocation: "agent".into(),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        let created_reply = |req_id| {
+            Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created.clone(),
+            })
+        };
+        // See `spliced_replace_harness`'s doc. `retain`-then-`push` rather
+        // than a plain `push`, because THIS test calls it twice for the
+        // SAME session id (the replay below is scripted as a second,
+        // identical create) — a bare push would leave the scripted list
+        // naming "sess-2" twice, which `drain_sessions`'s own duplicate-id
+        // guard would then refuse to read at all.
+        let sync_created = || {
+            fleet.edit(local, |script| {
+                script.sessions.retain(|s| s.id != created.id);
+                script.sessions.push(created.clone());
+            });
+        };
+
+        // First attempt: create succeeds, delete fails.
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id, intent_key, ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(intent_key.as_deref(), Some("replace-key"));
+        sync_created();
+        writer.write_frame(&created_reply(req_id)).await.unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        // No fixture change: the supervisor REFUSES this delete, so
+        // "sess-1" genuinely still exists on the far end too.
+        writer
+            .write_frame(&Frame::control(&ControlMsg::Error {
+                req_id,
+                message: "transient failure".into(),
+                kind: ErrorKind::Internal,
+            }))
+            .await
+            .unwrap();
+
+        // Retry, same key: the reply below is a hand-played REPLAY of the
+        // first create, exactly what the supervisor's own fingerprint match
+        // would answer with — same session, no second launch.
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id, intent_key, ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(intent_key.as_deref(), Some("replace-key"));
+        sync_created();
+        writer.write_frame(&created_reply(req_id)).await.unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        // This delete SUCCEEDS, so the fixture drops the source before the
+        // reply that tells the client it is gone — same rule as every other
+        // successful delete in this file.
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, _) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({"intent_key": "replace-key"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({"intent_key": "replace-key"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        session.id, "sess-2",
+        "the retry must replay the same session"
+    );
+
+    // See the live-raw-session test's own comment on why this waits for the
+    // create's background refresh to finish before reading the list — this
+    // test triggers TWO such refreshes (one per attempt), and both must have
+    // settled before the assertion below means anything.
+    harness.refresh_to_completion(local).await;
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-2"],
+        "exactly one new session must exist once the retry succeeds"
+    );
+
+    peer.await.unwrap();
+}
+
 /// `GET /api/sessions`'s JSON shape, which the UI decodes and which
 /// PLAN_M6.md item 5 extended without breaking.
 ///
