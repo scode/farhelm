@@ -26,13 +26,25 @@ Rules:
 
 # Finishing work
 
-Before creating or updating a PR, or claiming work is done, run exactly what CI runs and make it pass. The default is to
-run the whole list below. Do not mechanically rerun a command that already passed during the current task when the
-intervening diff provably cannot affect what that command checks: a Markdown-only follow-up does not invalidate Rust,
-desktop, installer, or browser results, for example. Reuse is per command, not an excuse to waive the whole list. Check
-the diff from the tested revision to the current head, rerun anything whose inputs or exercised behavior may have
-changed, and rerun when there is any doubt. A failed, interrupted, stale, or poorly identified run is not reusable.
-Report which earlier results were reused and why.
+Before creating or updating a PR, or claiming work is done, use judgment to select the checks below that can
+meaningfully validate the change. The list is the authoritative inventory of CI-equivalent gates and what each one
+covers, not a requirement to run every command for every diff. Run each command whose inputs, generated artifacts, or
+exercised behavior may have changed. Select and order checks by the risks they cover, the signal they provide, their
+cost, and the uncertainty that remains. Cost can favor a fast check over an equally credible slow one, but it cannot
+excuse skipping the only check that covers a material risk. Widen when a change is cross-cutting, security-sensitive,
+lifecycle-sensitive, installer- or release-sensitive, or otherwise uncertain, and use the whole list when that is the
+most credible validation rather than as a mechanical default.
+
+For a documentation-only change that cannot affect generated artifacts or executable examples — ordinary Markdown
+documentation, a lore entry, agent instructions, or comments with no doctest or generation role — do NOT run Rust,
+JavaScript, desktop, installer, provisioning, or browser tests. Run only formatters, linters, link checkers, or other
+checks that actually inspect the changed files, if any exist. Do not run a check solely because it appears in the full
+gate list.
+
+Reuse is per command. Check the diff from the tested revision to the current head, rerun anything whose inputs or
+exercised behavior may have changed, and rerun when there is real uncertainty about coverage. A failed, interrupted,
+stale, or poorly identified run is not reusable. Report checks run now; checks reused, with the covered revision and why
+the intervening diff leaves their coverage intact; and checks skipped, with the reason.
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
