@@ -41,6 +41,13 @@ JavaScript, desktop, installer, provisioning, or browser tests. Run only formatt
 checks that actually inspect the changed files, if any exist. Do not run a check solely because it appears in the full
 gate list.
 
+When building a stack of reviewable changes, do not run the highest-cost relevant gates after every commit or PR by
+default. At each review unit, run fast, high-signal checks that cover that unit and catch failures while they are cheap
+to localize. Once the intended stack is complete, run the highest-cost relevant gates once at the stack tip so they
+cover the combined diff. Run a highest-cost gate earlier when it is the only credible coverage for a material risk or
+when later work depends on its result. If the stack changes after a tip result, apply the per-command reuse rule and
+rerun only checks whose coverage is no longer valid.
+
 Reuse is per command. Check the diff from the tested revision to the current head, rerun anything whose inputs or
 exercised behavior may have changed, and rerun when there is real uncertainty about coverage. A failed, interrupted,
 stale, or poorly identified run is not reusable. Report checks run now; checks reused, with the covered revision and why
