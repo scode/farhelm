@@ -199,6 +199,18 @@ jobs:
         run: "sudo apt-get update && sudo apt-get install -y musl-tools"
       - name: "Install the pinned Dioxus CLI"
         run: "cargo install --locked dioxus-cli --version 0.7.10"
+      - name: "Let the toolchain's rust-objcopy find libLLVM on macOS"
+        if: "runner.os == 'macOS'"
+        run: |
+          sysroot=$(rustc --print sysroot)
+          for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
+            if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
+              mkdir -p "$target_dir/lib"
+              ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
+              echo "linked libLLVM.dylib into $target_dir/lib"
+            fi
+          done
+          "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
       - name: "Build the web bundle"
         run: |
           rm -rf target/dx

@@ -262,6 +262,39 @@
   # `dx` installs in ci.yml).
   run: cargo install --locked dioxus-cli --version 0.7.10
 
+- name: Let the toolchain's rust-objcopy find libLLVM on macOS
+  # Rust 1.98.0 links the Darwin toolchain's bundled `rust-objcopy` and
+  # `rust-lld` against a shared `@rpath/libLLVM.dylib` with an rpath of
+  # `@loader_path/../lib` (rust-lang/rust#157205), but the rustc component
+  # ships that library only at `<sysroot>/lib`, not under
+  # `lib/rustlib/<target>/lib` where the rpath points. rustup's proxies paper
+  # over it by prepending `<sysroot>/lib` to `DYLD_FALLBACK_LIBRARY_PATH` for
+  # every tool THEY launch, which is why plain cargo builds still work — but
+  # dx runs `rust-objcopy` directly to strip the bundle (dioxus-cli 0.7.10,
+  # `post_process_executable`), sets the Linux `LD_LIBRARY_PATH` instead of
+  # the Darwin variable, and so dies with "Library not loaded:
+  # @rpath/libLLVM.dylib ... Failed to strip binary". That is what failed
+  # the v0.4.0-rc.1 tag build on 2026-09-04, the first tag cut after the
+  # `macos-15` image moved from Rust 1.97.1 to 1.98.0 (v0.3.0-rc.2, built on
+  # the older image the day before, was fine).
+  #
+  # The symlink puts the library exactly where the rpath looks, the same
+  # shape the nix rustc packagers adopted (nix-community/fenix#253); it is
+  # guarded so a toolchain that already resolves the library (an older Rust,
+  # or a future rustc component that ships it in place) is left untouched.
+  # Drop this step once the image's Rust resolves `rust-objcopy` on its own.
+  if: runner.os == 'macOS'
+  run: |
+    sysroot=$(rustc --print sysroot)
+    for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
+      if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
+        mkdir -p "$target_dir/lib"
+        ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
+        echo "linked libLLVM.dylib into $target_dir/lib"
+      fi
+    done
+    "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
+
 - name: Build the web bundle
   # `rm -rf target/dx` is not hygiene theater: dx never prunes that directory,
   # so it accumulates every generation it has ever built, and a stale
