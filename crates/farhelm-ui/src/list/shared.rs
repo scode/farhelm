@@ -52,16 +52,19 @@ pub(super) struct RowState {
     /// which is what keeps a selection switch down to two row renders
     /// (see the render-count tests in `row::tests`).
     pub(super) selected: bool,
-    /// Whether this row's session runs on the helm's OWN machine, which is
-    /// what decides whether the row spends a line naming its host at all
-    /// (see [`session_is_local`] for why the row cannot answer this itself).
+    /// Whether this row's session runs on the helm's OWN machine, is on
+    /// another one, or cannot yet be placed either way — which decides both
+    /// which locality glyph the title line draws (if any) and whether it
+    /// names the host at all (see [`session_locality`] for why the row
+    /// cannot answer this itself).
     ///
     /// Part of `RowState` rather than a prop of its own for the reason the
     /// whole struct exists: it is derived display state, and the row's
     /// memoization only compares what is in the compared props. A fleet
-    /// where every session is local therefore renders no host lines and
-    /// still re-renders exactly the rows a selection change touched.
-    pub(super) host_is_local: bool,
+    /// where every session is local therefore draws the local glyph on
+    /// every row and still re-renders exactly the rows a selection change
+    /// touched.
+    pub(super) locality: HostLocality,
     /// How long ago this session was last active, already FORMATTED, or
     /// `None` for a helm that sends no activity stamp at all.
     ///
@@ -76,8 +79,35 @@ pub(super) struct RowState {
     pub(super) activity: Option<ActivityStamp>,
 }
 
-/// Whether a session sits on the helm's own machine, given the registry's
-/// local row id.
+/// Whether a session sits on the helm's own machine, on another one, or
+/// cannot yet be placed either way.
+///
+/// A third state alongside `Local`/`Remote` is not an implementation detail
+/// of the boolean this type replaced — it is load-bearing for the sidebar's
+/// icon (`icons::LocalHostIcon`/`RemoteHostIcon`). The old boolean could
+/// already draw a LOCAL glyph safely whenever it answered true — a
+/// confirmed match against the registry's local row is exactly the
+/// evidence that claim needs. What it could not do was draw a REMOTE
+/// glyph: its `false` answer covered both a session the registry has
+/// confirmed lives elsewhere and one this client simply cannot place yet
+/// (no host id, or the hosts read has not landed), and those two cases
+/// need opposite glyphs — one honest, one an invented claim. `Unknown` is
+/// what separates "confirmed remote" from "not confirmed either way," so
+/// the row can draw the remote glyph exactly when it is owed one, and
+/// never suppress a host name it already has in the meantime (see
+/// [`session_locality`] below).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HostLocality {
+    /// The session's host id matches the registry's local row.
+    Local,
+    /// Both ids are known and unequal — the session's host is confirmed to
+    /// be some OTHER machine than the local row.
+    Remote,
+    /// There is no evidence either way — see [`session_locality`].
+    Unknown,
+}
+
+/// Where a session sits, given the registry's local row id.
 ///
 /// The row itself cannot answer this: a `Session` carries a host id and the
 /// helm's rendering of that host's NAME, but nothing that says which kind of
@@ -92,22 +122,40 @@ pub(super) struct RowState {
 /// string, would silently drop the host line off sessions on another
 /// machine. The id has no such failure mode.
 ///
-/// Both absences answer FALSE, which is the honest direction rather than
-/// the pretty one. A session with no `host` came from a helm too old to
-/// send one, and a `None` local id means the hosts read has not landed yet
-/// (or failed) — in neither case is there evidence the session is local.
-/// Put precisely: unknown locality never SUPPRESSES an available host
-/// label — this function only ever pushes the row toward showing a host
-/// name it already has, never away from it. Whether a name actually
-/// appears is a separate question the row answers on its own: a legacy row
-/// with no `host_name` at all necessarily shows none, this function's
-/// verdict notwithstanding. The visible cost, for a row that does carry a
-/// name, is a host line that disappears on a fresh page load once
-/// `/api/hosts` answers; the alternative is a row that silently claims a
-/// remote session is local while the registry is still unknown, and that
-/// one is a lie rather than a flicker.
-pub(super) fn session_is_local(session_host: Option<HostId>, local_host: Option<HostId>) -> bool {
-    session_host.is_some() && session_host == local_host
+/// Both absences answer `Unknown`, which is the honest direction rather
+/// than the pretty one. A session with no `host` came from a helm too old
+/// to send one, and a `None` local id means the hosts read has not landed
+/// yet (or failed) — in neither case is there evidence the session is
+/// local, and in neither case is there evidence it is remote either. Put
+/// precisely: unknown locality never SUPPRESSES an available host label,
+/// and it never DRAWS the local glyph on a claim this function cannot back
+/// — it only ever pushes the row toward showing a host name it already
+/// has, never away from it, and toward the local glyph only once the
+/// registry actually agrees. Whether a name actually appears is a separate
+/// question the row answers on its own: a legacy row with no `host_name` at
+/// all necessarily shows none, this function's verdict notwithstanding. The
+/// visible cost, for a row that does carry a name, is a host name that
+/// disappears from the title line on a fresh page load once `/api/hosts`
+/// answers; the alternative is a row that silently claims a remote session
+/// is local while the registry is still unknown, and that one is a lie
+/// rather than a flicker.
+pub(super) fn session_locality(
+    session_host: Option<HostId>,
+    local_host: Option<HostId>,
+) -> HostLocality {
+    match (session_host, local_host) {
+        // Both known and equal: the registry has confirmed this session's
+        // host IS its own local row.
+        (Some(host), Some(local)) if host == local => HostLocality::Local,
+        // Both known, and they differ: whatever this session's host is, it
+        // is not the local row, so it is some other, remote machine.
+        (Some(_), Some(_)) => HostLocality::Remote,
+        // Either side missing (no host on the session, or no local row yet
+        // from the registry) is the same "no evidence" case: it must not
+        // be read as Remote just because the equality check above did not
+        // match.
+        _ => HostLocality::Unknown,
+    }
 }
 
 /// One entry in the create dialog's host selector: everything that decides
@@ -807,24 +855,41 @@ pub(super) mod tests {
         );
     }
 
-    /// A session is local only when its host id IS the registry's local
-    /// row; every absence answers "not local" and leaves the host line on.
-    ///
-    /// The absences are the half worth pinning. A helm too old to send
-    /// `host`, and a hosts read that has not landed, both leave the UI with
-    /// no evidence either way — and the row must name its host rather than
+    /// A session is `Local` only when its host id IS the registry's local
+    /// row, and `Remote` when both ids are known and differ — the two cases
+    /// with actual evidence behind them.
+    #[test]
+    fn locality_is_local_or_remote_only_when_both_ids_are_known() {
+        assert_eq!(session_locality(Some(9), Some(9)), HostLocality::Local);
+        assert_eq!(session_locality(Some(4), Some(9)), HostLocality::Remote);
+    }
+
+    /// Every absence answers `Unknown`, never `Remote` — an unknown host id
+    /// (a legacy helm) or an unlanded hosts read (the registry has not
+    /// answered yet) is a "no evidence" case, not a claim that the session
+    /// is on some OTHER machine, and the row must name its host rather than
     /// assume the session is on the machine the user is already looking at.
+    ///
+    /// This is the case the icon rule added on top of the pre-existing
+    /// boolean's "never suppress a host label" rule: an `Unknown` verdict
+    /// must draw no locality glyph at all, LOCAL or REMOTE, because either
+    /// one would assert a fact this function does not have.
     #[test]
     fn locality_needs_both_ids_and_never_guesses() {
-        assert!(session_is_local(Some(9), Some(9)));
-        assert!(!session_is_local(Some(4), Some(9)));
-        assert!(
-            !session_is_local(None, Some(9)),
-            "a session naming no host is not evidence of being local"
+        assert_eq!(
+            session_locality(None, Some(9)),
+            HostLocality::Unknown,
+            "a session naming no host is not evidence of being local OR remote"
         );
-        assert!(
-            !session_is_local(Some(9), None),
-            "no registry yet is not evidence of being local either"
+        assert_eq!(
+            session_locality(Some(9), None),
+            HostLocality::Unknown,
+            "no registry yet is not evidence either way"
+        );
+        assert_eq!(
+            session_locality(None, None),
+            HostLocality::Unknown,
+            "neither id known is still just the absence of evidence"
         );
     }
 }

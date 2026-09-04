@@ -57,6 +57,7 @@ use crate::api::{
     Commit, ProbeResponse, ProvisioningOperation, ProvisioningSubmission, adopt_host,
     probe_ssh_host, provision_host, remove_host, retry_host, set_host_destination,
 };
+use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
@@ -1675,6 +1676,33 @@ fn HostRow(
             "data-host-phase": "{phase_label(&host.state)}",
             "data-host-kind": "{kind_attribute}",
             div { class: "host-row-main",
+                // The same locality glyph the session row draws
+                // (2026-09-03) — not asked for by the TODO entry that
+                // introduced it, but two renderings of "this is a remote
+                // host" in two different vocabularies (a session row's
+                // icon, a host row's bare name) would be exactly the
+                // inconsistency `icons` exists to prevent, and reusing the
+                // two components here costs one match arm.
+                //
+                // `HostKind::Unrecognized` draws neither glyph: it is the
+                // forward-compat catch-all for a kind value a newer helm
+                // might send that this build cannot interpret, so — unlike
+                // `Local`/`Ssh`, which this registry row always knows
+                // outright — there is no verdict to assert. Asserting
+                // either glyph would be the same invented claim
+                // `list::shared::session_locality`'s `Unknown` case refuses
+                // to make for a session row.
+                match host.kind {
+                    HostKind::Local => rsx! {
+                        LocalHostIcon {}
+                        span { class: "visually-hidden", "local" }
+                    },
+                    HostKind::Ssh => rsx! {
+                        RemoteHostIcon {}
+                        span { class: "visually-hidden", "remote" }
+                    },
+                    HostKind::Unrecognized => rsx! {},
+                }
                 span { class: "host-name peer-value", dir: "ltr", "{shown_name}" }
                 span {
                     class: "host-status {phase_class(&host.state)}",

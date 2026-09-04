@@ -631,6 +631,14 @@ test.describe("multi-host", () => {
     const local = hostRowByName(page, "this machine");
     await expect(local).toHaveAttribute("data-host-phase", "connected");
     await expect(local).toHaveAttribute("data-host-kind", "local");
+    // The host panel draws the same locality glyphs as the session row
+    // (2026-09-03, `icons.rs`) — a local row gets the local glyph and its
+    // hidden word, never the remote one. `data-glyph` pins the actual SVG
+    // shape: the count and hidden-word checks alone would still pass if
+    // `HostRow` swapped which icon component it called for `Local`/`Ssh`.
+    await expect(local.locator(".host-kind-icon")).toHaveCount(1);
+    await expect(local.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
+    await expect(local.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
     await expect(local.locator(".host-status .status-dot")).toBeVisible();
     await expect(local.locator(".host-status-label")).toHaveCount(0);
     // Profiles lives in the app bar. The local row menu contains Retry and
@@ -644,6 +652,9 @@ test.describe("multi-host", () => {
     const remote = hostRowByName(page, info.remote_ssh);
     await expect(remote).toHaveAttribute("data-host-phase", "connected");
     await expect(remote).toHaveAttribute("data-host-kind", "ssh");
+    await expect(remote.locator(".host-kind-icon")).toHaveCount(1);
+    await expect(remote.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "remote");
+    await expect(remote.locator(".host-kind-icon + .visually-hidden")).toHaveText("remote");
     await openHostMenu(remote);
     await expect(remote.locator(".host-remove")).toHaveCount(1);
 
@@ -1800,6 +1811,22 @@ test.describe("multi-host", () => {
       await expect(row.locator(".session-host")).toHaveText(info.remote_ssh, {
         timeout: 30_000,
       });
+      // A remote row carries `data-host-locality` and draws the remote
+      // glyph beside its name (2026-09-03) — the multihost half of the
+      // locality rule; sidebar.spec.ts covers the local and unknown
+      // verdicts, which do not need a live second host.
+      await expect(row).toHaveAttribute("data-host-locality", "remote");
+      await expect(row.locator(".host-kind-icon")).toHaveCount(1);
+      // `data-glyph`, independently of `data-host-locality`: the row's own
+      // attribute proves the VERDICT, not which svg component actually
+      // rendered — a `HostLocality::Remote` arm that called `LocalHostIcon`
+      // by mistake would still satisfy every other assertion here.
+      await expect(row.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "remote");
+      // Adjacent-sibling, not a bare `.visually-hidden` lookup: a live
+      // status badge (this session is `running`) hides its own word the
+      // same way, and a loose selector would be ambiguous between the two
+      // clipped spans on the same row.
+      await expect(row.locator(".host-kind-icon + .visually-hidden")).toHaveText("remote");
       id = await findSessionIdByTitle(request, title);
 
       // The list's own answer must agree with the row: the session lives on
@@ -2422,6 +2449,26 @@ test.describe("multi-host", () => {
         state: { phase: "invented-by-a-later-helm" },
         needles: ["does not know"],
       },
+      // A different forward-compat seam from the one above: not an
+      // unrecognized PHASE, but an unrecognized host `kind` — the wire
+      // value a newer helm might send for a registry row kind this build
+      // has no name for (`HostKind::Unrecognized`, `#[serde(other)]`).
+      // Every entry above hardcodes `kind: "ssh"` below, which is exactly
+      // why this seam had no coverage: a `HostRow` that drew a local or
+      // remote glyph for an unrecognized kind would not fail any of them.
+      {
+        id: 8010,
+        phase: "connected",
+        display: null,
+        kind: "quantum-mesh",
+        state: {
+          phase: "connected",
+          identity: "sentinel-unrecognized-kind",
+          build_version: "sentinel-unrecognized-kind-build",
+          refresh: { status: "ok", sessions: 0 },
+        },
+        needles: ["sentinel-unrecognized-kind", "sentinel-unrecognized-kind-build"],
+      },
     ];
 
     await page.route("**/api/hosts", async (route) => {
@@ -2429,7 +2476,7 @@ test.describe("multi-host", () => {
       const body = await response.json();
       body.hosts = phases.map((entry) => ({
         id: entry.id,
-        kind: "ssh",
+        kind: entry.kind ?? "ssh",
         destination: `user@${entry.phase}`,
         name: `user@${entry.phase}`,
         identity: null,
@@ -2462,6 +2509,16 @@ test.describe("multi-host", () => {
       }
       if (entry.remedy) {
         await expect(row.locator(".host-remedy")).toContainText(entry.remedy);
+      }
+      // The unrecognized-kind entry: `data-host-kind` degrades to its own
+      // forward-compat token, and the row draws NEITHER locality glyph —
+      // asserting either one would be the same invented claim
+      // `list::shared::session_locality`'s `Unknown` case refuses to make
+      // for a session row (`hosts.rs`'s icon-selection doc).
+      if (entry.kind && entry.kind !== "ssh") {
+        await expect(row).toHaveAttribute("data-host-kind", "unrecognized");
+        await expect(row.locator(".host-kind-icon")).toHaveCount(0);
+        await expect(row.locator(".visually-hidden")).toHaveCount(0);
       }
     }
   });

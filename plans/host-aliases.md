@@ -10,8 +10,9 @@ any single piece, is what makes it medium rather than low.
 
 NOTE: a plan, written against the anchor commit; check `git log <anchor>..main` over the paths below before executing.
 Two other plans in this directory add helm schema migrations (`plans/session-dot-read-state.md`); whichever lands first
-takes schema version 16 and the other takes 17. This plan should land after `plans/sidebar-local-vs-remote.md`, whose
-title-line host slot is where the alias shows on session rows.
+takes schema version 16 and the other takes 17. The title-line host slot this plan's alias reuses on session rows
+already exists (`.session-host` in app.css, commit `3e5e4f653a8b`): every row now carries a locality glyph, and a remote
+or unknown row names its host in that bounded slot rather than on a line of its own.
 
 ## Decisions already taken
 
@@ -109,9 +110,9 @@ mirror.
 ### Session rows and the header
 
 Nothing to change: the row's `.session-host` and the session header's stale notice render the helm's `host_name`, which
-carries the alias. With `plans/sidebar-local-vs-remote.md` landed, a local row shows the local glyph and no name even
-when the local host is aliased; the alias for the local host is visible in the host panel and the details view, which is
-where "this machine" was visible before.
+carries the alias. The session row's locality glyph (commit `3e5e4f653a8b`) means a local row shows the local glyph and
+no name even when the local host is aliased; the alias for the local host is visible in the host panel and the details
+view, which is where "this machine" was visible before.
 
 ## Spec and docs
 

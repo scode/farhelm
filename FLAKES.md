@@ -207,3 +207,20 @@ profiles opening invalidate its geometry` failed once on Chromium and
 `a saved profile is what the next editor sees,
 before the re-read lands` once on WebKit, beside the three known profiles
 cases; the latter had also failed twice in ten loaded runs earlier that day. Disposition: open (TODO.md).
+
+## 2026-09-03 — `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts), localized
+
+Seen on `[webkit-sidebar]` during a full four-project sidebar/terminal-multihost run (`--repeat-each=3`) on a 4-vCPU
+sandbox for PR #363 (the sidebar locality-glyph change): `Error: route.fulfill: Route is already handled!` inside
+`forceBuildSkew` (`helpers/fleet.ts`), which rewrites every `**/api/**` reply's build-stamp header (`route.fetch()` then
+`route.fulfill({ response, headers })`). Neither this test nor `fleet.ts` was touched by PR #363. `forceBuildSkew` has
+four callers in the target snapshot — three in `feed.spec.ts` and this sidebar test — not the broader set of every test
+that reads a build stamp. Reproduced alone:
+`--project=webkit-sidebar -g "the sidebar app
+bar shows the helm build and client tooltip" --repeat-each=20`, single
+worker, no other test in play, failed 1 of 20 with the identical error. The shape reads as the route handler racing
+itself — WebKit re-issuing or re-dispatching the intercepted request so the handler runs twice concurrently for one
+navigation, and the second `fulfill` finds the route already answered. Not chased further: no hypothesis yet for why
+WebKit produces the second dispatch, and the other three `forceBuildSkew` callers (`feed.spec.ts`) passed throughout
+both runs, so whatever triggers it is rare and not obviously tied to this one test's own body. Disposition: open
+(TODO.md).

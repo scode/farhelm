@@ -430,8 +430,17 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
     ).toBeGreaterThanOrEqual(cwd.x + cwd.width - 1);
 
     // This session is on the helm's own machine, so naming its host would
-    // be a line spent on a word every row would carry.
+    // be a line spent on a word every row would carry — but the row still
+    // marks its locality with a glyph (2026-09-03): local is a positive
+    // signal on its own row, not an absence to notice elsewhere.
     await expect(target.locator(".session-host")).toHaveCount(0);
+    await expect(target).toHaveAttribute("data-host-locality", "local");
+    await expect(target.locator(".host-kind-icon")).toHaveCount(1);
+    // `data-glyph`, not just the count and the hidden word: those two alone
+    // would still pass if the LOCAL and REMOTE svg components were swapped,
+    // since neither depends on which shape actually rendered.
+    await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
+    await expect(target.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
 
     // A deliberately loose ceiling: the point is the density decision (a
     // row roughly half the four-line layout's ~90px), not a pixel-exact
@@ -2119,19 +2128,22 @@ test("the host list counts every host, humanizes phases, and clips long names", 
 });
 
 /**
- * A LOCAL session's host line is PROVISIONAL, not a settled fact, until the
- * registry actually answers — it shows the moment the listing renders, and
- * disappears the instant `/api/hosts` confirms this session's host id IS
- * the local row.
+ * A LOCAL session's host name and locality mark are PROVISIONAL, not a
+ * settled fact, until the registry actually answers — the name shows and
+ * the row carries `unknown` the moment the listing renders (with no glyph
+ * at all), and both flip the instant `/api/hosts` confirms this session's
+ * host id IS the local row: the name disappears and the local glyph
+ * appears in its place.
  *
- * `shared::session_is_local` answers "not local" for every unknown
- * (including "the hosts read has not landed yet"), and unknown locality
- * never SUPPRESSES an available host label (SPEC_impl.md) — so a session
- * that is in fact local still names its host for as long as the registry
- * has not confirmed otherwise. The route hold makes that window
- * deterministic instead of racing a fast helm: without it, `/api/hosts`
- * ordinarily answers before the first paint and the provisional state is
- * never actually observed.
+ * `shared::session_locality` answers `Unknown` for every case with no
+ * evidence either way (including "the hosts read has not landed yet"), and
+ * `Unknown` never SUPPRESSES an available host label (SPEC_impl.md) — so a
+ * session that is in fact local still names its host for as long as the
+ * registry has not confirmed otherwise, and NEVER draws the local glyph on
+ * that unconfirmed guess. The route hold makes that window deterministic
+ * instead of racing a fast helm: without it, `/api/hosts` ordinarily
+ * answers before the first paint and the provisional state is never
+ * actually observed.
  */
 test("a local session's host line is provisional until the registry confirms it", async ({
   page,
@@ -2163,11 +2175,235 @@ test("a local session's host line is provisional until the registry confirms it"
     await expect(target).toBeVisible({ timeout: 20_000 });
     await expect(target.locator(".session-host")).toBeVisible();
     await expect(target.locator(".session-host")).toContainText("this machine");
+    // Unconfirmed: the row names the host it already has, but draws no
+    // locality glyph at all — asserting the local glyph here would be
+    // exactly the invented claim `session_locality`'s `Unknown` case
+    // refuses to make.
+    await expect(target).toHaveAttribute("data-host-locality", "unknown");
+    await expect(target.locator(".host-kind-icon")).toHaveCount(0);
 
     releaseHosts();
     await expect(target.locator(".session-host")).toHaveCount(0);
+    // Confirmed: the name is gone and the local glyph has taken its place.
+    await expect(target).toHaveAttribute("data-host-locality", "local");
+    await expect(target.locator(".host-kind-icon")).toHaveCount(1);
+    await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
+    await expect(target.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
   } finally {
     await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The title line's width rule under the worst case it was designed for: a
+ * long title, a long remote destination, both the stale and archived
+ * badges, a live status, and an activity age, all sharing one line — in
+ * two adversarial arrangements, so each field's own floor is what the
+ * assertions actually depend on rather than an incidental amount of room.
+ *
+ * `.session-title` and `.session-host` (`app.css`) differ in flex-GROW —
+ * the title claims the line's unused space, the host claims none — but
+ * both share `flex-shrink: 1`, which on its own offers no protection: two
+ * equally-shrinkable siblings compress toward zero together under enough
+ * combined pressure. The real guarantee is each one's `min-width` (a
+ * floor); this test exists to prove that floor, not the flex-grow split,
+ * is load-bearing.
+ *
+ * Measured empirically (both engines) rather than assumed: with every
+ * fixed sibling this fixture asks for actually present — both badges, the
+ * live status dot, the locality icon, AND the age — this row's fixed
+ * content alone leaves LESS room than `.session-title`'s and
+ * `.session-host`'s floors add up to. So in BOTH adversarial arrangements
+ * below, title and host land at EXACTLY their declared floors (60px and
+ * 40px), never less — CSS's flex-shrink freezes each item at its min-width
+ * the moment the naive proportional shrink would cross it, and with this
+ * little room left, both cross it. `.session-host`'s `max-width: 40%` cap
+ * (generous room for an ordinary remote destination) is consequently NOT
+ * the binding constraint under this specific worst case — the floors are —
+ * which is why this test asserts the floors directly rather than asserting
+ * the cap engages. TITLE-DOMINANT makes the title the aggressor (content
+ * vastly exceeding the line) beside a short host name; HOST-DOMINANT makes
+ * BOTH title and host individually huge. Both prove the same floors hold,
+ * from two different constructions — a regression in either field's
+ * `min-width` specifically would still be caught by the case that leans on
+ * it, even though the two cases converge on identical numbers here.
+ * `.stale-badge`, `.archived-badge`, and `.status-time` (the age) are
+ * compared ACROSS the two cases: since the two scenarios put wildly
+ * different content pressure on the title/host split beside them, any one
+ * of these three rendering at a different width in one case than the
+ * other would mean it was not actually holding its own declared width —
+ * the whole point of their `flex-shrink: 0` — but was incidentally
+ * borrowing room instead.
+ *
+ * Route-fabricated, the same way the tilde-fold and bidi tests above are:
+ * this combination (stale AND archived AND a live status AND an activity
+ * age AND a long remote host) is not something the harness can coax out of
+ * a real session on demand, and the point here is purely the CSS split,
+ * not session lifecycle semantics. The sidebar itself has no drag handle
+ * or responsive breakpoint (`app.css`: `.app-sidebar` is a fixed 340px,
+ * not a `min-width`), so there is only one width to check this against —
+ * this test IS that check.
+ */
+test("the title line's width split holds its floors under stale, archived, status, and age", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  // Mirrors `.session-title`/`.session-host`'s `min-width` in app.css —
+  // kept as named constants rather than repeated literals so a future
+  // change to either floor only has to update one place per side, here and
+  // in the stylesheet.
+  const TITLE_FLOOR_PX = 60;
+  const HOST_FLOOR_PX = 40;
+  // Sub-pixel/cross-engine rounding tolerance, not a meaningful slack.
+  const TOL = 2;
+  const rlo = String.fromCharCode(0x202e);
+  const activityAgeSecs = Math.floor(Date.now() / 1000) - 5 * 3600;
+
+  /** Route `/api/sessions` to one fabricated row and load it fresh. */
+  async function loadFixture(overrides: Record<string, unknown>) {
+    await page.route(SESSION_LISTING, async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+        json: {
+          sessions: [
+            {
+              id: "width-contention-session",
+              cwd: "/tmp",
+              invocation: "sleep 300",
+              stale: true,
+              archived: true,
+              status: { state: "running" },
+              last_activity_at: activityAgeSecs,
+              // Not a real registered host — this fixture only needs an id
+              // that disagrees with the local row's, which any sufficiently
+              // large one does, so `session_locality` reads it as `Remote`
+              // without a second route mocking `/api/hosts`.
+              host: 999_999,
+              ...overrides,
+            },
+          ],
+          total: 1,
+          matching: 1,
+          truncated: false,
+        },
+      });
+    });
+    await page.goto("/");
+    const target = row(page, "width-contention-session");
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await expect(target).toHaveAttribute("data-host-locality", "remote");
+    await expect(target.locator(".status-time"), "the age must actually render").toBeVisible();
+    return target;
+  }
+
+  /** The boxes this test measures on every row, gathered in one place. */
+  async function measure(target: ReturnType<typeof row>) {
+    const sideBox = (await page.locator(".app-sidebar").boundingBox())!;
+    const rowBox = (await target.boundingBox())!;
+    expect(rowBox.width, "the row must not force the sidebar wider").toBeLessThanOrEqual(
+      sideBox.width + 1,
+    );
+    const lineBox = (await target.locator(".session-row-line").first().boundingBox())!;
+    return {
+      sideBox,
+      lineBox,
+      title: (await target.locator(".session-title").boundingBox())!,
+      host: (await target.locator(".session-host").boundingBox())!,
+      stale: (await target.locator(".stale-badge").boundingBox())!,
+      archived: (await target.locator(".archived-badge").boundingBox())!,
+      age: (await target.locator(".status-time").boundingBox())!,
+    };
+  }
+
+  // ===== Title-dominant: the title's content vastly exceeds the line;
+  // the host name is short. Proves the host still shows something real —
+  // not squeezed to nothing — while the title is being maximally greedy.
+  const titleDominant = await loadFixture({
+    title: `width-contention-${"t".repeat(150)}`,
+    host_name: "user@short-vm",
+  });
+  const dominant = await measure(titleDominant);
+  expect(dominant.title.width, "the title must keep a meaningful width").toBeGreaterThanOrEqual(
+    TITLE_FLOOR_PX - TOL,
+  );
+  expect(dominant.host.width, "the host must keep its floor even here").toBeGreaterThanOrEqual(
+    HOST_FLOOR_PX - TOL,
+  );
+  expect(
+    dominant.host.width,
+    "the host must still respect its 40% cap",
+  ).toBeLessThanOrEqual(dominant.lineBox.width * 0.4 + TOL);
+
+  // ===== Host-dominant: BOTH title and host are individually long (unlike
+  // title-dominant, where only the title was) — the opposite construction,
+  // proving the same floors hold when the host is ALSO an aggressor rather
+  // than a passive short string. This is also F11's "long-host case": the
+  // raw name embeds a directional override, so the same fixture proves the
+  // `title` tooltip carries the escaped value `display_peer` produces, not
+  // the raw peer-controlled string.
+  const rawLongHost = `deploy@${rlo}${"build-fleet-".repeat(8)}internal.example.com`;
+  const escapedLongHost = `deploy@<U+202E>${"build-fleet-".repeat(8)}internal.example.com`;
+  const hostDominant = await loadFixture({
+    title: `width-contention-${"t".repeat(150)}`,
+    host_name: rawLongHost,
+  });
+  const underdog = await measure(hostDominant);
+  expect(
+    underdog.title.width,
+    "the title must keep a meaningful width even against a long host",
+  ).toBeGreaterThanOrEqual(TITLE_FLOOR_PX - TOL);
+  expect(
+    underdog.host.width,
+    "the host must keep its floor even against a long title",
+  ).toBeGreaterThanOrEqual(HOST_FLOOR_PX - TOL);
+  expect(
+    underdog.host.width,
+    "the host must never grow past its cap",
+  ).toBeLessThanOrEqual(underdog.lineBox.width * 0.4 + TOL);
+  // F11: the tooltip carries the SAME escaped value the visible text does
+  // (`display_peer`, not the raw peer-controlled string) — reusing the
+  // existing bidi-fixture pattern (see "a bidi override in the invocation
+  // basename renders escaped and isolated" below) for the host name.
+  await expect(hostDominant.locator(".session-host")).toHaveText(escapedLongHost);
+  await expect(hostDominant.locator(".session-host")).toHaveAttribute("title", escapedLongHost);
+
+  // Every field ellipsizes inside the sidebar rather than forcing the row —
+  // or the line — wider than the column, in both cases.
+  for (const [label, m] of [
+    ["title-dominant", dominant],
+    ["host-dominant", underdog],
+  ] as const) {
+    for (const [name, box] of [
+      ["title", m.title],
+      ["host", m.host],
+    ] as const) {
+      expect(
+        box.x + box.width,
+        `[${label}] the ${name} field must ellipsize inside the sidebar, not force the row wide`,
+      ).toBeLessThanOrEqual(m.sideBox.x + m.sideBox.width + 1);
+    }
+  }
+
+  // The three FIXED claimants — proven fixed by holding the SAME width
+  // across two scenarios that put wildly different pressure on the
+  // flexible title/host split beside them. If either scenario had actually
+  // compressed one of these below its own content's width, the two
+  // measurements would disagree.
+  for (const [name, a, b] of [
+    ["stale badge", dominant.stale, underdog.stale],
+    ["archived badge", dominant.archived, underdog.archived],
+    ["activity age", dominant.age, underdog.age],
+  ] as const) {
+    expect(
+      Math.abs(a.width - b.width),
+      `the ${name} must render at the same width regardless of title/host pressure`,
+    ).toBeLessThanOrEqual(TOL);
   }
 });
 
