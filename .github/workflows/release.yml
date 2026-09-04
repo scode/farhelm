@@ -174,7 +174,7 @@ jobs:
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
           PATH="$PWD/.ci-tmux:$PATH" cargo test --workspace --exclude farhelm --exclude farhelm-desktop -- --show-output --test-threads=4
-          PATH="$PWD/.ci-tmux:$PATH" cargo test -p farhelm --lib --bins -- --show-output --test-threads=4
+          PATH="$PWD/.ci-tmux:$PATH" cargo test -p farhelm --bins -- --show-output --test-threads=4
       - name: "Regress safe output-client teardown on the pinned tmux"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: "scripts/test-tmux-pinned-shutdown.sh"

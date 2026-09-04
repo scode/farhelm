@@ -174,10 +174,16 @@
   # excluded by name: it links WebKitGTK, which this runner does not have
   # (the v0.3.0-rc.3 gate died in gobject-sys's build script on exactly
   # that), and its desktop coverage is CI's job, not this gate's.
+  #
+  # The farhelm crate is a binary with no library target, so its unit tests
+  # are selected with `--bins` ALONE: adding `--lib` makes cargo refuse the
+  # whole command ("no library targets found in package `farhelm`") before
+  # a single test runs, which is what failed the v0.3.0 tag build on
+  # 2026-09-03 — the first tag cut after this second command was added.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     PATH="$PWD/.ci-tmux:$PATH" cargo test --workspace --exclude farhelm --exclude farhelm-desktop -- --show-output --test-threads=4
-    PATH="$PWD/.ci-tmux:$PATH" cargo test -p farhelm --lib --bins -- --show-output --test-threads=4
+    PATH="$PWD/.ci-tmux:$PATH" cargo test -p farhelm --bins -- --show-output --test-threads=4
 
 - name: Regress safe output-client teardown on the pinned tmux
   # Its own step after the full suite: each scenario gets a fresh test
