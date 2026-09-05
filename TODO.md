@@ -14,6 +14,37 @@ everything not yet sorted, which carries no implication either way. Within a buc
 
 ## Near term
 
+- Fix the interrupted-session UI after a host reboot: it attaches to a terminal that no longer exists, then displays
+  `Detached: session <id> has no terminal: the supervisor (or its tmux server) restarted after the agent ended` beneath
+  a `connection lost` retry overlay. Observed on 0.4.0 on 2026-09-05. Both services started successfully; the supervisor
+  logged the changed boot ID and missing tmux panes, the helm connected, and the affected session's durable state was
+  `interrupted` with its captured Claude conversation identity and resume template intact. The maintainer confirmed that
+  the header's **restart** action works; **reconnect now** was the button that kept failing. This is a recovery
+  presentation and attachment-routing bug, not evidence that restart-with-resume is broken.
+  - In `crates/farhelm-ui/src/session_view.rs`, `terminal_specs` suppresses islands for stale or archived sessions, but
+    not interrupted ones; the rendered terminal surface has the same omission. An interrupted session on a reachable
+    host therefore mounts the agent terminal and attempts attachment to a pane the reboot destroyed.
+  - `resolve_terminal_inner` in `crates/farhelm-supervisor/src/service/terminals.rs` returns `NotFound` when
+    `entry.terminal` is absent, using the message above. That wording incorrectly claims the agent ended before the
+    restart even when the supervisor has classified a reboot interruption. The helm's attach-failure path in
+    `crates/farhelm-helm/src/terminal.rs` turns the refusal into a `detached` notice and closes the WebSocket.
+    `crates/farhelm-ui/assets/terminal.js` treats this notice as infrastructure loss: only takeover, tab-closed, and
+    stall reasons stop recovery. The resulting retry ladder cannot recreate the missing terminal.
+  - `restart_offer_text` already explains reboot interruption and conversation resume, but that explanation lives in the
+    restart button's tooltip and accessible description, leaving the terminal surface to advertise the wrong action.
+    Follow SPEC.md's Durability and resume and missing-terminal contracts: show metadata, a visible explanation that the
+    reboot removed the terminal, and a clear restart-with-resume action. Do not mount or keep retrying an interrupted
+    session's absent terminal, and do not relaunch the agent without the user's action. Preserve attachment to surviving
+    exited panes; an exited status alone does not mean the terminal is gone. Replace the misleading missing-terminal
+    error with wording that does not invent an ordering of agent exit and reboot.
+  - Extend `e2e/tests/terminal-restart.spec.ts`: its interrupted-session test injects a listing row and checks the
+    tooltip, accessible description, status badge, and absence of unsolicited restart requests, but never asserts that
+    terminal attachment and the reconnect overlay are absent. Cover opening an already-interrupted session and an open
+    session transitioning through host loss to interrupted; neither should attach or retry the vanished terminal. Verify
+    that explicit restart resumes and attaches to the new terminal, while declining leaves the session interrupted. The
+    Rust reboot coverage in `crates/farhelm/tests/e2e/boot_id_durable_outcome.rs` already expects attachment to an
+    interrupted session to fail; that refusal must become an ordinary recovery state in the UI.
+
 - Deflake `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e). Fingerprint:
   `the supervisor never answered the agent request: Elapsed(())` from the peer's 20 s `answer()` budget, panicking at
   the `answer()` expect. It is a load flake that predates the profiles/host-list stack: on 2026-09-02 a 4-vCPU sandbox
