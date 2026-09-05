@@ -355,10 +355,23 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     // relaunches, and nothing gets downgraded to exited-unknown by the
     // attempt. This is SPEC.md's "opening and declining changes nothing"
     // as far as this PR can go; the resume OFFER itself is item 9.
-    client2
+    let refusal = client2
         .attach(&live.id, 80, 24)
         .await
-        .expect_err("an interrupted session has no terminal to attach to");
+        .expect_err("an interrupted session has no terminal to attach to")
+        .to_string();
+    // The refusal is what a browser paints when it opens the session, so
+    // its wording is part of the contract: it names the reboot and the way
+    // forward, and never claims to know that the agent ended BEFORE the
+    // restart — the ordering SPEC.md's "interrupted" exists to leave open.
+    assert!(
+        refusal.contains("host rebooted") && refusal.contains("restart offers to resume"),
+        "the refusal must name the reboot and the resume offer: {refusal}"
+    );
+    assert!(
+        !refusal.contains("after the agent ended"),
+        "the refusal must not order the agent's end against the restart: {refusal}"
+    );
     assert_eq!(
         listed(&client2, &live.id).await.status,
         SessionStatus::Interrupted,

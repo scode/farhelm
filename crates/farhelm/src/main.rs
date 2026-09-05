@@ -373,6 +373,16 @@ enum SupervisorCmd {
         /// corresponding pipe open.
         #[arg(long, hide = true)]
         exit_on_stdin_close: bool,
+        /// TEST ONLY: read this host's boot id from PATH instead of the
+        /// kernel. Lets a test harness simulate a reboot against a real
+        /// supervisor process by rewriting the file between restarts.
+        ///
+        /// Hidden because no production launch passes it: `farhelm helm
+        /// setup`'s units, the desktop launcher, and a hand-started
+        /// supervisor all read the real boot id, and a supervisor pointed at
+        /// a file that never changes would never classify a genuine reboot.
+        #[arg(long, hide = true, value_name = "PATH")]
+        boot_id_file: Option<PathBuf>,
     },
 }
 
@@ -667,6 +677,7 @@ fn main() -> anyhow::Result<()> {
                     state_dir,
                     tmux,
                     exit_on_stdin_close,
+                    boot_id_file,
                 },
         } => {
             init_tracing();
@@ -743,6 +754,7 @@ fn main() -> anyhow::Result<()> {
                 tmux_program: tmux,
                 agent_hooks,
                 agent_instructions,
+                boot_id_file,
             };
             runtime()?.block_on(run_supervisor(&dir, startup, exit_on_stdin_close))
         }
