@@ -5,10 +5,14 @@ same PR that addresses it, so the file only ever describes what is still wanted.
 priorities unless an entry says so itself.
 
 Five buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "near term" is what should be picked up next; "systematic deflake" is the
-plan for making the test suites stop failing under load as a class, distinct from the per-test deflake entries under
-"near term" that it is meant to retire; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is
-everything not yet sorted, which carries no implication either way. Within a bucket, no order.
+the decision is made, only the work remains; "near term" is what should be picked up next; "deflake" is test and harness
+reliability work, including CI execution and restoring gates, that does not change user-visible behavior; "maybe later"
+is wanted but not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication
+either way. Within a bucket, no order.
+
+A flaky test does not by itself make an entry test-only work. Known product fixes stay in their product bucket, as do
+investigations where it is not yet clear whether the failure is in the product or the test. Move those investigations to
+"Deflake" once the diagnosis establishes a test-only fix; move work out of "Deflake" if it needs a user-visible change.
 
 ## Definite simplification
 
@@ -27,24 +31,17 @@ everything not yet sorted, which carries no implication either way. Within a buc
   would be honest. The fix is product work, needing a maintainer decision: trace the helm control connection's
   reader/demux scheduling and EOF path under a loaded four-thread e2e binary, and make the connection-loss path reach
   `HelmLink::fail_all` before the answer budget can expire. The test stays `#[ignore]`d until then.
-- Deflake three profiles-popup Playwright cases that fail only under load (e2e/tests/profiles.spec.ts). All three pass
-  locally in both engines, repeatedly, and fail on a 4-vCPU sandbox running the spec with the default worker count
-  beside a live helm, supervisor, and both browsers; seen 2026-09-03 at the 0.3.0-rc.1 tip, Chromium only. Start at rung
-  3 of `.agents/narrow-tests.md` on a 4-vCPU box; rung 1 does not reproduce any of them.
+- Fix profiles-popup focus dismissal under load (e2e/tests/profiles.spec.ts). This was investigated together with the
+  pending-focus and stale-classifier harness flakes now under "Deflake". All three pass locally in both engines,
+  repeatedly, and fail on a 4-vCPU sandbox running the spec with the default worker count beside a live helm,
+  supervisor, and both browsers; seen 2026-09-03 at the 0.3.0-rc.1 tip, Chromium only. Start at rung 3 of
+  `.agents/narrow-tests.md` on a 4-vCPU box; rung 1 does not reproduce any of them.
   - `the profiles popup follows its focus and Escape dismissal contract`: after `locator.focus()` moves focus to the
     host details toggle, the popup is still mounted 5 s later. The focus-out classifier answers `Unknown` when its
     `document.activeElement` eval overruns the 370 ms settlement budget, and `Unknown` never dismisses; the rc.1 code
     retries such an obligation six times at 150 ms and then drops it, and on this box that was still not enough. Either
     the budget scales with observed bridge latency, or a dropped obligation is retried on the next focus event rather
     than forgotten.
-  - `unknown then transit waits for the pending focus request`: the popup is gone by the time the test looks 400 ms
-    later. This test drives the classifier through the `window.__farhelmTestProfiles` hooks (`classificationErrors`,
-    held requests); the retry loop added for the case above re-classifies while those hooks are still armed, and under
-    load the retry's sample lands after the held request is released. The test and the retry need one story about which
-    classification the hook is holding.
-  - `stale focus-out classifiers cannot clear newer obligations`: "the page never opened feed socket #1 (saw 0)" — the
-    stubbed feed harness in `helpers/fleet.ts` (`stubFeed`) never saw the page's socket within its wait. Harness, not
-    product; the same helper serves every profiles test, so the first look is the wait's length under load.
   - Attempted on 2026-09-03, not shipped. A loaded before leg (10 full-spec runs on a 4-vCPU sandbox, both engines, a
     `cargo build` looping beside Playwright) reproduced: the pending-focus case failed 5/10 on Chromium and 1/10 on
     WebKit, the stale-classifier case 2/10 and 2/10, the focus-and-Escape case 0/10. The attempt made an exhausted
@@ -56,16 +53,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
     mounted. The stale-classifier case was clean. Whoever picks this up next starts from that attempt's diff (kept
     outside the repo) and from why the event-driven retry closes the popup sooner than the pending-focus test expects;
     the two tests and the retry still do not share one story.
-- Deflake `a client that stops draining is detached with the stall reason after the full stall interval`
-  (e2e/tests/terminal-flood.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, the poll "the attachment
-  must cross HIGH_WATER and pause before the stall clock can start" saw zero pauses in 30 s: the flood never built
-  enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
-  backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Attempted the same
-  day without reproduction: 30 loaded WebKit runs of the test on a 4-vCPU sandbox (a `cargo build` looping beside
-  Playwright) all passed, and a temporary timer around the gate-to-first-pause interval measured 1.3 to 2.7 s loaded
-  (ten runs), 1.3 s unloaded on WebKit and 0.9 s on Chromium, against the poll's 30 s budget. No change was made on that
-  evidence. The next attempt needs the full Playwright output of a failing run, since the one sighting's log was not
-  kept; if it recurs, the first question is whether the flood finished before the client ever paused.
 - Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), again. On
   2026-09-03, on a 4-vCPU sandbox with a `cargo build` looping beside the tests, 2 of 10 single runs and 1 of 3
   full-binary runs at `--test-threads=4` against 0.3.0 timed out after 40 s waiting for `BINARY-MARKER`: the request
@@ -110,6 +97,41 @@ everything not yet sorted, which carries no implication either way. Within a buc
   loaded runs during the profiles attempt above). Same spec, same box, same day as the three cases above; nothing about
   either cause is known beyond the names. Start at rung 1 of `.agents/narrow-tests.md` with `--repeat-each` on the
   engine that failed.
+- Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
+  (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs): failed once on 2026-09-03 in a loaded `--test-threads=4`
+  full-binary run on a 4-vCPU sandbox ("a consumed sentinel is deleted once its Error outcome commits durably"),
+  untouched by whatever else was in that tree at the time, and passed cleanly reproduced alone immediately after. One
+  sighting, no hypothesis beyond "load-sensitive". Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box.
+- Product-side policies that only show under load, worth their own decisions rather than test tweaks: the profiles
+  popup's "an unknown focus classification never dismisses" rule leaves the popup open on a slow renderer (retries were
+  bolted on; the real fix is retrying on the next focus event instead of dropping), and the launch shim consuming a
+  planted spec before a delete runs (pin the spec or make delete's fail-closed check independent of shim timing).
+
+## Deflake
+
+- Deflake `unknown then transit waits for the pending focus request`: the popup is gone by the time the test looks 400
+  ms later. This test drives the classifier through the `window.__farhelmTestProfiles` hooks (`classificationErrors`,
+  held requests); the popup retry loop re-classifies while those hooks are still armed, and under load the retry's
+  sample lands after the held request is released. The test and the retry need one story about which classification the
+  hook is holding. Seen on 2026-09-03 at the 0.3.0-rc.1 tip on a loaded 4-vCPU sandbox, Chromium only in the initial
+  sightings. The shared reproduction setup and failed fix attempt are recorded in the profiles-popup entry under "Near
+  term". This entry covers the test hooks and synchronization; changes to actual focus dismissal belong with that
+  product fix.
+- Deflake `stale focus-out classifiers cannot clear newer obligations`: "the page never opened feed socket #1 (saw 0)" —
+  the stubbed feed harness in `helpers/fleet.ts` (`stubFeed`) never saw the page's socket within its wait. Harness, not
+  product; the same helper serves every profiles test, so the first look is the wait's length under load. Seen on
+  2026-09-03 at the 0.3.0-rc.1 tip on a loaded 4-vCPU sandbox, Chromium only in the initial sightings. The shared
+  reproduction setup and failed fix attempt are recorded in the profiles-popup entry under "Near term".
+- Deflake `a client that stops draining is detached with the stall reason after the full stall interval`
+  (e2e/tests/terminal-flood.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, the poll "the attachment
+  must cross HIGH_WATER and pause before the stall clock can start" saw zero pauses in 30 s: the flood never built
+  enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
+  backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Attempted the same
+  day without reproduction: 30 loaded WebKit runs of the test on a 4-vCPU sandbox (a `cargo build` looping beside
+  Playwright) all passed, and a temporary timer around the gate-to-first-pause interval measured 1.3 to 2.7 s loaded
+  (ten runs), 1.3 s unloaded on WebKit and 0.9 s on Chromium, against the poll's 30 s budget. No change was made on that
+  evidence. The next attempt needs the full Playwright output of a failing run, since the one sighting's log was not
+  kept; if it recurs, the first question is whether the flood finished before the client ever paused.
 - Deflake `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts): on 2026-09-03, on
   `webkit-sidebar`, `Error: route.fulfill: Route is already handled!` inside `forceBuildSkew` (`helpers/fleet.ts`, four
   callers: three in `feed.spec.ts` and this test) — reproduced alone at 1/20 on a 4-vCPU sandbox, single worker, so it
@@ -118,11 +140,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   (`--repeat-each=3`, 1/168), same error and call site, so the race is not WebKit-specific after all — widen the
   investigation to both engines. Start at rung 1 of `.agents/narrow-tests.md` (already run once; widen the repeat count)
   on both `chromium-sidebar` and `webkit-sidebar`.
-- Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
-  (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs): failed once on 2026-09-03 in a loaded `--test-threads=4`
-  full-binary run on a 4-vCPU sandbox ("a consumed sentinel is deleted once its Error outcome commits durably"),
-  untouched by whatever else was in that tree at the time, and passed cleanly reproduced alone immediately after. One
-  sighting, no hypothesis beyond "load-sensitive". Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box.
 - Deflake `tests::sweep_never_reaps_a_held_lock` (crates/farhelm-teststate/src/lib.rs): on 2026-09-03, in 1 of 2
   full-workspace `cargo test` runs at `--test-threads=4` on a 4-vCPU sandbox, the test's SECOND assertion failed
   (`left: []`, `right: ["/tmp/.tmp…/fh-it.live01"]`) — after the test releases its own flock, `sweep` failed to reap the
@@ -130,11 +147,11 @@ everything not yet sorted, which carries no implication either way. Within a buc
   runs at `--test-threads=4`) — only the full-workspace run, where every crate's test binaries compete for real `/tmp`
   and process-table activity at once, has shown it. No hypothesis yet beyond that shape; start at rung 4 of
   `.agents/narrow-tests.md` (the full workspace, repeated) since rungs 1-3 already came back clean.
-- Put the tmux e2e suite back into the release gate, and un-ignore the two load-flaky tests still ignored, once the
-  deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
-  every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or
-  two of the load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a
-  different one, with the code they check unchanged; and
+- Put the tmux e2e suite back into the release gate, and un-ignore the two load-flaky tests still ignored, once the test
+  fixes in this bucket and the product fixes under "Near term" are done. As of 0.3.0-rc.3 the release build's test step
+  (`.github/dist-build-setup.yml`) runs every test target EXCEPT the `farhelm` crate's integration tests, because on the
+  GitHub-hosted 4-vCPU runner one or two of the load-sensitive tests above failed on most tag builds (rc.1: three gate
+  runs, rc.2: two), each time a different one, with the code they check unchanged; and
   `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` and
   `session_lifecycle::non_utf8_terminal_output_survives_live_stream` carry `#[ignore]` so CI's full suite stops rolling
   the same dice (the delete fail-closed test and the two `terminal_backpressure` tests were ignored too, and were
@@ -142,24 +159,27 @@ everything not yet sorted, which carries no implication either way. Within a buc
   failed 3 of 9 GitHub runs of this stack in one day). The suite still runs in CI's `test` job on every ready PR and
   before a stack lands, so the gap is at tag time only. Reversing both is the definition of done for the deflake work.
 
-## Systematic deflake
+### Systematic deflake
 
 Context for every entry here: cutting 0.3.0 on 2026-09-02/03 produced fourteen distinct test failures that reproduced
 only under load (a 4-vCPU sandbox running the browser suite beside a live stack, or the GitHub-hosted 4-vCPU release
 runner running the Rust suite beside its own build), never on a developer machine. Three tag builds of rc.1 and two of
 rc.2 failed on a different one or two of them each time. They were not evenly spread: almost all of them came from two
 seams, the tmux attach boundary in the Rust e2e harness and fixed time budgets tuned for a fast box, with the profiles
-popup's focus machinery a third on the browser side. The per-test entries under "near term" hold the fingerprints; the
-work below is what retires them as a class. Order is a suggestion, from cheapest and most certain to most speculative.
+popup's focus machinery a third on the browser side. The per-test entries in this bucket and under "Near term" hold the
+fingerprints; the work below addresses test execution and harness reliability across suites. Order is a suggestion, from
+cheapest and most certain to most speculative.
 
 - One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
   relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
-  the profiles popup's 250 + 120 ms settlement, the stub feed's socket wait, and every 5 s Playwright `expect`.
-  Introduce one factor the harness reads from the environment (something like `FARHELM_TEST_SLOW=3`, default 1) that
-  every wait multiplies by, and set it in CI's `test` job and the release gate; for Playwright, the same via
-  `expect.configure`/`test.setTimeout` from an env variable in `playwright.config.ts`. A measured latency probe at
-  harness start (time one trivial tmux control exchange) could set the factor automatically, but the env knob is the
-  first step because it separates "the machine is slow" from "the code is wrong" without touching a single test.
+  the stub feed's socket wait, and every 5 s Playwright `expect`. Introduce one factor the harness reads from the
+  environment (something like `FARHELM_TEST_SLOW=3`, default 1) that every wait multiplies by, and set it in CI's `test`
+  job and the release gate; for Playwright, the same via `expect.configure`/`test.setTimeout` from an env variable in
+  `playwright.config.ts`. A measured latency probe at harness start (time one trivial tmux control exchange) could set
+  the factor automatically, but the env knob is the first step because it separates "the machine is slow" from "the code
+  is wrong" without touching a single test. This factor applies only to harness waits, never product deadlines such as
+  popup focus settlement or relay answer budgets. The diagnosed product failures under "Near term" still need their own
+  fixes.
 - Retries scoped to named tests, reported as flaky, not hidden. `cargo nextest` runs each test in its own process,
   supports `retries` per test through filtersets, and reports "flaky" as its own outcome in JUnit output; Playwright has
   per-project `retries`. A single load hiccup then stops being fatal to a gate while the ledger of what flaked stays
@@ -168,7 +188,7 @@ work below is what retires them as a class. Order is a suggestion, from cheapest
 - Tier by sensitivity, not by suite. The 0.3.0 emergency cut removed the whole tmux e2e suite from the release gate (see
   the "put the tmux e2e suite back" entry above); the durable form is a "load-sensitive" tier — a nextest test group or
   a Playwright tag — that the gate runs with retries or on a quieter runner, while everything else gates as before.
-  Membership starts as the per-test entries under "near term" and shrinks as they are fixed.
+  Membership starts as the per-test entries in this bucket and under "Near term", and shrinks as they are fixed.
 - Run the gate's suite where it is not competing with the release build. The tag build runs the suite inside the build
   job on a 4-vCPU runner while the release build itself is warm; `--test-threads=2` there, or a separate job on a larger
   runner, is a cheap experiment that may remove most of the load by itself. Measure before and after.
@@ -177,10 +197,6 @@ work below is what retires them as a class. Order is a suggestion, from cheapest
   the wrong mount) was found by the sandbox run hours after it was written. Give ready PRs a loaded run (the browser
   suite on a 4-vCPU runner, drafts excluded as today) and add a nightly `--repeat-each` hunt over the load-sensitive
   tier so new members are caught before they block a tag.
-- Product-side policies that only show under load, worth their own decisions rather than test tweaks: the profiles
-  popup's "an unknown focus classification never dismisses" rule leaves the popup open on a slow renderer (retries were
-  bolted on; the real fix is retrying on the next focus event instead of dropping), and the launch shim consuming a
-  planted spec before a delete runs (pin the spec or make delete's fail-closed check independent of shim timing).
 
 ## Maybe later
 
