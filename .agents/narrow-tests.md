@@ -63,12 +63,14 @@ Two caveats before trusting a narrow non-reproduction:
 - Thread count. The narrow run has no contention; CI runs the full suite at `--test-threads=4`. Before concluding "only
   fails in the big run", rerun rung 3 as the whole binary at 4 threads:
   `cargo test -p farhelm --test e2e -- --test-threads=4 --show-output`.
-- Ambient environment. A shell inside a farhelm session carries `FARHELM_AGENT_ID`, and the sweep tests read live
-  `/proc` environs, so they are sensitive to it. Measured on 2026-09-01: `farhelm-teststate`'s
-  `sweep_never_reaps_a_held_lock` failed in 2 of 10 runs with the marker set and 0 of 10 without it. Four
-  `service::sweep::tests` cases in `farhelm-supervisor` have also failed under an ambient marker on machines with a
-  systemd user manager (they skip themselves elsewhere). Scrub it (`env -u FARHELM_AGENT_ID cargo test ...`) or run from
-  a shell outside any farhelm session before blaming your change.
+- Ambient environment. A shell inside a farhelm session carries `FARHELM_AGENT_ID`, and the supervisor's sweep tests
+  inspect live `/proc` environs. Four `service::sweep::tests` cases in `farhelm-supervisor` have failed under an ambient
+  marker on machines with a systemd user manager (they skip themselves elsewhere). Scrub it
+  (`env -u FARHELM_AGENT_ID cargo test ...`) or run from a shell outside any farhelm session before blaming your change.
+  The separate `farhelm-teststate` sweep does not inspect process environments. Its earlier 2/10 versus 0/10 marker
+  comparison did not establish causation: a later parallel crate run proved that its fixture's flock could remain held
+  after the parent closed its descriptor, because another thread's child inherited it before exec. That fixture now
+  explicitly unlocks before asserting reaping; `FLAKES.md` records the evidence.
 
 The first cargo invocation in a fresh checkout still pays the dependency build whatever filter you pass; narrowing the
 target (`-p`, `--test`, `--lib`) trims that too, since cargo only builds what the selected targets need. After that,

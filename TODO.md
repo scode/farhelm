@@ -121,13 +121,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   full-binary run on a 4-vCPU sandbox ("a consumed sentinel is deleted once its Error outcome commits durably"),
   untouched by whatever else was in that tree at the time, and passed cleanly reproduced alone immediately after. One
   sighting, no hypothesis beyond "load-sensitive". Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box.
-- Deflake `tests::sweep_never_reaps_a_held_lock` (crates/farhelm-teststate/src/lib.rs): on 2026-09-03, in 1 of 2
-  full-workspace `cargo test` runs at `--test-threads=4` on a 4-vCPU sandbox, the test's SECOND assertion failed
-  (`left: []`, `right: ["/tmp/.tmp…/fh-it.live01"]`) — after the test releases its own flock, `sweep` failed to reap the
-  now-genuinely-dead directory. Never reproduced alone (5 solo repetitions) or under the crate's own parallel suite (3
-  runs at `--test-threads=4`) — only the full-workspace run, where every crate's test binaries compete for real `/tmp`
-  and process-table activity at once, has shown it. No hypothesis yet beyond that shape; start at rung 4 of
-  `.agents/narrow-tests.md` (the full workspace, repeated) since rungs 1-3 already came back clean.
 - Put the tmux e2e suite back into the release gate, and un-ignore the remaining load-flaky test, once the deflake
   entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs every
   test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or two of

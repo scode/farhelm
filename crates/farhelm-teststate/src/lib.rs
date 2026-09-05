@@ -572,11 +572,12 @@ fn collect_tmux_sockets(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
 /// just clutter.
 ///
 /// The lock's descriptor is close-on-exec (Rust opens all files that
-/// way), so children this process spawns can never inherit it — a
-/// long-lived child holding a dead parent's lock would keep killed
-/// harness state falsely live, which is the orphan accumulation this
-/// protocol exists to prevent. When the process dies, however abruptly,
-/// the kernel drops the flock with it.
+/// way), so a child cannot retain it after successfully executing its
+/// program. This keeps long-lived child programs from holding a dead
+/// harness's state falsely live. A newly forked child can still inherit
+/// the descriptor until it executes or exits; if the parent dies in that
+/// interval, the kernel releases the flock only after the child's copy
+/// closes too.
 ///
 /// Field order is the drop order and it matters: the directory is removed
 /// first, while the lock is still held, so a concurrent sweep never
@@ -730,7 +731,12 @@ mod tests {
         assert!(outcome.reaped.is_empty());
         assert_eq!(outcome.live, 1);
         assert!(live.exists());
-        // Released, the same dir becomes ordinary dead state.
+        // A concurrent Command spawn can inherit this open file description
+        // until exec, so closing our descriptor alone does not prove the flock
+        // was released. Unlock explicitly: the assertion below is about dead
+        // state becoming reapable, not how quickly another thread's child execs.
+        // SAFETY: the lock File owns a valid descriptor throughout this call.
+        assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) }, 0);
         drop(lock);
         let outcome = sweep(root.path(), &instant_policy());
         assert_eq!(outcome.reaped, vec![live]);
