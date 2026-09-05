@@ -33,35 +33,17 @@ everything not yet sorted, which carries no implication either way. Within a buc
 - Move "new session" onto the session-count ("N sessions") row, right-aligned, and rename it to "new", since the row
   makes it clear that it applies to sessions. Keep its existing style and color, but make it slightly smaller to fit the
   row.
-- Deflake three profiles-popup Playwright cases that fail only under load (e2e/tests/profiles.spec.ts). All three pass
-  locally in both engines, repeatedly, and fail on a 4-vCPU sandbox running the spec with the default worker count
-  beside a live helm, supervisor, and both browsers; seen 2026-09-03 at the 0.3.0-rc.1 tip, Chromium only. Start at rung
-  3 of `.agents/narrow-tests.md` on a 4-vCPU box; rung 1 does not reproduce any of them.
-  - `the profiles popup follows its focus and Escape dismissal contract`: after `locator.focus()` moves focus to the
-    host details toggle, the popup is still mounted 5 s later. The focus-out classifier answers `Unknown` when its
-    `document.activeElement` eval overruns the 370 ms settlement budget, and `Unknown` never dismisses; the rc.1 code
-    retries such an obligation six times at 150 ms and then drops it, and on this box that was still not enough. Either
-    the budget scales with observed bridge latency, or a dropped obligation is retried on the next focus event rather
-    than forgotten.
-  - `unknown then transit waits for the pending focus request`: the popup is gone by the time the test looks 400 ms
-    later. This test drives the classifier through the `window.__farhelmTestProfiles` hooks (`classificationErrors`,
-    held requests); the retry loop added for the case above re-classifies while those hooks are still armed, and under
-    load the retry's sample lands after the held request is released. The test and the retry need one story about which
-    classification the hook is holding.
-  - `stale focus-out classifiers cannot clear newer obligations`: "the page never opened feed socket #1 (saw 0)" — the
-    stubbed feed harness in `helpers/fleet.ts` (`stubFeed`) never saw the page's socket within its wait. Harness, not
-    product; the same helper serves every profiles test, so the first look is the wait's length under load.
-  - Attempted on 2026-09-03, not shipped. A loaded before leg (10 full-spec runs on a 4-vCPU sandbox, both engines, a
-    `cargo build` looping beside Playwright) reproduced: the pending-focus case failed 5/10 on Chromium and 1/10 on
-    WebKit, the stale-classifier case 2/10 and 2/10, the focus-and-Escape case 0/10. The attempt made an exhausted
-    `Unknown` obligation wait for the next document focus event (reading the event revision when the classifier settles,
-    since the `focusin` can land while the bridge is still evaluating), gave the test hook page-local ordinals so a hold
-    names the classification it owns, added a quiescence wait before tests arm holds, and widened `stubFeed`'s socket
-    wait from 15 s to 30 s. Its loaded after leg failed: the pending-focus case then failed 11/20 on Chromium (the popup
-    gone before the test looks, more often than before), and one WebKit focus-and-Escape repeat still found the popup
-    mounted. The stale-classifier case was clean. Whoever picks this up next starts from that attempt's diff (kept
-    outside the repo) and from why the event-driven retry closes the popup sooner than the pending-focus test expects;
-    the two tests and the retry still do not share one story.
+- Investigate the unreproduced profiles startup/bridge symptoms from the loaded 0.3.0-rc.1 browser runs on 2026-09-03.
+  `stale focus-out classifiers cannot clear newer obligations` failed with "the page never opened feed socket #1 (saw
+  0)" inside `stubFeed` (`e2e/tests/helpers/fleet.ts`), before exercising the classifiers. The focus-and-Escape case was
+  also diagnosed then as an exhausted Unknown classification leaving the popup mounted; that product diagnosis remains
+  unproven. Against `d71a87fb`, separate exact runs reproduced different harness focus races that are now corrected.
+  Those corrections passed six initial cases and 120 repetitions (20 per case per engine) on a 4-vCPU, 8-GiB sandbox
+  with pinned tmux 3.7c, one Playwright worker, and two CPU-load children in the repeated run, without reproducing
+  either older fingerprint. This is non-reproduction, not a fix for these symptoms. Retain the full browser/bridge trace
+  and feed open/close timestamps on recurrence, distinguishing no socket request from a late request and a classifier
+  that exhausted its observations. Do not widen startup waits or add another focus-retry mechanism without that
+  evidence.
 - Deflake `a client that stops draining is detached with the stall reason after the full stall interval`
   (e2e/tests/terminal-flood.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, the poll "the attachment
   must cross HIGH_WATER and pause before the stall clock can start" saw zero pauses in 30 s: the flood never built
@@ -108,14 +90,10 @@ everything not yet sorted, which carries no implication either way. Within a buc
   the state directory's claim, or it reconciles nothing and this test would pass for the wrong reason". One sighting,
   never alone, no hypothesis beyond the fingerprint: the replacement supervisor did not win the state directory's claim
   in time under load. Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box with the full transcript kept.
-- Deflake two more profiles cases seen once each in a full browser-suite run on a 4-vCPU sandbox on 2026-09-03 (both
-  engines, no extra load beside the suite itself):
-  `only layout changes after a profiles opening invalidate its
-  geometry` (Chromium) and
-  `a saved profile is what the next editor sees, before the re-read lands` (WebKit, which also failed twice in ten
-  loaded runs during the profiles attempt above). Same spec, same box, same day as the three cases above; nothing about
-  either cause is known beyond the names. Start at rung 1 of `.agents/narrow-tests.md` with `--repeat-each` on the
-  engine that failed.
+- Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`: seen
+  once in Chromium during a full browser-suite run on a 4-vCPU sandbox on 2026-09-03, with both engines and no extra
+  load beside the suite itself. No cause established. Start at rung 1 of `.agents/narrow-tests.md` with `--repeat-each`
+  on Chromium. The saved-profile case formerly grouped here has its own fix recorded in FLAKES.md.
 - Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
   (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs): failed once on 2026-09-03 in a loaded `--test-threads=4`
   full-binary run on a 4-vCPU sandbox ("a consumed sentinel is deleted once its Error outcome commits durably"),
