@@ -92,7 +92,13 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 ///   them. `restart_offer_text`'s elaboration — why the terminal is gone,
 ///   what happens to the conversation — is a further hover tooltip and
 ///   assistive-technology description, which is what had no business being
-///   permanent chrome on every session forever.
+///   permanent chrome on every session forever. The one exception is the
+///   interrupted surface below: an interrupted session has no terminal to
+///   show, and the band standing where the panes would be states the
+///   reason and carries the restart, because a tooltip the user has to find
+///   is what let the old retry overlay advertise the wrong action there.
+///   Conditional, like the stale and archived bands, so the steady state
+///   still pays nothing.
 /// - **A classified status renders in at most one place.** The header
 ///   normally, the stale band for a stale session (whose notice already
 ///   carries SPEC.md's "last-known status"), nowhere for `Unknown`
@@ -360,6 +366,19 @@ pub(crate) fn SessionView(
     // replays the pane's scrollback, which for a reused terminal is what
     // puts the PRIOR run's output back on screen above the new one.
     let mut mount_generation = use_signal(|| 0_u32);
+    // Whether THIS view has relaunched the session since it last saw it
+    // interrupted. Set by a restart reply, cleared once a read commits any
+    // status other than `Interrupted` (the effect below), and read by
+    // `terminal_absence`: it is the one fact that lets the terminal mount
+    // in the window between a successful restart and the listing catching
+    // up, when the session is still reported interrupted but no longer is.
+    // Per view on purpose: another client's restart reaches this one
+    // through the listing like any other change. Per MOUNT as well, so
+    // leaving and reopening the session inside that window shows the band
+    // again; a click there sends a plain restart the supervisor refuses
+    // against a live agent (its own pane recheck), so the cost is one
+    // refused request, not a second relaunch.
+    let mut relaunched = use_signal(|| false);
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`), and whether the inline
     // confirm prompt is open for a still-running agent (the same in-page
@@ -969,8 +988,17 @@ pub(crate) fn SessionView(
         let refresh_after_restart = refresh_after_restart.clone();
         spawn(async move {
             let outcome = restart_session(&base, &id, mode, stop_if_running).await;
-            if let Err(e) = &outcome {
-                restart_error.set(Some(e.clone()));
+            match &outcome {
+                Err(e) => restart_error.set(Some(e.clone())),
+                // The reply says the relaunch happened, and that fact
+                // outruns the listing: the supervisor answers `Unknown`
+                // for the new run and the helm keeps the cached
+                // `Interrupted` until its next probe, so for a few
+                // seconds this view would otherwise keep the interrupted
+                // surface — and its restart control — over a session
+                // that is now running. `relaunched` is what lets the
+                // terminal mount at once instead (see `terminal_absence`).
+                Ok(_) => relaunched.set(true),
             }
             // Remounted on both paths. A success obviously needs it (new
             // pane, or a respawned one, and the server tore the old
@@ -1036,6 +1064,10 @@ pub(crate) fn SessionView(
     // restart), cloned rather than duplicated so both send exactly the
     // same request shape and share the same in-flight guard.
     let mut confirm_restart = restart.clone();
+    // A third caller since the interrupted surface: its band carries the
+    // same restart control the header does, wired to this same closure so
+    // the two can never send different requests for one click.
+    let mut notice_restart = restart.clone();
     let mut fresh_restart = restart;
 
     let archive_base = base.clone();
@@ -1239,7 +1271,11 @@ pub(crate) fn SessionView(
         // sync is what tears down islands belonging to a host that went away
         // while this view was open, which returning `None` (the
         // lease-not-yet-minted case) would leave mounted and silently dead.
-        if session.stale || session.archived {
+        // Interrupted joins stale and archived here: the pane the attach
+        // would target is the one the reboot destroyed, and the ladder in
+        // terminal.js would otherwise retry a refusal forever. The one
+        // decision for all three is `terminal_absence`.
+        if terminal_absence(&session, relaunched()).is_some() {
             return Some("[]".to_string());
         }
         let tabs = visible_tabs(&session.tabs, &opened_tabs.read(), &closed_tabs.read());
@@ -1332,6 +1368,23 @@ pub(crate) fn SessionView(
     // helm that cannot honor it.
     let reconnect_policy =
         use_memo(move || reconnect_policy(crate::skew::helm_is_current()).to_string());
+    // `relaunched` lasts until the listing agrees OR the host goes away,
+    // whichever comes first. The first commit reporting any status but
+    // `Interrupted` retires it, because the listing has caught up. A
+    // staleness transition retires it too, and that one is load-bearing: a
+    // second reboot inside the relaunch window would leave every commit
+    // this view sees saying `Interrupted` (the new run was never
+    // classified), so without this a host coming back from that second
+    // boot would get a silent attach attempt against a destroyed pane —
+    // the very surface this exists to remove. Stale outranks interrupted
+    // anyway, so clearing at that moment costs nothing. An effect rather
+    // than a write during render, which Dioxus turns into a re-render loop.
+    use_effect(move || {
+        let listing_caught_up = !matches!(current.read().status, SessionStatus::Interrupted);
+        if relaunched() && (listing_caught_up || stale()) {
+            relaunched.set(false);
+        }
+    });
     use_effect(move || {
         // Nothing attaches until the lease is minted; `lease_error` is
         // what the user sees if it never is.
@@ -1767,7 +1820,36 @@ pub(crate) fn SessionView(
                     }
                 }
             }
-            if !shown.archived && stale_notice.is_none() {
+            // An interrupted session on a reachable host: the reboot took
+            // its terminal, so this band stands where the panes would be
+            // (SPEC.md: metadata and the reason, never an empty pane, and
+            // nothing relaunches until the user asks). The restart control
+            // here is the header's, wired to the same claim and request,
+            // placed where the user is looking when the terminal is
+            // missing. No confirm step: nothing is running.
+            if terminal_absence(&shown, relaunched()) == Some(TerminalAbsence::Interrupted) {
+                div { class: "interrupted-notice",
+                    span { class: "interrupted-notice-text", "{interrupted_surface_text(shown.restart_offer)}" }
+                    button {
+                        r#type: "button",
+                        class: "btn restart-from-notice",
+                        "aria-label": "{restart_label}",
+                        title: "{restart_label} — {offer_explanation}",
+                        disabled: lifecycle.busy(),
+                        onclick: move |_| {
+                            if !lifecycle.claim() {
+                                return;
+                            }
+                            notice_restart(false);
+                        },
+                        "{restart_label}"
+                    }
+                }
+            }
+            // The whole terminal surface — strip and panes — is either
+            // present or replaced by one of the explanations above; see
+            // `terminal_absence` for the precedence.
+            if terminal_absence(&shown, relaunched()).is_none() {
                 // The tab strip: the agent terminal first and unclosable
                 // (SPEC.md gives a session one agent terminal, and closing it
                 // is not one of the operations that exist), then every open
@@ -2066,7 +2148,23 @@ fn activity_destination(
 /// to act (SPEC.md: opening an interrupted session offers
 /// restart-with-resume). Everything else states the offer alone.
 fn restart_offer_text(status: &SessionStatus, offer: RestartOffer) -> String {
-    let offered = match offer {
+    let offered = offer_clause(offer);
+    match status {
+        SessionStatus::Interrupted => {
+            format!("interrupted by a host reboot — {offered}.")
+        }
+        SessionStatus::Error { .. } => format!("the agent never started — {offered}."),
+        _ => format!("{offered}."),
+    }
+}
+
+/// What a restart would do for this session, as the clause every surface
+/// that offers one shares: the header control's tooltip and accessible
+/// description (`restart_offer_text`) and the interrupted session's own
+/// notice (`interrupted_surface_text`). One source, so the two can never
+/// promise different things about the same conversation.
+fn offer_clause(offer: RestartOffer) -> &'static str {
+    match offer {
         RestartOffer::Resume => "restarting resumes this session's own conversation",
         RestartOffer::FallbackTemplate => {
             "no conversation was captured, so restarting runs this session's configured resume \
@@ -2076,14 +2174,72 @@ fn restart_offer_text(status: &SessionStatus, offer: RestartOffer) -> String {
             "no conversation was captured for this session, so restarting launches a fresh agent \
              in the same directory"
         }
-    };
-    match status {
-        SessionStatus::Interrupted => {
-            format!("interrupted by a host reboot — {offered}.")
-        }
-        SessionStatus::Error { .. } => format!("the agent never started — {offered}."),
-        _ => format!("{offered}."),
     }
+}
+
+/// Why this view mounts no terminal for a session, when it mounts none.
+///
+/// Three states leave a session with nothing to attach, and each gets its
+/// own explanation instead of an empty pane (SPEC.md's missing-terminal
+/// rule). They are ordered by how much of the session is unreachable, and
+/// the first that applies wins: a stale host cannot be asked anything, so
+/// neither the archive nor the reboot is a fact the view can act on until
+/// the host is back; an archived session's terminal was removed on purpose
+/// and restart is the one route back whatever else happened; and an
+/// interrupted session on a reachable host has a terminal the reboot took,
+/// where retrying an attach can only ever be refused
+/// (`resolve_terminal_inner` in the supervisor) and restart-with-resume is
+/// the way forward.
+///
+/// `Exited` is deliberately NOT here: an exited pane is normally still
+/// there holding its scrollback, and SPEC.md keeps it viewable. Only the
+/// boot-id classifier's `Interrupted` says the terminal is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalAbsence {
+    Stale,
+    Archived,
+    Interrupted,
+}
+
+/// The one decision behind both the desired island set (`terminal_specs`)
+/// and the render: `None` mounts terminals, `Some` mounts an explanation.
+/// Pure so the precedence above is unit-tested rather than implied by the
+/// order of `if` arms in a component body.
+///
+/// `relaunched` is this view's own knowledge that it has restarted the
+/// session since the listing last called it interrupted (see the signal of
+/// that name). A restart reply outruns the listing by a probe interval, and
+/// during that window the session is reported interrupted but is not: the
+/// supervisor has a new terminal for it, and mounting is what attaches it.
+/// So a relaunched session is never `Interrupted` here. Stale and archived
+/// are unaffected — neither is something a restart from this view resolves
+/// on its own.
+fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsence> {
+    if session.stale {
+        Some(TerminalAbsence::Stale)
+    } else if session.archived {
+        Some(TerminalAbsence::Archived)
+    } else if matches!(session.status, SessionStatus::Interrupted) && !relaunched {
+        Some(TerminalAbsence::Interrupted)
+    } else {
+        None
+    }
+}
+
+/// The sentence the interrupted surface shows where the terminal was.
+///
+/// Leads with WHY there is no terminal — the reboot took it — and then
+/// says what restart would do, in the same words as the header control's
+/// explanation, so the band and the button never disagree. The reason is
+/// stated on the surface itself rather than left to the header's tooltip
+/// because this is the spot the user is looking at when the terminal is
+/// missing; a tooltip they have to find is what let the old retry overlay
+/// advertise the wrong action.
+fn interrupted_surface_text(offer: RestartOffer) -> String {
+    format!(
+        "this session's terminal did not survive the host reboot — {}.",
+        offer_clause(offer)
+    )
 }
 
 /// The restart control's accessible name (`aria-label`, and the front half
@@ -2103,6 +2259,193 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A session fixture for the terminal-surface decisions below: live,
+    /// reachable, not archived — the state that mounts terminals — so each
+    /// test flips exactly the one fact it is about.
+    fn live_session() -> Session {
+        Session {
+            id: "sess".to_string(),
+            title: "sess".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: crate::SessionStatus::Running,
+            annotation: None,
+            restart_offer: crate::RestartOffer::Resume,
+            created_at: 0,
+            last_activity_at: 0,
+            archived: false,
+            tabs: Vec::new(),
+            host: Some(1),
+            host_identity: None,
+            host_name: Some("this machine".to_string()),
+            stale: false,
+            source_profile: None,
+            seen_activity_at: None,
+        }
+    }
+
+    /// An interrupted session mounts no terminal, and only interruption —
+    /// not any ended status — makes that call.
+    ///
+    /// This is the reboot bug's fix at the decision level: before it, an
+    /// interrupted session on a reachable host mounted the agent island,
+    /// attached to the pane the reboot destroyed, and climbed a retry
+    /// ladder that could never succeed. The exited case is the guard on
+    /// the other side (SPEC.md: an exited pane is normally still there
+    /// with its scrollback, and an exited status alone never means the
+    /// terminal is gone).
+    #[test]
+    fn an_interrupted_session_mounts_no_terminal_but_an_exited_one_does() {
+        assert_eq!(terminal_absence(&live_session(), false), None);
+        let interrupted = Session {
+            status: crate::SessionStatus::Interrupted,
+            ..live_session()
+        };
+        assert_eq!(
+            terminal_absence(&interrupted, false),
+            Some(TerminalAbsence::Interrupted)
+        );
+        // Only interruption means "gone": every other status a reachable,
+        // unarchived session can carry mounts terminals, including the
+        // ended ones — an exited pane keeps its scrollback (SPEC.md), and an
+        // error's pane holds the launch shim's last words.
+        for status in [
+            crate::SessionStatus::Unknown,
+            crate::SessionStatus::Waiting,
+            crate::SessionStatus::Idle,
+            crate::SessionStatus::Exited { exit_code: Some(1) },
+            crate::SessionStatus::Error {
+                detail: "exec failed".to_string(),
+            },
+        ] {
+            let session = Session {
+                status: status.clone(),
+                ..live_session()
+            };
+            assert_eq!(
+                terminal_absence(&session, false),
+                None,
+                "{status:?} alone does not mean the terminal is gone"
+            );
+        }
+    }
+
+    /// A session this view has just relaunched is not interrupted, however
+    /// the listing still describes it — and the exemption is for
+    /// interruption only.
+    ///
+    /// This is the window after a restart reply and before the helm's next
+    /// probe, when the row still says interrupted but the supervisor has a
+    /// new terminal: the view must mount it (as it did before the
+    /// interrupted surface existed) rather than keep offering a restart
+    /// that would now hit a running agent. Stale and archived stay put
+    /// under the same flag, because a restart from here resolves neither.
+    #[test]
+    fn a_relaunched_session_is_not_interrupted_but_stays_stale_or_archived() {
+        let interrupted = Session {
+            status: crate::SessionStatus::Interrupted,
+            ..live_session()
+        };
+        assert_eq!(terminal_absence(&interrupted, true), None);
+        let stale = Session {
+            stale: true,
+            ..interrupted.clone()
+        };
+        assert_eq!(terminal_absence(&stale, true), Some(TerminalAbsence::Stale));
+        let archived = Session {
+            archived: true,
+            ..interrupted
+        };
+        assert_eq!(
+            terminal_absence(&archived, true),
+            Some(TerminalAbsence::Archived)
+        );
+    }
+
+    /// The three explanations for an absent terminal have a fixed
+    /// precedence: stale over archived over interrupted.
+    ///
+    /// The order is what keeps one session from showing two competing
+    /// explanations, and it encodes which fact the user can act on: an
+    /// unreachable host makes both the archive and the reboot moot until
+    /// it is back, and an archive is a deliberate removal whatever the
+    /// reboot did. The header's restart control exists in every state, so
+    /// what a regression here would produce is a SECOND control inside a
+    /// band whose explanation contradicts the notice above it. The
+    /// archived-only case guards the other direction: an archive stands on
+    /// its own, not only when it coincides with a reboot.
+    #[test]
+    fn stale_outranks_archived_outranks_interrupted() {
+        let everything = Session {
+            status: crate::SessionStatus::Interrupted,
+            archived: true,
+            stale: true,
+            ..live_session()
+        };
+        assert_eq!(
+            terminal_absence(&everything, false),
+            Some(TerminalAbsence::Stale)
+        );
+        let archived_and_interrupted = Session {
+            stale: false,
+            ..everything.clone()
+        };
+        assert_eq!(
+            terminal_absence(&archived_and_interrupted, false),
+            Some(TerminalAbsence::Archived)
+        );
+        let archived_only = Session {
+            status: crate::SessionStatus::Exited { exit_code: None },
+            archived: true,
+            ..live_session()
+        };
+        assert_eq!(
+            terminal_absence(&archived_only, false),
+            Some(TerminalAbsence::Archived)
+        );
+        let stale_only = Session {
+            status: crate::SessionStatus::Running,
+            archived: false,
+            ..everything
+        };
+        assert_eq!(
+            terminal_absence(&stale_only, false),
+            Some(TerminalAbsence::Stale)
+        );
+    }
+
+    /// The interrupted surface's sentence names the reboot and then
+    /// promises exactly what the header's restart control promises.
+    ///
+    /// The two are built from one `offer_clause`, and this pins that they
+    /// stay so: a band that said "resumes the conversation" beside a
+    /// tooltip that said "launches a fresh agent" would be the exact
+    /// silently-wrong-resume claim SPEC.md forbids, for the session whose
+    /// capture never landed.
+    #[test]
+    fn the_interrupted_surface_matches_the_restart_offer() {
+        for offer in [
+            RestartOffer::Resume,
+            RestartOffer::FallbackTemplate,
+            RestartOffer::FreshOnly,
+        ] {
+            let band = interrupted_surface_text(offer);
+            let tooltip = restart_offer_text(&SessionStatus::Interrupted, offer);
+            assert!(
+                band.starts_with("this session's terminal did not survive the host reboot"),
+                "{band}"
+            );
+            assert!(
+                band.ends_with(&format!("{}.", offer_clause(offer))),
+                "the band must end with the same clause the tooltip carries: {band}"
+            );
+            assert!(
+                tooltip.ends_with(&format!("{}.", offer_clause(offer))),
+                "{tooltip}"
+            );
+        }
+    }
 
     /// A mutation reply must not cost the view its install binding.
     ///
