@@ -300,3 +300,32 @@ safety assertions and production sweep are unchanged. Twenty subsequent parallel
 isolated runs, split equally with and without a controlled agent marker, also passed; this sweep does not read process
 environments. Earlier entries' claim that Cargo runs separate crate test binaries concurrently was incorrect; the
 relevant concurrency is inside this crate's test process. Disposition: fixed; removed from TODO.md.
+
+## 2026-09-05 — profiles focus fixtures race the opening handoff
+
+`the profiles popup follows its focus and Escape dismissal contract`,
+`unknown then transit waits for the pending focus request`, and
+`stale focus-out classifiers cannot clear newer obligations` in `e2e/tests/profiles.spec.ts` reproduced against the
+near-term baseline on a 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c. An event trace showed a reopened popup becoming
+visible before opening had placed focus inside it: moving directly from the toggle to an outside control then emitted no
+popup focus-out event, leaving the classifier count unchanged. The unknown/transit fixture instead settled as `missing`
+after its 250-ms placement deadline, before the test's 400-ms observation; hiding a known target did not produce the
+unknown evidence the assertion required. The three scenarios now wait for initial popup focus before injecting events,
+and the unknown fixture delays its placement observation beyond the deadline. All original dismissal, Escape, and
+stale-result assertions remain. Six initial cases passed across Chromium and WebKit; 120 subsequent repetitions (20 per
+case per engine) passed with one browser worker and two CPU-load children. Disposition: the reproduced harness races are
+fixed; TODO.md retains the unexplained historical startup/bridge symptoms. This does not establish that all historical
+failures shared these causes: the older missing feed-socket symptom did not recur, and the earlier exhausted-Unknown
+product diagnosis remains unproven. Review added an explicit `focusSettled === "unknown"` assertion, which passed twenty
+repetitions per engine without extra CPU load.
+
+## 2026-09-05 — profile editor focus moves during fixture input
+
+`a saved profile is what the next editor sees, before the re-read lands` in `e2e/tests/profiles.spec.ts` failed on the
+tenth diagnostic WebKit repetition on the same near-term baseline and 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c. The
+recorded POST and confirmed reply both contained the old invocation and a profile name with `edited-invocation`
+appended: the save had faithfully stored what the fixture sent. Opening the editor asynchronously focuses its name
+field, which could interrupt Playwright filling the invocation field. The test now waits for that initial focus handoff
+before filling the other field; it still blocks catalog reads and verifies that the save reply alone updates the row and
+the reopened editor. Twenty corrected repetitions per engine passed without extra CPU load. Disposition: harness
+correction; the separate layout-epoch case remains in TODO.md.

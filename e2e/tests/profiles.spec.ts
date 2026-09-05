@@ -164,6 +164,14 @@ async function openProfiles(page: Page) {
   await expect(section(page)).toBeVisible({ timeout: 20_000 });
 }
 
+/** A focus-out scenario starts only after opening has placed focus inside.
+ * Visibility precedes that asynchronous handoff. Moving straight from the
+ * toggle to an outside control emits no popup focus-out event at all. */
+async function openFocusedProfiles(page: Page) {
+  await openProfiles(page);
+  await expect(section(page).locator(".new-profile-button")).toBeFocused();
+}
+
 /** Close the popup with the same app-bar toggle that opened it. */
 async function closeProfiles(page: Page) {
   await page.locator(".profiles-toggle").click();
@@ -531,14 +539,13 @@ test.describe("agent profiles", () => {
   test("the profiles popup follows its focus and Escape dismissal contract", async ({ page }) => {
     await listWithStubbedFeed(page);
     const toggle = page.locator(".profiles-toggle");
-    await openProfiles(page);
-    await expect(section(page).locator(".new-profile-button")).toBeFocused();
+    await openFocusedProfiles(page);
 
     await page.keyboard.press("Escape");
     await expect(section(page)).toHaveCount(0);
     await expect(toggle).toBeFocused();
 
-    await openProfiles(page);
+    await openFocusedProfiles(page);
     const destination = page.locator(".host-details-toggle");
     await destination.focus();
     await expect(section(page)).toHaveCount(0);
@@ -719,14 +726,18 @@ test.describe("agent profiles", () => {
   /**
    * A failed classification followed by document transit still waits for the
    * popup's live focus request. Unknown evidence cannot skip that settlement
-   * loop and turn `body` into an early dismissal destination.
+   * loop and turn `body` into an early dismissal destination. The delayed
+   * placement observation ends without evidence when its deadline expires;
+   * merely hiding a known target would instead settle as Missing and permit
+   * transit dismissal once that request was no longer pending.
    */
   test("unknown then transit waits for the pending focus request", async ({ page }) => {
     await listWithStubbedFeed(page);
-    await openProfiles(page);
+    await openFocusedProfiles(page);
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = {
         hideFocusTarget: true,
+        focusEvalDelayMs: 500,
         focusAttempts: 0,
         classificationErrors: 1,
         classificationAttempts: 0,
@@ -741,6 +752,11 @@ test.describe("agent profiles", () => {
       page.evaluate(() => (window as any).__farhelmTestProfiles.classificationAttempts)
     ).toBeGreaterThanOrEqual(2);
     await page.waitForTimeout(400);
+    // Verify the uncertainty branch itself: a hidden target that settled as
+    // Missing would test a different dismissal contract even if still visible.
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusSettled)
+    ).toBe("unknown");
     await expect(section(page)).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
       .toBe(true);
@@ -753,7 +769,7 @@ test.describe("agent profiles", () => {
    */
   test("stale focus-out classifiers cannot clear newer obligations", async ({ page }) => {
     await listWithStubbedFeed(page);
-    await openProfiles(page);
+    await openFocusedProfiles(page);
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = {
         classification: { holds: 2, started: 0, releases: [] },
@@ -774,7 +790,7 @@ test.describe("agent profiles", () => {
     await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
     await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
 
-    await openProfiles(page);
+    await openFocusedProfiles(page);
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles.classification = { holds: 2, started: 0, releases: [] };
     });
@@ -783,7 +799,7 @@ test.describe("agent profiles", () => {
       page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
     ).toBe(1);
     await page.locator(".profiles-toggle").click();
-    await openProfiles(page);
+    await openFocusedProfiles(page);
     await outside.focus();
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
@@ -1249,6 +1265,10 @@ test.describe("agent profiles", () => {
     // is what the SAVE's own reply produced.
     held = true;
     await editing.locator(".profile-edit").click();
+    // Opening places focus asynchronously on the name field. Let that
+    // handoff finish before fill focuses the invocation field; otherwise
+    // WebKit can deliver its text into the name after focus moves mid-fill.
+    await expect(editing.locator(".profile-name-input")).toBeFocused();
     await editing.locator(".profile-invocation-input").fill("edited-invocation");
     await editing.locator(".profile-save").click();
     // The form closes on success; the row now has to show the accepted
