@@ -139,6 +139,68 @@ test("the sidebar app bar stays pinned while the session list scrolls", async ({
 });
 
 /**
+ * The sidebar scrolls without a scrollbar. On macOS the overlay scrollbar
+ * painted over the row menus and controls at the column's right edge, and a
+ * classic scrollbar (which the OS can force on) would reserve a gutter the
+ * column cannot spare, so the stylesheet hides it on both declared
+ * scrollers. Fills the sidebar past one screen, then checks three things:
+ * both scrollers resolve `scrollbar-width: none`, the sidebar takes no
+ * gutter (its content box spans its padding box), and a wheel gesture over
+ * it still scrolls. Only the gutter check measures geometry the rule
+ * changes, and only where the engine draws a classic space-taking
+ * scrollbar (Playwright's Linux Chromium does); under overlay scrollbars,
+ * macOS's included, the gutter is zero either way and the reported bug —
+ * the overlay painting over the row controls — is verified by eye there.
+ * The wheel check is what keeps this from passing against
+ * `overflow: hidden`, which would also show no scrollbar.
+ */
+test("the sidebar hides its scrollbar without giving up scrolling", async ({ page, request }) => {
+  const marker = `sidebar-scrollbar-${Date.now()}`;
+  const created = await fillSidebarPastOneScreen(request, marker);
+  try {
+    await page.setViewportSize({ width: 900, height: 500 });
+    await page.goto("/");
+    await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
+    const sidebar = page.locator(".app-sidebar");
+    await expect
+      .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight), { timeout: 20_000 })
+      .toBe(true);
+    // Pinned at rest before the wheel, so the wheel step can never become
+    // dead weight behind some future scroll-on-open behavior: the
+    // assertion below is "the wheel moved it", not "it is scrolled".
+    expect(await sidebar.evaluate((el) => el.scrollTop), "the sidebar rests at the top").toBe(0);
+
+    for (const selector of [".app-sidebar", ".session-list"]) {
+      expect(
+        await page.locator(selector).evaluate((el) => getComputedStyle(el).scrollbarWidth),
+        `${selector} must resolve scrollbar-width: none`,
+      ).toBe("none");
+    }
+    // A classic scrollbar narrows clientWidth below the padding box; with
+    // none, the only difference between offsetWidth and clientWidth is the
+    // sidebar's own border.
+    const gutter = await sidebar.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const borders = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+      return el.offsetWidth - el.clientWidth - borders;
+    });
+    expect(gutter, "no horizontal space may be reserved for a scrollbar").toBeLessThanOrEqual(1);
+
+    const box = await sidebar.boundingBox();
+    expect(box, "the sidebar must have a box").not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(0, 300);
+    await expect
+      .poll(() => sidebar.evaluate((el) => el.scrollTop), {
+        message: "a wheel gesture over the sidebar must still scroll it",
+      })
+      .toBeGreaterThan(0);
+  } finally {
+    await cleanupAll(request, created);
+  }
+});
+
+/**
  * Clean up every session in `sessions`, even when some cleanups fail.
  *
  * A plain loop that stopped at the first failure would abandon every
