@@ -215,6 +215,10 @@ certain to most speculative.
 
 ## Maybe later
 
+- Support agents' native voice modes by piping audio through the helm to the supervisor and onward to the agent. Assess
+  feasibility later, including how agents accept audio and what transport or audio-device integration would be needed;
+  this entry does not commit to a design.
+
 - Take a pre-upgrade backup of the on-disk state so a release can be rolled back. Rerunning the installer pinned to an
   older `FARHELM_VERSION` swaps the binaries back cleanly, but it does not make a downgrade work: both stores refuse to
   open a database whose `user_version` is above what the binary understands (deliberately — misreading is worse than
