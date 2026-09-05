@@ -33,19 +33,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
 - Move "new session" onto the session-count ("N sessions") row, right-aligned, and rename it to "new", since the row
   makes it clear that it applies to sessions. Keep its existing style and color, but make it slightly smaller to fit the
   row.
-- Deflake `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e). Fingerprint:
-  `the supervisor never answered the agent request: Elapsed(())` from the peer's 20 s `answer()` budget, panicking at
-  the `answer()` expect. It is a load flake that predates the profiles/host-list stack: on 2026-09-02 a 4-vCPU sandbox
-  running the e2e binary alone at `--test-threads=4` hit it in 2 of 5 runs on main and 3 of 7 on that stack's tip, while
-  16 runs alone passed on both, and every local run on a 6-core machine passed. Never yet seen on a GitHub runner, but
-  the release workflow's build gate runs this suite, so it is a tag-build risk. Diagnosed on 2026-09-03 and NOT a test
-  budget: with the test included in the loaded four-thread binary it failed 1 of 10 runs, and a sandbox-only run with
-  the peer read widened to 60 s (the 10 s promptness assertion kept) then got `ErrorKind::Timeout` instead of
-  `Unavailable`, which is the relay's own upcall-answer budget expiring before the helm connection-loss path ran. So the
-  product's helm-death detection loses to the upcall budget under load, and neither a wider peer read nor a wider oracle
-  would be honest. The fix is product work, needing a maintainer decision: trace the helm control connection's
-  reader/demux scheduling and EOF path under a loaded four-thread e2e binary, and make the connection-loss path reach
-  `HelmLink::fail_all` before the answer budget can expire. The test stays `#[ignore]`d until then.
 - Deflake three profiles-popup Playwright cases that fail only under load (e2e/tests/profiles.spec.ts). All three pass
   locally in both engines, repeatedly, and fail on a 4-vCPU sandbox running the spec with the default worker count
   beside a live helm, supervisor, and both browsers; seen 2026-09-03 at the 0.3.0-rc.1 tip, Chromium only. Start at rung
@@ -149,17 +136,16 @@ everything not yet sorted, which carries no implication either way. Within a buc
   runs at `--test-threads=4`) — only the full-workspace run, where every crate's test binaries compete for real `/tmp`
   and process-table activity at once, has shown it. No hypothesis yet beyond that shape; start at rung 4 of
   `.agents/narrow-tests.md` (the full workspace, repeated) since rungs 1-3 already came back clean.
-- Put the tmux e2e suite back into the release gate, and un-ignore the two load-flaky tests still ignored, once the
-  deflake entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs
-  every test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or
-  two of the load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a
-  different one, with the code they check unchanged; and
-  `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` and
-  `session_lifecycle::non_utf8_terminal_output_survives_live_stream` carry `#[ignore]` so CI's full suite stops rolling
-  the same dice (the delete fail-closed test and the two `terminal_backpressure` tests were ignored too, and were
-  un-ignored in #355 and #357; the invalid-byte test joined the list after its stall was localized to the input path and
-  failed 3 of 9 GitHub runs of this stack in one day). The suite still runs in CI's `test` job on every ready PR and
-  before a stack lands, so the gap is at tag time only. Reversing both is the definition of done for the deflake work.
+- Put the tmux e2e suite back into the release gate, and un-ignore the remaining load-flaky test, once the deflake
+  entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs every
+  test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or two of
+  the load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a different
+  one, with the code they check unchanged; and `session_lifecycle::non_utf8_terminal_output_survives_live_stream`
+  carries `#[ignore]` so CI's full suite stops rolling the same dice (the delete fail-closed test and the two
+  `terminal_backpressure` tests were ignored too, and were un-ignored in #355 and #357; the invalid-byte test joined the
+  list after its stall was localized to the input path and failed 3 of 9 GitHub runs of this stack in one day). The
+  suite still runs in CI's `test` job on every ready PR and before a stack lands, so the gap is at tag time only.
+  Reversing both is the definition of done for the deflake work.
 
 ## Systematic deflake
 

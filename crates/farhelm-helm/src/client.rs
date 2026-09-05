@@ -816,6 +816,27 @@ pub struct SupervisorClient {
     shutdown: watch::Sender<bool>,
 }
 
+impl Drop for SupervisorClient {
+    /// Close the transport and cancel owned answers when the final handle goes.
+    ///
+    /// An answer task retains its own writer sender, so dropping this client's
+    /// sender alone cannot close the queue. On a quiet connection nothing else
+    /// would wake either transport half. Explicit retirement still handles
+    /// withdrawal while callers retain handles; this is the final-owner backstop.
+    fn drop(&mut self) {
+        // Exclusive access needs no lock, and teardown must also release tasks
+        // if earlier code poisoned the bookkeeping mutex while unwinding.
+        let tasks = self
+            .agent_tasks
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner());
+        for handle in tasks.handles.drain(..) {
+            handle.abort();
+        }
+        let _ = self.shutdown.send(true);
+    }
+}
+
 /// The answering work one connection owns, plus the fact that decides
 /// whether any MORE of it may start.
 ///
@@ -1333,9 +1354,17 @@ impl SupervisorClient {
                 // `write_frame_before_stall`: without a bound, bounding
                 // the outbound queue would let a wedged peer park this
                 // task and every producer behind it forever.
-                if let Err(e) =
-                    write_frame_before_stall(&mut writer, &bytes_written, frame, writer_stall).await
-                {
+                // A live peer may make slow progress for arbitrarily long,
+                // but retirement must release an in-flight write immediately.
+                // Cancelling mid-frame is safe only because this path closes
+                // the transport instead of attempting another frame on it.
+                let result = tokio::select! {
+                    _ = writer_cancel.changed() => break,
+                    result = write_frame_before_stall(
+                        &mut writer, &bytes_written, frame, writer_stall,
+                    ) => result,
+                };
+                if let Err(e) = result {
                     warn!(error = %e, "frame write to supervisor failed");
                     // The write half dying must fail waiters too: a
                     // half-broken pipe (remote stops reading, keeps
@@ -1353,10 +1382,9 @@ impl SupervisorClient {
             // the demux to drop its read future rather than leaving a
             // generic split stream alive behind the closed writer.
             let _ = writer_done.send(true);
-            // The channel closes when the last external client handle
-            // disappears. Explicit shutdown matters for generic split
-            // streams, whose read half may otherwise keep the underlying
-            // transport—and therefore the peer's read—alive.
+            // Final-owner drop and explicit retirement both signal shutdown.
+            // Closing the writer matters for generic split streams, whose
+            // other half may otherwise keep the peer's read alive.
             let _ = writer.shutdown().await;
         });
 
@@ -1518,8 +1546,9 @@ impl SupervisorClient {
     ///
     /// Synchronous, and callable from inside a `watch::send_modify`
     /// closure, because that is where a client is withdrawn (see
-    /// `manager::HostActor::publish_refresh`). It does exactly two things,
-    /// both of which the last `Arc` drop CANNOT be trusted to do:
+    /// `manager::HostActor::publish_refresh`). Withdrawal must not wait for
+    /// the final `Arc` drop: callers may still own this obsolete client.
+    /// It does exactly two things:
     ///
     /// - aborts the answering tasks, which is what stops a fleet listing
     ///   being assembled for a peer nobody will accept an answer from;
@@ -1540,14 +1569,12 @@ impl SupervisorClient {
     /// Asynchronous only in the sense that the drain happens on the demux
     /// task rather than under this call.
     ///
-    /// The drop was never sufficient for either. An in-flight agent task
-    /// holds a `writer_tx` clone, so the writer channel stays open, so the
-    /// writer task stays parked, so the transport stays alive — and when
-    /// the listing finishes it writes its answer onto a connection the
-    /// registry replaced, which for a host listing means naming the OLD
-    /// connection's row as the asking session's `current` host after that
-    /// row's machine has already changed. Retiring explicitly makes the
-    /// withdrawal and the teardown the same event.
+    /// The destructor provides the same cleanup once no handle remains,
+    /// but waiting for it would let an in-flight listing finish against a
+    /// connection the registry replaced. For a host listing that means
+    /// naming the OLD connection's row as the asking session's `current`
+    /// host after that row's machine has already changed. Retiring explicitly
+    /// makes withdrawal and teardown the same event.
     ///
     /// Idempotent: a second call re-signals a flag that is already set and
     /// drains an empty task list.
@@ -3452,6 +3479,44 @@ mod tests {
         }
     }
 
+    /// A transport that can stop accepting bytes after the handshake.
+    ///
+    /// The notification proves the writer entered a frame write before its
+    /// owner disappears; an empty outbound queue cannot exercise that boundary.
+    struct ParkableWriter<W> {
+        inner: W,
+        park: Arc<AtomicBool>,
+        entered: Arc<tokio::sync::Notify>,
+    }
+
+    impl<W: AsyncWrite + Unpin> AsyncWrite for ParkableWriter<W> {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            if self.park.load(Ordering::SeqCst) {
+                self.entered.notify_one();
+                return Poll::Pending;
+            }
+            Pin::new(&mut self.inner).poll_write(cx, buf)
+        }
+
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_flush(cx)
+        }
+
+        fn poll_shutdown(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
     /// Register a terminal on `client` directly, returning the receiving
     /// half a real `attach()` caller would have got.
     ///
@@ -3574,6 +3639,52 @@ mod tests {
                 .await
                 .expect("peer did not observe EOF after client drop")
                 .unwrap()
+                .is_none()
+        );
+    }
+
+    /// Final-owner shutdown must interrupt a frame already waiting on the peer.
+    ///
+    /// The ordinary no-progress timeout protects a live client's writes. It
+    /// must not keep a retired connection open after ownership has ended.
+    #[tokio::test]
+    async fn dropping_the_last_client_interrupts_an_in_progress_write() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("peer handshake");
+            reader.read_frame().await.expect("read after client drop")
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let park = Arc::new(AtomicBool::new(false));
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let client = SupervisorClient::start(
+            r,
+            ParkableWriter {
+                inner: w,
+                park: Arc::clone(&park),
+                entered: Arc::clone(&entered),
+            },
+        )
+        .await
+        .expect("client handshake");
+        park.store(true, Ordering::SeqCst);
+        client.send_input(1, b"x".to_vec()).await;
+        timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .expect("the writer never entered the blocked frame");
+
+        drop(client);
+
+        assert!(
+            timeout(Duration::from_secs(2), peer)
+                .await
+                .expect("a blocked write kept the dropped client's transport open")
+                .expect("peer task")
                 .is_none()
         );
     }
@@ -6546,6 +6657,44 @@ mod tests {
             .await
             .expect("client handshake");
         (client, peer.await.expect("peer task"))
+    }
+
+    /// Dropping the last client must close even while an upcall cannot answer.
+    ///
+    /// The answer owner holds a writer sender while it awaits the handler.
+    /// Unlike a busy terminal connection, this peer sends no later frames that
+    /// could incidentally make the demultiplexer notice the client is gone.
+    /// Closing must therefore follow ownership, not depend on more traffic.
+    #[tokio::test]
+    async fn dropping_the_last_client_with_a_pending_upcall_closes_the_transport() {
+        let (handler, mut entered, _gate) = GatedHandler::parked();
+        let handler_lifetime = Arc::downgrade(&handler);
+        let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
+            handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
+        ));
+        let (client, mut peer) = agent_connection(slot).await;
+        peer.ask(1, farhelm_proto::AgentVerb::Hosts {}).await;
+        timeout(Duration::from_secs(2), entered.recv())
+            .await
+            .expect("the upcall handler did not start")
+            .expect("the handler announcement channel closed");
+
+        drop(client);
+
+        assert!(
+            timeout(Duration::from_secs(2), peer.reader.read_frame())
+                .await
+                .expect("a pending upcall kept the dropped client's transport open")
+                .expect("read after dropping the client")
+                .is_none()
+        );
+        timeout(Duration::from_secs(2), async {
+            while handler_lifetime.strong_count() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("dropping the client left its unanswered handler running");
     }
 
     /// A connection that reaches "live" before the helm's `AppState` exists
