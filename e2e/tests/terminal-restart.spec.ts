@@ -8,7 +8,7 @@
 // previous run, with the new run drawing below it. All four are below.
 // ---------------------------------------------------------------------
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { hideSeenState, SESSION_LISTING } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import {
@@ -36,19 +36,22 @@ installTerminalSuiteHooks();
 // interrupted): the user simply does not click. So what this pins is that
 // navigating away sends nothing and leaves the row exactly as it was —
 // a restart affordance that fired on open, or on back, would be the bug.
-test("an interrupted session's view leads with the resume offer, and declining changes nothing", async ({
-  page,
-}) => {
-  const sessionId = "11111111-2222-3333-4444-555555555555";
-  const title = `interrupted-offer-${Date.now()}`;
+/**
+ * Add one interrupted, resumable session to the real listing and intercept
+ * its restart route, counting the requests that reach it.
+ *
+ * The real listing plus one injected row, so every other test's session
+ * (and the shared "e2e-session") keeps coming through untouched. The
+ * counter is what every test here ultimately asserts on: SPEC.md's
+ * "nothing respawns unattended" is a claim about requests, and only a
+ * count can show that a decline sent none and a click sent exactly one.
+ */
+async function injectInterruptedSession(page: Page, sessionId: string, title: string) {
   await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
     }
-    // The real listing plus one interrupted row, so every other test's
-    // session (and the shared "e2e-session") keeps coming through
-    // untouched.
     const response = await route.fetch();
     const listing = await response.json();
     listing.sessions.push({
@@ -62,11 +65,20 @@ test("an interrupted session's view leads with the resume offer, and declining c
     listing.total += 1;
     await route.fulfill({ response, json: listing });
   });
-  let restartRequests = 0;
+  const counter = { restartRequests: 0 };
   await page.route(`**/api/sessions/${sessionId}/restart`, async (route) => {
-    restartRequests++;
+    counter.restartRequests++;
     await fulfillAsHelm(route, { status: 200, contentType: "application/json", body: "{}" });
   });
+  return counter;
+}
+
+test("an interrupted session's view leads with the resume offer, and declining changes nothing", async ({
+  page,
+}) => {
+  const sessionId = "11111111-2222-3333-4444-555555555555";
+  const title = `interrupted-offer-${Date.now()}`;
+  const counter = await injectInterruptedSession(page, sessionId, title);
 
   await page.goto("/");
   await rowByTitle(page, title).locator(".session-row-open").click();
@@ -106,7 +118,25 @@ test("an interrupted session's view leads with the resume offer, and declining c
   // An interrupted session has nothing running, so there is no confirm
   // step in front of it.
   await expect(page.locator(".restart-confirm")).toHaveCount(0);
-  expect(restartRequests).toBe(0);
+  expect(counter.restartRequests).toBe(0);
+
+  // The reboot took the terminal, so the view mounts none and retries
+  // nothing (SPEC.md: metadata and the reason, never an empty pane): no
+  // terminal element for terminal.js to attach, no catch-up or reconnect
+  // overlay, and no tab strip. Before this, the view attached to the
+  // destroyed pane and climbed a "connection lost" ladder whose "reconnect
+  // now" could never succeed. In their place, the surface itself says why
+  // and carries the restart, so the explanation is not only a tooltip.
+  await expect(page.locator("#terminal")).toHaveCount(0);
+  await expect(page.locator("#term-connecting")).toHaveCount(0);
+  await expect(page.locator(".terminal-panes")).toHaveCount(0);
+  await expect(page.locator(".tab-strip")).toHaveCount(0);
+  const notice = page.locator(".interrupted-notice");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("did not survive the host reboot");
+  await expect(notice).toContainText("resumes this session's own conversation");
+  await expect(notice.locator(".restart-from-notice")).toHaveAttribute("aria-label", "resume conversation");
+  expect(counter.restartRequests).toBe(0);
 
   // Declining means LEAVING — selecting another session — and the leave
   // itself must not send anything: a regression that fired the restart on
@@ -115,7 +145,34 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
   const row = rowByTitle(page, title);
   await expect(row.locator(".status-badge")).toHaveText("interrupted");
-  expect(restartRequests).toBe(0);
+  expect(counter.restartRequests).toBe(0);
+});
+
+// The interrupted surface's own restart control is the same request the
+// header's is: one click, one restart, no confirmation (nothing is running
+// to confirm stopping). Counted rather than merely observed, because two
+// controls wired to one closure could still double-send if the second one
+// were given its own handler by mistake — and a restart is not idempotent
+// from the user's side.
+test("restart from the interrupted surface sends the resume request exactly once", async ({
+  page,
+}) => {
+  const sessionId = "11111111-2222-3333-4444-666666666666";
+  const title = `interrupted-surface-restart-${Date.now()}`;
+  const counter = await injectInterruptedSession(page, sessionId, title);
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+  const restart = page.locator(".interrupted-notice .restart-from-notice");
+  await expect(restart).toBeVisible();
+  await expect(restart).toBeEnabled();
+  await restart.click();
+  await expect.poll(() => counter.restartRequests).toBe(1);
+  // No confirmation panel was interposed, and the click was not
+  // re-delivered by the surface re-rendering around the in-flight request.
+  await expect(page.locator(".restart-confirm")).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(counter.restartRequests).toBe(1);
 });
 
 // A live agent is the one case SPEC.md requires a confirmation for
