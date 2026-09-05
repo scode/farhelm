@@ -263,3 +263,17 @@ has shown it, once. Cause not established: the workspace-only reproduction point
 a full-suite run, but nothing in this test's own logic identifies a mechanism, and no cross-test interaction has
 actually been demonstrated — a claim to that effect in an earlier version of this entry was speculation, not a finding.
 Disposition: open (TODO.md).
+
+## 2026-09-05 — final-client cleanup with an unanswered upcall
+
+`agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` in `crates/farhelm/tests/e2e/agent_relay.rs`
+simulates helm death by dropping its last client handle. An unanswered handler's owner retained a writer sender, so
+dropping the client did not close a quiet connection; a later terminal frame could incidentally wake the demultiplexer
+and hide the leak. A deterministic quiet-peer unit test failed against the prior implementation with the transport still
+open after two seconds. Final-owner cleanup now aborts registered answers and signals both transport halves; the unit
+test verifies EOF and handler release. Review found that an already blocked frame write also needed to observe that
+signal. A separate gated-writer regression reproduced the two-second failure before that correction. The ten-test relay
+module and twenty focused helm-death runs with two CPU-load children passed on a 4-vCPU, 8-GiB sandbox with pinned tmux
+3.7c. The helm-death test is no longer ignored. This corrects the client-lifetime failure in the simulated death; it
+does not establish scheduler starvation in the supervisor's EOF handler as the historical cause. The other release-gate
+flakes remain separate work in TODO.md.
