@@ -682,6 +682,11 @@ export function countReads(page: Page): ReadCounter {
  * bundle version and what the server says, and both sides of a real
  * disagreement would have to be built from different commits.
  *
+ * A caller that removes this interceptor before the page closes must drain
+ * its active handlers with `page.unrouteAll({ behavior: "wait" })`. A plain
+ * `unroute` changes interception while `route.fetch` can still be awaiting
+ * an upstream response, making the subsequent fulfilment race route disposal.
+ *
  * The stamp must be visible ASCII, and that is the transport's rule rather
  * than this helper's: an HTTP header cannot carry arbitrary text, and a
  * value with anything else in it is refused when the client reads the header

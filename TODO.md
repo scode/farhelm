@@ -147,14 +147,6 @@ everything not yet sorted, which carries no implication either way. Within a buc
   loaded runs during the profiles attempt above). Same spec, same box, same day as the three cases above; nothing about
   either cause is known beyond the names. Start at rung 1 of `.agents/narrow-tests.md` with `--repeat-each` on the
   engine that failed.
-- Deflake `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts): on 2026-09-03, on
-  `webkit-sidebar`, `Error: route.fulfill: Route is already handled!` inside `forceBuildSkew` (`helpers/fleet.ts`, four
-  callers: three in `feed.spec.ts` and this test) — reproduced alone at 1/20 on a 4-vCPU sandbox, single worker, so it
-  is not a cross-test interaction. Reads as the route handler racing itself under WebKit, but why WebKit dispatches the
-  intercepted request twice for one navigation is not known. Also seen once on `chromium-sidebar` on 2026-09-03
-  (`--repeat-each=3`, 1/168), same error and call site, so the race is not WebKit-specific after all — widen the
-  investigation to both engines. Start at rung 1 of `.agents/narrow-tests.md` (already run once; widen the repeat count)
-  on both `chromium-sidebar` and `webkit-sidebar`.
 - Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
   (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs): failed once on 2026-09-03 in a loaded `--test-threads=4`
   full-binary run on a 4-vCPU sandbox ("a consumed sentinel is deleted once its Error outcome commits durably"),
