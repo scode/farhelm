@@ -354,6 +354,23 @@ samp {
    * rows stack and ellipsize per line; their fixed menus escape this
    * clipping context. The filter controls do too. */
   overflow: hidden auto;
+  /* The sidebar scrolls without a scrollbar. On macOS the overlay scrollbar
+   * painted itself over the column's right edge and covered the row menu
+   * toggles and controls that live there (seen on 0.5.0-rc.1), and a
+   * classic always-visible scrollbar, which the OS can force on, would
+   * instead reserve a gutter the 340px column cannot spare. Hiding it
+   * touches nothing about scrollability: wheel, trackpad, touch, and
+   * keyboard scrolling, and the browser's own scroll-on-focus when Tab
+   * lands on a row's control below the fold, all work on a scroller with
+   * no scrollbar. Two declarations because two engine generations:
+   * `scrollbar-width: none` is the standard property (Chromium 121+,
+   * Safari 18.2+ and the WebKit of that generation, Firefox), and the
+   * `::-webkit-scrollbar` rule below is for WebKit builds that predate it,
+   * including the desktop app's embedded engine on older systems.
+   * `.app-shell`'s horizontal scrollbar is deliberately left alone: it
+   * only appears when the window is too narrow for both panes, and then
+   * it is the honest signal. */
+  scrollbar-width: none;
   /* The sidebar is CHROME, not content: it sits one level above the
      ground the terminal shares with the page, which is the single
      biggest reason this shell no longer reads as one flat field.
@@ -861,6 +878,16 @@ samp {
    deliberately plain, matching the rest of M1's undecorated chrome. */
 .session-list {
   overflow-y: auto;
+  /* Same hidden-scrollbar treatment as `.app-sidebar`, for the same
+   * reason: this is the other declared scroller in the column, and if a
+   * layout change ever gave it a bounded height it would grow the same
+   * edge-covering scrollbar. See the comment at `.app-sidebar`. */
+  scrollbar-width: none;
+}
+
+.app-sidebar::-webkit-scrollbar,
+.session-list::-webkit-scrollbar {
+  display: none;
 }
 
 /* The row is a column: `.session-row-main` (the open button's stacked
