@@ -11,9 +11,10 @@
 //! barriers and per-session sink opening, handoff, reaping, and readiness.
 
 use super::core::{RequestError, SessionEntry, Supervisor, error_kind, truncate_for_error};
+use crate::store::LastOutcome;
 use crate::tmux::{InputClient, ReplayStreamCandidate, SessionSink};
 use anyhow::Context;
-use farhelm_proto::{ErrorKind, Frame, TerminalSelector};
+use farhelm_proto::{ErrorKind, Frame, RestartOffer, TerminalSelector};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration;
@@ -385,6 +386,72 @@ enum TabResolution {
     DeadIncluded,
 }
 
+/// The refusal for a session whose terminal no longer exists on this host,
+/// worded from what the supervisor actually knows.
+///
+/// This string travels a long way: the helm relays it verbatim as the
+/// terminal socket's `detached` reason, and the browser paints it under a
+/// banner, so it is the sentence a user reads when they open a session the
+/// reboot took. The wording it replaced claimed the restart happened
+/// "after the agent ended", which SPEC.md's reboot contract explicitly
+/// forbids inferring: after a reboot the supervisor cannot know whether the
+/// agent exited moments before or was killed by the boot, and "interrupted"
+/// exists to say exactly that. So the two cases are told apart by the
+/// durable outcome, and neither orders the agent's end against the restart.
+///
+/// An entry loses its terminal on exactly two paths, and the wording
+/// follows which one it was, in the same precedence the UI's own
+/// terminal-absence decision uses (`terminal_absence` in the session view),
+/// so a refusal never contradicts the band on screen:
+///
+/// - An archived entry (`archive_session` publishes it terminal-less)
+///   names the archive: its terminal was removed on purpose, and restart
+///   is how a fresh one comes back. Archive outranks the reboot below
+///   because it is a deliberate act that stands whatever the boot did.
+/// - An entry the boot-id classifier marked [`LastOutcome::Interrupted`]
+///   names the reboot and points at the one way forward, restart, which
+///   SPEC.md says offers to resume the conversation.
+/// - Everything else is the restart gap: the entry was reloaded from the
+///   store at supervisor startup and its tmux session was already gone,
+///   whether the agent had exited before, the launch's pane never came
+///   back, or the tmux server itself died. The restart is a fact there;
+///   when the agent ended relative to it is not, so the sentence names the
+///   restart and nothing about the agent.
+///
+/// The reboot case ends with what restart would actually do, per the
+/// session's own [`RestartOffer`]: only a session whose conversation was
+/// captured can be promised a resume, and SPEC.md forbids implying one
+/// where a fresh launch is what the user would get.
+fn missing_terminal_message(
+    id: &str,
+    archived: bool,
+    outcome: &LastOutcome,
+    offer: RestartOffer,
+) -> String {
+    let id = truncate_for_error(id);
+    if archived {
+        format!(
+            "session {id} has no terminal: it is archived, which removed its terminal; restart \
+             creates a fresh one"
+        )
+    } else if matches!(outcome, LastOutcome::Interrupted) {
+        let restart = match offer {
+            RestartOffer::Resume => "restart offers to resume the conversation",
+            RestartOffer::FallbackTemplate => "restart runs its configured resume command",
+            RestartOffer::FreshOnly => "restart launches a fresh agent in the same directory",
+        };
+        format!(
+            "session {id} has no terminal: its host rebooted and the terminal did not survive; \
+             {restart}"
+        )
+    } else {
+        format!(
+            "session {id} has no terminal on this host: the supervisor (or its tmux server) \
+             restarted and the terminal did not survive"
+        )
+    }
+}
+
 async fn resolve_terminal_inner(
     sup: &Supervisor,
     entry: &SessionEntry,
@@ -398,15 +465,33 @@ async fn resolve_terminal_inner(
     // session stays visible in the list either way. It is also the gate
     // every TAB lookup passes through first: with no tmux session there is
     // no window to carry a marker, so a tab selector on such a session is
-    // not-found for the same underlying reason.
+    // not-found for the same underlying reason. The wording comes from the
+    // durable outcome (`missing_terminal_message`), because a reboot's
+    // interruption and an ordinary restart gap are different facts and the
+    // user is about to act on which one it was.
     let agent = entry.terminal.as_ref().ok_or_else(|| {
+        // Two per-entry mutexes, taken one after the other and never
+        // nested: each hold is a read of one small value, which is the
+        // rule that makes blocking mutexes safe inside async code here
+        // (see `SessionEntry::outcome`).
+        let outcome = entry
+            .outcome
+            .lock()
+            .expect("outcome mutex poisoned")
+            .clone();
+        // The same derivation the restart path uses for the offer it
+        // reports on the wire, so the refusal never promises a resume the
+        // restart would not perform.
+        let offer = entry.snapshot.restart_offer(
+            entry
+                .capture
+                .lock()
+                .expect("capture mutex poisoned")
+                .committed_conversation(),
+        );
         RequestError::new(
             ErrorKind::NotFound,
-            format!(
-                "session {} has no terminal: the supervisor (or its tmux server) restarted \
-                 after the agent ended",
-                truncate_for_error(&entry.info.id)
-            ),
+            missing_terminal_message(&entry.info.id, entry.info.archived, &outcome, offer),
         )
     })?;
     match terminal {
@@ -2064,6 +2149,107 @@ mod tests {
     use super::*;
     use crate::tmux::PaneState;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    /// The missing-terminal refusal tells a reboot apart from a restart
+    /// gap, and never orders the agent's end against either.
+    ///
+    /// This is the sentence the browser shows when an interrupted session
+    /// is opened, so its two claims are pinned: an `Interrupted` outcome
+    /// names the reboot and the restart-with-resume way forward, while
+    /// every other outcome says only that this host has no terminal. The
+    /// negative assertion guards the regression this replaced — wording
+    /// that stated the restart came "after the agent ended", an ordering
+    /// SPEC.md says the supervisor cannot know after a reboot.
+    #[test]
+    fn missing_terminal_wording_follows_the_durable_outcome() {
+        let resumable = missing_terminal_message(
+            "s-1",
+            false,
+            &LastOutcome::Interrupted,
+            RestartOffer::Resume,
+        );
+        assert!(resumable.contains("host rebooted"), "{resumable}");
+        assert!(
+            resumable.contains("restart offers to resume"),
+            "{resumable}"
+        );
+        // Only a captured conversation may be promised a resume: the other
+        // two offers name what restart would really do instead.
+        let fresh = missing_terminal_message(
+            "s-1",
+            false,
+            &LastOutcome::Interrupted,
+            RestartOffer::FreshOnly,
+        );
+        assert!(fresh.contains("host rebooted"), "{fresh}");
+        assert!(
+            fresh.contains("fresh agent") && !fresh.contains("resume"),
+            "{fresh}"
+        );
+        let template = missing_terminal_message(
+            "s-1",
+            false,
+            &LastOutcome::Interrupted,
+            RestartOffer::FallbackTemplate,
+        );
+        assert!(template.contains("configured resume command"), "{template}");
+
+        // An archived entry lost its terminal to the archive, not to any
+        // restart, and says so; the reboot still wins when both apply.
+        let archived = missing_terminal_message(
+            "s-1",
+            true,
+            &LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some("stopped by user".to_string()),
+            },
+            RestartOffer::FreshOnly,
+        );
+        assert!(archived.contains("archived"), "{archived}");
+        assert!(!archived.contains("restarted"), "{archived}");
+        // Archive outranks the reboot, matching the UI's `terminal_absence`
+        // precedence: the band on screen says "archived", so must this.
+        let archived_after_reboot =
+            missing_terminal_message("s-1", true, &LastOutcome::Interrupted, RestartOffer::Resume);
+        assert!(
+            archived_after_reboot.contains("archived")
+                && !archived_after_reboot.contains("rebooted"),
+            "{archived_after_reboot}"
+        );
+
+        for other in [
+            LastOutcome::Launching,
+            LastOutcome::Running,
+            LastOutcome::StopRequested,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+            LastOutcome::Error {
+                detail: "exec failed".to_string(),
+            },
+        ] {
+            let text = missing_terminal_message("s-1", false, &other, RestartOffer::FreshOnly);
+            assert!(
+                text.contains("has no terminal on this host"),
+                "{other:?}: {text}"
+            );
+            assert!(
+                !text.contains("rebooted") && !text.contains("archived"),
+                "{other:?} must claim neither a reboot nor an archive: {text}"
+            );
+        }
+        for text in [
+            resumable,
+            archived,
+            missing_terminal_message("s-1", false, &LastOutcome::Running, RestartOffer::FreshOnly),
+        ] {
+            assert!(
+                !text.contains("after the agent ended"),
+                "no wording may order the agent's end against the restart: {text}"
+            );
+        }
+    }
 
     /// Records whether a gated test future was cancelled before release.
     struct DropFlag(Arc<AtomicBool>);

@@ -872,12 +872,15 @@ fn read_host_boot_id() -> anyhow::Result<Option<String>> {
 }
 
 /// [`read_host_boot_id`]'s logic, parameterized on the path it reads —
-/// split out purely so a unit test can point it at a tempdir-backed file
-/// instead of the real `/proc` entry, per this project's rule against
-/// mutating the test process's own environment. Not itself exposed as a
-/// [`BootIdSource`]: production always wants the fixed `/proc` path, so
-/// only the zero-argument wrapper is wired into [`Seams::default`].
-#[cfg(any(not(target_os = "macos"), test))]
+/// split out so a unit test can point it at a tempdir-backed file instead
+/// of the real `/proc` entry, per this project's rule against mutating the
+/// test process's own environment, and so the test-only
+/// [`SupervisorStartup::boot_id_file`] override can do the same for a
+/// supervisor running as a real process. Compiled on every target for that
+/// second caller: on macOS the production reader is the sysctl above, but
+/// the override still has to parse a file there. Production always wants
+/// the fixed kernel source, so only the zero-argument wrapper is wired into
+/// [`SupervisorSeams::default`].
 fn read_boot_id_from(path: &Path) -> anyhow::Result<Option<String>> {
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
@@ -3566,6 +3569,24 @@ pub struct SupervisorStartup {
     /// opinion pass [`crate::agent_kind::AgentInstructions::default()`],
     /// which announces on every hooked launch.
     pub agent_instructions: crate::agent_kind::AgentInstructions,
+    /// A file to read this host's boot id from instead of the kernel's own
+    /// source — `farhelm supervisor run --boot-id-file`, a TEST-ONLY seam.
+    /// `None`, which every production launch passes, keeps
+    /// [`BootIdSource`]'s default of reading the real boot id.
+    ///
+    /// Exists so a browser-driven test can simulate a reboot against a real
+    /// supervisor process: the Rust suite injects a [`BootIdSource`] closure
+    /// directly, but a supervisor launched as a child process has no such
+    /// seam, and the only other way to change the boot id it reads is to
+    /// reboot the machine. The file is read the way `/proc`'s entry is
+    /// ([`read_boot_id_from`]): a missing file means "no boot id at all"
+    /// and an empty one the same, so a harness that forgets to write it
+    /// gets the same-boot path, never a spurious interruption. Deliberately
+    /// a command-line option and not an environment variable: this
+    /// project's tests never mutate their own process's environment, and a
+    /// variable would also be one more thing a systemd unit could inherit
+    /// by accident.
+    pub boot_id_file: Option<PathBuf>,
 }
 
 impl Supervisor {
@@ -3579,6 +3600,7 @@ impl Supervisor {
                 tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
+                boot_id_file: None,
             },
         )
         .await
@@ -3599,8 +3621,19 @@ impl Supervisor {
             tmux_program,
             agent_hooks,
             agent_instructions,
+            boot_id_file,
         } = startup;
         let exe = std::env::current_exe().context("resolving own binary path")?;
+        let defaults = SupervisorSeams::default();
+        // The test-only override replaces the SOURCE, not the reader: the
+        // file is parsed by the same function the kernel's entry is, so a
+        // harness gets exactly the three-way contract production has
+        // (present, absent, unreadable) and cannot construct a boot id
+        // shape the real path never would.
+        let boot_id: BootIdSource = match boot_id_file {
+            Some(path) => Arc::new(move || read_boot_id_from(&path)),
+            None => defaults.boot_id.clone(),
+        };
         Self::new_with_seams(
             state_dir,
             exe,
@@ -3609,7 +3642,8 @@ impl Supervisor {
                 tmux_program,
                 agent_hooks,
                 agent_instructions,
-                ..SupervisorSeams::default()
+                boot_id,
+                ..defaults
             },
         )
         .await
@@ -14943,6 +14977,7 @@ pub(crate) mod tests {
             tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks,
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
+            boot_id_file: None,
         };
         let argv = vec!["claude".to_string()];
 
@@ -14996,6 +15031,7 @@ pub(crate) mod tests {
             tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions,
+            boot_id_file: None,
         };
         let argv = vec!["claude".to_string()];
 
@@ -15027,6 +15063,65 @@ pub(crate) mod tests {
         assert!(
             result.join(" ").contains("--announce"),
             "the default startup value must announce: {result:?}"
+        );
+    }
+
+    /// The test-only boot-id file a supervisor was STARTED with is what its
+    /// reboot classifier reads — and it is re-read at every construction.
+    ///
+    /// A simulated reboot against a real supervisor process rests on both
+    /// halves: a harness starts the process with `--boot-id-file`, kills
+    /// the tmux server, rewrites the file, and restarts the supervisor on
+    /// the same state directory expecting the live sessions to come back
+    /// interrupted. A value read once into the seam would satisfy the
+    /// first construction and silently never notice the rewrite, so the
+    /// second construction here reads a different id from the same path.
+    /// The recorded id in `supervisor_meta` is the observable: it is what
+    /// `record_boot` writes from the seam, and what the next startup
+    /// compares against. (Rewriting the file alone is not a reboot: reload
+    /// keeps a pane it still finds, so a harness that leaves tmux running
+    /// gets its terminal back rather than an interruption.)
+    #[tokio::test]
+    async fn a_startup_boot_id_file_is_what_the_classifier_reads() {
+        let state = StateDir::new();
+        let boot_file = state.path().join("boot-id");
+        let startup = || SupervisorStartup {
+            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
+            agent_hooks: crate::agent_kind::AgentHooks::default(),
+            agent_instructions: crate::agent_kind::AgentInstructions::default(),
+            boot_id_file: Some(boot_file.clone()),
+        };
+
+        std::fs::write(&boot_file, "boot-first\n").expect("write boot id");
+        let first = Supervisor::new_for_startup(state.path(), startup())
+            .await
+            .expect("supervisor");
+        assert_eq!(
+            first
+                .store
+                .boot_id()
+                .await
+                .expect("read stored boot id")
+                .as_deref(),
+            Some("boot-first"),
+            "the classifier must record the id the file names, trimmed"
+        );
+        drop(first);
+
+        std::fs::write(&boot_file, "boot-second\n").expect("rewrite boot id");
+        let second = Supervisor::new_for_startup(state.path(), startup())
+            .await
+            .expect("supervisor after the simulated reboot");
+        assert_eq!(
+            second
+                .store
+                .boot_id()
+                .await
+                .expect("read stored boot id")
+                .as_deref(),
+            Some("boot-second"),
+            "a rewritten file must be seen by the next construction, or the harness's reboot \
+             is a no-op"
         );
     }
 
