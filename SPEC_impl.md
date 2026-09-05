@@ -702,6 +702,15 @@ rule that stays correct if several helms per supervisor are ever supported. Requ
 protocol and stay that way: the asking process numbers its own leg, the supervisor numbers the upcall from a counter it
 keeps per helm connection, and the relay holds the mapping for one round trip.
 
+The helm's client closes its transport when its final owning handle drops, even with an unanswered upcall. Answer tasks
+hold writer senders of their own, so closing the client's sender alone cannot make a quiet connection reach EOF. The
+destructor aborts its registered answer tasks and signals the existing reader and writer cancellation paths.
+Cancellation also interrupts a frame already being written: the connection is closing, so preserving frame
+synchronization cannot justify retaining its transport until a live-peer stall timeout. The manager also retires a
+withdrawn connection explicitly: it must close while callers still retain obsolete handles, rather than waiting for
+final-owner cleanup. Neither path claims that cancelling an answer rolls back a mutation the handler may already have
+applied.
+
 The failure vocabulary is two kinds, split by whether a retry is free. `ErrorKind::Unavailable` means nothing is holding
 the request: no helm is attached, its connection died before or during the request, the request could not be delivered
 onto that connection at all, or the helm itself is not in a state to answer — still starting up, shutting down, or
