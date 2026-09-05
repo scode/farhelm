@@ -534,6 +534,72 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
 });
 
 /**
+ * The host/directory line reads as one `host:~/path` string aligned under
+ * the title. Three geometry claims the stylesheet makes and nothing else
+ * checks: the line's text starts at the identity copy's x rather than the
+ * status dot's, the host, the colon, and the path abut with no gap between
+ * them, and the colon is set at the same size as the two runs it joins
+ * (it used to inherit the button's larger size and read as a mark between
+ * two smaller strings). Tolerances of one pixel because Chromium and
+ * WebKit round subpixel boxes differently.
+ */
+test("the host/directory line aligns under the title as one continuous string", async ({
+  page,
+  request,
+}) => {
+  const marker = `meta-line-${Date.now()}`;
+  const session = await createSession(request, {
+    title: marker,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await expect(target.locator(".session-host")).toHaveText("this machine");
+
+    const dot = (await target.locator(".session-status-slot").boundingBox())!;
+    const title = (await target.locator(".session-title").boundingBox())!;
+    const host = (await target.locator(".session-host").boundingBox())!;
+    const separator = (await target.locator(".session-host-separator").boundingBox())!;
+    // The path's TEXT, not its container: `.session-cwd` is the flex item
+    // that abuts the colon whatever happens, while the glyphs inside it are
+    // placed by its rtl clipper's `text-align: left` — drop that and the
+    // path would sit at the far right of the line with the container still
+    // touching the colon.
+    const path = (await target.locator(".session-cwd-text").boundingBox())!;
+
+    expect(host.x, "the line starts under the title, not under the status dot").toBeGreaterThan(
+      dot.x + 1,
+    );
+    expect(Math.abs(host.x - title.x), "the line's left edge sits on the title's").toBeLessThanOrEqual(
+      1,
+    );
+    expect(
+      Math.abs(separator.x - (host.x + host.width)),
+      "no gap between the host and the colon",
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(path.x - (separator.x + separator.width)),
+      "no gap between the colon and the path's text",
+    ).toBeLessThanOrEqual(1);
+
+    const fontSizes = await target.evaluate((el) =>
+      [".session-host", ".session-host-separator", ".session-cwd"].map(
+        (selector) => getComputedStyle(el.querySelector(selector)!).fontSize,
+      ),
+    );
+    expect(
+      new Set(fontSizes).size,
+      `host, colon, and path must share one font size, got ${fontSizes.join(", ")}`,
+    ).toBe(1);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
  * A long PROFILE-backed invocation badge clips inside its first-line column,
  * while the cwd on the second line remains usable.
  *
@@ -2462,9 +2528,19 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
       sideBox.width + 1,
     );
     const lineBox = (await target.locator(".session-row-meta").boundingBox())!;
+    // The host's 40% cap resolves against the line's CONTENT box, and the
+    // line now carries a left indent (the two leading tracks it skips to
+    // sit under the title), so the border box `lineBox` measures would
+    // let a cap regression of several points slip through the assertions
+    // below.
+    const lineContentWidth = await target.locator(".session-row-meta").evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    });
     return {
       sideBox,
       lineBox,
+      lineContentWidth,
       title: (await target.locator(".session-title").boundingBox())!,
       identity: (await target.locator(".session-identity-copy").boundingBox())!,
       host: (await target.locator(".session-host").boundingBox())!,
@@ -2491,7 +2567,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   expect(
     dominant.host.width,
     "the host must still respect its 40% cap",
-  ).toBeLessThanOrEqual(dominant.lineBox.width * 0.4 + TOL);
+  ).toBeLessThanOrEqual(dominant.lineContentWidth * 0.4 + TOL);
   for (const qualifier of [dominant.stale, dominant.archived]) {
     expect(qualifier.x).toBeGreaterThanOrEqual(dominant.identity.x - TOL);
     expect(qualifier.x + qualifier.width).toBeLessThanOrEqual(dominant.identity.x + dominant.identity.width + TOL);
@@ -2526,7 +2602,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   expect(
     underdog.host.width,
     "the host must never grow past its cap",
-  ).toBeLessThanOrEqual(underdog.lineBox.width * 0.4 + TOL);
+  ).toBeLessThanOrEqual(underdog.lineContentWidth * 0.4 + TOL);
   // F11: the tooltip carries the SAME escaped value the visible text does
   // (`display_peer`, not the raw peer-controlled string) — reusing the
   // existing bidi-fixture pattern (see "a bidi override in the invocation
