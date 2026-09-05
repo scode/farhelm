@@ -294,14 +294,12 @@ impl ListSort {
 }
 
 /// The one client preference the helm remembers for every client at once
-/// (SPEC.md, Session list): the chosen list order and the last
-/// user-selected session. The wire shape of `GET`/`PUT /api/preferences`.
+/// (SPEC.md, Session list): the chosen list order, user-selected session,
+/// and compact-row choice. The reply shape of `GET /api/preferences`.
 ///
-/// Both fields are `Option` because one type is the whole reply AND the
-/// sparse patch a write sends: on the way in, `None` is "never chosen, use
-/// the default"; on the way out, `None` is "leave that field alone", which
-/// is what lets two clients sharing the row each write only the field the
-/// user changed (see [`store_preference`]). `list_sort` stays the bare wire
+/// `None` means "never chosen, use the default". Writes use
+/// [`PreferenceValue`] to send only the field the user changed, so another
+/// client's choices in the other fields survive. `list_sort` stays the bare wire
 /// word rather than a decoded [`ListSort`] so an unrecognized value can be
 /// carried through to `list::view::decoded_sort`'s fallback instead of
 /// failing the decode of the whole reply.
@@ -311,6 +309,8 @@ pub(crate) struct Preferences {
     pub(crate) list_sort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) last_selected: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) compact: Option<bool>,
 }
 
 /// How long the seed read of the shared preference may take before the
@@ -343,9 +343,9 @@ pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String>
     resp.json::<Preferences>().await.map_err(|e| e.to_string())
 }
 
-/// Which half of the shared preference a write names.
+/// Which field of the shared preference a writer owns.
 ///
-/// The write queue below serializes writes PER FIELD: the two fields are
+/// The write queue below serializes writes PER FIELD: the three fields are
 /// independent last-writer-wins values (the helm merges sparse patches per
 /// field), so a slow selection write must not delay a sort write, while two
 /// writes to the SAME field must reach the helm in the order the user made
@@ -354,6 +354,7 @@ pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String>
 pub(crate) enum PreferenceField {
     Sort,
     Selected,
+    Compact,
 }
 
 impl PreferenceField {
@@ -362,6 +363,48 @@ impl PreferenceField {
         match self {
             PreferenceField::Sort => "list_sort",
             PreferenceField::Selected => "last_selected",
+            PreferenceField::Compact => "compact",
+        }
+    }
+}
+
+/// One concrete preference choice queued by this client.
+///
+/// The variant binds a wire field to its value type. Keeping that pairing in
+/// one value means replay cannot silently discard a text value queued for the
+/// boolean compact field, or the reverse; malformed wire input remains the
+/// helm route's typed-validation concern.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PreferenceValue {
+    Sort(String),
+    Selected(String),
+    Compact(bool),
+}
+
+impl PreferenceValue {
+    /// Select the independent queue slot that serializes writes for this value.
+    fn field(&self) -> PreferenceField {
+        match self {
+            Self::Sort(_) => PreferenceField::Sort,
+            Self::Selected(_) => PreferenceField::Selected,
+            Self::Compact(_) => PreferenceField::Compact,
+        }
+    }
+
+    /// Preserve the variant's concrete type while forming the sparse JSON patch.
+    fn wire_value(&self) -> serde_json::Value {
+        match self {
+            Self::Sort(value) | Self::Selected(value) => serde_json::json!(value),
+            Self::Compact(value) => serde_json::json!(value),
+        }
+    }
+
+    /// Place a dirty local choice over a freshly fetched helm seed.
+    fn overlay(&self, seed: &mut Preferences) {
+        match self {
+            Self::Sort(value) => seed.list_sort = Some(value.clone()),
+            Self::Selected(value) => seed.last_selected = Some(value.clone()),
+            Self::Compact(value) => seed.compact = Some(*value),
         }
     }
 }
@@ -375,9 +418,12 @@ impl PreferenceField {
 /// reauthentication replay exists for.
 #[derive(Default)]
 struct FieldWrite {
-    latest: Option<String>,
+    latest: Option<PreferenceValue>,
     acked: bool,
     in_flight: bool,
+    /// A fresh choice needs its own write even if it returns to the value
+    /// already being sent: another client may have committed in between.
+    recorded_since_send: bool,
 }
 
 /// The write queue's whole state: a latest-wins slot per field.
@@ -404,6 +450,7 @@ struct FieldWrite {
 struct PreferenceWrites {
     sort: FieldWrite,
     selected: FieldWrite,
+    compact: FieldWrite,
 }
 
 impl PreferenceWrites {
@@ -411,16 +458,19 @@ impl PreferenceWrites {
         match field {
             PreferenceField::Sort => &mut self.sort,
             PreferenceField::Selected => &mut self.selected,
+            PreferenceField::Compact => &mut self.compact,
         }
     }
 
     /// Record a new local choice. Returns whether the caller must start a
     /// writer (none is running for this field).
-    fn record(&mut self, field: PreferenceField, value: String) -> bool {
+    fn record(&mut self, value: PreferenceValue) -> bool {
+        let field = value.field();
         let slot = self.field(field);
         slot.latest = Some(value);
         slot.acked = false;
         if slot.in_flight {
+            slot.recorded_since_send = true;
             return false;
         }
         slot.in_flight = true;
@@ -428,21 +478,25 @@ impl PreferenceWrites {
     }
 
     /// The value the writer should send next — always the newest recorded.
-    fn next_to_send(&mut self, field: PreferenceField) -> Option<String> {
-        self.field(field).latest.clone()
+    fn next_to_send(&mut self, field: PreferenceField) -> Option<PreferenceValue> {
+        let slot = self.field(field);
+        slot.recorded_since_send = false;
+        slot.latest.clone()
     }
 
     /// A PUT for `sent` settled. Returns whether the writer must go again
     /// because a newer value arrived while it was out; otherwise the field
     /// is released (and marked acked on success).
+    /// Returning to `sent` still counts as a newer choice: another client
+    /// could have overwritten its earlier commit before this response arrived.
     ///
     /// A FAILED write is not retried on its own: the value stays dirty for
     /// the next reauthentication replay or the next user change, per the
     /// fire-and-forget policy — persistence failures cost the next launch,
     /// never a retry loop against a helm that is refusing.
-    fn finished(&mut self, field: PreferenceField, sent: &str, success: bool) -> bool {
+    fn finished(&mut self, field: PreferenceField, sent: &PreferenceValue, success: bool) -> bool {
         let slot = self.field(field);
-        if slot.latest.as_deref() != Some(sent) {
+        if slot.recorded_since_send || slot.latest.as_ref() != Some(sent) {
             return true;
         }
         slot.acked = success;
@@ -462,10 +516,11 @@ impl PreferenceWrites {
     /// `None` both when nothing was chosen and when the choice is safely on
     /// the helm (where the fetched row is the better answer: another client
     /// may have written since).
-    fn dirty(&self, field: PreferenceField) -> Option<String> {
+    fn dirty(&self, field: PreferenceField) -> Option<PreferenceValue> {
         let slot = match field {
             PreferenceField::Sort => &self.sort,
             PreferenceField::Selected => &self.selected,
+            PreferenceField::Compact => &self.compact,
         };
         if slot.acked {
             return None;
@@ -475,7 +530,7 @@ impl PreferenceWrites {
 
     /// Claim a dirty field for a replay writer. Returns the value to send,
     /// or `None` when there is nothing dirty or a writer already owns it.
-    fn begin_replay(&mut self, field: PreferenceField) -> Option<String> {
+    fn begin_replay(&mut self, field: PreferenceField) -> Option<PreferenceValue> {
         let value = self.dirty(field)?;
         let slot = self.field(field);
         if slot.in_flight {
@@ -531,8 +586,9 @@ impl Drop for WriterGuard {
 /// wrote since. Same-field writes are serialized latest-wins through
 /// [`PreferenceWrites`] so a burst of changes cannot land on the helm in
 /// reverse order.
-pub(crate) fn store_preference(base: &str, field: PreferenceField, value: String) {
-    if preference_writes().record(field, value) {
+pub(crate) fn store_preference(base: &str, value: PreferenceValue) {
+    let field = value.field();
+    if preference_writes().record(value) {
         spawn_preference_writer(base.to_string(), field);
     }
 }
@@ -546,16 +602,17 @@ pub(crate) fn store_preference(base: &str, field: PreferenceField, value: String
 /// acknowledged are NOT overlaid: the helm's answer is newer authority for
 /// those (another client may have written since this one did).
 pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Preferences {
-    for field in [PreferenceField::Sort, PreferenceField::Selected] {
+    for field in [
+        PreferenceField::Sort,
+        PreferenceField::Selected,
+        PreferenceField::Compact,
+    ] {
         let claimed = {
             let mut queue = preference_writes();
             match queue.dirty(field) {
                 Some(value) => {
                     let claimed = queue.begin_replay(field).is_some();
-                    match field {
-                        PreferenceField::Sort => seed.list_sort = Some(value),
-                        PreferenceField::Selected => seed.last_selected = Some(value),
-                    }
+                    value.overlay(&mut seed);
                     claimed
                 }
                 None => false,
@@ -580,7 +637,7 @@ fn spawn_preference_writer(base: String, field: PreferenceField) {
             let Some(value) = preference_writes().next_to_send(field) else {
                 break;
             };
-            let success = send_preference_patch(&base, field, &value).await;
+            let success = send_preference_patch(&base, &value).await;
             if !preference_writes().finished(field, &value, success) {
                 break;
             }
@@ -591,9 +648,9 @@ fn spawn_preference_writer(base: String, field: PreferenceField) {
 
 /// One `PUT /api/preferences` carrying a single-field patch. Failures are
 /// logged and reported to the queue, never surfaced.
-async fn send_preference_patch(base: &str, field: PreferenceField, value: &str) -> bool {
+async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
     let url = format!("{base}/api/preferences");
-    let patch = serde_json::json!({ field.key(): value });
+    let patch = serde_json::json!({ value.field().key(): value.wire_value() });
     let outcome = match send(client().put(&url).json(&patch)).await {
         Ok(resp) if resp.status().is_success() => return true,
         Ok(resp) => read_failure("PUT", &url, resp).await,
@@ -1764,7 +1821,7 @@ type SeenWriteReport = Box<dyn FnOnce(Result<(), String>)>;
 /// is sent AFTER it settles — so requests for the same session reach the
 /// helm in the order they were queued, never the order their network calls
 /// happen to finish. A slot is pruned once its queue drains (unlike
-/// `PreferenceWrites`'s two fields, kept forever): an idle per-session slot
+/// `PreferenceWrites`'s three fields, kept forever): an idle per-session slot
 /// held for a tab's whole lifetime would otherwise leak.
 #[derive(Default)]
 struct SeenWrites(std::collections::HashMap<String, SeenWriteSlot>);
@@ -3366,7 +3423,31 @@ mod tests {
 /// pure state machine so no runtime or network is involved.
 #[cfg(test)]
 mod preference_write_tests {
-    use super::{PreferenceField, PreferenceWrites};
+    use super::{PreferenceField, PreferenceValue, PreferenceWrites};
+
+    /// Returning to an in-flight value is still a new explicit choice.
+    /// The first true may already have committed while its response is
+    /// delayed; another client can then commit false before this client's
+    /// final true. Treating value equality as acknowledgement loses that
+    /// final choice. The resend is needed after either success or failure,
+    /// but an unchanged failed resend must not create an automatic retry.
+    #[test]
+    fn returning_to_an_in_flight_value_still_sends_the_new_choice() {
+        for first_succeeded in [false, true] {
+            let mut queue = PreferenceWrites::default();
+            let field = PreferenceField::Compact;
+            let value = PreferenceValue::Compact(true);
+            assert!(queue.record(value.clone()));
+            assert_eq!(queue.next_to_send(field), Some(value.clone()));
+            assert!(!queue.record(PreferenceValue::Compact(false)));
+            assert!(!queue.record(value.clone()));
+            assert!(queue.finished(field, &value, first_succeeded));
+            assert_eq!(queue.dirty(field), Some(value.clone()));
+            assert_eq!(queue.next_to_send(field), Some(value.clone()));
+            assert!(!queue.finished(field, &value, false));
+            assert_eq!(queue.dirty(field), Some(value));
+        }
+    }
 
     /// Same-field writes are serialized latest-wins: a value recorded while
     /// a PUT is out is sent AFTER that PUT settles, and the settled PUT's
@@ -3380,28 +3461,36 @@ mod preference_write_tests {
     fn a_newer_value_recorded_mid_flight_is_sent_after_and_wins() {
         let mut queue = PreferenceWrites::default();
         assert!(
-            queue.record(PreferenceField::Sort, "created".to_string()),
+            queue.record(PreferenceValue::Sort("created".to_string())),
             "the first write starts a writer"
         );
         assert_eq!(
-            queue.next_to_send(PreferenceField::Sort).as_deref(),
-            Some("created")
+            queue.next_to_send(PreferenceField::Sort),
+            Some(PreferenceValue::Sort("created".to_string()))
         );
 
         assert!(
-            !queue.record(PreferenceField::Sort, "title".to_string()),
+            !queue.record(PreferenceValue::Sort("title".to_string())),
             "a write while one is in flight must NOT start a second writer"
         );
         assert!(
-            queue.finished(PreferenceField::Sort, "created", true),
+            queue.finished(
+                PreferenceField::Sort,
+                &PreferenceValue::Sort("created".to_string()),
+                true
+            ),
             "settling the older value must send the writer around again"
         );
         assert_eq!(
-            queue.next_to_send(PreferenceField::Sort).as_deref(),
-            Some("title"),
+            queue.next_to_send(PreferenceField::Sort),
+            Some(PreferenceValue::Sort("title".to_string())),
             "and what it sends next is the newest value"
         );
-        assert!(!queue.finished(PreferenceField::Sort, "title", true));
+        assert!(!queue.finished(
+            PreferenceField::Sort,
+            &PreferenceValue::Sort("title".to_string()),
+            true
+        ));
         assert_eq!(
             queue.dirty(PreferenceField::Sort),
             None,
@@ -3409,15 +3498,19 @@ mod preference_write_tests {
         );
     }
 
-    /// The two fields are independent queues: a selection write neither
-    /// waits behind nor is reordered against a sort write.
+    /// The three fields are independent queues: text and boolean choices
+    /// neither wait behind nor reorder one another.
     #[test]
-    fn the_two_fields_do_not_share_a_writer() {
+    fn the_three_fields_do_not_share_a_writer() {
         let mut queue = PreferenceWrites::default();
-        assert!(queue.record(PreferenceField::Sort, "title".to_string()));
+        assert!(queue.record(PreferenceValue::Sort("title".to_string())));
         assert!(
-            queue.record(PreferenceField::Selected, "session-1".to_string()),
+            queue.record(PreferenceValue::Selected("session-1".to_string())),
             "a selection write starts its own writer even with a sort write in flight"
+        );
+        assert!(
+            queue.record(PreferenceValue::Compact(true)),
+            "the boolean compact choice owns a third independent writer"
         );
     }
 
@@ -3427,24 +3520,32 @@ mod preference_write_tests {
     #[test]
     fn a_failed_write_stays_dirty_and_is_claimed_exactly_once_for_replay() {
         let mut queue = PreferenceWrites::default();
-        assert!(queue.record(PreferenceField::Selected, "session-9".to_string()));
-        assert!(!queue.finished(PreferenceField::Selected, "session-9", false));
+        assert!(queue.record(PreferenceValue::Selected("session-9".to_string())));
+        assert!(!queue.finished(
+            PreferenceField::Selected,
+            &PreferenceValue::Selected("session-9".to_string()),
+            false
+        ));
 
         assert_eq!(
-            queue.dirty(PreferenceField::Selected).as_deref(),
-            Some("session-9"),
+            queue.dirty(PreferenceField::Selected),
+            Some(PreferenceValue::Selected("session-9".to_string())),
             "the unpersisted choice must survive for the replay"
         );
         assert_eq!(
-            queue.begin_replay(PreferenceField::Selected).as_deref(),
-            Some("session-9")
+            queue.begin_replay(PreferenceField::Selected),
+            Some(PreferenceValue::Selected("session-9".to_string()))
         );
         assert_eq!(
             queue.begin_replay(PreferenceField::Selected),
             None,
             "a second gate mount must not start a rival writer for the same field"
         );
-        assert!(!queue.finished(PreferenceField::Selected, "session-9", true));
+        assert!(!queue.finished(
+            PreferenceField::Selected,
+            &PreferenceValue::Selected("session-9".to_string()),
+            true
+        ));
         assert_eq!(queue.dirty(PreferenceField::Selected), None);
     }
 
@@ -3454,11 +3555,14 @@ mod preference_write_tests {
     #[test]
     fn a_lost_writer_releases_the_field_without_forgetting_the_value() {
         let mut queue = PreferenceWrites::default();
-        assert!(queue.record(PreferenceField::Sort, "title".to_string()));
+        assert!(queue.record(PreferenceValue::Sort("title".to_string())));
         queue.writer_lost(PreferenceField::Sort);
-        assert_eq!(queue.dirty(PreferenceField::Sort).as_deref(), Some("title"));
+        assert_eq!(
+            queue.dirty(PreferenceField::Sort),
+            Some(PreferenceValue::Sort("title".to_string()))
+        );
         assert!(
-            queue.record(PreferenceField::Sort, "created".to_string()),
+            queue.record(PreferenceValue::Sort("created".to_string())),
             "the next write must be able to start a replacement writer"
         );
     }
@@ -3468,8 +3572,12 @@ mod preference_write_tests {
     #[test]
     fn an_acknowledged_field_is_not_overlaid_onto_a_fetched_seed() {
         let mut queue = PreferenceWrites::default();
-        assert!(queue.record(PreferenceField::Sort, "title".to_string()));
-        assert!(!queue.finished(PreferenceField::Sort, "title", true));
+        assert!(queue.record(PreferenceValue::Sort("title".to_string())));
+        assert!(!queue.finished(
+            PreferenceField::Sort,
+            &PreferenceValue::Sort("title".to_string()),
+            true
+        ));
         assert_eq!(queue.dirty(PreferenceField::Sort), None);
         assert_eq!(queue.begin_replay(PreferenceField::Sort), None);
     }

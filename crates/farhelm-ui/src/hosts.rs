@@ -943,7 +943,7 @@ pub(crate) fn HostsPanel(
     let busy = ops.busy();
     rsx! {
         section { class: "hosts-panel",
-            div { class: "hosts-header",
+            div { class: "hosts-heading",
                 div { class: "host-count",
                     if let Some(hosts) = read.hosts() {
                         if hosts.len() == 1 { "1 host" } else { "{hosts.len()} hosts" }
@@ -951,13 +951,16 @@ pub(crate) fn HostsPanel(
                         "hosts"
                     }
                 }
-                div { class: "hosts-header-controls",
-                button {
-                    r#type: "button",
-                    class: "btn host-details-toggle",
-                    aria_expanded: details_open(),
-                    onclick: move |_| {
-                        details_open.toggle();
+                label { class: "host-details-control",
+                    input {
+                    r#type: "checkbox",
+                    class: "host-details-toggle",
+                    checked: details_open(),
+                    onchange: move |event| {
+                        // Automatic setup may reveal details before that
+                        // render reaches the checkbox. Honor the native
+                        // requested state instead of inverting a newer signal.
+                        details_open.set(event.checked());
                         // Every row changes height together. A fixed menu is
                         // measured once, and the filter popover is fixed to
                         // the session header, so neither can survive that
@@ -966,11 +969,16 @@ pub(crate) fn HostsPanel(
                         session_menu_open.set(None);
                         filter_open.set(false);
                     },
+                    }
                     "details"
                 }
                 button {
                     r#type: "button",
                     class: "btn add-host-button",
+                    // The compact heading spends only the visible word
+                    // "add"; assistive technology keeps the object that
+                    // action adds, matching the form and existing callers.
+                    aria_label: "add host",
                     // This control UNMOUNTS the add form, so it must not act
                     // while a MUTATION is in flight: dropping the component
                     // mid-request strands the response with nothing left to
@@ -987,8 +995,7 @@ pub(crate) fn HostsPanel(
                         let open = adding();
                         adding.set(!open);
                     },
-                    "add host"
-                }
+                    "add"
                 }
             }
             if adding() {

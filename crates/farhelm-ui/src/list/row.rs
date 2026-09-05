@@ -469,31 +469,23 @@ std::thread_local! {
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
-/// The row is always two lines: the title line (the title, the
-/// stale/archived/status badges, the locality glyph, an optional host name
-/// for a remote or unknown session, and the last-activity age) and a meta
-/// line carrying the abbreviated cwd beside a compact invocation badge.
-/// Each field ellipsizes alone in the fixed-width sidebar; the host name
-/// specifically occupies a BOUNDED slot on the title line (`.session-host`
-/// in app.css, `flex: 0 1 auto` with a `max-width` cap) rather than a
-/// line of its own, so a long destination cannot push the title to
-/// nothing and a long title cannot hide the host entirely.
+/// The row uses two lines unless the shared compact preference hides the
+/// second. The identity line reserves fixed status and locality slots, then
+/// carries the title and its qualifiers, the agent badge, and activity age.
+/// An ended status stays visible beside the title instead of stretching the
+/// status slot; an unknown locality leaves its reserved slot blank rather
+/// than claiming an identity. The second line names the host and abbreviated
+/// cwd, with each field retaining its full value in a tooltip.
 ///
-/// The two-line shape is a density decision (2026-08-23, the UI refresh),
-/// and it reverses the interviewed row contents recorded in
-/// BUGS_BURNDOWN.md's "Decisions (interviewed 2026-08-13)", which called
-/// for the host and the full invocation on every row. In a fleet that is
-/// mostly local, a dedicated host line said "this machine" over and over,
-/// and the full invocation line was usually an absolute path plus flags
-/// that ellipsized into indistinguishability — two lines of row height for
-/// near-zero information. Both are still reachable, and neither ever costs
-/// a line of its own again (2026-09-03 moved the host onto the title line
-/// rather than reviving its dedicated one — see `SPEC_impl.md`'s
-/// sidebar-row paragraph for that reversal's own reasoning): a remote or
-/// unknown session's host name rides the title line's bounded slot, and
-/// the full cwd and invocation are on the respective elements' `title`
-/// attributes. See `abbreviate_home` and `compact_invocation` for what
-/// each abbreviation costs.
+/// The second line restores the host/directory pairing so rows from several
+/// machines can be scanned without mixing identity into the already dense
+/// first line. Compact mode is the explicit escape hatch for a fleet where
+/// that repeated context is less useful. The invocation stays as a compact
+/// first-line badge: profile name when present, otherwise program basename
+/// plus a recognized unattended-mode marker. The full cwd remains available
+/// on the open button in compact mode, and the invocation keeps its badge
+/// tooltip in either mode. See `abbreviate_home` and
+/// `compact_invocation` for what each abbreviation costs.
 ///
 /// A row the helm marked stale
 /// — its host is in some non-connected state — is dimmed and badged rather
@@ -665,6 +657,10 @@ std::thread_local! {
 pub(super) fn SessionRow(
     session: Session,
     state: RowState,
+    /// Whether the shared sidebar preference hides the host/directory line.
+    /// The identity row never changes, so compactness cannot hide status,
+    /// locality, or the menu target a keyboard user needs to reach.
+    compact: bool,
     rename_draft: Signal<String>,
     on_open: EventHandler<Session>,
     /// The "clone" menu item's click: hands the row's own `Session` up so
@@ -742,6 +738,14 @@ pub(super) fn SessionRow(
     // convention two call sites have to maintain by hand.
     let unseen = session.has_unseen_output();
     let badge = status_badge(&session.status, session.annotation.as_deref(), unseen);
+    // Live statuses occupy the fixed leading slot as dots. Ended statuses
+    // carry details a dot cannot express, so their word stays with the title
+    // while the slot remains reserved; this aligns every later column without
+    // changing the status contract.
+    let (status_slot_badge, ended_badge) = match badge {
+        Some(badge) if badge.visible => (None, Some(badge)),
+        badge => (badge, None),
+    };
     // The browser suite's stable wire token for locality, the same role
     // `data-host-kind` plays in the host panel: a plain string rather than
     // `Debug`'s derived spelling, so a rename of the enum's variants (their
@@ -1171,6 +1175,9 @@ pub(super) fn SessionRow(
                 button {
                     r#type: "button",
                     class: "session-row-open",
+                    // Keep the full directory discoverable when compact mode
+                    // removes the metadata line and its own tooltip.
+                    title: if compact { session.cwd.clone() },
                     // The accessible counterpart of the visual highlight:
                     // the sidebar is a navigation-shaped list of open
                     // buttons, and `aria-current` is the native way to say
@@ -1195,14 +1202,10 @@ pub(super) fn SessionRow(
                     // row contents) is far too narrow for the old
                     // everything-on-one-line layout, whose min-width floors
                     // produced the MT-8 overflow class the moment space ran
-                    // short. The title line leads with identity, its
-                    // qualifiers, and (2026-09-03) locality — the glyph and,
-                    // for a remote or unknown host, its name, sharing the
-                    // line with the title rather than spending a second one
-                    // on it (see the locality slot below and
-                    // `SPEC_impl.md`'s sidebar-row paragraph for why); the
-                    // directory/invocation pair follows on a line of its
-                    // own, each field ellipsizing alone. `span` wrappers,
+                    // short. Fixed status/locality tracks lead the title and
+                    // its qualifiers; agent and activity occupy the trailing
+                    // tracks. The host/directory pair follows on its own line,
+                    // with compact mode removing that line as one unit. `span` wrappers,
                     // not `div`: this all sits inside the
                     // native `.session-row-open` <button>, whose content
                     // model only permits phrasing content — a flow-content
@@ -1210,15 +1213,9 @@ pub(super) fn SessionRow(
                     // accessibility tooling may interpret inconsistently.
                     // The stacked-line layout comes from the class's CSS,
                     // not the element kind.
-                    span { class: "session-row-line",
-                        span { class: "session-title", "{session.title}" }
-                        if session.stale {
-                            span { class: "stale-badge", "stale" }
-                        }
-                        if session.archived {
-                            span { class: "archived-badge", "archived" }
-                        }
-                        if let Some(badge) = badge {
+                    span { class: "session-row-line session-row-identity",
+                        span { class: "session-status-slot",
+                        if let Some(badge) = status_slot_badge {
                             // The row's own dot doubles as the mark-read/
                             // mark-unread MOUSE shortcut (SPEC.md, Status)
                             // — the keyboard-operable path is the `…` menu
@@ -1238,13 +1235,13 @@ pub(super) fn SessionRow(
                                 dot_title: offers_mark_seen.then(|| mark_seen_label.to_string()),
                             }
                         }
-                        // The locality slot (2026-09-03): between the
-                        // badges and the age, so the title
-                        // ellipsizes first under pressure and the host
-                        // keeps a bounded share of the line rather than
-                        // being pushed off it entirely — see `.session-host`
-                        // and `.host-kind-icon` in app.css for the width
-                        // split.
+                        }
+                        // The locality slot (2026-09-03): a fixed leading
+                        // track immediately after status, so every title
+                        // starts at the same position whether this row is
+                        // local, remote, or still unknown. See
+                        // `.session-locality-slot` and `.host-kind-icon` in
+                        // app.css for the geometry.
                         //
                         // Every row draws a glyph once its locality is
                         // KNOWN — local is a positive signal on its own row,
@@ -1257,6 +1254,7 @@ pub(super) fn SessionRow(
                         // clip-not-remove pattern `status::StatusBadgeView`
                         // uses for a status word next to a color-only dot),
                         // since the icon itself is `aria-hidden`.
+                        span { class: "session-locality-slot",
                         match locality {
                             HostLocality::Local => rsx! {
                                 LocalHostIcon {}
@@ -1268,36 +1266,53 @@ pub(super) fn SessionRow(
                             },
                             HostLocality::Unknown => rsx! {},
                         }
-                        // The host NAME rides the same line, for a remote or
-                        // unknown row only — a local row already said so
-                        // with the glyph above and never repeats "this
-                        // machine" in words (see `session_locality`'s doc:
-                        // the row still never prints the helm's own
-                        // rendering of its local host). The name is the
-                        // helm's own rendering (`host_name`), denormalized
-                        // onto the row so the list needs no second request
-                        // — a row from a helm that sends none simply shows
-                        // nothing here rather than inventing a label.
-                        // Escaped and direction-isolated like every other
-                        // rendering of a destination: this one names the
-                        // machine a row's stop and delete will reach, so a
-                        // name able to reorder the line around it could
-                        // make one host's session read as another's.
-                        //
-                        // `title` carries the same escaped value, not the
-                        // raw one — SPEC.md's promise is the FULL value on
-                        // the row, and the title-line slot ellipsizes at
-                        // 40% width (`.session-host` in app.css), so a long
-                        // destination needs the same tooltip recovery path
-                        // the directory line already has.
-                        if let Some(host_name) =
-                            session.host_name.as_ref().filter(|_| locality != HostLocality::Local)
-                        {
+                        }
+                        // One grid child owns the whole identity cluster.
+                        // Keeping qualifiers inside it preserves the leading
+                        // and trailing grid tracks. They can wrap within this
+                        // cluster when several state words cannot fit beside
+                        // the title; a clipped-away state would be misleading.
+                        span { class: "session-identity-copy",
+                            // Native tooltips do not inherit DOM direction
+                            // isolation. Escape invisible directional controls
+                            // in this new display surface like other peer text.
+                            span { class: "session-title", title: display_peer(&session.title), "{session.title}" }
+                            if let Some(badge) = ended_badge {
+                                StatusBadgeView {
+                                    badge,
+                                    dot_onclick: move |_| {},
+                                    dot_title: None,
+                                }
+                            }
+                            if session.stale {
+                                span { class: "stale-badge", title: "stale", "stale" }
+                            }
+                            if session.archived {
+                                span { class: "archived-badge", title: "archived", "archived" }
+                            }
+                        }
+                        // The agent badge stays on the identity line, where
+                        // it can sit in its own right-aligned column before
+                        // activity time. A profile name is the agent the
+                        // user chose; raw invocation sessions retain the
+                        // compact program-and-marker label.
+                        if let Some(source) = &session.source_profile {
                             span {
-                                class: "session-host peer-value",
+                                class: "session-invocation session-agent peer-value",
                                 dir: "ltr",
-                                title: "{display_peer(host_name)}",
-                                "{display_peer(host_name)}"
+                                "data-profile-existence": "{existence_word(source.existence)}",
+                                title: "{source_profile_label(source)} — {session.invocation}",
+                                "{display_peer(&source.name)}"
+                            }
+                        } else if let Some(compact) = &invocation_compact {
+                            span {
+                                class: "session-invocation session-agent",
+                                title: "{session.invocation}",
+                                span { class: "peer-value", dir: "ltr", "{display_peer(&compact.basename)}" }
+                                if let Some(marker) = compact.marker {
+                                    " · "
+                                    span { class: "peer-value", dir: "ltr", "{marker}" }
+                                }
                             }
                         }
                         // Beside the badge, and about something ELSE. The
@@ -1317,6 +1332,7 @@ pub(super) fn SessionRow(
                         // — and the age stays legible as its own quiet field
                         // instead of inheriting a status color that would
                         // make "2m" look like a verdict.
+                        span { class: "session-activity-column",
                         if let Some(activity) = &activity {
                             span {
                                 class: "status-time",
@@ -1324,16 +1340,23 @@ pub(super) fn SessionRow(
                                 "{activity.age}"
                             }
                         }
+                        }
                     }
-                    // Directory and invocation SHARE the last line: both are
-                    // compact enough now to fit beside each other (a
-                    // tilde-folded path and a one-word invocation badge),
-                    // and pairing them is what gets the row to roughly half
-                    // its old height. The cwd flexes and the badge does not
-                    // (see `.session-row-meta` in app.css), so pressure
-                    // eats the path's leading segments rather than the
-                    // shorter, denser field.
+                    if !compact {
+                    // The optional second line names the actual host beside
+                    // the working directory. A missing legacy host name
+                    // stays missing: locality can establish an icon, never
+                    // an invented machine name.
                     span { class: "session-row-line session-row-meta",
+                        if let Some(host_name) = &session.host_name {
+                            span {
+                                class: "session-host peer-value",
+                                dir: "ltr",
+                                title: "{display_peer(host_name)}",
+                                "{display_peer(host_name)}"
+                            }
+                            span { class: "session-host-separator", ":" }
+                        }
                         // Two spans, not one: `.session-cwd` is the rtl
                         // clipping container that puts the ellipsis on the
                         // LEFT, and the inner `dir="ltr"` child is the bidi
@@ -1347,55 +1370,7 @@ pub(super) fn SessionRow(
                         span { class: "session-cwd", title: "{session.cwd}",
                             span { class: "session-cwd-text", dir: "ltr", "{cwd_shown}" }
                         }
-                        // The invocation slot answers "what is this?" in as
-                        // few characters as the question allows. A session
-                        // created FROM a profile answers with the profile's
-                        // snapshotted name, which is what the user actually
-                        // chose; everything else answers with the derived
-                        // badge (`compact_invocation`). Either way the full
-                        // command line is on the `title`.
-                        //
-                        // The profile case keeps the same existence data as
-                        // the panel chip. Renames and unknown states use it
-                        // for their qualifier and warning color; deletion is
-                        // deliberately plain because a historical snapshot is
-                        // not evidence that the session itself is unhealthy.
-                        if let Some(source) = &session.source_profile {
-                            span {
-                                class: "session-invocation peer-value",
-                                dir: "ltr",
-                                "data-profile-existence": "{existence_word(source.existence)}",
-                                title: "{source_profile_label(source)} — {session.invocation}",
-                                "{display_peer(&source.name)}"
-                            }
-                        } else if let Some(compact) = &invocation_compact {
-                            // Basename and marker are TWO isolated spans,
-                            // not one interpolated string: the basename is
-                            // raw text from the invocation, so a
-                            // directional override inside it must not be
-                            // able to reorder the marker that follows (see
-                            // `CompactInvocation`'s own doc, and
-                            // `crate::peer` for why `dir="ltr"` plus
-                            // `unicode-bidi: isolate` together bound
-                            // resolution to one element). The marker itself
-                            // is trusted — it comes only from this build's
-                            // own `INVOCATION_MARKERS` table — but still
-                            // gets its own isolated span so the basename's
-                            // bidi context can never reach past its edge.
-                            span {
-                                class: "session-invocation",
-                                title: "{session.invocation}",
-                                span {
-                                    class: "peer-value",
-                                    dir: "ltr",
-                                    "{display_peer(&compact.basename)}"
-                                }
-                                if let Some(marker) = compact.marker {
-                                    " · "
-                                    span { class: "peer-value", dir: "ltr", "{marker}" }
-                                }
-                            }
-                        }
+                    }
                     }
                 }
                 // The actions menu: one small toggle beside the open
@@ -2265,6 +2240,7 @@ mod tests {
             rsx! {
                 SessionRow {
                     session,
+                    compact: false,
                     state: RowState {
                         error: None,
                         busy: false,
@@ -2361,6 +2337,7 @@ mod tests {
                     SessionRow {
                         key: "{id}",
                         session: row_specimen(id),
+                        compact: false,
                         state: RowState {
                             error: None,
                             busy: false,

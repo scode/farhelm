@@ -764,6 +764,7 @@ export async function hideSeenState(page: Page): Promise<void> {
 export interface Preferences {
   list_sort?: string;
   last_selected?: string;
+  compact?: boolean;
 }
 
 /** Read the helm's shared preference row (SPEC.md, Session list). */
@@ -779,7 +780,11 @@ export async function readPreferences(request: APIRequestContext): Promise<Prefe
  */
 export async function patchPreferences(
   request: APIRequestContext,
-  patch: { list_sort?: string | null; last_selected?: string | null },
+  patch: {
+    list_sort?: string | null;
+    last_selected?: string | null;
+    compact?: boolean | null;
+  },
 ): Promise<void> {
   const response = await request.put("/api/preferences", { data: patch });
   if (!response.ok()) throw new Error(`PUT /api/preferences: ${response.status()}`);
@@ -795,7 +800,7 @@ export async function patchPreferences(
  * the row in `beforeEach` rather than inherit the last test's answer.
  */
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
-  await patchPreferences(request, { list_sort: null, last_selected: null });
+  await patchPreferences(request, { list_sort: null, last_selected: null, compact: null });
 }
 
 /**
@@ -847,18 +852,17 @@ export async function openHostsPanel(page: Page): Promise<void> {
   // its own when automatic local setup needs a person (a plan, a manual
   // remedy, a probe error), and that reveal can land between this helper's
   // read and its click, turning the click into a CLOSE. Each poll clicks
-  // only while the disclosure reads closed, so a reveal that raced the
+  // only while the native checkbox reads unchecked, so a reveal that raced the
   // first click is simply observed on the next look.
   await expect
     .poll(
       async () => {
-        const expanded = await toggle.getAttribute("aria-expanded");
-        if (expanded !== "true") await toggle.click();
-        return toggle.getAttribute("aria-expanded");
+        if (!(await toggle.isChecked())) await toggle.click();
+        return toggle.isChecked();
       },
       { timeout: 20_000, intervals: [250, 500, 1000] },
     )
-    .toBe("true");
+    .toBe(true);
 }
 
 /**

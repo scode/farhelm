@@ -1,8 +1,9 @@
 /**
  * The two-tier button system's own contract (app.css's "Shared button
  * look" section and SPEC_impl.md's GUI paragraph on it): `.btn` is ghost by
- * default across the whole sheet, and `.btn-primary` is the one filled
- * exception a given SURFACE gets — never more than one live at a time on
+ * default, sidebar heading actions share a grey secondary treatment, and
+ * `.btn-primary` is the accent-filled action a given SURFACE gets — never
+ * more than one live at a time on
  * the sidebar's resting chrome, and never more than one live at a time
  * inside any single open dialog. Nothing else in the suite reads computed
  * color to check that promise (the rest of the browser suite treats CSS as
@@ -10,8 +11,9 @@
  * on), which is exactly how a specificity bug or a stray literal color
  * could ship unnoticed behind a screenshot nobody diffed pixel-for-pixel.
  *
- * Three tests: the permitted-primaries/ghost-everything-else color sweep,
- * the row kebab's opacity reveal states, and the kebab's coarse-pointer
+ * Four tests: the permitted-primaries/ghost-controls color sweep, the sidebar
+ * heading controls, the row kebab's opacity reveal states, and the kebab's
+ * coarse-pointer
  * (touch) fallback. Each is kept to a fixed, deliberately small sample of
  * controls per class of claim rather than trying to enumerate every `.btn`
  * call site in the sheet — the point is to witness the SYSTEM working, not
@@ -73,8 +75,6 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
 
     const accentFill = await resolveToken(page, "--accent-fill");
     const accentEdge = await resolveToken(page, "--accent-edge");
-    const accent = await resolveToken(page, "--accent");
-    const pressedFill = await resolveToken(page, "--control-hover-bg");
     const danger = await resolveToken(page, "--danger");
 
     // `toHaveCSS` (polling) rather than a one-shot `getComputedStyle`
@@ -130,17 +130,6 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
     await page.getByRole("button", { name: "add host" }).click();
     await expect(page.locator(".add-host-form")).toHaveCount(0);
 
-    // A disclosure is ghost at rest and takes the shared pressed accent only
-    // while the content named by `aria-expanded` is visible.
-    const details = page.locator(".host-details-toggle");
-    await expect(details).toHaveCSS("background-color", GHOST);
-    await details.click();
-    await expect(details).toHaveAttribute("aria-expanded", "true");
-    await expect(details).toHaveCSS("background-color", pressedFill);
-    await expect(details).toHaveCSS("color", accent);
-    await details.click();
-    await expect(details).toHaveAttribute("aria-expanded", "false");
-
     // --- Ghost sample #1 (row-menu item) and the destructive item, both
     // read straight out of the row's open actions menu without clicking
     // either — clicking "delete" would open ITS OWN confirmation, which is
@@ -181,6 +170,50 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
   } finally {
     await cleanupSession(request, session.id);
   }
+});
+
+/**
+ * Sidebar heading controls keep their requested hierarchy and density.
+ * Computed paint catches a more-specific selector overriding a shared class;
+ * explicit dimensions guard the compact heading size independently of paint.
+ */
+test("sidebar heading controls share secondary paint and compact sizing", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "new session" })).toHaveText("new");
+  await expect(page.getByRole("button", { name: "add host" })).toHaveText("add");
+
+  const secondary = [".profiles-toggle", ".filter-toggle", ".add-host-button"];
+  const styles = await Promise.all(
+    secondary.map((selector) =>
+      page.locator(selector).evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.backgroundColor, style.borderTopColor, style.color];
+      }),
+    ),
+  );
+  expect(styles[1]).toEqual(styles[0]);
+  expect(styles[2]).toEqual(styles[0]);
+  const primaryBackground = await page
+    .locator(".new-session-button")
+    .evaluate((node) => getComputedStyle(node).backgroundColor);
+  expect(primaryBackground).not.toBe(styles[0][0]);
+
+  for (const selector of [".new-session-button", ".add-host-button"]) {
+    await expect(page.locator(selector)).toHaveCSS("font-size", "12px");
+    await expect(page.locator(selector)).toHaveCSS("padding-top", "2px");
+    await expect(page.locator(selector)).toHaveCSS("padding-right", "8px");
+  }
+
+  // Details is a native checkbox: its checked state is the disclosure
+  // contract, and keyboard activation belongs to the browser rather than a
+  // button-specific aria-expanded emulation.
+  const details = page.locator(".host-details-toggle");
+  await expect(details).not.toBeChecked();
+  await details.click();
+  await expect(details).toBeChecked();
+  await details.click();
+  await expect(details).not.toBeChecked();
 });
 
 /**
