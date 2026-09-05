@@ -287,3 +287,16 @@ establishes an interceptor-removal race, rather than the previously suspected du
 route handlers before removing them fixes that boundary without swallowing errors. Fifty repetitions per engine passed
 on a 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c and one browser worker, as did the three shared-helper feed callers in
 each engine. Disposition: fixed; removed from TODO.md.
+
+## 2026-09-05 — sweep fixture lock inherited before exec
+
+`tests::sweep_never_reaps_a_held_lock` in `crates/farhelm-teststate/src/lib.rs` reproduced in the first parallel 16-test
+crate run on a 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c. Temporary diagnostics showed `live=1` after the fixture
+dropped its file, with the mtime already in the past: the sweep found a contended lock, rather than refusing a future
+timestamp or failing removal. Concurrent crate tests spawn tmux. Close-on-exec does not prevent a child from briefly
+inheriting the parent's open file description, and a pipe-barrier fork probe confirmed that the flock survives the
+parent's close until the child exits. The fixture now unlocks explicitly before asserting reaping; the initial held-lock
+safety assertions and production sweep are unchanged. Twenty subsequent parallel crate runs passed. Forty earlier
+isolated runs, split equally with and without a controlled agent marker, also passed; this sweep does not read process
+environments. Earlier entries' claim that Cargo runs separate crate test binaries concurrently was incorrect; the
+relevant concurrency is inside this crate's test process. Disposition: fixed; removed from TODO.md.
