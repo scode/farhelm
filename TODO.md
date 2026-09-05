@@ -45,6 +45,25 @@ everything not yet sorted, which carries no implication either way. Within a buc
     Rust reboot coverage in `crates/farhelm/tests/e2e/boot_id_durable_outcome.rs` already expects attachment to an
     interrupted session to fail; that refusal must become an ordinary recovery state in the UI.
 
+- Rearrange the session-list layout. On the first row, put the status dot at the far left, immediately followed by the
+  this-machine/remote icon, then the session name; keep the dots and icons aligned across sessions. Move the agent type
+  onto that same row, aligned toward the right, followed by the activity time in a right-aligned column so times stay in
+  a consistent horizontal position across sessions, immediately before the narrow menu gutter. Remove the hostname from
+  this row. On the second row, show the hostname (alias if set), followed by a colon (`:`), followed by the directory.
+- Narrow the right-hand menu gutters in both the session and host lists. They take up too much horizontal space for the
+  popup menus; make each only slightly wider than the `...` button.
+- Add a compact-mode checkbox beside the session count, on the same row. When checked, hide each session's second row
+  (hostname and directory) so more sessions fit on screen; when unchecked, show it.
+- Make the host list's "details" toggle a proper checkbox and put it to the right of the host count, on the same row, so
+  it does not take up an extra row of vertical space.
+- Style "add host" like the "new session" button, but use a greyish color so "new session" remains the primary action.
+  Put it on the host-count row, right-aligned. A smaller size than "new session" is fine to fit the heading. Rename it
+  to "add", since the row makes it clear that it applies to hosts.
+- Make "profiles" at the top left and "filter" at the top of the session list proper buttons, using the same greyish
+  button style as the host list's "add" button.
+- Move "new session" onto the session-count ("N sessions") row, right-aligned, and rename it to "new", since the row
+  makes it clear that it applies to sessions. Keep its existing style and color, but make it slightly smaller to fit the
+  row.
 - Deflake `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e). Fingerprint:
   `the supervisor never answered the agent request: Elapsed(())` from the peer's 20 s `answer()` budget, panicking at
   the `answer()` expect. It is a load flake that predates the profiles/host-list stack: on 2026-09-02 a 4-vCPU sandbox
