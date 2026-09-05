@@ -4,11 +4,12 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Five buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "near term" is what should be picked up next; "systematic deflake" is the
-plan for making the test suites stop failing under load as a class, distinct from the per-test deflake entries under
-"near term" that it is meant to retire; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is
-everything not yet sorted, which carries no implication either way. Within a bucket, no order.
+Six buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
+the decision is made, only the work remains; "near term" is what should be picked up next; "difficult deflake" holds
+unresolved test failures after targeted investigation, with evidence and the next useful measurement; "systematic
+deflake" is the plan for making the test suites stop failing under load as a class, distinct from the per-test entries
+it is meant to retire; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is everything not yet
+sorted, which carries no implication either way. Within a bucket, no order.
 
 ## Definite simplification
 
@@ -45,82 +46,160 @@ everything not yet sorted, which carries no implication either way. Within a buc
     Rust reboot coverage in `crates/farhelm/tests/e2e/boot_id_durable_outcome.rs` already expects attachment to an
     interrupted session to fail; that refusal must become an ordinary recovery state in the UI.
 
-- Investigate the unreproduced profiles startup/bridge symptoms from the loaded 0.3.0-rc.1 browser runs on 2026-09-03.
-  `stale focus-out classifiers cannot clear newer obligations` failed with "the page never opened feed socket #1 (saw
-  0)" inside `stubFeed` (`e2e/tests/helpers/fleet.ts`), before exercising the classifiers. The focus-and-Escape case was
-  also diagnosed then as an exhausted Unknown classification leaving the popup mounted; that product diagnosis remains
-  unproven. Against `d71a87fb`, separate exact runs reproduced different harness focus races that are now corrected.
-  Those corrections passed six initial cases and 120 repetitions (20 per case per engine) on a 4-vCPU, 8-GiB sandbox
-  with pinned tmux 3.7c, one Playwright worker, and two CPU-load children in the repeated run, without reproducing
-  either older fingerprint. This is non-reproduction, not a fix for these symptoms. Retain the full browser/bridge trace
-  and feed open/close timestamps on recurrence, distinguishing no socket request from a late request and a classifier
-  that exhausted its observations. Do not widen startup waits or add another focus-retry mechanism without that
-  evidence.
-- Deflake `a client that stops draining is detached with the stall reason after the full stall interval`
-  (e2e/tests/terminal-flood.spec.ts), WebKit. On the same loaded 4-vCPU sandbox, 2026-09-03, the poll "the attachment
-  must cross HIGH_WATER and pause before the stall clock can start" saw zero pauses in 30 s: the flood never built
-  enough backpressure to pause the client, so the stall clock the test measures never started. The spec and the
-  backpressure code were untouched by the stack that surfaced it; the load itself is the difference. Attempted the same
-  day without reproduction: 30 loaded WebKit runs of the test on a 4-vCPU sandbox (a `cargo build` looping beside
-  Playwright) all passed, and a temporary timer around the gate-to-first-pause interval measured 1.3 to 2.7 s loaded
-  (ten runs), 1.3 s unloaded on WebKit and 0.9 s on Chromium, against the poll's 30 s budget. No change was made on that
-  evidence. The next attempt needs the full Playwright output of a failing run, since the one sighting's log was not
-  kept; if it recurs, the first question is whether the flood finished before the client ever paused.
-- Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), again. On
-  2026-09-03, on a 4-vCPU sandbox with a `cargo build` looping beside the tests, 2 of 10 single runs and 1 of 3
-  full-binary runs at `--test-threads=4` against 0.3.0 timed out after 40 s waiting for `BINARY-MARKER`: the request
-  byte sent through the attachment never produced the fixture's reply within the budget. The fixture is already in raw
-  mode before it prints READY (#339), so the first suspect is the input path under load (`send_input`, the supervisor's
-  `send-keys` exchange, the fixture's read) rather than the fixture, and the second is the budget. Start at rung 1 of
-  `.agents/narrow-tests.md` on a loaded 4-vCPU box and keep the full transcript the harness panic prints; the sandbox
-  run that found this kept only a summary. It then failed the same way on a GitHub-hosted runner (CI run 33716079614,
-  the `test` job on a docs-only PR of this stack), so it is a CI flake, not only a sandbox one; kept transcripts from
-  later sandbox runs show READY present, once in snapshot shape, and nothing at all after the request byte. Localized on
-  2026-09-03 and NOT a budget: 8 of 20 loaded single runs failed, and with a temporary test-side barrier (a
-  `ListSessions` request queued right after `send_input`; the helm writer keeps frame order and `handle_connection`
-  finishes the input handler before reading the next frame, so the list's reply proves the `send-keys` exchange
-  completed) a failing run showed `send_input` queued in 11 µs, the barrier replied in 6 ms, and the marker still never
-  came in 40 s. So tmux acknowledged the `send-keys` command and the raw-mode fixture never received the byte, or never
-  produced its reply. The fix is product work, needing a maintainer decision: make the input-delivery contract detect or
-  recover from a `send-keys` that tmux acknowledges without the pane seeing it (or find why the pane does not). Neither
-  widening the 40 s wait nor changing the fixture addresses the measurement. The test carries `#[ignore]` since
-  2026-09-03, after failing 3 of 9 GitHub runs of one stack in a day, the same move the other load flakes got; the fix
-  un-ignores it.
-- Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e): on
-  2026-09-03, on a loaded 4-vCPU sandbox running the full binary at `--test-threads=4`, it failed 1 of 3 runs on its 64
-  MiB in-process RSS assertion (terminal_backpressure.rs:906 at 0.3.0), not in the flood-start wait its siblings died
-  in. It then passed 21 loaded runs (one full-binary baseline plus 20 `terminal_backpressure::` module runs) while the
-  flood-start oracle was being fixed, so there is one sighting and no hypothesis; a first look is what else the test
-  process held in memory during that run (the module runs 16 tests, 4 threads, each with a 12 MiB flood).
-- Deflake `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e): on 2026-09-03, on the
-  same loaded sandbox, `timed out waiting for "FAKE-AGENT READY"` in 1 of 3 full-binary runs on 0.3.0 and 1 of 3 on the
-  attach-boundary stack, never alone. No hypothesis yet; start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU
-  box with the full transcript kept.
-- Deflake `session_rename::a_renamed_title_survives_a_supervisor_restart` (crates/farhelm/tests/e2e): on 2026-09-03, in
-  1 of 3 loaded full-binary runs at `--test-threads=4` on a 4-vCPU sandbox (a `cargo build` looping beside the tests),
-  the restart helper it shares with `create_idempotency.rs` panicked in its own setup check, "the replacement must hold
-  the state directory's claim, or it reconciles nothing and this test would pass for the wrong reason". One sighting,
-  never alone, no hypothesis beyond the fingerprint: the replacement supervisor did not win the state directory's claim
-  in time under load. Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box with the full transcript kept.
-- Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`: seen
-  once in Chromium during a full browser-suite run on a 4-vCPU sandbox on 2026-09-03, with both engines and no extra
-  load beside the suite itself. No cause established. Start at rung 1 of `.agents/narrow-tests.md` with `--repeat-each`
-  on Chromium. The saved-profile case formerly grouped here has its own fix recorded in FLAKES.md.
-- Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
-  (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs): failed once on 2026-09-03 in a loaded `--test-threads=4`
-  full-binary run on a 4-vCPU sandbox ("a consumed sentinel is deleted once its Error outcome commits durably"),
-  untouched by whatever else was in that tree at the time, and passed cleanly reproduced alone immediately after. One
-  sighting, no hypothesis beyond "load-sensitive". Start at rung 3 of `.agents/narrow-tests.md` on a loaded 4-vCPU box.
-- Put the tmux e2e suite back into the release gate, and un-ignore the remaining load-flaky test, once the deflake
-  entries above are done. As of 0.3.0-rc.3 the release build's test step (`.github/dist-build-setup.yml`) runs every
-  test target EXCEPT the `farhelm` crate's integration tests, because on the GitHub-hosted 4-vCPU runner one or two of
-  the load-sensitive tests above failed on most tag builds (rc.1: three gate runs, rc.2: two), each time a different
-  one, with the code they check unchanged; and `session_lifecycle::non_utf8_terminal_output_survives_live_stream`
-  carries `#[ignore]` so CI's full suite stops rolling the same dice (the delete fail-closed test and the two
-  `terminal_backpressure` tests were ignored too, and were un-ignored in #355 and #357; the invalid-byte test joined the
-  list after its stall was localized to the input path and failed 3 of 9 GitHub runs of this stack in one day). The
-  suite still runs in CI's `test` job on every ready PR and before a stack lands, so the gap is at tag time only.
-  Reversing both is the definition of done for the deflake work.
+## Difficult deflake
+
+These entries remain unresolved after targeted investigation; clean repetitions are non-reproduction evidence, not
+fixes. The 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs, 8 GiB RAM, and pinned tmux 3.7c.
+Unless stated otherwise, Rust batches ran twenty fresh invocations of the built `farhelm` e2e binary with the exact
+named test and `--exact --show-output`, stopping at the first failure. The ignored binary-output case also used
+`--include-ignored`. Browser batches used the named project/test with `--workers=1 --repeat-each=20
+--max-failures=1`.
+`.agents/narrow-tests.md` gives the corresponding Cargo and Playwright commands. Extra load, changed fixtures, and
+historical evidence are called out per entry.
+
+The combined native run at `aa333815` used four test threads and the same pinned tmux, with a real systemd user manager
+and no extra CPU-load process. The stalled-viewer RSS, degenerate-size READY, replacement-claim, and malformed sentinel
+cases all passed in that run. The whole e2e binary was 336 passed, four failed in the shared forced-pause helper
+described below, and five ignored (four credentialed real-agent cases plus binary output). That wider non-reproduction
+does not resolve the four historical cases.
+
+An earlier corrected combined browser run passed 467 Chromium tests with two credential skips. WebKit passed 457,
+skipped eleven (two credential cases and nine unsupported clipboard-permission cases), and failed the large-message case
+below. That failure also reproduced on the frozen baseline; the WebKit command remains a failed command, not a clean
+gate.
+
+The final browser runs at `6903cf90` selected all 469 tests per engine with one worker. Chromium finished with 465
+passed, two profiles failures, and two credential skips in 24.4 minutes. WebKit finished with 456 passed, two failures
+(menu focus and stalled-client detachment), and eleven expected skips in 29.4 minutes. The profiles failures reproduced
+on the frozen baseline; the menu failure appears pre-existing but did not reproduce in twenty baseline attempts; the
+stall failure recurred from the existing entry. Their evidence and remaining uncertainty are below. Neither full command
+is a clean gate.
+
+- Investigate the remaining profiles startup/bridge symptoms in `e2e/tests/profiles.spec.ts` from the loaded 0.3.0-rc.1
+  runs on 2026-09-03. `stale focus-out classifiers cannot clear newer obligations` failed inside `stubFeed`
+  (`e2e/tests/helpers/fleet.ts`) with "the page never opened feed socket #1 (saw 0)", before exercising classifiers. The
+  focus-and-Escape case was also diagnosed then as an exhausted Unknown classification leaving the popup mounted; that
+  product diagnosis remains unproven. Against the baseline above, exact runs reproduced different harness focus races,
+  corrected in #385: a reopened popup was visible before focus entered it, and the Unknown fixture produced known
+  Missing instead. Those corrections passed six initial cases and 120 repetitions (20 per case per engine) with two
+  CPU-load children; the later explicit Unknown oracle passed another twenty per engine without extra load. Neither
+  older fingerprint recurred. The previous event-driven retry/classification-ordinal attempt made pending focus failures
+  more frequent and did not settle Escape dismissal; do not revive it as a proven solution. On recurrence, retain the
+  full browser/bridge trace and feed open/close timestamps, separating no socket request from a late request and a
+  classifier exhausting observations. A new retry policy needs that evidence first.
+- Fix the distinct focus failures in `an inert sidebar click dismisses the profiles popup` and
+  `a popup-created profile is offered on every host`, in `e2e/tests/profiles.spec.ts`. Both failed in the final Chromium
+  run at `6903cf90` on the worker shape and pin above, without extra load. The first observed body focus after its
+  outside click, then found the popup still mounted with its new-profile button focused: the delayed opening handoff
+  returned focus inside and canceled dismissal. The second filled invocation while an editor handoff was still pending;
+  the trace shows that text appended to the name, an empty required invocation field, and no POST to the profile route.
+  Its catalog wait therefore timed out without a save ever being sent. A pinned candidate batch passed the first case
+  once, then failed the second on its first attempt. Separate exact baseline batches on untouched `d71a87fb`, with
+  `--repeat-each=20 --max-failures=1 --workers=1`, failed the inert case immediately and the profile case after one
+  pass. Both failures therefore predate this work; passing retries would not settle them. The relevant popup production
+  code is unchanged. The inert-click failure is a product focus-obligation defect: a trusted outside click must override
+  or invalidate the stale opening-focus request, as `SPEC_impl.md` requires. Preserve that immediate click in the test;
+  waiting for opening focus first would hide the defective ordering. The profile-creation failure is a separate fixture
+  handoff race: apply the existing editor-name-focus precondition before filling fields. Repeat both engines and retain
+  focus-event traces after each correction. Do not add retries or widen the catalog wait.
+- Investigate `opening the actions menu enters it, and Tab leaves it` in `e2e/tests/sidebar.spec.ts`, WebKit. At
+  `6903cf90`, the full run failed to open the menu with ArrowDown. Its trace shows the toggle focus assertion passing,
+  then terminal focus in the keyboard-action snapshot about 23 ms later; the menu handler never received that key.
+  Initial terminal reveal was still pending despite `__farhelmTermReady` being true. The test, menu handler, and
+  `terminal.js` are unchanged from `d71a87fb`, suggesting a pre-existing fixture race, but twenty exact baseline
+  executions passed without extra load on the worker shape and pin above. The new layout may affect its frequency; there
+  is no direct baseline reproduction. First check whether awaiting `__farhelmTest.replay.revealed` before focusing the
+  toggle settles initial reveal, then retain focus and reveal receipts in repetitions of both engines. Keep this
+  initial-attach race distinct from reconnect behavior, and retain the keyboard-entry and Tab-exit assertions.
+- Deflake `a client that stops draining is detached with the stall reason after the full stall interval` in
+  `e2e/tests/terminal-flood.spec.ts`, WebKit. The loaded 2026-09-03 failure saw zero pauses after thirty seconds, before
+  the sixty-second stall interval could start. Thirty prior loaded repetitions passed; ten gate-to-first-pause
+  measurements were 1.3–2.7 seconds versus the thirty-second allowance. Source inspection found the fixture still
+  patches future writes before mounting, waits for readiness, and releases a gated producer of 800,000 numbered records
+  that then idles. The final `6903cf90` WebKit run reproduced zero pauses for thirty seconds, with a stalled-detach
+  banner already visible about 404 ms after the gate send. This is much earlier than the supervisor's sixty-second
+  interval. The unchanged helm outgoing-channel backstop may have detached first, before the browser paused; the trace
+  does not prove that cause. Retain detach-reason and queue receipts alongside gate send, received bytes, pending
+  writes, pauses, replay state, and FLOOD-DONE to distinguish helm backpressure from supervisor stall, producer
+  completion, and replay cutover. Do not widen the budget before locating why HIGH_WATER was never reached.
+- Deflake `an over-one-megabyte message does not drop the terminal socket` in `e2e/tests/terminal-flood.spec.ts`,
+  WebKit. The combined run failed its fifteen-second `echo:after-big-message` wait after the socket-open/drained
+  assertion passed. The trace shows steadily growing echoed input and the exact reply arriving at the deadline; the
+  final inner assertion succeeded just after the outer poll timed out. Twenty fresh-stack candidate executions passed,
+  but the same exact test failed on execution thirteen of untouched `d71a87fb`, after twelve passes, on the same
+  four-CPU worker without extra load. This establishes a pre-existing flake. The 1-MiB-plus-one-byte paste becomes 4,097
+  tmux send-key commands; draining the browser socket does not mean the pane has processed them. The poll also returns
+  the whole megabyte-scale terminal buffer. Measure pane processing and marker delivery separately from buffer
+  serialization before choosing a scoped assertion or budget correction. Retain the open-socket, drain, and exact-reply
+  assertions; no timeout increase or product change was made in this pass.
+- Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` in
+  `crates/farhelm/tests/e2e/session_lifecycle.rs`. The baseline failed on the fifth exact execution (four passed): READY
+  arrived but BINARY-MARKER did not arrive within forty seconds. Earlier command-acknowledgement diagnostics localized
+  this as missing input, but new fixture receipts disprove that diagnosis for a reproduced occurrence: the fixture
+  consumed its input and flushed the binary reply, yet the client still saw no marker. Twenty quiet diagnostic runs
+  passed; with two CPU-load children, sixteen passed before the seventeenth failed with both receipts present. Keeping
+  the fixture alive after flushing passed twenty loaded runs. Restoring immediate exit with failure-only pane capture
+  and dead-state diagnostics also passed twenty loaded runs, so no failing capture was obtained. This points toward an
+  output/exit handoff without proving where bytes were lost; the timeout without a detach also weakens a simple early
+  terminal-end explanation. Keep `#[ignore]`. Next record raw tmux control markers, decoded payload counts, forwarder
+  enqueue, writer completion, and terminal-end handoff for this pane. Input replay, sleeps, or a final capture protocol
+  would add delivery/duplication semantics without a demonstrated cause and exceed this pass's scoped-fix boundary.
+- Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` in
+  `crates/farhelm/tests/e2e/terminal_backpressure.rs`. Twenty exact baseline runs passed. The historical loaded
+  four-thread failure exceeded the 64-MiB supervisor RSS allowance; twenty-one earlier loaded runs also passed. That
+  supervisor lives inside the e2e process, so the sample includes libtest, harness, and sibling allocations; the
+  separate tmux RSS sample belongs to this test's private server. The producer-progress assertion excludes a stopped
+  producer as the explanation for a pass. On recurrence, retain every RSS/progress sample, active sibling identities,
+  and a bounded allocator breakdown to attribute growth before changing a queue or bound. The four-thread full binary
+  supplies the co-resident allocations an isolated loop omits.
+- Deflake `session_lifecycle::attach_with_degenerate_size_still_works` in
+  `crates/farhelm/tests/e2e/session_lifecycle.rs`. Twenty exact baseline runs passed. Historical failures occurred only
+  in loaded four-thread full binaries, waiting for READY before asserting the clamped 1x1 geometry. `basic_session`
+  returns after pane creation, while `basic_session_ready` waits for agent execution; substituting the latter would
+  change the launch/attach boundary under test. On a failing run retain attach/replay markers and bounded pane capture,
+  dead state, current command, and dimensions to distinguish launch, tmux grid, and live delivery. A missing READY is
+  not evidence that the clamp failed, and no budget correction is established.
+- Deflake `session_rename::a_renamed_title_survives_a_supervisor_restart` in
+  `crates/farhelm/tests/e2e/session_rename.rs`. Twenty exact baseline runs passed. The historical loaded four-thread
+  failure was the replacement supervisor ownership assertion in the shared `create_idempotency.rs` handoff helper,
+  before the rename reload assertion. Its successful temporary probe takes a flock and closes the file before creating
+  the replacement. A concurrent fork can retain that open file description until exec, the mechanism demonstrated for
+  the separate sweep fixture fixed in #384. This is a concrete hypothesis here, not a reproduced cause. Trace probe
+  acquisition/release and the replacement claim result during concurrent process creation. If inherited probe ownership
+  is confirmed, explicitly unlocking that probe is a scoped fixture correction. Retain the ownership assertion: a
+  read-only reload could otherwise make the rename test pass without exercising a real successor.
+- Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
+  isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
+  worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus
+  race, fixed in #385 and validated twenty times per engine. For this remaining geometry case, retain the pre-open
+  scroll epoch, opening epoch, measured rectangle epoch, focus settlement, and post-open scroll event on recurrence. The
+  test already waits for popup focus before the second scroll. No failing trace yet establishes that its timing or
+  geometry contract should change.
+- Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail` in
+  `crates/farhelm/tests/e2e/launch_sentinel_error_status.rs`. Twenty exact baseline runs passed. The historical loaded
+  four-thread assertion found the expected durable Error state but a surviving sentinel. Source awaits cleanup after
+  `transition_many` commits; removal is best-effort and logs non-NotFound errors. It is not an unawaited deletion race.
+  On recurrence capture unlink path/errno, planted versus derived generation paths, and the committed session ID. If the
+  paths match and no removal warning exists, inspect the actual directory entry before changing cleanup semantics.
+- Fix the forced-pause helper's client-list parsing in `crates/farhelm/tests/e2e/terminal_backpressure.rs`. The combined
+  `aa333815` run failed four cases with "no output control client found among tmux clients":
+  `replay_marker::a_tmux_pause_catch_up_replays_without_a_marker`,
+  `terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment`,
+  `terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane`, and
+  `terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state`. The listing visibly contained the output
+  client's `pause-after=5` flag, but an underscore separated its name from the flags where the helper expects a tab. The
+  exact replay-marker case also failed on untouched `d71a87fb` with one test thread in 0.47 seconds, on a second worker
+  with the same pinned 3.7c and no extra load. Both the helper and these test bodies are unchanged across the
+  comparison; this is a newly observed pre-existing test/substrate compatibility failure, not evidence that catch-up
+  itself broke. Retain the listing, check the formatter's delimiter bytes, and use an unambiguous supported separator
+  while keeping the positive `pause-after` discriminator. Then validate all four callers against the pinned substrate.
+- Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
+  above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
+  viewer RSS, degenerate-size READY, replacement claim, malformed-sentinel, and forced-pause helper cases still block
+  restoring the entire `farhelm` integration target in `.github/dist-build-setup.yml`. Browser flakes are separate
+  coverage and do not themselves gate that Rust target. The integration suite still runs in CI's test job for ready PRs.
+  A single clean combined run cannot establish that these latent failures are fixed; retain the release exclusion until
+  the evidence supports reversing it.
 
 ## Systematic deflake
 
@@ -129,8 +208,9 @@ only under load (a 4-vCPU sandbox running the browser suite beside a live stack,
 runner running the Rust suite beside its own build), never on a developer machine. Three tag builds of rc.1 and two of
 rc.2 failed on a different one or two of them each time. They were not evenly spread: almost all of them came from two
 seams, the tmux attach boundary in the Rust e2e harness and fixed time budgets tuned for a fast box, with the profiles
-popup's focus machinery a third on the browser side. The per-test entries under "near term" hold the fingerprints; the
-work below is what retires them as a class. Order is a suggestion, from cheapest and most certain to most speculative.
+popup's focus machinery a third on the browser side. The historical cases from those runs are now retained under
+"difficult deflake"; the work below is what retires them as a class. Order is a suggestion, from cheapest and most
+certain to most speculative.
 
 - One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
   relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
@@ -148,7 +228,9 @@ work below is what retires them as a class. Order is a suggestion, from cheapest
 - Tier by sensitivity, not by suite. The 0.3.0 emergency cut removed the whole tmux e2e suite from the release gate (see
   the "put the tmux e2e suite back" entry above); the durable form is a "load-sensitive" tier — a nextest test group or
   a Playwright tag — that the gate runs with retries or on a quieter runner, while everything else gates as before.
-  Membership starts as the per-test entries under "near term" and shrinks as they are fixed.
+  Membership starts as the historical cases from those 0.3.0 runs now under "difficult deflake" and shrinks as they are
+  fixed. Newly encountered failures share that bucket for tracking; adding one does not automatically enroll it in this
+  initial tier.
 - Run the gate's suite where it is not competing with the release build. The tag build runs the suite inside the build
   job on a 4-vCPU runner while the release build itself is warm; `--test-threads=2` there, or a separate job on a larger
   runner, is a cheap experiment that may remove most of the load by itself. Measure before and after.

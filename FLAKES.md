@@ -329,3 +329,83 @@ field, which could interrupt Playwright filling the invocation field. The test n
 before filling the other field; it still blocks catalog reads and verifies that the save reply alone updates the row and
 the reopened editor. Twenty corrected repetitions per engine passed without extra CPU load. Disposition: harness
 correction; the separate layout-epoch case remains in TODO.md.
+
+## 2026-09-05 — binary reply is flushed but absent from the live attachment
+
+`session_lifecycle::non_utf8_terminal_output_survives_live_stream` in `crates/farhelm/tests/e2e/session_lifecycle.rs`
+failed on the fifth exact execution against `d71a87fb`, with READY but no BINARY-MARKER after forty seconds. On a
+four-CPU, 8-GiB worker with pinned tmux 3.7c, a temporary fixture recorded both consuming the request byte and flushing
+the binary reply in a reproduced loaded failure (sixteen passes, then the seventeenth failed, with two CPU-load
+children). Twenty quiet diagnostic runs passed. Keeping the fixture alive after flushing passed twenty loaded runs;
+restoring immediate exit with failure-only pane diagnostics also passed twenty, so no failing pane capture was obtained.
+The receipt disproves the older missing-input localization for this occurrence and supports investigating the
+output/exit handoff, without establishing which layer lost progress. No product change or fixture keep-alive was
+shipped. Disposition: remains ignored and open under Difficult deflake in TODO.md, with the next
+raw-tmux/forwarder/writer/terminal-end measurements recorded there.
+
+## 2026-09-05 — forced-pause client listing lacks the expected tab
+
+`replay_marker::a_tmux_pause_catch_up_replays_without_a_marker` and
+`terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment`,
+`terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane`, and
+`terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state`, in
+`crates/farhelm/tests/e2e/replay_marker.rs` and `crates/farhelm/tests/e2e/terminal_backpressure.rs`, failed in the
+four-thread native run at `aa333815` on a four-CPU, 8-GiB worker with pinned tmux 3.7c. Their shared helper could not
+find an output control client even though the printed listing contained `pause-after=5`: the name/flags separator was an
+underscore, while the parser splits at a tab. The exact replay-marker case reproduced on untouched `d71a87fb` on a
+second worker with the same pin, one test thread, and no extra load. The helper and test bodies are unchanged across
+that comparison. This establishes a pre-existing test/substrate compatibility failure before the catch-up assertions,
+not a new product regression. Disposition: open under Difficult deflake in TODO.md; inspect delimiter bytes and correct
+the helper without weakening its positive output-client discriminator.
+
+## 2026-09-05 — large terminal paste reaches the reply deadline
+
+`an over-one-megabyte message does not drop the terminal socket` in `e2e/tests/terminal-flood.spec.ts` failed in the
+combined WebKit run on a four-CPU, 8-GiB Ubuntu worker with pinned tmux 3.7c. The socket-open/drained assertion passed,
+but the fifteen-second `echo:after-big-message` wait timed out. Its retained trace shows steadily growing echoed input
+and the exact reply arriving at the deadline, with the inner assertion succeeding just after the outer poll timed out.
+Twenty fresh-stack exact candidate executions passed; restoring and rebuilding untouched `d71a87fb` on the same worker
+reproduced the same reply-wait failure on execution thirteen, after twelve passes, without extra CPU load. This proves
+the failure predates the current fixes. Processing 4,097 tmux send-key commands and returning the whole megabyte-scale
+terminal buffer leave little assertion margin; the relative costs still need measurement. Disposition: open under
+Difficult deflake in TODO.md. No timeout or product behavior was changed, and the failed full WebKit command is not
+counted as a clean gate.
+
+## 2026-09-05 — two distinct profiles focus handoffs fail
+
+`an inert sidebar click dismisses the profiles popup` and `a popup-created profile is offered on every host`, in
+`e2e/tests/profiles.spec.ts`, failed in Chromium at `6903cf90` on a four-CPU, 8-GiB Ubuntu 24.04 worker with pinned tmux
+3.7c and no extra load. The inert-click trace observes body focus, then a late opening handoff returns focus to the
+new-profile button and the popup stays mounted. The create-profile trace shows a pending editor handoff redirecting
+invocation text into the name; native required-field validation refuses the empty invocation, no POST reaches the route,
+and the catalog wait expires. A correctly pinned candidate batch passed inert once and failed profile creation once.
+Separate exact baseline batches on untouched `d71a87fb` failed inert on the first attempt and profile creation on the
+second, after one pass. The popup production code is unchanged. The inert click exposes a pre-existing product
+focus-obligation defect: the late opening request overrides the user's newer outside destination. Preserve the immediate
+outside click as regression coverage and make that obligation invalidate or override stale opening focus; waiting past
+the handoff would hide the defect. Profile creation is a separate fixture race, for which the existing editor-name-focus
+precondition is the next correction to try. Disposition: both remain open under Difficult deflake in TODO.md; no
+product, timeout, or retry change was made for these failures in this pass.
+
+## 2026-09-05 — WebKit menu entry loses focus to initial terminal reveal
+
+`opening the actions menu enters it, and Tab leaves it`, in `e2e/tests/sidebar.spec.ts`, failed in the full WebKit run
+at `6903cf90` on a four-CPU, 8-GiB Ubuntu 24.04 worker with pinned tmux 3.7c and no extra load. The toggle-focus
+assertion passed, but the ArrowDown action snapshot about 23 ms later showed terminal focus and the menu stayed closed.
+The trace places this at initial attach/reveal, after `__farhelmTermReady` became true. The test, menu handler, and
+`terminal.js` are unchanged from frozen `d71a87fb`; twenty quiet exact baseline executions passed. This therefore
+appears pre-existing, but is not baseline-reproduced, and the changed layout may affect its frequency. Disposition: open
+under Difficult deflake in TODO.md. Check actual replay-reveal settlement before focusing the toggle, keeping keyboard
+entry and Tab exit covered; do not treat terminal readiness alone as proof that focus has settled.
+
+## 2026-09-05 — WebKit stalled-client case detaches before observing a pause
+
+`a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward
+replays`,
+in `e2e/tests/terminal-flood.spec.ts`, reproduced the historical zero-pause failure in the full WebKit run at `6903cf90`
+on a four-CPU, 8-GiB Ubuntu 24.04 worker with pinned tmux 3.7c and no extra load. Pause count stayed zero for thirty
+seconds, but the trace already showed the stalled-detach banner about 404 ms after gate send, much earlier than the
+supervisor's sixty-second stall interval. The unchanged helm outgoing-channel backstop may have won before the browser
+paused; the trace establishes the ordering, not that queue-level cause. Disposition: still open under Difficult deflake
+in TODO.md. Add detach-reason and queue receipts to the existing gate/write/replay measurements before repeating the
+expensive scenario or changing its budget.
