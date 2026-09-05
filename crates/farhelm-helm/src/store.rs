@@ -108,7 +108,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 17;
+const SCHEMA_VERSION: i64 = 18;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -649,10 +649,11 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
 }
 
 /// The client preference this helm remembers for every client at once
-/// (SPEC.md, Session list): the chosen list order and the session the user
-/// last selected. One row, one shape — the stored row and the `GET` reply.
+/// (SPEC.md, Session list): the chosen list order, session the user last
+/// selected, and compact-row choice. One row, one shape — the stored row and
+/// the `GET` reply.
 ///
-/// Both fields are `Option` because "never set" is a real state: the
+/// Every field is `Option` because "never set" is a real state: the
 /// client's default applies. `list_sort` is the bare `?sort=` word
 /// ([`parse_sort_key`]), stored as the word rather than the enum so an
 /// unset value has an honest representation; `last_selected` is a bare
@@ -667,6 +668,8 @@ pub struct Preferences {
     pub list_sort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_selected: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compact: Option<bool>,
 }
 
 /// A sparse change to [`Preferences`]: each field is absent (leave it as
@@ -696,6 +699,12 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_selected: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compact: Option<Option<bool>>,
 }
 
 /// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
@@ -706,6 +715,17 @@ where
     D: serde::Deserializer<'de>,
 {
     <Option<String> as serde::Deserialize>::deserialize(deserializer).map(Some)
+}
+
+/// Deserialize the boolean counterpart of [`double_option`].
+///
+/// Keeping this typed makes malformed compact patches a request error rather
+/// than silently translating a misspelled string into an unrelated layout.
+fn double_option_bool<'de, D>(deserializer: D) -> Result<Option<Option<bool>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Option<bool> as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 impl SessionFilter {
@@ -1490,22 +1510,23 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  created_at  INTEGER NOT NULL
              ) STRICT;
              -- The ONE client preference row (SPEC.md, Session list): the
-             -- chosen list order and the last user-selected session, shared
+             -- chosen list order, last user-selected session, and compact rows, shared
              -- by every client of this helm. Singleton for the same reason
              -- web_token is: no client keeps its own copy, so there is
-             -- exactly one answer to remember. Both columns nullable — an
+             -- exactly one answer to remember. Preference columns are nullable — an
              -- unset preference is a real state (the default) and the row
              -- may hold one without the other.
              CREATE TABLE preferences (
                  singleton     INTEGER PRIMARY KEY CHECK (singleton = 1),
                  list_sort     TEXT,
-                 last_selected TEXT
+                 last_selected TEXT,
+                 compact       INTEGER CHECK (compact IN (0, 1))
              ) STRICT;
              {SESSION_SEEN_SCHEMA}
              -- Must equal SCHEMA_VERSION exactly — see the Rust comment
              -- above this whole `execute_batch` call for what goes wrong
              -- when the two drift.
-             PRAGMA user_version = 17;",
+             PRAGMA user_version = 18;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1927,6 +1948,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch(&format!("{SESSION_SEEN_SCHEMA} PRAGMA user_version = 17;"))
             .context("migrating helm.db to schema version 17")?;
         version = 17;
+    }
+    if version == 17 {
+        // Compactness is a boolean presentation preference, but it belongs
+        // in the same shared row as sort and selection so a browser and the
+        // desktop client seed the same layout after their next read.
+        tx.execute_batch(
+            "ALTER TABLE preferences ADD COLUMN compact INTEGER CHECK (compact IN (0, 1)); \
+             PRAGMA user_version = 18;",
+        )
+        .context("migrating helm.db to schema version 18")?;
+        version = 18;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2385,12 +2417,13 @@ impl HelmStore {
             conn.lock()
                 .expect("helm db mutex poisoned")
                 .query_row(
-                    "SELECT list_sort, last_selected FROM preferences WHERE singleton = 1",
+                    "SELECT list_sort, last_selected, compact FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
                         Ok(Preferences {
                             list_sort: row.get(0)?,
                             last_selected: row.get(1)?,
+                            compact: row.get(2)?,
                         })
                     },
                 )
@@ -2425,18 +2458,28 @@ impl HelmStore {
             // which a COALESCE could not express.
             let sort_present = patch.list_sort.is_some();
             let selected_present = patch.last_selected.is_some();
+            let compact_present = patch.compact.is_some();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
+            let compact = patch.compact.flatten();
             conn.lock()
                 .expect("helm db mutex poisoned")
                 .execute(
-                    "INSERT INTO preferences (singleton, list_sort, last_selected) \
-                     VALUES (1, ?1, ?2) \
+                    "INSERT INTO preferences (singleton, list_sort, last_selected, compact) \
+                     VALUES (1, ?1, ?2, ?3) \
                      ON CONFLICT (singleton) DO UPDATE SET \
-                         list_sort = CASE WHEN ?3 THEN excluded.list_sort ELSE list_sort END, \
-                         last_selected = CASE WHEN ?4 THEN excluded.last_selected \
-                                              ELSE last_selected END",
-                    rusqlite::params![sort, selected, sort_present, selected_present],
+                         list_sort = CASE WHEN ?4 THEN excluded.list_sort ELSE list_sort END, \
+                         last_selected = CASE WHEN ?5 THEN excluded.last_selected \
+                                              ELSE last_selected END, \
+                         compact = CASE WHEN ?6 THEN excluded.compact ELSE compact END",
+                    rusqlite::params![
+                        sort,
+                        selected,
+                        compact,
+                        sort_present,
+                        selected_present,
+                        compact_present
+                    ],
                 )
                 .context("writing the client preference")?;
             Ok(())
@@ -5025,11 +5068,16 @@ mod tests {
             .update_preferences(patch(r#"{"last_selected":"session-1"}"#))
             .await
             .unwrap();
+        store
+            .update_preferences(patch(r#"{"compact":true}"#))
+            .await
+            .unwrap();
         assert_eq!(
             store.preferences().await.unwrap(),
             Preferences {
                 list_sort: Some("title".to_string()),
                 last_selected: Some("session-1".to_string()),
+                compact: Some(true),
             },
             "a selection write must not discard the sort written before it"
         );
@@ -5044,6 +5092,7 @@ mod tests {
             Preferences {
                 list_sort: Some("created".to_string()),
                 last_selected: Some("session-1".to_string()),
+                compact: Some(true),
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -5057,8 +5106,28 @@ mod tests {
             Preferences {
                 list_sort: Some("created".to_string()),
                 last_selected: None,
+                compact: Some(true),
             },
             "an explicit null clears exactly the field it names"
+        );
+
+        store
+            .update_preferences(patch(r#"{"compact":false}"#))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap().compact,
+            Some(false),
+            "false is an explicit stored choice rather than the absent default"
+        );
+        store
+            .update_preferences(patch(r#"{"compact":null}"#))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap().compact,
+            None,
+            "null restores the absent compact choice without touching other fields"
         );
     }
 
@@ -5295,8 +5364,10 @@ mod tests {
     /// could be "fixed" by pasting the comments into the migration, which
     /// would make the test pass without checking anything. Stripping `--`
     /// comments and collapsing whitespace compares the schema instead.
-    /// (Safe for this DDL specifically: it contains no string literal that
-    /// could hide a `--`.)
+    /// `ALTER TABLE ADD COLUMN` also relocates whitespace before commas and
+    /// closing parentheses; those differences do not change a constraint.
+    /// This normalization is scoped to the DDL here: its string literals
+    /// contain neither `--` nor the punctuation/space pairs removed below.
     fn schema_objects(conn: &Connection) -> Vec<(String, String)> {
         fn normalize(sql: &str) -> String {
             sql.lines()
@@ -5304,6 +5375,8 @@ mod tests {
                 .flat_map(str::split_whitespace)
                 .collect::<Vec<_>>()
                 .join(" ")
+                .replace(" ,", ",")
+                .replace(" )", ")")
         }
 
         let mut stmt = conn
@@ -5683,8 +5756,8 @@ mod tests {
     }
 
     /// A migrated database and a freshly created one must end up with
-    /// byte-identical schemas — the invariant that lets [`apply_schema`]'s
-    /// version-0 branch create the final shape directly instead of
+    /// identical schemas after SQL formatting normalization — the invariant
+    /// that lets [`apply_schema`]'s version-0 branch create the final shape directly instead of
     /// replaying every historical step. Without this, a migration that
     /// forgot an index would leave upgraded installs subtly different from
     /// new ones, and every later test would pass on whichever of the two
@@ -5708,6 +5781,42 @@ mod tests {
             migrated.unwrap(),
             fresh.unwrap(),
             "the migration ladder and the fresh-create path must agree on the final schema"
+        );
+    }
+
+    /// Schema 18 adds presentation state to an existing singleton without
+    /// changing either preference older clients already wrote.
+    ///
+    /// This starts from the exact schema-17 difference rather than a fresh
+    /// database: the compact column is absent, sort and selection are both
+    /// populated, and opening through [`HelmStore`] must preserve them while
+    /// exposing compact as the old-client default.
+    #[tokio::test]
+    async fn schema_18_preserves_the_version_17_preference_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helm.db");
+        {
+            let store = HelmStore::open(&path).await.expect("create current schema");
+            drop(store);
+            let conn = Connection::open(&path).expect("reopen raw");
+            conn.execute_batch(
+                "ALTER TABLE preferences DROP COLUMN compact;
+                 INSERT INTO preferences (singleton, list_sort, last_selected)
+                 VALUES (1, 'title', 'session-before-compact');
+                 PRAGMA user_version = 17;",
+            )
+            .expect("plant schema-17 preferences");
+        }
+
+        let migrated = HelmStore::open(&path).await.expect("migrate schema 17");
+        assert_eq!(
+            migrated.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("title".to_string()),
+                last_selected: Some("session-before-compact".to_string()),
+                compact: None,
+            },
+            "the new field defaults absent while both existing choices survive"
         );
     }
 
@@ -5959,11 +6068,10 @@ mod tests {
     /// than needing any data carried forward (nothing pre-16 ever recorded
     /// whether a session had been looked at, so there is nothing TO carry).
     ///
-    /// Planted by dropping the table from a just-opened current database
-    /// rather than by writing out the whole version-16 shape by hand, unlike
-    /// the older fixtures above: version 17 is a pure table ADDITION with no
-    /// prior column or table it replaces, so "current schema minus this one
-    /// table" and "the version-16 shape" are the same database.
+    /// Planted by removing the later additions from a current database:
+    /// version 17 added the seen table, and version 18 added compactness.
+    /// Both must be absent before assigning version 16, or the migration
+    /// would run against a shape no released version could have created.
     #[tokio::test]
     async fn a_version_16_database_gains_the_session_seen_table() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -5974,7 +6082,7 @@ mod tests {
         };
         {
             let conn = Connection::open(&path).expect("reopen raw");
-            conn.execute_batch("DROP TABLE session_seen; PRAGMA user_version = 16;")
+            conn.execute_batch("DROP TABLE session_seen; ALTER TABLE preferences DROP COLUMN compact; PRAGMA user_version = 16;")
                 .expect("downgrade to version 16");
         }
 
@@ -7095,8 +7203,9 @@ mod tests {
     /// "a version-N database" fixtures
     /// (`a_version_5_bare_default_is_dropped_by_schema_15` and its
     /// siblings) that anchor at the schema immediately preceding the
-    /// migration under test — schema 16 added exactly one column, so
-    /// downgrading is exactly reversing that single `ALTER TABLE`.
+    /// migration under test. Removing the later seen table and compact
+    /// preference restores that historical shape before reversing schema
+    /// 16's alias addition.
     #[tokio::test]
     async fn a_version_15_database_migrates_hosts_to_a_null_alias() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -7109,6 +7218,7 @@ mod tests {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "DROP TABLE session_seen;
+                 ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE hosts DROP COLUMN alias;
                  PRAGMA user_version = 15;",
             )

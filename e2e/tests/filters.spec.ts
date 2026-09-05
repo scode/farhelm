@@ -361,11 +361,12 @@ test.describe("session list filtering", () => {
     await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
 
     await openFilterBar(page);
-    // Tab chooses a real outside control. The popover must close behind it
-    // rather than stealing focus back to its toggle or withdrawing the query.
+    // Tab chooses the next outside control, now compact in the session
+    // heading. The popover must close behind it rather than stealing focus
+    // back to its toggle or withdrawing the query.
     await page.locator(".filter-clear").press("Tab");
     await expect(page.locator(".filter-popover")).toHaveCount(0);
-    await expect(page.locator(".new-session-button")).toBeFocused();
+    await expect(page.locator(".compact-toggle input")).toBeFocused();
     await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
 
     await openFilterBar(page);

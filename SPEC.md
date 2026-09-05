@@ -276,12 +276,12 @@ it shows the session's metadata and says why there is no terminal, rather than a
 One flat list across all registered hosts, with filtering and search by host, directory, agent profile, status, and
 title. The list can be ordered by most recent activity, by creation time, or by title, chosen from a control that is
 reachable without opening the filter controls; the order someone picks is remembered by the helm as one preference
-shared by every client, together with the last-selected session, and most recent activity is what a client shows until
-someone picks otherwise. No client keeps its own copy: every client reads the helm's preference once after
-authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the same
-session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
-different answers — is not wanted. A client that asks the helm for no particular order gets creation time. The filter
-controls open on demand rather than standing permanently above the list and apply as someone edits them; while an
+shared by every client, together with the last-selected session and compact-row choice, and most recent activity is what
+a client shows until someone picks otherwise. No client keeps its own copy: every client reads the helm's preference
+once after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on
+the same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients
+remember different answers — is not wanted. A client that asks the helm for no particular order gets creation time. The
+filter controls open on demand rather than standing permanently above the list and apply as someone edits them; while an
 applied filter's controls are closed, the list says visibly that a filter is in force, so a narrowed list can never
 masquerade as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable
 as a filter, but parentage does not nest the list and implies nothing about VCS state.
@@ -301,25 +301,26 @@ or incremental listing, or per-order server-side indexing is wanted at any layer
 client to hold and sort the entire fleet in memory; a fleet that outgrows the cap is outside what this product is built
 for, and the notice is the whole of the answer to it.
 
-A row shows a session's title, its status (drawn as described under Status), how long ago it was last active, and its
-working directory. Every row also marks whether its session is on the helm's own machine or on another one; a session
-whose host cannot yet be placed either way marks neither, rather than guessing. A remote session additionally names its
-host, on the same line as the title, with the same full-value-on-the-row tooltip promise the directory carries below. An
-available host name stays visible for as long as locality is unknown — only a CONFIRMED local session drops the name,
-since that is the one verdict actually established; a legacy row with no host name at all still shows none, which is an
-allowed absence rather than a promise this row invents one. The working directory and the launch command are shown
-abbreviated, with their full, untouched values always available on the row (a tooltip on the web and desktop clients);
-an abbreviation is never the only place a value is recorded. A row's own actions menu, beyond the lifecycle operations
-above, also offers a mark read / mark unread toggle — reachable there or by clicking the dot itself — that sets the
-session's seen state directly (see Status). Exactly how a row lays out its lines and pixels is an implementation choice,
-covered in SPEC_impl.md rather than here.
+A row's first line shows its status (drawn as described under Status), locality mark, title, agent label, and last
+activity time; live status dots and locality marks occupy aligned columns, while ended status words stay beside the
+title with the dot slot reserved. Times share a right-aligned column before the row menu. A session whose host cannot
+yet be placed either way marks neither, rather than guessing. Its second line shows the helm-supplied host name (an
+alias when set), then `:`, then its working directory; a legacy row with no host name shows only the directory, rather
+than inventing a local identity or a dangling separator. The second line is hidden when the helm-wide compact preference
+is on, which defaults off and is shared at the next preference seed across clients. The working directory and launch
+command remain abbreviated only where shown, with their full, untouched values always available on the row (a tooltip on
+the web and desktop clients); an abbreviation is never the only place a value is recorded. A row's own actions menu,
+beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there or by clicking the
+dot itself — that sets the session's seen state directly (see Status). Exactly how a row lays out its lines and pixels
+is an implementation choice, covered in SPEC_impl.md rather than here.
 
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
-it. Host actions open on demand from the row menu, and one global details control reveals the version, identity, session
-count, remedies, diagnostics, and provisioning progress under every row. Profiles are managed from the sidebar's own
-popup. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm
-restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are refused
-with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
+it. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host actions
+open on demand from the row menu, and details reveals the version, identity, session count, remedies, diagnostics, and
+provisioning progress under every row. Profiles and filtering use secondary buttons; session creation remains the blue
+primary action. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives
+helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are
+refused with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
 directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
 one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
 clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
@@ -641,12 +642,12 @@ worktree, workspace, or branch as part of spawning — if the agent wants a `jj 
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
   operation succeeded when it failed. Two best-effort exceptions log a failure but stay silent rather than surfacing it:
-  the helm-side preference (list order and last selection), because losing next-launch convenience must not turn a
-  choice that already took effect into a failed current operation, and a helm that lost the preference falls back to the
-  defaults; and the automatic "mark seen" a session's own opening or activity advance triggers (see Status), because a
-  lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the next
-  successful write. The manual "mark unread"/"mark read" toggle is not covered by either exception — a failed toggle
-  surfaces like any other operation.
+  the helm-side preference (list order, last selection, and compact layout), because losing next-launch convenience must
+  not turn a choice that already took effect into a failed current operation, and a helm that lost the preference falls
+  back to the defaults; and the automatic "mark seen" a session's own opening or activity advance triggers (see Status),
+  because a lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the
+  next successful write. The manual "mark unread"/"mark read" toggle is not covered by either exception — a failed
+  toggle surfaces like any other operation.
 - Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
   low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
   while the global details disclosure shows the evidence and remedies behind the phase.

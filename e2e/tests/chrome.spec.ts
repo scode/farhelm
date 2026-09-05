@@ -125,7 +125,7 @@ test("keyboard focus paints the accent outline; a mouse click does not", async (
     });
 
     const accentRgb = await resolveToken(page, "--accent");
-    // An ordinary `.btn` with no contextual focus override of its own —
+    // A native checkbox with no contextual focus override of its own —
     // unlike `.session-row-open` below, which restates its own ring for
     // a documented reason (see that class's `:focus-visible` comment in
     // app.css) — so this half of the test exercises the sheet-wide rule

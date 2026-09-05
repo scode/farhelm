@@ -821,14 +821,14 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
-    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
     const row = hostRowByName(page, "user@remove-refusal");
     await openHostMenu(row);
     await row.locator(".host-remove").click();
     await row.locator(".host-confirm-remove").click();
 
     await expect(row.locator(".host-error")).toContainText("the host is still required");
-    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   });
 
   // F2/COR-HOST-MENU-OFFSCREEN: the longest real phase word
@@ -1203,11 +1203,11 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
-    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
     const row = hostRowByName(page, "user@editable");
     await openHostMenu(row);
     await row.locator(".host-edit").click();
-    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".host-details-toggle")).toBeChecked();
 
     // Gone the instant the row swaps to the destination field — nothing
     // here dismisses it by hand.
@@ -1217,7 +1217,7 @@ test.describe("multi-host", () => {
     await expect(input).toHaveValue("user@editable");
 
     await page.locator(".host-details-toggle").click();
-    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
     await expect(input).toBeVisible();
     await expect(input).toHaveValue("user@editable");
 

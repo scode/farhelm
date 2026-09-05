@@ -37,8 +37,9 @@ use super::shared::{
 };
 
 /// The shared preference (SPEC.md, Session list) as this page holds it:
-/// the chosen list order and the last user-selected session, seeded once
-/// from the helm by `PreferencesGate` and provided to this view as context.
+/// the chosen list order, last user-selected session, and compact-row choice,
+/// seeded once from the helm by `PreferencesGate` and provided to this view
+/// as context.
 ///
 /// The helm remembers ONE preference for every client — no client keeps
 /// its own copy, and per-client persistence (browser storage, a desktop
@@ -62,11 +63,11 @@ use super::shared::{
 /// one-attached-client rule — the consequence SPEC.md's Terminal
 /// experience section names.
 ///
-/// One signal for both fields, so a write to either dirties every reader
+/// One signal for all three fields, so a write to one dirties every reader
 /// of the struct: a sort change with an empty right pane re-runs the
 /// auto-select effect. That effect is idempotent (its `resolving_*`
 /// guards), so this is a wasted run rather than a wrong one, and one
-/// signal keeps the seed and the two writers trivially consistent.
+/// signal keeps the seed and the three writers trivially consistent.
 #[derive(Clone, Copy)]
 pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
 
@@ -88,7 +89,7 @@ fn stored_selection(preferences: SharedPreferences) -> Option<String> {
 /// `SharedPreferences`).
 fn remember_selection(base: &str, mut preferences: SharedPreferences, id: &str) {
     preferences.0.write().last_selected = Some(id.to_string());
-    api::store_preference(base, api::PreferenceField::Selected, id.to_string());
+    api::store_preference(base, api::PreferenceValue::Selected(id.to_string()));
 }
 
 /// A stored preference as an order: anything this build does not recognize —
@@ -109,6 +110,15 @@ fn stored_sort(preferences: SharedPreferences) -> ListSort {
     decoded_sort(preferences.0.read().list_sort.as_deref())
 }
 
+/// Whether this client starts with the helm's shared compact-row preference.
+///
+/// An unset value is the old preference row and therefore means expanded.
+/// The route's typed boolean decoding rejects malformed stored API values
+/// before they could reach this fallback.
+fn stored_compact(preferences: SharedPreferences) -> bool {
+    preferences.0.read().compact.unwrap_or(false)
+}
+
 /// Record a chosen order: written on CHANGE only (see `apply_sort`), so a
 /// client that never touches the control never writes at all.
 ///
@@ -116,7 +126,18 @@ fn stored_sort(preferences: SharedPreferences) -> ListSort {
 /// same vocabulary its `?sort=` accepts.
 fn remember_sort(base: &str, mut preferences: SharedPreferences, sort: ListSort) {
     preferences.0.write().list_sort = Some(sort.key().to_string());
-    api::store_preference(base, api::PreferenceField::Sort, sort.key().to_string());
+    api::store_preference(base, api::PreferenceValue::Sort(sort.key().to_string()));
+}
+
+/// Keep a compact-mode choice locally while asking the helm to remember it.
+///
+/// The client changes first because preference persistence is best effort:
+/// a failed request must not make the checkbox reverse under the user's
+/// cursor. The shared row supplies the value to a later seed; it is not a
+/// live broadcast to other already-open clients.
+fn remember_compact(base: &str, mut preferences: SharedPreferences, compact: bool) {
+    preferences.0.write().compact = Some(compact);
+    api::store_preference(base, api::PreferenceValue::Compact(compact));
 }
 
 /// The orders the sidebar offers, in the order it offers them, each with the
@@ -854,6 +875,9 @@ pub(crate) fn ListView(
     // reads the FILTER: a re-sorted listing covers exactly what the same
     // filter's listing covered, so nothing about evidence changes with it.
     let mut sort = use_signal(move || stored_sort(preferences));
+    // Render the optimistic shared preference directly: compactness has no
+    // separate draft or listing-read state to keep synchronized.
+    let compact = stored_compact(preferences);
 
     // The two surfaces' readers (`reader::SurfaceReader`): one reader each,
     // coalescing every trigger into a single live read and retrying one that
@@ -2607,10 +2631,38 @@ pub(crate) fn ListView(
             }
         }
         }
-        div { class: "list-toolbar",
-            button {
+        // The session list's own header: count, compact preference, and the
+        // creation action share one line so neither former control row costs
+        // vertical space in the fixed sidebar.
+        div { class: "list-header",
+            div { class: "session-heading",
+                if let Some(Ok(listing)) = &*listing.read() {
+                    {
+                        let banner = count_banner(listing);
+                        rsx! { div { class: "{banner.class}", "{banner.text}" } }
+                    }
+                }
+                label { class: "compact-toggle",
+                    input {
+                        r#type: "checkbox",
+                        checked: compact,
+                        onchange: move |event| {
+                            let next = event.checked();
+                            // Removing metadata moves every row below it; an
+                            // open menu still holds its old anchor coordinates.
+                            menu_open.set(None);
+                            remember_compact(&base, preferences, next);
+                        },
+                    }
+                    "compact"
+                }
+                button {
                 r#type: "button",
                 class: "btn btn-primary new-session-button",
+                // The heading keeps the short visible word "new" while the
+                // accessible name preserves the object named by the former
+                // full-width label.
+                aria_label: "new session",
                 // This control UNMOUNTS the create form, so it must not act
                 // while anything is in flight: dropping the component drops
                 // its `spawn`ed task's ability to ever act on the response,
@@ -2643,48 +2695,43 @@ pub(crate) fn ListView(
                     }
                     show_create.set(opening);
                 },
-                "new session"
+                    "new"
+                }
             }
-        }
-        if show_create() {
-            CreateSessionForm {
-                hosts: host_options,
-                open_host,
-                hosts_loaded: hosts.read().hosts().is_some(),
-                chosen_host,
-                create_target,
-                catalog: profiles,
-                ops,
-                prefill: clone_prefill(),
-                on_created: move |session: Session| {
-                    // Creation is a user-initiated selection too.
-                    remember_selection(&created_base, preferences, &session.id);
-                    show_create.set(false);
-                    // The other close path. This component STAYS mounted
-                    // under the sidebar layout, so without this clear the
-                    // next open of the dialog would silently reopen on the
-                    // last create's host — and the last create's clone
-                    // prefill, for the same reason.
-                    chosen_host.set(None);
-                    clone_prefill.set(None);
-                    on_open.call(session);
-                },
+            // Keep the form immediately after its opener in DOM order:
+            // forward Tab from "new" must enter it, not skip past a form
+            // inserted above the heading. The opener remains in view above
+            // the draft and still provides its existing cancellation action.
+            if show_create() {
+                CreateSessionForm {
+                    hosts: host_options,
+                    open_host,
+                    hosts_loaded: hosts.read().hosts().is_some(),
+                    chosen_host,
+                    create_target,
+                    catalog: profiles,
+                    ops,
+                    prefill: clone_prefill(),
+                    on_created: move |session: Session| {
+                        // Creation is a user-initiated selection too.
+                        remember_selection(&created_base, preferences, &session.id);
+                        show_create.set(false);
+                        // This component stays mounted after creation, so
+                        // clear the draft's host and clone seed just as the
+                        // explicit cancellation path does.
+                        chosen_host.set(None);
+                        clone_prefill.set(None);
+                        on_open.call(session);
+                    },
+                }
             }
-        }
-        // The session list's own header: the count line, then the filter
-        // toggle and the sort. Rendered in EVERY listing state, not only after
+        // The session list's remaining header: filter toggle and sort.
+        // Rendered in EVERY listing state, not only after
         // a successful read — these controls are the only way to change or
         // clear a filter, and a failed read is exactly when someone may need
         // to (a filter naming a host that has since been removed, say). The
-        // count line is the banner when there is a listing to count and
-        // nothing otherwise; `rows::count_banner` decides its wording.
-        div { class: "list-header",
-            if let Some(Ok(listing)) = &*listing.read() {
-                {
-                    let banner = count_banner(listing);
-                    rsx! { div { class: "{banner.class}", "{banner.text}" } }
-                }
-            }
+        // count already lives beside compact and new, so this row contains
+        // only the controls that need a separate line.
             div { class: "list-header-controls",
                 button {
                     r#type: "button",
@@ -2786,6 +2833,7 @@ pub(crate) fn ListView(
                         for session in apply_optimistic_renames(&listing.sessions, &renamed.read()) {
                             SessionRow {
                                 key: "{session.id}",
+                                compact,
                                 state: RowState {
                                     error: errors.read().get(&session.id).cloned(),
                                     // The shared token counts as busy for

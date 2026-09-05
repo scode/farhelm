@@ -332,9 +332,8 @@ samp {
 /* The two-pane shell (BUGS_BURNDOWN.md issue 5): a fixed-width sidebar
  * holding the session list, and a main pane holding the selected session.
  * The sidebar width is FIXED by decision (no drag handle, no persistence);
- * wider than the bare minimum because rows carry title, status, directory,
- * invocation, a locality glyph, and (for a remote or unknown session) a
- * host name sharing the title line in a bounded slot. Every ancestor of
+ * wider than the bare minimum because rows carry aligned status/locality,
+ * title, agent, and activity columns above a host/directory line. Every ancestor of
  * .terminal-panes must keep a definite
  * height, which is why the chain here is all height:100%/flex — a
  * height:auto link would collapse the terminal to zero rows. */
@@ -422,9 +421,39 @@ samp {
   font-size: 12px;
 }
 
-/* The count remains its own element for the committed-list contract, while
-   the wrapper makes it a two-row header with controls that affect those rows. */
-.list-header {
+/* The count remains its own element for the committed-list contract. Count,
+   compact choice, and creation action describe the same list, so they share
+   one compact heading rather than spending a row each. */
+.session-heading,
+.hosts-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 10px;
+  background: var(--bg-2);
+}
+
+.session-heading .session-count,
+.hosts-heading .host-count {
+  padding: 0;
+}
+
+.compact-toggle,
+.host-details-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-1);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.session-heading .new-session-button,
+.hosts-heading .add-host-button {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 12px;
 }
 
 .list-header-controls {
@@ -989,10 +1018,11 @@ samp {
      button takes everything the fixed-size toggle leaves, and shrinks
      (ellipsizing its lines) rather than pushing the toggle out.
 
-     The padding is symmetric and tight: it and the line gap are the two
-     numbers the density pass (the 2026-08 UI refresh) had to spend on this
-     button's own box model. Most of the row's height came out of dropping
-     lines rather than shrinking type — the one exception is
+     The vertical and left padding are tight; the right edge has none because
+     `.session-row-main` already supplies the complete gap before the menu.
+     Adding padding there would turn invisible button interior into a second
+     trailing gutter. Most of the row's height came out of dropping lines
+     rather than shrinking type — the one exception is
      `.session-title` itself, stepped down from the inherited 16px to 14px
      below; see that rule's own comment for why that one pixel budget was
      spent while the fields under it were held to their floor. */
@@ -1001,7 +1031,7 @@ samp {
   flex: 1;
   min-width: 0;
   gap: 2px;
-  padding: 6px 12px;
+  padding: 6px 0 6px 12px;
   border: none;
   background: none;
   color: inherit;
@@ -1022,19 +1052,6 @@ samp {
   align-items: baseline;
   gap: 8px;
   min-width: 0;
-}
-
-/* The row's last line pairs the directory with the invocation badge (see
-   SessionRow's doc for why they share one). The two are NOT equal
-   claimants on the width: the path keeps the `flex: 1 1 auto` every row
-   field gets below and left-truncates under pressure (its rightmost
-   segments are the informative ones), while the badge gives up its share
-   of the growth and is capped at half the line. Without that cap, a long
-   profile name would push the path down to its ellipsis and the row would
-   say which agent it is without saying where. */
-.session-row-meta > .session-invocation {
-  flex: 0 1 auto;
-  max-width: 55%;
 }
 
 /* Either row's actions-menu toggle (built on the same generic mechanics —
@@ -1065,8 +1082,12 @@ samp {
 .host-row-menu {
   flex: 0 0 auto;
   align-self: flex-start;
-  margin: 4px 8px 0 0;
-  padding: 0 8px;
+  /* The parent contributes a 6px gap before this button and this rule adds
+     2px after it. That makes the COMPLETE trailing reservation exactly 8px
+     wider than the control, including space on both sides; measuring only
+     this margin would miss the parent gap and permit the old wide gutter. */
+  margin: 4px 2px 0 0;
+  padding: 0 5px;
   font-size: 14px;
   line-height: 1.4;
   transition:
@@ -1126,8 +1147,7 @@ samp {
    the selection nothing — one glyph of accent text cannot compete with a
    whole row's accent fill. */
 .session-row-menu[aria-expanded="true"],
-.host-row-menu[aria-expanded="true"],
-.host-details-toggle[aria-expanded="true"] {
+.host-row-menu[aria-expanded="true"] {
   background: var(--control-hover-bg);
   color: var(--accent);
 }
@@ -1683,11 +1703,10 @@ samp {
    strings with no length limit the UI enforces (a title can legally run
    tens of KB) — every one needs its own overflow/ellipsis handling. The
    stacked sidebar rows (BUGS_BURNDOWN.md issue 5) retired the old
-   basis-and-floor space-splitting: `min-width: 0` and ellipsis are the
-   whole story now, and the floors that once re-entered the MT-8 overflow
-   regime are gone. The density pass then put the directory and the
-   invocation back on ONE line — see `.session-row-meta` above for the
-   split that keeps that from reintroducing a space fight. */
+   basis-and-floor space-splitting. The current grid gives the title and
+   invocation separate first-line tracks, while host and directory share the
+   optional second line. Shrinkable containers and ellipsis bound each field;
+   the title and host retain small readable floors within those tracks. */
 .session-title {
   /* 14px rather than the inherited 16: this is a dense list of rows, and
      the standard list-item size is what the density pass spends here. It
@@ -1699,19 +1718,86 @@ samp {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* `flex: 1 1 auto` claims the growth this line's fixed-width siblings
-     (the badges, the icon, the age) leave unused — that is what `1 1`
-     differs on from `.session-host`'s `0 1` below. It is NOT what protects
-     the title from collapsing: `flex-shrink` is `1` on both this and
-     `.session-host`, so under real pressure the two shrink in the same
-     pass, proportional to their own content size, and neither's
-     flex-shrink factor alone stops it reaching zero. `min-width` below is
-     the actual floor — a fixed pixel amount the browser will not shrink
-     past, whatever the surrounding pressure — and `.session-host` carries
-     the matching floor on the other side of this split, so long content on
-     either side cannot squeeze the other to an unreadable sliver. */
+  /* The general title treatment retains a readable floor. The sidebar's
+     `.session-identity-copy .session-title` override uses a smaller four-glyph
+     floor because its grid must also keep the aligned agent and activity
+     columns reachable at 280px. */
   flex: 1 1 auto;
   min-width: 60px;
+}
+
+/* Fixed leading tracks keep every title aligned. A live status uses the
+   first slot's dot; ended wording moves into the identity copy, and unknown
+   locality leaves the second slot blank, so neither truth changes the
+   geometry. The agent track can shrink independently while the activity
+   column remains right-aligned. Ages have no day-count ceiling, so the last
+   track can grow beyond its usual four characters without overlapping the
+   agent badge. */
+.session-row-identity {
+  display: grid;
+  grid-template-columns: 12px 12px minmax(0, 1fr) minmax(0, min(8em, 35%)) minmax(4ch, max-content);
+  align-items: baseline;
+  column-gap: 6px;
+}
+
+.session-status-slot {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.session-locality-slot {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.session-identity-copy {
+  grid-column: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  row-gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.session-identity-copy .session-title {
+  /* Keep a recognizable prefix of the session identity at the 280px floor.
+     The surrounding grid still owns the hard width limit, so qualifiers and
+     the title ellipsize before displacing aligned agent and activity tracks. */
+  min-width: 4ch;
+}
+
+.session-identity-copy .status-badge,
+.session-identity-copy .stale-badge,
+.session-identity-copy .archived-badge {
+  /* Several state words need more room than a narrow identity track can
+     supply on one line. Wrap inside this track rather than hiding a whole
+     qualifier behind its parent's clip; cap an individual long error here
+     too, retaining StatusBadgeView's full-text tooltip. */
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-agent {
+  grid-column: 4;
+  justify-self: end;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.session-activity-column {
+  grid-column: 5;
+  min-width: 0;
+  text-align: right;
 }
 
 /* The locality glyph (2026-09-03):
@@ -1733,21 +1819,12 @@ samp {
   flex: 0 0 auto;
 }
 
-/* The remote host's name, sharing the title line rather than a line of its
-   own (the 2026-09-03 reversal — see SPEC_impl.md's sidebar-row paragraph).
-   `flex: 0 1 auto` differs from `.session-title`'s `1 1 auto` only in
-   flex-GROW: this item claims none of the line's unused space, the title
-   claims all of it. That is a growth rule, not a shrink one — `flex-shrink`
-   is `1` here exactly as it is on the title, so on its own it would let
-   this shrink at the same rate and, under enough pressure, to the same
-   zero. Two properties do the actual two-sided bounding the split needs:
-   `max-width: 40%` caps this ABOVE, so a very long destination cannot push
-   the title toward nothing regardless of how little the title's own
-   content wants; `min-width` below floors this BELOW, so a very long
-   TITLE cannot push the host past legibility either. 40% is a deliberate
-   middle ground — generous enough that an ordinary ssh destination is
-   rarely clipped, tight enough that the title still gets the majority of
-   the line whenever both are long. */
+/* The rendered host name leads the optional second line beside the cwd.
+   `flex: 0 1 auto` differs from `.session-cwd`'s `1 1 auto` only in
+   flex-GROW: this item claims none of the line's unused space, while the cwd
+   claims the rest. `max-width: 40%` stops a long destination from hiding
+   the directory, and the floor keeps enough of the host visible to identify
+   it. */
 .session-host {
   color: var(--fg-1);
   font-size: 12px;
@@ -2147,9 +2224,9 @@ samp {
 
 /* ===== Hosts panel ================================================ */
 
-/* One permanent host list, directly above the session list. Its header uses
-   the same two-row count/control rhythm, and per-row evidence stays behind
-   one global disclosure without unmounting any async owner. */
+/* One permanent host list, directly above the session list. Count, details
+   and add share one heading; per-row evidence stays behind one global
+   disclosure without unmounting any async owner. */
 .hosts-panel {
   /* Same story as `.session-row`'s separator: the panel and the sidebar
      around it share --bg-1, so the foot has to be drawn with a rule. */
@@ -2157,32 +2234,22 @@ samp {
   padding: 0;
 }
 
-.hosts-header {
-  background: var(--bg-1);
-}
-
 .host-count {
   background: var(--bg-2);
   color: var(--fg-1);
   font-size: 12px;
-  padding: 4px 10px;
 }
 
-.hosts-header-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+.add-host-button,
+.profiles-toggle,
+.filter-toggle {
+  background: var(--bg-2);
+  border-color: var(--border);
+  color: var(--fg-0);
 }
 
-.host-details-toggle,
-.add-host-button {
-  font-size: 12px;
+.host-details-control {
   padding: 2px 8px;
-}
-
-.add-host-button {
-  margin-left: auto;
 }
 
 .hosts-status {
@@ -2823,18 +2890,9 @@ samp {
 /* ===== Create dialog ============================================== */
 
 /* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
-   toolbar, not a modal library — see the design note in lib.rs's
+   session heading, not a modal library — see the design note in lib.rs's
    `CreateSessionForm` doc. Kept visually close to the row/badge styling
    above it rather than introducing a new visual language for one form. */
-.list-toolbar {
-  padding: 10px 14px;
-}
-
-.new-session-button {
-  font-size: 13px;
-  padding: 4px 10px;
-}
-
 .create-session-form {
   display: flex;
   flex-direction: column;
