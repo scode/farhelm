@@ -1,6 +1,6 @@
 //! `GET`/`PUT /api/preferences` — the one client preference the helm
-//! remembers for every client (SPEC.md, Session list): the chosen list order
-//! and the last user-selected session.
+//! remembers for every client (SPEC.md, Session list): the chosen list order,
+//! last user-selected session, and compact-row choice.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client keeps its own copy, so a browser tab and the desktop
@@ -141,6 +141,28 @@ mod tests {
             .expect("the preference reply decodes as the shared type")
     }
 
+    /// Compact may be the first preference a fresh client changes. Exercise
+    /// insertion into an absent singleton row, not only the update path after
+    /// sort or selection created it, and leave those unrelated choices unset.
+    #[tokio::test]
+    async fn compact_alone_creates_the_shared_preference_row() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read_raw(&harness).await, b"{}");
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({ "compact": true })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await,
+            Preferences {
+                compact: Some(true),
+                ..Preferences::default()
+            }
+        );
+    }
+
     /// The route pair is the whole contract every client is written
     /// against: a fresh helm answers an empty object, a sparse `PUT` lands
     /// only the field it names, a later `GET` reads the merged row back, a
@@ -177,13 +199,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({ "compact": true })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert_eq!(
             read(&harness).await,
             Preferences {
                 list_sort: Some("title".to_string()),
                 last_selected: Some("session-7".to_string()),
+                compact: Some(true),
             },
-            "each sparse patch lands its own field and keeps the other's"
+            "each sparse patch lands its own field and keeps the others"
         );
 
         let response = harness
@@ -211,6 +240,16 @@ mod tests {
             Some("title"),
             "a refused patch leaves the row as it was"
         );
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({ "compact": "yes" })))
+            .await
+            .unwrap();
+        assert!(
+            response.status().is_client_error(),
+            "a compact preference is a typed boolean, not a truthy string"
+        );
+        assert_eq!(read(&harness).await.compact, Some(true));
 
         let response = harness
             .router()
@@ -223,6 +262,7 @@ mod tests {
             Preferences {
                 list_sort: Some("title".to_string()),
                 last_selected: None,
+                compact: Some(true),
             },
             "an explicit null clears the field it names and only that one"
         );

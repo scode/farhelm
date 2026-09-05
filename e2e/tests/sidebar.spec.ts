@@ -378,22 +378,20 @@ test("switching sessions directly tears the old view down and mounts the new one
 /**
  * A row with hostile content — an unbroken multi-hundred-character title,
  * cwd, and invocation — stays INSIDE the fixed sidebar column, with the
- * title above a meta line that pairs the directory with the invocation
- * badge.
+ * title and invocation badge above a host/directory line.
  *
  * The stacked layout's whole reason to exist is that the old single-line
  * row overflowed the 340px column under exactly this content (the MT-8
  * class); a wrapper or flex regression that restored horizontal packing
  * or let a line force the row wide would pass every text-content
  * assertion and fail only here. The geometry asserted below is the
- * density pass's layout (the 2026-08 UI refresh): directory and invocation
- * deliberately SHARE a line now, so the check is that they overlap
- * vertically and sit side by side, not that one is under the other.
+ * current layout: title and agent badge share the identity line, while host
+ * and directory overlap vertically on the second line.
  *
  * Two further properties ride along because this is the cheapest local
- * session in the suite to assert them on: a session on the helm's own
- * machine renders no host line at all, and the whole row fits in a height
- * that the four-line layout could not have.
+ * session in the suite to assert them on: a local session still names its
+ * host on the second line, and the whole row fits in a height that the old
+ * four-line layout could not have.
  */
 test("a row with unbroken oversized fields stays contained and stacked in the sidebar", async ({
   page,
@@ -435,23 +433,23 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
     // The title still leads on a line of its own — a regression that
     // packed it in beside the metadata would land here.
     expect(title.y).toBeLessThan(cwd.y);
-    // Directory and invocation share the meta line: overlapping vertical
-    // extents, badge to the right of the path. Asserted as an overlap
+    // Title and invocation share the identity line: overlapping vertical
+    // extents, badge to the right of the identity copy. Asserted as an overlap
     // rather than as equal `y` because the two have different font sizes
     // and sit on a shared baseline, so their boxes start at different
     // offsets by design.
-    expect(invocation.y).toBeLessThan(cwd.y + cwd.height);
-    expect(cwd.y).toBeLessThan(invocation.y + invocation.height);
+    expect(invocation.y).toBeLessThan(title.y + title.height);
+    expect(title.y).toBeLessThan(invocation.y + invocation.height);
     expect(
       invocation.x,
-      "the invocation badge follows the directory on the same line",
-    ).toBeGreaterThanOrEqual(cwd.x + cwd.width - 1);
+      "the invocation badge follows the title on the identity line",
+    ).toBeGreaterThanOrEqual(title.x + title.width - 1);
 
-    // This session is on the helm's own machine, so naming its host would
-    // be a line spent on a word every row would carry — but the row still
-    // marks its locality with a glyph (2026-09-03): local is a positive
-    // signal on its own row, not an absence to notice elsewhere.
-    await expect(target.locator(".session-host")).toHaveCount(0);
+    // The second line names the rendered host even when locality is local;
+    // the icon and text answer different questions and remain independently
+    // truthful.
+    await expect(target.locator(".session-host")).toHaveText("this machine");
+    await expect(target.locator(".session-host-separator")).toHaveText(":");
     await expect(target).toHaveAttribute("data-host-locality", "local");
     await expect(target.locator(".host-kind-icon")).toHaveCount(1);
     // `data-glyph`, not just the count and the hidden word: those two alone
@@ -474,8 +472,8 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
 });
 
 /**
- * A long PROFILE-backed invocation badge clips inside the row, and the cwd
- * beside it keeps a usable share of the shared meta line.
+ * A long PROFILE-backed invocation badge clips inside its first-line column,
+ * while the cwd on the second line remains usable.
  *
  * The 300-char raw invocation above no longer exercises the badge's own
  * overflow handling: the 2026-08 UI refresh compacts any RAW command line to
@@ -514,9 +512,9 @@ test("a long profile-backed invocation badge clips inside the row", async ({ pag
     // proving the ellipsis rule did the constraining rather than a
     // conveniently narrow fixture.
     expect(await badge.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-    // The directory keeps a USABLE share of the line: `.session-row-meta`'s
-    // split caps the badge at 55% (app.css) precisely so an unbounded
-    // profile name cannot squeeze the path down to nothing.
+    // The directory remains usable on its separate host/cwd line; an
+    // unbounded badge cannot squeeze it because the two fields no longer
+    // share a flex row.
     expect(
       cwdBox.width,
       "the directory must keep a usable share of the shared line, not be squeezed to nothing " +
@@ -1902,8 +1900,8 @@ test("the archive consequence wraps fully visible inside the panel", async ({
 });
 
 /**
- * The sidebar's resting chrome keeps one host list, the two-row session
- * header, session rows, and create control visible. Host details and the
+ * The sidebar's resting chrome keeps one host list, the compact session
+ * heading, session rows, and create control visible. Host details and the
  * filter popover remain closed until requested.
  *
  * This pins the one-list contract directly: a regression that hides the
@@ -1917,38 +1915,119 @@ test("the host list is permanent while details and filtering stay on demand", as
   await expect(page.locator(".hosts-panel")).toBeVisible();
   await expect(page.locator(".hosts-toggle")).toHaveCount(0);
   await expect(page.locator(".sidebar-controls")).toHaveCount(0);
-  await expect(page.locator(".host-details-toggle")).toBeVisible();
+  const hostHeading = page.locator(".hosts-heading");
+  const details = hostHeading.getByRole("checkbox", { name: "details", exact: true });
+  await expect(details).toBeVisible();
   await expect(page.locator(".filter-toggle")).toBeVisible();
-  // Session controls belong to the two-row list header, not the hosts-only
-  // top strip. DOM order matters here because the count explains the rows
-  // before the controls that can change them.
+  // Count, compact, and new share one heading; filter and sort share the
+  // following control row. DOM order matters because each count explains
+  // the rows before the controls that can change them.
   const header = page.locator(".list-header");
-  await expect(header.locator(":scope > .session-count")).toHaveCount(1);
+  await expect(header.locator(":scope > .session-heading .session-count")).toHaveCount(1);
+  await expect(header.locator(":scope > .session-heading .compact-toggle")).toHaveCount(1);
+  await expect(header.locator(":scope > .session-heading .new-session-button")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls .filter-toggle")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls .sort-select")).toHaveCount(1);
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(details).not.toBeChecked();
   await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator(".filter-popover")).toHaveCount(0);
   const rows = page.locator(".host-row");
   await expect(rows.first()).toBeVisible({ timeout: 20_000 });
   const count = await rows.count();
   await expect(page.locator(".host-count")).toHaveText(count === 1 ? "1 host" : `${count} hosts`);
+  // Being descendants of one heading is insufficient: wrapping controls
+  // onto a second line would restore the vertical space this layout removes.
+  const hostControls = [
+    hostHeading.locator(".host-count"),
+    hostHeading.locator(".host-details-control"),
+    hostHeading.getByRole("button", { name: "add host", exact: true }),
+  ];
+  const hostBoxes = await Promise.all(hostControls.map((control) => control.boundingBox()));
+  expect(hostBoxes.every((box) => box !== null)).toBe(true);
+  expect(Math.max(...hostBoxes.map((box) => box!.y))).toBeLessThan(
+    Math.min(...hostBoxes.map((box) => box!.y + box!.height)),
+  );
   const local = rows.first();
   await expect(local.locator(".host-status .status-dot")).toBeVisible();
   await expect(local.locator(".host-status-label")).toHaveCount(0);
   await expect(local.locator(".host-row-menu")).toHaveCSS("opacity", "1");
 
-  await openHostsPanel(page);
+  // Space toggles the focusable checkbox itself and still applies the global
+  // disclosure to every host row.
+  await details.focus();
+  await page.keyboard.press("Space");
+  await expect(details).toBeChecked();
   for (let index = 0; index < count; index += 1) {
     await expect(rows.nth(index).locator(".host-detail")).toBeVisible();
   }
-  await page.locator(".host-details-toggle").click();
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("Space");
+  await expect(details).not.toBeChecked();
 
   await openFilterBar(page);
   await page.locator(".filter-toggle").click();
   await expect(page.locator(".filter-popover")).toHaveCount(0);
+});
+
+/**
+ * Both compact choices apply immediately, persist through reload, and seed
+ * another client from the helm. Turning it off must persist false rather than
+ * merely clear a local checkbox. Changing row heights also dismisses a menu whose
+ * measured anchor would otherwise belong to the old layout. The already-open-client broadcast deliberately stays
+ * out of scope; opening the second page is the next preference seed.
+ */
+test("compact hides the second line and persists across client seeds", async ({
+  page,
+  request,
+  context,
+}) => {
+  await patchPreferences(request, { compact: null });
+  const session = await createSession(request, {
+    title: `compact-persistence-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let second: Page | undefined;
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    const expandedHeight = (await target.boundingBox())!.height;
+    await expect(target.locator(".session-row-meta")).toBeVisible();
+    const compact = page.getByRole("checkbox", { name: "compact", exact: true });
+    await expect(compact).not.toBeChecked();
+    await waitForHostsListSettled(page);
+    await openRowMenu(target);
+
+    await compact.check();
+    await expect(compact).toBeChecked();
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-meta")).toHaveCount(0);
+    await expect(target.locator(".session-row-open")).toHaveAttribute("title", session.cwd);
+    expect((await target.boundingBox())!.height).toBeLessThan(expandedHeight);
+    await expect.poll(async () => (await readPreferences(request)).compact).toBe(true);
+
+    await page.reload();
+    await expect(page.locator(".compact-toggle input")).toBeChecked();
+    await expect(row(page, session.id).locator(".session-row-meta")).toHaveCount(0);
+
+    second = await context.newPage();
+    await second.goto("/");
+    await expect(second.locator(".compact-toggle input")).toBeChecked();
+    await expect(row(second, session.id).locator(".session-row-meta")).toHaveCount(0);
+
+    await second.locator(".compact-toggle input").uncheck();
+    await expect(row(second, session.id).locator(".session-row-meta")).toBeVisible();
+    await expect.poll(async () => (await readPreferences(request)).compact).toBe(false);
+    await page.reload();
+    await expect(page.locator(".compact-toggle input")).not.toBeChecked();
+    await expect(row(page, session.id).locator(".session-row-meta")).toBeVisible();
+    expect((await row(page, session.id).boundingBox())!.height).toBeGreaterThan(expandedHeight - 1);
+  } finally {
+    if (second) await second.close();
+    await patchPreferences(request, { compact: null });
+    await cleanupSession(request, session.id);
+  }
 });
 
 /**
@@ -2180,19 +2259,16 @@ test("the host list counts every host, humanizes phases, and clips long names", 
 });
 
 /**
- * A LOCAL session's host name and locality mark are PROVISIONAL, not a
- * settled fact, until the registry actually answers — the name shows and
- * the row carries `unknown` the moment the listing renders (with no glyph
- * at all), and both flip the instant `/api/hosts` confirms this session's
- * host id IS the local row: the name disappears and the local glyph
- * appears in its place.
+ * A LOCAL session's locality mark is provisional until the registry answers:
+ * the host name remains truthful on the second line throughout, while the
+ * first-line slot changes from blank/unknown to the local glyph once the
+ * registry confirms the host id.
  *
  * `shared::session_locality` answers `Unknown` for every case with no
  * evidence either way (including "the hosts read has not landed yet"), and
- * `Unknown` never SUPPRESSES an available host label (SPEC_impl.md) — so a
- * session that is in fact local still names its host for as long as the
- * registry has not confirmed otherwise, and NEVER draws the local glyph on
- * that unconfirmed guess. The route hold makes that window deterministic
+ * `Unknown` never suppresses an available host label (SPEC_impl.md), and the
+ * settled two-line layout keeps that label after classification too. The
+ * route hold makes the unknown window deterministic
  * instead of racing a fast helm: without it, `/api/hosts` ordinarily
  * answers before the first paint and the provisional state is never
  * actually observed.
@@ -2235,8 +2311,9 @@ test("a local session's host line is provisional until the registry confirms it"
     await expect(target.locator(".host-kind-icon")).toHaveCount(0);
 
     releaseHosts();
-    await expect(target.locator(".session-host")).toHaveCount(0);
-    // Confirmed: the name is gone and the local glyph has taken its place.
+    await expect(target.locator(".session-host")).toContainText("this machine");
+    // Confirmed: the name stays on the second line and the locality slot
+    // gains the local glyph.
     await expect(target).toHaveAttribute("data-host-locality", "local");
     await expect(target.locator(".host-kind-icon")).toHaveCount(1);
     await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
@@ -2247,66 +2324,24 @@ test("a local session's host line is provisional until the registry confirms it"
 });
 
 /**
- * The title line's width rule under the worst case it was designed for: a
- * long title, a long remote destination, both the stale and archived
- * badges, a live status, and an activity age, all sharing one line — in
- * two adversarial arrangements, so each field's own floor is what the
- * assertions actually depend on rather than an incidental amount of room.
+ * Hostile title and host lengths stay contained at 280px while simultaneous
+ * stale/archive qualifiers remain on the identity line. Two opposing content
+ * shapes prove the second-line host floor and cap without coupling them to
+ * the first-line title, agent, or activity columns.
  *
- * `.session-title` and `.session-host` (`app.css`) differ in flex-GROW —
- * the title claims the line's unused space, the host claims none — but
- * both share `flex-shrink: 1`, which on its own offers no protection: two
- * equally-shrinkable siblings compress toward zero together under enough
- * combined pressure. The real guarantee is each one's `min-width` (a
- * floor); this test exists to prove that floor, not the flex-grow split,
- * is load-bearing.
- *
- * Measured empirically (both engines) rather than assumed: with every
- * fixed sibling this fixture asks for actually present — both badges, the
- * live status dot, the locality icon, AND the age — this row's fixed
- * content alone leaves LESS room than `.session-title`'s and
- * `.session-host`'s floors add up to. So in BOTH adversarial arrangements
- * below, title and host land at EXACTLY their declared floors (60px and
- * 40px), never less — CSS's flex-shrink freezes each item at its min-width
- * the moment the naive proportional shrink would cross it, and with this
- * little room left, both cross it. `.session-host`'s `max-width: 40%` cap
- * (generous room for an ordinary remote destination) is consequently NOT
- * the binding constraint under this specific worst case — the floors are —
- * which is why this test asserts the floors directly rather than asserting
- * the cap engages. TITLE-DOMINANT makes the title the aggressor (content
- * vastly exceeding the line) beside a short host name; HOST-DOMINANT makes
- * BOTH title and host individually huge. Both prove the same floors hold,
- * from two different constructions — a regression in either field's
- * `min-width` specifically would still be caught by the case that leans on
- * it, even though the two cases converge on identical numbers here.
- * `.stale-badge`, `.archived-badge`, and `.status-time` (the age) are
- * compared ACROSS the two cases: since the two scenarios put wildly
- * different content pressure on the title/host split beside them, any one
- * of these three rendering at a different width in one case than the
- * other would mean it was not actually holding its own declared width —
- * the whole point of their `flex-shrink: 0` — but was incidentally
- * borrowing room instead.
- *
- * Route-fabricated, the same way the tilde-fold and bidi tests above are:
- * this combination (stale AND archived AND a live status AND an activity
- * age AND a long remote host) is not something the harness can coax out of
- * a real session on demand, and the point here is purely the CSS split,
- * not session lifecycle semantics. The sidebar itself has no drag handle
- * or responsive breakpoint (`app.css`: `.app-sidebar` is a fixed 340px,
- * not a `min-width`), so there is only one width to check this against —
- * this test IS that check.
+ * The fixture is route-controlled because stale plus archived plus a live
+ * status is useful layout pressure but not a lifecycle state the harness can
+ * produce on demand. The peer-controlled host also carries a bidi override,
+ * preserving the escaping and tooltip assertion from the earlier layout.
  */
-test("the title line's width split holds its floors under stale, archived, status, and age", async ({
+test("hostile identity and host text stay contained with simultaneous qualifiers", async ({
   page,
   request,
 }) => {
   const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
   expect(stamp, "the helm must stamp its replies").toBeTruthy();
-  // Mirrors `.session-title`/`.session-host`'s `min-width` in app.css —
-  // kept as named constants rather than repeated literals so a future
-  // change to either floor only has to update one place per side, here and
-  // in the stylesheet.
-  const TITLE_FLOOR_PX = 60;
+  // Mirrors the host's minimum width in app.css. The title gets a nonzero
+  // space check below; this pixel constant does not specify its glyph floor.
   const HOST_FLOOR_PX = 40;
   // Sub-pixel/cross-engine rounding tolerance, not a meaningful slack.
   const TOL = 2;
@@ -2347,6 +2382,9 @@ test("the title line's width split holds its floors under stale, archived, statu
       });
     });
     await page.goto("/");
+    await page.locator(".app-sidebar").evaluate((element) => {
+      (element as HTMLElement).style.width = "280px";
+    });
     const target = row(page, "width-contention-session");
     await expect(target).toBeVisible({ timeout: 20_000 });
     await expect(target).toHaveAttribute("data-host-locality", "remote");
@@ -2361,15 +2399,18 @@ test("the title line's width split holds its floors under stale, archived, statu
     expect(rowBox.width, "the row must not force the sidebar wider").toBeLessThanOrEqual(
       sideBox.width + 1,
     );
-    const lineBox = (await target.locator(".session-row-line").first().boundingBox())!;
+    const lineBox = (await target.locator(".session-row-meta").boundingBox())!;
     return {
       sideBox,
       lineBox,
       title: (await target.locator(".session-title").boundingBox())!,
+      identity: (await target.locator(".session-identity-copy").boundingBox())!,
       host: (await target.locator(".session-host").boundingBox())!,
       stale: (await target.locator(".stale-badge").boundingBox())!,
       archived: (await target.locator(".archived-badge").boundingBox())!,
       age: (await target.locator(".status-time").boundingBox())!,
+      statusSlot: (await target.locator(".session-status-slot").boundingBox())!,
+      localitySlot: (await target.locator(".session-locality-slot").boundingBox())!,
     };
   }
 
@@ -2381,9 +2422,7 @@ test("the title line's width split holds its floors under stale, archived, statu
     host_name: "user@short-vm",
   });
   const dominant = await measure(titleDominant);
-  expect(dominant.title.width, "the title must keep a meaningful width").toBeGreaterThanOrEqual(
-    TITLE_FLOOR_PX - TOL,
-  );
+  expect(dominant.title.width, "the title must retain visible space").toBeGreaterThan(0);
   expect(dominant.host.width, "the host must keep its floor even here").toBeGreaterThanOrEqual(
     HOST_FLOOR_PX - TOL,
   );
@@ -2391,6 +2430,11 @@ test("the title line's width split holds its floors under stale, archived, statu
     dominant.host.width,
     "the host must still respect its 40% cap",
   ).toBeLessThanOrEqual(dominant.lineBox.width * 0.4 + TOL);
+  for (const qualifier of [dominant.stale, dominant.archived]) {
+    expect(qualifier.x).toBeGreaterThanOrEqual(dominant.identity.x - TOL);
+    expect(qualifier.x + qualifier.width).toBeLessThanOrEqual(dominant.identity.x + dominant.identity.width + TOL);
+    expect(qualifier.y + qualifier.height).toBeLessThanOrEqual(dominant.identity.y + dominant.identity.height + TOL);
+  }
 
   // ===== Host-dominant: BOTH title and host are individually long (unlike
   // title-dominant, where only the title was) — the opposite construction,
@@ -2402,14 +2446,17 @@ test("the title line's width split holds its floors under stale, archived, statu
   const rawLongHost = `deploy@${rlo}${"build-fleet-".repeat(8)}internal.example.com`;
   const escapedLongHost = `deploy@<U+202E>${"build-fleet-".repeat(8)}internal.example.com`;
   const hostDominant = await loadFixture({
-    title: `width-contention-${"t".repeat(150)}`,
+    title: `width-contention-${rlo}${"t".repeat(150)}`,
     host_name: rawLongHost,
   });
+  // The new native title tooltip is a separate display surface: directional
+  // controls must be legible there instead of rearranging the tooltip text.
+  await expect(hostDominant.locator(".session-title")).toHaveAttribute(
+    "title",
+    `width-contention-<U+202E>${"t".repeat(150)}`,
+  );
   const underdog = await measure(hostDominant);
-  expect(
-    underdog.title.width,
-    "the title must keep a meaningful width even against a long host",
-  ).toBeGreaterThanOrEqual(TITLE_FLOOR_PX - TOL);
+  expect(underdog.title.width, "the title must retain visible space").toBeGreaterThan(0);
   expect(
     underdog.host.width,
     "the host must keep its floor even against a long title",
@@ -2442,11 +2489,10 @@ test("the title line's width split holds its floors under stale, archived, statu
     }
   }
 
-  // The three FIXED claimants — proven fixed by holding the SAME width
-  // across two scenarios that put wildly different pressure on the
-  // flexible title/host split beside them. If either scenario had actually
-  // compressed one of these below its own content's width, the two
-  // measurements would disagree.
+  // Qualifiers and activity retain stable geometry when only peer-controlled
+  // title and host lengths change. This also catches a qualifier escaping its
+  // identity group into an automatic grid row. Wrapping inside that group
+  // is deliberate when several state words cannot fit on one line.
   for (const [name, a, b] of [
     ["stale badge", dominant.stale, underdog.stale],
     ["archived badge", dominant.archived, underdog.archived],
@@ -2454,9 +2500,159 @@ test("the title line's width split holds its floors under stale, archived, statu
   ] as const) {
     expect(
       Math.abs(a.width - b.width),
-      `the ${name} must render at the same width regardless of title/host pressure`,
+      `the ${name} must render at the same width regardless of identity pressure`,
     ).toBeLessThanOrEqual(TOL);
   }
+  expect(Math.abs(dominant.age.x - underdog.age.x), "activity times share one column").toBeLessThanOrEqual(TOL);
+  expect(Math.abs(dominant.statusSlot.x - underdog.statusSlot.x)).toBeLessThanOrEqual(TOL);
+  expect(Math.abs(dominant.localitySlot.x - underdog.localitySlot.x)).toBeLessThanOrEqual(TOL);
+});
+
+/**
+ * Fixed status/locality tracks, right-aligned ages, and menu reservations hold
+ * at an adversarial 280px sidebar width. The fixtures deliberately mix live,
+ * ended, and unknown states plus short and long agent badges. One age exceeds
+ * four characters: unbounded day counts must keep the same right edge without
+ * overlapping the adjacent badge. A legacy row without a host name must retain
+ * its directory without inventing either a host label or a dangling colon.
+ */
+test("narrow rows align fixed facts and reserve only control-sized menu gutters", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  const local = await localHostId(request);
+  const activity = Math.floor(Date.now() / 1000) - 120;
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+      json: {
+        sessions: [
+          {
+            id: "narrow-live",
+            title: "live row",
+            cwd: "/srv/live",
+            invocation: "a",
+            host: 999_991,
+            host_name: "remote-build-host",
+            status: { state: "running" },
+            last_activity_at: activity,
+          },
+          {
+            id: "narrow-ended",
+            title: "ended row",
+            cwd: "/srv/ended",
+            invocation: "/opt/tools/a-very-long-agent-program-name --flag",
+            host: local,
+            host_name: "this machine",
+            status: { state: "exited", exit_code: 17 },
+            stale: true,
+            archived: true,
+            last_activity_at: activity - 1000 * 86_400,
+          },
+          {
+            id: "narrow-unknown",
+            title: "unknown row",
+            cwd: "/srv/unknown",
+            invocation: "agent",
+            status: { state: "unknown" },
+            last_activity_at: activity,
+          },
+        ],
+        total: 3,
+        matching: 3,
+        truncated: false,
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.locator(".app-sidebar").evaluate((element) => {
+    (element as HTMLElement).style.width = "280px";
+  });
+  const rows = [row(page, "narrow-live"), row(page, "narrow-ended"), row(page, "narrow-unknown")];
+  for (const target of rows) await expect(target).toBeVisible({ timeout: 20_000 });
+
+  async function left(target: Locator, selector: string) {
+    return (await target.locator(selector).boundingBox())!.x;
+  }
+  for (const selector of [".session-status-slot", ".session-locality-slot"] as const) {
+    const positions = await Promise.all(rows.map((target) => left(target, selector)));
+    expect(Math.max(...positions) - Math.min(...positions), `${selector} must align`).toBeLessThanOrEqual(2);
+  }
+  const ages = await Promise.all(rows.map(async (target) => (await target.locator(".status-time").boundingBox())!));
+  const ageRights = ages.map((box) => box.x + box.width);
+  expect(Math.max(...ageRights) - Math.min(...ageRights), "activity right edges must align").toBeLessThanOrEqual(2);
+  await expect(rows[1].locator(".status-time")).toHaveText("1000d");
+  for (let index = 0; index < rows.length; index++) {
+    const badge = (await rows[index].locator(".session-agent").boundingBox())!;
+    expect(badge.x + badge.width, "an age must not overlap its agent badge").toBeLessThanOrEqual(ages[index].x);
+  }
+  await expect(rows[0].locator(".session-status-slot .status-dot")).toHaveCount(1);
+  await expect(rows[1].locator(".session-status-slot .status-badge")).toHaveCount(0);
+  await expect(rows[1].locator(".session-identity-copy .status-badge")).toContainText("exited");
+  await expect(rows[2].locator(".session-status-slot .status-badge")).toHaveCount(0);
+  await expect(rows[2].locator(".session-locality-slot .host-kind-icon")).toHaveCount(0);
+  await expect(rows[2].locator(".session-row-meta")).toBeVisible();
+  await expect(rows[2].locator(".session-host")).toHaveCount(0);
+  await expect(rows[2].locator(".session-host-separator")).toHaveCount(0);
+  await expect(rows[2].locator(".session-cwd")).toHaveText("/srv/unknown");
+  await expect(rows[1].locator(".stale-badge")).toBeVisible();
+  await expect(rows[1].locator(".archived-badge")).toBeVisible();
+  /** DOM visibility alone misses a badge completely clipped by its parent. */
+  async function expectPaintedQualifiers() {
+    const identity = (await rows[1].locator(".session-identity-copy").boundingBox())!;
+    for (const selector of [".status-badge", ".stale-badge", ".archived-badge"]) {
+      const badge = (await rows[1].locator(`.session-identity-copy ${selector}`).boundingBox())!;
+      expect(badge.width, `${selector} retains visible text space`).toBeGreaterThan(12);
+      expect(badge.x).toBeGreaterThanOrEqual(identity.x - 1);
+      expect(badge.x + badge.width).toBeLessThanOrEqual(identity.x + identity.width + 1);
+      expect(badge.y).toBeGreaterThanOrEqual(identity.y - 1);
+      expect(badge.y + badge.height).toBeLessThanOrEqual(identity.y + identity.height + 1);
+    }
+  }
+  await expectPaintedQualifiers();
+  const liveTitle = rows[0].locator(".session-title");
+  const liveTitleBox = (await liveTitle.boundingBox())!;
+  const fourCharacters = await liveTitle.evaluate((node) => {
+    const probe = document.createElement("span");
+    probe.style.cssText = `position:fixed;width:4ch;font:${getComputedStyle(node).font}`;
+    document.body.appendChild(probe);
+    const width = probe.getBoundingClientRect().width;
+    probe.remove();
+    return width;
+  });
+  expect(liveTitleBox.width, "an ordinary title keeps roughly four glyphs at 280px").toBeGreaterThanOrEqual(
+    fourCharacters - 2,
+  );
+
+  async function menuExcess(main: Locator, content: Locator, menu: Locator) {
+    const mainBox = (await main.boundingBox())!;
+    const contentBox = (await content.boundingBox())!;
+    const menuBox = (await menu.boundingBox())!;
+    return mainBox.x + mainBox.width - (contentBox.x + contentBox.width) - menuBox.width;
+  }
+  const sessionExcess = await menuExcess(
+    rows[0].locator(".session-row-main"),
+    rows[0].locator(".session-activity-column"),
+    rows[0].locator(".session-row-menu"),
+  );
+  expect(sessionExcess).toBeGreaterThanOrEqual(0);
+  expect(sessionExcess).toBeLessThanOrEqual(8.5);
+
+  const host = page.locator(".host-row").first();
+  await expect(host).toBeVisible({ timeout: 20_000 });
+  const hostExcess = await menuExcess(
+    host.locator(".host-row-main"),
+    host.locator(".host-status"),
+    host.locator(".host-row-menu"),
+  );
+  expect(hostExcess).toBeGreaterThanOrEqual(0);
+  expect(hostExcess).toBeLessThanOrEqual(8.5);
 });
 
 /** Closing the app-bar popup discards its local editor draft, so reopening
@@ -3160,7 +3356,7 @@ test("opening host details closes an open row menu", async ({ page, request }) =
     await openRowMenu(target);
 
     await page.locator(".host-details-toggle").click();
-    await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".host-details-toggle")).toBeChecked();
     await expect(page.locator(".host-detail").first()).toBeVisible();
 
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
@@ -3179,7 +3375,7 @@ test("opening host details closes an open host-row menu", async ({ page }) => {
   await openHostMenu(host);
 
   await page.locator(".host-details-toggle").click();
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
   await expect(host.locator(".host-row-menu-panel")).toHaveCount(0);
   await expect(host.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
 });
@@ -3192,7 +3388,7 @@ test("opening host details closes the filter popover", async ({ page }) => {
   await openFilterBar(page);
 
   await page.locator(".host-details-toggle").click();
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
   await expect(page.locator(".filter-popover")).toHaveCount(0);
   await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
 });
@@ -3294,13 +3490,17 @@ test("scrolling the sidebar dismisses the filter popover after its toggle moves"
     invocation: "sleep 300",
   });
   try {
-    // A short viewport is what makes the sidebar scroll at all: whether one
-    // session overflows the default 720px depends on how many rows other
-    // specs left on the shared stack, which this test must not depend on.
+    // The scroll is the stimulus, not the number or density of session rows.
+    // Reserve overflow explicitly so a denser layout or fixture cleanup
+    // cannot turn this into a test that never scrolls its real container.
     await page.setViewportSize({ width: 1280, height: 360 });
     await page.goto("/");
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     const sidebar = page.locator(".app-sidebar");
+    const viewportHeight = await sidebar.evaluate((el) => el.clientHeight);
+    await page.locator(".session-list").evaluate((el, height) => {
+      (el as HTMLElement).style.minHeight = `${height * 2}px`;
+    }, viewportHeight);
     await expect.poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1)).toBe(true);
     await page.locator(".filter-toggle").click();
     const before = await page.locator(".filter-toggle").boundingBox();
@@ -3368,6 +3568,13 @@ test("opening the create-session form closes an open row menu", async ({ page, r
 
     await page.locator(".new-session-button").click();
     await expect(page.locator(".create-session-form")).toBeVisible();
+
+    // Moving the opener into the count heading must leave the draft after
+    // it in keyboard order. Otherwise forward Tab skips the newly opened
+    // form entirely, even though pointer creation still works.
+    await page.locator(".new-session-button").focus();
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".create-session-form :focus")).toHaveCount(1);
 
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");

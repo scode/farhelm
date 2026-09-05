@@ -2681,7 +2681,7 @@ test.describe("agent profiles", () => {
         const target = event.target;
         if (!(target instanceof Element) || !target.closest(".profile-save")) return;
         window.removeEventListener("click", handler);
-        (document.querySelector(".host-details-toggle") as HTMLButtonElement).focus();
+        (document.querySelector(".host-details-toggle") as HTMLInputElement).focus();
       };
       window.addEventListener("click", handler);
     });

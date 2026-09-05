@@ -50,29 +50,29 @@ no semantic selectors. Among DOM-based Rust options, Dioxus is the most active a
 Tauri+Leptos would mean gluing two frameworks for no clear gain. Skipping dioxus-fullstack keeps the API a first-class
 tested surface (the spawn CLI and test fixtures need it anyway) and avoids the framework's most churn-prone part.
 
-The session list's chosen ORDER and the last-selected session are one preference the HELM keeps, in a singleton row of
-`helm.db` (`preferences`: `list_sort`, `last_selected`) behind `GET`/`PUT /api/preferences`, device-authenticated like
-every other route. Both clients read it once after authentication — `PreferencesGate` holds the authenticated tree,
-rendering nothing, until the read lands, so the sort control and the auto-select effect see the remembered values on
-their first run and no frame shows a default that is then corrected. On desktop the IPC authentication gate already
-holds the tree and the read is one loopback hop, so nothing is visible; in the browser the first paint deliberately
-waits on that one round trip to the helm — a page with a valid credential used to paint its sidebar synchronously from
-localStorage — so the list never appears in an order that then changes. A write is a sparse patch naming only the field
-the user changed, merged per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two
-clients changing different fields at nearly the same time cannot clobber each other; the signal in the page is updated
-before the request leaves, which is what keeps the choice in force when the write fails. Same-field writes are
-serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse order; the write queue is
-process state outside the remounted tree, and after credential recovery the gate overlays and replays any local choice
-whose write never got through, so reauthentication cannot roll the current client back to the helm's older row. The seed
-read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a stalled preference
-endpoint cannot blank the page for the funnel's full sixty seconds. The sort travels as the bare word `?sort=` takes and
-is validated against that vocabulary at the write; the selection is a bare session id (the browser's old `{helm, id}`
-record was keyed by helm identity only because origin-scoped storage could outlive a state-directory swap, and a row in
-the helm's own database cannot describe another helm's fleet). An absent or unrecognized sort word still reads as the UI
-default (`activity`) on the client, because the row outlives the build that validated it. Nothing is kept per client: no
-localStorage key, no field in `desktop-client.json` (which now holds credentials only), no eval round trip. The visible
-consequences are the ones SPEC.md names — one answer shared by every client, and a second client attaching to whatever
-was selected most recently anywhere.
+The session list's chosen ORDER, last-selected session, and compact-row choice are one preference the HELM keeps, in a
+singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`) behind `GET`/`PUT /api/preferences`,
+device-authenticated like every other route. Both clients read it once after authentication — `PreferencesGate` holds
+the authenticated tree, rendering nothing, until the read lands, so the sort control and the auto-select effect see the
+remembered values on their first run and no frame shows a default that is then corrected. On desktop the IPC
+authentication gate already holds the tree and the read is one loopback hop, so nothing is visible; in the browser the
+first paint deliberately waits on that one round trip to the helm — a page with a valid credential used to paint its
+sidebar synchronously from localStorage — so the list never appears in an order that then changes. A write is a sparse
+patch naming only the field the user changed, merged per-field by the helm (an absent field is untouched, an explicit
+`null` clears one), so two clients changing different fields at nearly the same time cannot clobber each other; the
+signal in the page is updated before the request leaves, which is what keeps the choice in force when the write fails.
+Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse
+order; the write queue is process state outside the remounted tree, and after credential recovery the gate overlays and
+replays any local choice whose write never got through, so reauthentication cannot roll the current client back to the
+helm's older row. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered",
+so a stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort travels as the bare
+word `?sort=` takes and is validated against that vocabulary at the write; the selection is a bare session id (the
+browser's old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could outlive a
+state-directory swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or
+unrecognized sort word still reads as the UI default (`activity`) on the client, because the row outlives the build that
+validated it. Nothing is kept per client: no localStorage key, no field in `desktop-client.json` (which now holds
+credentials only), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every
+client, and a second client attaching to whatever was selected most recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -107,27 +107,30 @@ rows in hand even when the cap cut the listing, where under a non-creation order
 cut: a cut listing is a fleet of hundreds, the fallback exists to keep the pane from sitting empty rather than to be
 exact, and the alternative was a second request shape for that corner.
 
-What a sidebar row SHOWS was narrowed on 2026-08-23, reversing part of BUGS_BURNDOWN.md's "Decisions (interviewed
-2026-08-13)" list, which called for title, status badge, host, working directory and invocation on every row. Two of
-those turned out to cost a line of height each while saying nothing on the common fleet, and the host line was withdrawn
-from every row that WAS the helm's own machine, appearing only for a session that was not.
-
-That VISIBILITY rule was reversed again on 2026-09-03, while the height argument behind it survives: every row now marks
-its locality, but the mark costs one glyph's width on the existing title line rather than a line of its own, so the "no
-extra line" outcome the 2026-08-23 pass fought for is kept even though the visibility choice it made is not.
-`list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
-matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when both
-ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read that has
-not landed). The row draws the LOCAL glyph only for a confirmed `Local` verdict — an `Unknown` row draws no glyph at
-all, never the local one, because a glyph is a positive claim `session_locality` has no evidence to back. The 2026-08-23
-rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available host label, it only ever
-leaves the row free to show one it already has, and the glyph rule adds a second promise on top rather than replacing
-the first. Legacy rows without a host name at all necessarily show none regardless — locality answers whether a name
-would be shown, not whether one exists to show. The invocation is rendered compactly: the profile's snapshotted name
-when the session was created from one, otherwise the program's basename plus a marker for an unattended-mode flag
-(`claude · skip-perms`). The working directory is tilde-folded against the `/home/<user>` and `/Users/<user>` shapes,
-since no home directory is on the wire to fold against properly. Every one of those abbreviations is lossy, so the
-untouched string rides along in a `title` attribute — the row is a summary, and the full truth stays one hover away.
+The sidebar uses two lines unless the shared compact preference hides the second. Its identity line is status, locality,
+title, stale/archive qualifiers, agent badge, and a right-aligned activity-time column before the narrow menu gutter.
+The second line is the host name and directory, joined by `:` when the helm supplied a name. This restores host
+visibility for confirmed local sessions too: a host name is an identity fact, while the locality icon answers a separate
+question. The status and locality tracks keep fixed icon-sized widths: live status uses the first slot's dot, ended
+status keeps its truthful word beside the title, and an absent status or unknown locality leaves its slot blank. This
+keeps later columns aligned without inventing dots or locality. The activity track has a four-character minimum and
+grows for unbounded ages such as `1000d`. Stale and archived qualifiers stay inside the identity group and wrap there
+when necessary, so a narrow row cannot clip away an entire state label. Those exceptional rows can be taller even in
+compact mode; the surrounding icon, agent, activity, and menu columns retain their positions. A legacy row with no name
+leaves that fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the
+session's host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why),
+`Remote` when both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a
+hosts read that has not landed). The row draws the LOCAL glyph only for a confirmed `Local` verdict — an `Unknown` row
+draws no glyph at all, never the local one, because a glyph is a positive claim `session_locality` has no evidence to
+back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available
+host label, it only ever leaves the row free to show one it already has, and the glyph rule adds a second promise on top
+rather than replacing the first. Legacy rows without a host name at all necessarily show none regardless — locality
+answers whether a name would be shown, not whether one exists to show. The invocation is rendered compactly: the
+profile's snapshotted name when the session was created from one, otherwise the program's basename plus a marker for an
+unattended-mode flag (`claude · skip-perms`). The working directory is tilde-folded against the `/home/<user>` and
+`/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of those
+abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
+truth stays one hover away.
 
 The status badge's dot-or-word split (SPEC.md's Status section) is decided in Rust, in `status::status_badge`, not in
 CSS: the badge carries its word on every path and a flag saying whether that word is shown or only left for a screen
@@ -244,13 +247,13 @@ terminal whose retained output becomes visible while the popup is mounted does n
 not hand focus to that terminal; the user can click it when they want to type there.
 
 Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
-Its two-row header gives the known host count first and then one unpersisted global details disclosure beside the
-add-host control. Every row always shows its name, phase dot, and muted actions toggle in the same trailing gutter as
-session-row status; connected spends no visible word, while other phases use humanized prose and retain the stable wire
-token in their data attribute. The disclosure reveals every row's evidence and diagnostics together. Provisioning
-commands live in the row menu, but their confirmation and active or retained progress stay under the row because that
-lifecycle owns more context than a floating menu can safely hold. Starting one of those commands opens details before
-planning, while a running or failed retained run leaves one short trace when details are closed.
+Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
+Every row always shows its name, phase dot, and muted actions toggle in the same narrow trailing gutter as the
+session-row actions toggle; connected spends no visible word, while other phases use humanized prose and retain the
+stable wire token in their data attribute. The disclosure reveals every row's evidence and diagnostics together.
+Provisioning commands live in the row menu, but their confirmation and active or retained progress stay under the row
+because that lifecycle owns more context than a floating menu can safely hold. Starting one of those commands opens
+details before planning, while a running or failed retained run leaves one short trace when details are closed.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel hangs below-LEFT of the toggle that opened it — its top-right corner
@@ -1087,7 +1090,7 @@ reports a failed listing rather than a silently shortened one.
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities, and optional
   aliases), last-known session cache (survives helm restarts per SPEC.md), the helm-wide profile catalog and its one
   remembered default, recoverable web token, hashed browser device sessions, and the one client preference (list order,
-  last-selected session) every client shares.
+  last-selected session, compact rows) every client shares.
 - The `profiles` table is bounded on both axes — 128 profiles per helm, 8 KiB of caller-supplied text per profile — so
   the unpaginated catalog reply stays predictably bounded. The schema migration that creates it seeds Claude Code and
   Codex in plain and permission-skipping variants exactly once, so edits and deletions remain durable. A profile names

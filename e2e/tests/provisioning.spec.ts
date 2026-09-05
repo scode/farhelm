@@ -586,11 +586,11 @@ test("a transient local probe error can be retried into the run-setup answer", a
     await route.continue();
   });
   await page.goto("/");
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-error")).toContainText("temporary local probe failure");
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
   await openHostMenu(local);
   await expect(local.locator(".provisioning-auto-setup")).toBeVisible();
 
@@ -647,7 +647,7 @@ test("manual-only local setup leaves the manual command primary", async ({ page 
     await route.continue();
   });
   await page.goto("/");
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-manual:not(.secondary)")).toContainText(
@@ -656,7 +656,7 @@ test("manual-only local setup leaves the manual command primary", async ({ page 
   await expect(local.locator(".provisioning-error")).toContainText(
     "this is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel",
   );
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
   await expect(local.locator(".provisioning-plan")).toHaveCount(0);
   await openHostMenu(local);
   await expect(local.locator(".provisioning-auto-setup")).toHaveCount(0);
@@ -690,12 +690,12 @@ test("an unvalidated automatic local probe reveals its feedback", async ({ page 
   });
 
   await page.goto("/");
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toContainText(
     "the helm accepted the local probe, but its reply could not be read",
   );
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
 });
 
 /**
@@ -726,12 +726,12 @@ test("an automatic local plan reveals its confirmation", async ({ page }) => {
   });
 
   await page.goto("/");
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toContainText(
     "install the local supervisor",
   );
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
 });
 
 /**
@@ -843,7 +843,7 @@ test("UPDATE plans once, binds to the row, and releases OpLock at acceptance", a
   await page.goto("/");
   await expect(page.locator(".hosts-panel")).toBeVisible();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   // Completed retained runs are resting history, not collapsed traces.
   await expect(row.locator(".provisioning-trace")).toHaveCount(0);
   await openHostMenu(row);
@@ -859,7 +859,7 @@ test("UPDATE plans once, binds to the row, and releases OpLock at acceptance", a
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(toggle).toBeFocused();
   await expect(row.locator(".provisioning-plan")).toBeVisible();
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
   expect((await backendEvents()).filter((event) => event.event === "probe")).toHaveLength(1);
 
   await openHostMenu(row);
@@ -916,7 +916,7 @@ test("a newly landed plan closes an already-open filter", async ({
   // to SURVIVE a beat; a filter closed by leftover settling is reopened.
   // Once it holds, the only thing that can close it is the plan the held
   // route is about to release.
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".host-details-toggle")).toBeChecked();
   await expect(row.locator(".provisioning-planning")).toBeVisible();
   const toggle = page.locator(".filter-toggle");
   await expect
@@ -967,7 +967,7 @@ test("collapsed trace transitions invalidate fixed-surface geometry", async ({
 
   await page.goto("/");
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
-  await expect(page.locator(".host-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
 
   for (const status of ["running", "failed", "completed"] as const) {
     await openFilterBar(page);
