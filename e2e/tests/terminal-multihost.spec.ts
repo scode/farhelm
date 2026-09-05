@@ -44,9 +44,9 @@ import {
 import { stackScratchDir } from "./helpers/scratch";
 import path from "node:path";
 import fs from "node:fs";
-import { ChildProcess, spawn } from "node:child_process";
+import { ChildProcess, spawn, spawnSync } from "node:child_process";
 import net from "node:net";
-import { cleanupSession, fillCreateForm } from "./helpers/term";
+import { cleanupSession, fillCreateForm, waitForTermText } from "./helpers/term";
 import {
   cleanUpSessionsTitled,
   FAKE_AGENT_INVOCATION,
@@ -56,6 +56,7 @@ import {
   installTerminalSuiteHooks,
   LIVE_BADGE,
   rowByTitle,
+  sharedSessionRow,
 } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
@@ -78,6 +79,15 @@ type StackInfo = {
   remote_supervisor_pid: number;
   remote_ssh: string;
   provisioning_backend: string;
+  /**
+   * The file the "remote" supervisor reads its boot id from
+   * (`--boot-id-file`, its test-only seam). Rewriting it between a kill
+   * and a respawn is how this file simulates a REBOOT of that host — a
+   * changed boot id is the one thing the supervisor's interrupted
+   * classification rests on, and the only other way to change it is to
+   * reboot the machine.
+   */
+  remote_boot_id_file: string;
 };
 
 /**
@@ -539,9 +549,13 @@ async function restoreFleetRow(request: APIRequestContext) {
  */
 async function restoreRemoteSupervisor(request: APIRequestContext) {
   const info = stackInfo();
+  // The same test-only boot-id seam start-stack.sh launched it with: a
+  // respawn that dropped the option would read the machine's real boot id,
+  // and every session of the harness's "boot-1" would come back interrupted
+  // on a host that never rebooted.
   restartedRemote = spawn(
     info.farhelm,
-    ["supervisor", "run", "--state-dir", info.remote_state],
+    ["supervisor", "run", "--state-dir", info.remote_state, "--boot-id-file", info.remote_boot_id_file],
     { stdio: "ignore" },
   );
   await expect
@@ -2244,6 +2258,156 @@ test.describe("multi-host", () => {
       const still = listing.sessions.find((s: any) => s.title === staleTitle);
       expect(still, "a refused stop must not remove the row").toBeTruthy();
       expect(still.stale).toBe(true);
+    });
+  });
+
+  // A REBOOT of the remote host, simulated the way the Rust suite's reboot
+  // tests define one: the supervisor and its tmux server go away, the boot
+  // id the supervisor reads changes (start-stack.sh's `--boot-id-file`
+  // seam, rewritten between the kill and the respawn), and the supervisor
+  // comes back on the same state directory. A changed boot id alone is not
+  // a reboot — reload keeps any pane it still finds — which is why the tmux
+  // server is killed too. What the helm then shows for sessions that were
+  // live is SPEC.md's interrupted contract, end to end against real
+  // binaries rather than an injected listing row: no terminal is mounted or
+  // retried, the surface says why, declining changes nothing, and only the
+  // user's restart relaunches anything.
+  //
+  // Serial and grouped for the same reason as the group above: one
+  // expensive, destructive setup that every test here observes a different
+  // side of. The first test performs the reboot itself, because the
+  // transition — a session OPEN while its host reboots — is one of the
+  // things under test and cannot be observed from a `beforeAll`.
+  test.describe.serial("after a simulated reboot of the remote host", () => {
+    const openTitle = `open-through-reboot-${Date.now()}`;
+    const closedTitle = `closed-through-reboot-${Date.now()}`;
+    const ids: string[] = [];
+
+    /** Create a fake-agent session on the remote and wait until the helm has seen it live. */
+    async function createLiveRemoteSession(request: APIRequestContext, title: string) {
+      const remote = await apiRemoteHost(request);
+      const created = await request.post("/api/sessions", {
+        data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title, host: remote.id },
+      });
+      expect(created.ok(), `creating ${title} on the remote host: ${await created.text()}`).toBe(true);
+      const id: string = (await created.json()).id;
+      ids.push(id);
+      // Live as OBSERVED by the helm before the reboot: only a session last
+      // known running is interrupted by a boot, and the create reply's
+      // placeholder status is not an observation.
+      await expect
+        .poll(
+          async () => {
+            const listing = await (await request.get("/api/sessions")).json();
+            return listing.sessions.find((s: any) => s.id === id)?.status?.state;
+          },
+          { timeout: 30_000, message: `waiting for the helm to see ${title} running` },
+        )
+        .toMatch(LIVE_BADGE);
+      return id;
+    }
+
+    test.beforeAll(async ({ request }) => {
+      if (!fleetReady) return;
+      test.setTimeout(120_000);
+      await createLiveRemoteSession(request, openTitle);
+      await createLiveRemoteSession(request, closedTitle);
+    });
+
+    test.afterAll(async ({ request }) => {
+      if (!fleetReady) return;
+      for (const id of ids) await cleanupSession(request, id);
+    });
+
+    // The transition: a session whose terminal is on screen when its host
+    // reboots. The view passes through the host-unreachable surface while
+    // the host is down (that part is the group above's), and must settle on
+    // the interrupted surface once the host is back — with no terminal
+    // element left behind for the reconnect ladder to keep retrying into.
+    test("reboot-while-open: an attached session settles on the interrupted surface", async ({
+      page,
+      request,
+    }) => {
+      requireFleet();
+      test.setTimeout(240_000);
+      const info = stackInfo();
+
+      await page.goto("/");
+      await rowByTitle(page, openTitle).locator(".session-row-open").click();
+      await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+        timeout: 20_000,
+      });
+      await waitForTermText(page, "FAKE-AGENT READY");
+
+      // The reboot. `kill-server` may find the server already gone (a
+      // supervisor's exit does not take it down, but nothing guarantees it
+      // is still there either), so its exit status is not asserted.
+      await killRemoteSupervisor();
+      spawnSync("tmux", ["-S", path.join(info.remote_state, "tmux.sock"), "kill-server"]);
+      fs.writeFileSync(info.remote_boot_id_file, "boot-2\n");
+      await restoreRemoteSupervisor(request);
+
+      const notice = page.locator(".interrupted-notice");
+      await expect(notice).toBeVisible({ timeout: 60_000 });
+      await expect(notice).toContainText("did not survive the host reboot");
+      await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
+      await expect(page.locator("#terminal")).toHaveCount(0);
+      await expect(page.locator("#term-connecting")).toHaveCount(0);
+      await expect(page.locator(".host-stale-notice")).toHaveCount(0);
+      // Settled, not passing through: a view that remounted the terminal
+      // and resumed the ladder would show the overlay again within its
+      // first retry, which is well inside this window.
+      await page.waitForTimeout(5_000);
+      await expect(page.locator("#terminal")).toHaveCount(0);
+      await expect(page.locator("#term-connecting")).toHaveCount(0);
+      await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
+    });
+
+    // Opening a session that was ALREADY interrupted when the view loads,
+    // and declining: the row and the session stay exactly as they were.
+    test("reboot-already-interrupted: opening mounts no terminal, and leaving changes nothing", async ({
+      page,
+      request,
+    }) => {
+      requireFleet();
+      await page.goto("/");
+      const row = rowByTitle(page, closedTitle);
+      await expect(row.locator(".status-badge")).toHaveText("interrupted", { timeout: 60_000 });
+      await row.locator(".session-row-open").click();
+      await expect(page.locator(".interrupted-notice")).toBeVisible();
+      await expect(page.locator("#terminal")).toHaveCount(0);
+      await expect(page.locator("#term-connecting")).toHaveCount(0);
+      await expect(page.locator(".tab-strip")).toHaveCount(0);
+      // Declining is leaving. Nothing was sent, so the supervisor still
+      // classifies the session as interrupted and the row still says so.
+      await sharedSessionRow(page).click();
+      await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+      await expect(rowByTitle(page, closedTitle).locator(".status-badge")).toHaveText("interrupted");
+      const listing = await (await request.get("/api/sessions")).json();
+      const still = listing.sessions.find((s: any) => s.title === closedTitle);
+      expect(still?.status?.state, "declining must leave the session interrupted").toBe("interrupted");
+    });
+
+    // The one way forward: restart from the surface relaunches the agent in
+    // a new terminal, which the view then attaches like any other.
+    test("reboot-restart: restart from the interrupted surface attaches the new terminal", async ({
+      page,
+    }) => {
+      requireFleet();
+      test.setTimeout(120_000);
+      await page.goto("/");
+      await rowByTitle(page, closedTitle).locator(".session-row-open").click();
+      const restart = page.locator(".interrupted-notice .restart-from-notice");
+      await expect(restart).toBeVisible();
+      await restart.click();
+      await expect(page.locator(".interrupted-notice")).toHaveCount(0, { timeout: 60_000 });
+      await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+        timeout: 60_000,
+      });
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await expect(page.locator(".titlebar .status-badge")).toHaveText(LIVE_BADGE, {
+        timeout: 60_000,
+      });
     });
   });
 

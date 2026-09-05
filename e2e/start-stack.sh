@@ -164,7 +164,19 @@ sup_pid=$!
 # and two of them reach past the API at this supervisor: one kills it to
 # drive a host through unreachable, and both re-register it. Everything
 # they need to do that is published in $stack_info below.
-"$bin" supervisor run --state-dir "$remote_state" >"$state/remote-supervisor.log" 2>&1 9>&- &
+#
+# The remote reads its boot id from a file this run owns rather than from
+# the kernel, so the multi-host suite can simulate a REBOOT of that host:
+# kill the supervisor and its tmux server, rewrite the file, respawn the
+# supervisor with the same option (published below as
+# `remote_boot_id_file`) — and the sessions that were live come back
+# interrupted, exactly as after a real boot. `--boot-id-file` is the
+# supervisor's test-only seam for this and nothing in production passes
+# it; the local supervisor keeps reading the real boot id.
+remote_boot_id_file="$remote_state/boot-id"
+printf 'boot-1\n' >"$remote_boot_id_file" || exit 1
+"$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
+  >"$state/remote-supervisor.log" 2>&1 9>&- &
 remote_sup_pid=$!
 
 # Give both supervisors a moment to bind their sockets before the helm
@@ -216,8 +228,9 @@ print(json.dumps({
     "remote_ssh": "localhost",
     "state": sys.argv[4],
     "provisioning_backend": sys.argv[5],
+    "remote_boot_id_file": sys.argv[6],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to
