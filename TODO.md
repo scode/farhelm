@@ -46,11 +46,6 @@ sorted, which carries no implication either way. Within a bucket, no order.
     Rust reboot coverage in `crates/farhelm/tests/e2e/boot_id_durable_outcome.rs` already expects attachment to an
     interrupted session to fail; that refusal must become an ordinary recovery state in the UI.
 
-- Align the non-compact session row's hostname/directory line with the session name above it, rather than the far-left
-  status indicator. Render it as one continuous string, using the hostname alias when set and an ordinary colon in the
-  same font with no surrounding spaces: `myhost.com:~/path/to/project`. Preserve the existing full-value tooltip and
-  truncation behavior.
-
 ## Difficult deflake
 
 These entries remain unresolved after targeted investigation; clean repetitions are non-reproduction evidence, not
