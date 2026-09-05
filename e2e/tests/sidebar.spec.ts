@@ -94,7 +94,10 @@ test("the sidebar app bar shows the helm build and client tooltip", async ({ pag
   await expect(version).toHaveText(forced);
   await expect(version).toHaveAttribute("title", `this client was built as farhelm ${stamp}`);
 
-  await page.unroute("**/api/**");
+  // Mounting host rows can leave provisioning reads inside route.fetch even
+  // after the version is visible. Drain those handlers before removing the
+  // interception pattern, or their later fulfill races an already handled route.
+  await page.unrouteAll({ behavior: "wait" });
   await page.goto("/");
   await expect(version).toHaveText(stamp);
   await expect(version).toHaveAttribute("title", `this client was built as farhelm ${stamp}`);

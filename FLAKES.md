@@ -277,3 +277,13 @@ module and twenty focused helm-death runs with two CPU-load children passed on a
 3.7c. The helm-death test is no longer ignored. This corrects the client-lifetime failure in the simulated death; it
 does not establish scheduler starvation in the supervisor's EOF handler as the historical cause. The other release-gate
 flakes remain separate work in TODO.md.
+
+## 2026-09-05 — build-skew interceptor removal
+
+`the sidebar app bar shows the helm build and client tooltip` in `e2e/tests/sidebar.spec.ts` failed on repetition 48 of
+50 in WebKit at `route.fulfill`, with `Route is already handled!`. The trace shows the test removing interception while
+provisioning fetch handlers were still awaiting responses; their later fulfilments failed before the navigation. This
+establishes an interceptor-removal race, rather than the previously suspected duplicate dispatch. Waiting for active
+route handlers before removing them fixes that boundary without swallowing errors. Fifty repetitions per engine passed
+on a 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c and one browser worker, as did the three shared-helper feed callers in
+each engine. Disposition: fixed; removed from TODO.md.
