@@ -60,11 +60,15 @@ out-dir = "../../target/dist-desktop"
 # The app icon rides in the desktop archive so `install.sh` can assemble a
 # `Farhelm.app` bundle from files the SHA256SUMS verification already covered,
 # instead of embedding a binary blob in a `curl | sh` script someone should be
-# able to read. `Farhelm.icns` is generated from `icon.png` (placeholder
-# artwork, 1024x1024) as a single-`ic10` icns — the 8-byte icns header, then
-# one chunk whose payload is the PNG verbatim; modern macOS scales it for
-# every context. To regenerate after changing `icon.png`, wrap it the same way
-# (`iconutil` on a Mac also works and just produces a multi-size variant).
+# able to read. `icon.svg` is the artwork's source of truth: a monospace F
+# with a block cursor on the macOS icon grid (1024x1024 canvas, 824px rounded
+# square, transparent margin). `icon.png` is that SVG rasterized at 1024x1024
+# with the margin left transparent, and `Farhelm.icns` is the PNG wrapped as a
+# single-`ic10` icns — the 8-byte icns header, then one chunk whose payload is
+# the PNG verbatim; modern macOS scales it for every context. To regenerate
+# after changing `icon.svg`, rasterize it to `icon.png` with any renderer that
+# preserves alpha, then wrap it the same way (`iconutil` on a Mac also works
+# and just produces a multi-size variant).
 
 [dist]
 dist = true

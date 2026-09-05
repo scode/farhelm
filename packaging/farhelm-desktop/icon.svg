@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Farhelm app icon: a monospace F with a block cursor after it, on a
+  macOS-style rounded square. The source of truth for icon.png and
+  Farhelm.icns next to it; the dist.toml comment on those two files says how
+  to regenerate them from this.
+
+  Geometry follows Apple's macOS icon grid: a 1024x1024 canvas whose rounded
+  square is 824px, leaving a transparent 100px margin on every side so the
+  icon sits at the same size as its Dock neighbours. The artwork itself is
+  drawn in a 256-unit space and scaled up, which keeps the numbers small and
+  the corner radius (58/256, about 22.6%) the ratio a squircle-shaped Dock
+  tile expects.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g transform="translate(100 100) scale(3.21875)">
+    <rect width="256" height="256" rx="58" fill="#0B0D10"/>
+    <g fill="#F4F7F5">
+      <rect x="60" y="56" width="32" height="144"/>
+      <rect x="60" y="56" width="100" height="30"/>
+      <rect x="60" y="116" width="76" height="28"/>
+    </g>
+    <rect x="172" y="156" width="28" height="44" fill="#5CF08A"/>
+  </g>
+</svg>
