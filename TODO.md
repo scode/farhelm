@@ -18,6 +18,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Color the "this machine" icon in the session list red by default to make local sessions unmistakable. Assume the local
+  machine is not an appropriate place for `--yolo` mode; the color should keep the user clearly aware that the session
+  is local.
+
 - Fix the opening-focus obligation exposed by `an inert sidebar click dismisses the profiles popup` in
   `e2e/tests/profiles.spec.ts`. In the final Chromium run at `6903cf90`, the test observed body focus after its outside
   click, then found the popup still mounted with its new-profile button focused: the delayed opening handoff returned
@@ -287,6 +291,10 @@ established, flakes the per-PR loop caught, and new entries per class; a class r
 sharpen the entry, not add a retry.
 
 ## Maybe later
+
+- Let the user mark each host as "yolo is fine" or "yolo is not fine", controlling which hosts appear red in the session
+  list. This could also support warnings when the user is about to run an unsandboxed agent on a host marked "yolo is
+  not fine".
 
 - Support agents' native voice modes by piping audio through the helm to the supervisor and onward to the agent. Assess
   feasibility later, including how agents accept audio and what transport or audio-device integration would be needed;
