@@ -1413,7 +1413,7 @@ mod tests {
     /// for the life of the connection, which is a leak nothing else in
     /// the suite would notice. A LIVE transfer's entry is never evicted at
     /// any count: it holds that transfer's channel and its admission slot.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn finished_upload_routes_are_bounded_and_live_ones_are_never_evicted() {
         let mut routes = HashMap::new();
         for channel in 1..=(MAX_UPLOAD_TOMBSTONES as u32 + 10) {
@@ -1453,7 +1453,7 @@ mod tests {
     /// the answer comes from the channel's tombstone rather than from the
     /// session map: by commit time the session is gone from the map
     /// either way, so the map could only ever give the generic answer.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_late_commit_is_answered_from_its_channels_tombstone() {
         let deleted = test_route(1, Some(true));
         let (message, kind) = commit_without_upload(Some(&deleted), 1);

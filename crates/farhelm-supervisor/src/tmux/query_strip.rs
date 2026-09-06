@@ -125,7 +125,7 @@ mod tests {
 
     /// Every table entry is removed without changing ordinary bytes around it;
     /// this protects the user-visible stream from both leakage and corruption.
-    #[test]
+    #[farhelm_testtrace::test]
     fn removes_each_query_between_ordinary_text() {
         for entry in all_entries() {
             let mut stripper = QueryStripper::default();
@@ -140,7 +140,7 @@ mod tests {
 
     /// Every notification split must have the same result as one notification,
     /// because tmux is free to divide a pane payload at any byte boundary.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_transcript_split_matches_the_unsplit_result() {
         let mut transcript = b"start \x1b[".to_vec();
         for entry in all_entries() {
@@ -166,7 +166,7 @@ mod tests {
 
     /// Similar control sequences and ordinary escape bytes must pass through;
     /// the fixed table must not quietly turn into a terminal parser.
-    #[test]
+    #[farhelm_testtrace::test]
     fn decoys_pass_through_untouched() {
         let decoys = b"\x1b[\x1b[?2004$p\x1b[?2004h\x1b\x1b]11;r g b : 0 0 0 0 / 0 0 0 0\x1b\\";
         let mut stripper = QueryStripper::default();
@@ -176,7 +176,7 @@ mod tests {
     }
 
     /// The pending suffix is bounded even when fed one byte at a time.
-    #[test]
+    #[farhelm_testtrace::test]
     fn hold_back_never_exceeds_the_table_bound() {
         let mut stripper = QueryStripper::default();
         for entry in all_entries() {
@@ -194,7 +194,7 @@ mod tests {
 
     /// A partial prefix is ordinary output once the caller decides no more
     /// bytes should be waited for, and a second flush must be empty.
-    #[test]
+    #[farhelm_testtrace::test]
     fn flush_returns_and_clears_partial_prefix() {
         let mut stripper = QueryStripper::default();
         assert!(stripper.feed(b"\x1b]11;").is_empty());

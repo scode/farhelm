@@ -9655,7 +9655,7 @@ pub(crate) mod tests {
     /// non-UTF-8 home is `Internal` (host misconfiguration no different
     /// request can route around), and `~user` is `InvalidRequest` caller
     /// misuse. All of them name the actual problem in the message.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tilde_expansion_covers_every_form() {
         let kind_of = |err: &anyhow::Error| {
             err.downcast_ref::<RequestError>()
@@ -9736,7 +9736,7 @@ pub(crate) mod tests {
     /// second close cannot recover whichever diagnostic the first response
     /// discards. Keeping both is the only way to tell an operator about a
     /// surviving process and an unresolved output client at the same time.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_close_preserves_process_and_output_cleanup_failures() {
         let error = tab_close_cleanup_result(
             "tab-1",
@@ -9879,7 +9879,7 @@ pub(crate) mod tests {
     /// session. `Resume` against `FreshOnly` is the mirror image and the
     /// more dangerous one: honoring it could only mean running a
     /// `{conversation}` template with nothing to fill it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_restart_offer_accepts_exactly_one_mode() {
         for offer in [
             RestartOffer::FreshOnly,
@@ -9927,7 +9927,7 @@ pub(crate) mod tests {
     /// prescribed response is to refresh and re-present it (the wire
     /// vocabulary's staleness contract) — an unqualified "conflict" would
     /// leave it with nothing to show the user.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_mismatched_mode_names_the_current_offer() {
         let err = relaunch_argv(
             RestartMode::Fresh,
@@ -9946,7 +9946,7 @@ pub(crate) mod tests {
     /// resume promise rests on: the conversation id arrives in its OWN argv
     /// element, substituted rather than spliced, and no placeholder ever
     /// survives into something that gets executed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_mode_builds_its_own_command() {
         let resumed = relaunch_argv(
             RestartMode::Resume,
@@ -9987,7 +9987,7 @@ pub(crate) mod tests {
 
     /// The common case: an id well under the cap is echoed verbatim, with
     /// no allocation (`Cow::Borrowed`) and no trailing ellipsis.
-    #[test]
+    #[farhelm_testtrace::test]
     fn truncate_for_error_passes_short_ids_through_unchanged() {
         let id = "s1";
         assert_eq!(truncate_for_error(id), id);
@@ -10001,7 +10001,7 @@ pub(crate) mod tests {
     /// condition `<=` in `truncate_for_error` exists to get right, since
     /// an off-by-one here would either truncate a fitting id or let one
     /// byte over the cap through unclipped.
-    #[test]
+    #[farhelm_testtrace::test]
     fn truncate_for_error_leaves_an_id_at_exactly_the_cap_untouched() {
         let id = "a".repeat(ECHOED_ID_MAX);
         assert_eq!(truncate_for_error(&id), id.as_str());
@@ -10009,7 +10009,7 @@ pub(crate) mod tests {
 
     /// One byte over the cap must be truncated and marked with `...` —
     /// the case the cap exists for at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn truncate_for_error_truncates_one_byte_over_the_cap() {
         let id = "a".repeat(ECHOED_ID_MAX + 1);
         let truncated = truncate_for_error(&id);
@@ -10026,7 +10026,7 @@ pub(crate) mod tests {
     /// real char boundary would crash the whole request rather than
     /// truncate it. The correct behavior is to back up to the boundary
     /// just before the emoji, dropping it whole rather than splitting it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn truncate_for_error_does_not_split_a_multibyte_char_at_the_boundary() {
         let mut id = "a".repeat(ECHOED_ID_MAX - 1);
         id.push('🎉'); // 4 bytes, starting one byte before the cap
@@ -10045,7 +10045,7 @@ pub(crate) mod tests {
     /// removed while a REAL, current `tmux.conf` right next to it survives
     /// untouched — proving the sweep is name-scoped rather than a blanket
     /// removal of the state-dir root.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn sweep_tmux_config_temp_files_removes_only_the_orphan() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("tmux.conf"), b"set -g exit-empty off\n").unwrap();
@@ -10068,7 +10068,7 @@ pub(crate) mod tests {
     /// must be gone after startup — while its siblings (here, a `launch/`
     /// directory) are untouched, proving the sweep is a targeted removal
     /// and not a state-dir wipe.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn sweep_legacy_snapshots_dir_removes_the_directory_and_its_frames() {
         let tmp = tempfile::tempdir().unwrap();
         let snapshots = tmp.path().join("snapshots");
@@ -10093,7 +10093,7 @@ pub(crate) mod tests {
     /// contract cannot regress into an error or a panic on the common
     /// path; what this asserts is only that the call returns and creates
     /// nothing (log output is not captured here).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn sweep_legacy_snapshots_dir_tolerates_a_missing_directory() {
         let tmp = tempfile::tempdir().unwrap();
         sweep_legacy_snapshots_dir(tmp.path()).await;
@@ -10105,7 +10105,7 @@ pub(crate) mod tests {
     /// a path that plain does not exist) must come back `Ok(None)`, never
     /// an `Err` — see [`BootIdSource`]'s docs for why the two outcomes
     /// drive opposite reload behavior and must not be collapsed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_boot_id_from_a_missing_path_is_ok_none() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("boot_id");
@@ -10117,7 +10117,7 @@ pub(crate) mod tests {
     /// production reasoning inline in `read_boot_id_from`: storing an
     /// empty string would make a later REAL id look like a reboot on no
     /// actual evidence.
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_boot_id_from_an_empty_or_blank_file_is_ok_none() {
         let tmp = tempfile::tempdir().unwrap();
         let empty = tmp.path().join("boot_id");
@@ -10131,7 +10131,7 @@ pub(crate) mod tests {
 
     /// The ordinary case: a real boot-id line, trimmed of the trailing
     /// newline `/proc` files carry, comes back as `Ok(Some(<trimmed>))`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_boot_id_from_a_normal_file_returns_the_trimmed_id() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("boot_id");
@@ -10148,7 +10148,7 @@ pub(crate) mod tests {
     /// of guessing (see `BootIdSource`'s docs). A directory is the
     /// portable way to force that read error without `chmod` tricks,
     /// which break when the test runs as root (repo rule).
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_boot_id_from_an_unreadable_path_is_err() {
         let tmp = tempfile::tempdir().unwrap();
         let as_dir = tmp.path().join("boot_id");
@@ -10164,7 +10164,7 @@ pub(crate) mod tests {
     /// can fire without a reboot, mass-interrupting live sessions on an
     /// ordinary supervisor restart.
     #[cfg(target_os = "macos")]
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_mac_boot_session_uuid_is_present_and_stable() {
         let first = read_host_boot_id()
             .expect("reading kern.bootsessionuuid must not error")
@@ -10243,7 +10243,7 @@ pub(crate) mod tests {
     /// Asserted by mutating the OLD entry and observing the published one,
     /// which is the direction the bug actually takes: the writers hold the
     /// old entry and the readers use the new.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_renamed_entry_shares_the_runs_cells_with_the_entry_it_replaces() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         let renamed = renamed_entry(&old, "new title".to_string());
@@ -10346,7 +10346,7 @@ pub(crate) mod tests {
     /// read together — a future reader tidying this entry's cells into one
     /// consistent policy would otherwise pick a policy that is wrong for
     /// one of them either way.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         old.first_input.lock().unwrap().at = Some(1_700_000_000);
@@ -10421,7 +10421,7 @@ pub(crate) mod tests {
     /// Asserted across every variant rather than just `Reported` so the
     /// rule reads as "the reset is unconditional", which is the property
     /// that has to survive the next variant somebody adds.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_relaunch_that_reopens_the_capture_window_discards_every_prior_verdict() {
         for prior in [
             CaptureState::Provisional {
@@ -10500,7 +10500,7 @@ pub(crate) mod tests {
     /// Resume offer from, so a session that had just been resumed would
     /// immediately stop offering to resume — and, with no record locator to
     /// re-verify from, the scan could not put it back either.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_resume_relaunch_keeps_the_identity_the_agent_reported() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         old.first_input.lock().unwrap().at = Some(1_700_000_000);
@@ -10549,7 +10549,7 @@ pub(crate) mod tests {
     /// belongs to the launch that earned it, and inheriting it would
     /// silence the wire for the next broken launch — exactly the restart a
     /// user performs when trying to fix the thing the warning is about.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_relaunch_mints_fresh_hook_cells_even_when_it_keeps_the_capture_window() {
         let ordering = std::sync::atomic::Ordering::Relaxed;
         for reset_capture in [true, false] {
@@ -10596,7 +10596,7 @@ pub(crate) mod tests {
     /// run was showing, on evidence gathered from a process that is gone.
     /// That cross-generation contamination is exactly what the fence exists
     /// to prevent.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_relaunch_resets_the_activity_sample_rather_than_inheriting_the_dead_runs_screen() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         old.activity
@@ -10658,7 +10658,7 @@ pub(crate) mod tests {
     /// Driven against a real tmux server through the real reload, because
     /// the name-lookup path is exactly the kind of code that looks obvious
     /// and silently matches nothing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reload_rediscovers_the_pane_of_a_launching_row_that_did_launch() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -10824,7 +10824,7 @@ pub(crate) mod tests {
     /// of that pass rather than of `launch_scope_unit` in isolation
     /// (already a one-line pure function with nothing else worth pinning
     /// on its own).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reload_carries_forward_the_scope_a_stored_launch_recorded() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -10915,7 +10915,7 @@ pub(crate) mod tests {
     ///
     /// Driven through the real `reload_sessions`, like its siblings above,
     /// because the row-to-state mapping only exists inside that pass.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reload_distinguishes_a_reported_identity_from_a_scanned_one() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11038,7 +11038,7 @@ pub(crate) mod tests {
     /// A neighbouring file in the same directory is planted to pin the
     /// scope: delete removes ONE session's trace, not the directory, and
     /// certainly not a sibling session's history.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn deleting_a_session_removes_its_conversation_hook_trace() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11129,7 +11129,7 @@ pub(crate) mod tests {
     /// observable from here without a tracing fixture; what this test
     /// holds is the surrounding claim, that the missing file is reached on
     /// the success path rather than short-circuited before it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn deleting_a_session_with_no_hook_trace_is_not_an_error() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11196,7 +11196,7 @@ pub(crate) mod tests {
     /// Written against a real tmux server through the real reload, since
     /// the reconciliation is a property of that pass and not of the
     /// transition policy alone.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reload_reconciles_a_stop_intent_against_the_pane_it_left_behind() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11312,7 +11312,7 @@ pub(crate) mod tests {
     /// The failure is injected by corrupting the row out of band, which is
     /// how an unreadable row fails for real: inside the transaction,
     /// before anything is written.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stop_that_cannot_record_its_intent_reports_instead_of_killing() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11403,7 +11403,7 @@ pub(crate) mod tests {
     /// unreadable row fails: inside the transaction, before anything is
     /// written. No test-only seam is needed — the database is a file, and
     /// this test opens it the same way a `sqlite3` prompt would.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_outcome_write_leaves_the_mirror_untouched() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11483,7 +11483,7 @@ pub(crate) mod tests {
     /// Both halves are checked: the row must be untouched, and the
     /// candidate must still have CLASSIFIED it — "wrote nothing" must not
     /// be achieved by "computed nothing".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably() {
         let state = StateDir::new();
         let db_path = state.path().join("supervisor.db");
@@ -11589,7 +11589,7 @@ pub(crate) mod tests {
     /// the unit level because the e2e suite exercises the cross-process
     /// shape but constructs both supervisors in one process, which is
     /// exactly the case this flag covers.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_second_serve_on_the_same_state_dir_is_refused() {
         let state = StateDir::new();
         let first = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11626,7 +11626,7 @@ pub(crate) mod tests {
     /// `create_session` relies on (`?` on the spec write, strictly before
     /// `self.tmux.create_session`) rather than only the write helper's
     /// own atomicity in isolation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_session_never_launches_tmux_after_a_failed_spec_publish() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11711,7 +11711,7 @@ pub(crate) mod tests {
     /// first attempt did. A retry that flips raw-to-profile, or names a
     /// different profile, must land on a different fingerprint and be
     /// refused as a key reuse.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_create_fingerprint_covers_every_session_shaping_field() {
         let base = raw_fingerprint("/work", "agent --flag", Some("t"), None, None);
         let cases = [
@@ -11952,7 +11952,7 @@ pub(crate) mod tests {
     /// supervisor has ever seen into a `Conflict` on its next identical
     /// retry — permanently, for that key. Version 10 therefore gave the
     /// PROFILE mode a separate encoding rather than extending this one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_persisted_fingerprint_encoding_is_pinned() {
         assert_eq!(
             raw_fingerprint(
@@ -12001,7 +12001,7 @@ pub(crate) mod tests {
     /// that broke every install in the field. This literal is the fixture;
     /// its counterpart in the field is a row in somebody's SQLite file that
     /// nothing will ever rewrite.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_v9_fingerprint_is_reproduced_exactly_by_the_same_request_today() {
         // Exactly what `create_fingerprint(cwd, invocation, title,
         // agent_kind, resume_template)` produced when those were five
@@ -12056,7 +12056,7 @@ pub(crate) mod tests {
     /// or re-derived the field from `created_at`, would hand a client a
     /// session that has visibly moved backwards in its own list. Equal
     /// values on the two sides would let that pass unnoticed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_settled_v9_reservation_replays_instead_of_conflicting() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -12133,7 +12133,7 @@ pub(crate) mod tests {
     /// with `Conflict` and leave the reserved identity stranded forever,
     /// which is worse than the settled case: there is not even a session to
     /// point at.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pending_v9_reservation_is_reconciled_instead_of_conflicting() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -12210,7 +12210,7 @@ pub(crate) mod tests {
     /// what makes it assertable at all — the emission itself is exercised
     /// by the e2e ambiguity tests, which prove the behavior the message
     /// describes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_overlap_diagnostic_explains_the_refusal_it_accompanies() {
         let reason = overlapping_windows_reason("sess-a", "sess-b", "/work/repo");
         for needle in [
@@ -12243,7 +12243,7 @@ pub(crate) mod tests {
     /// No ticker runs here (`serve` is what starts one), so nothing can
     /// have moved the value: what this observes is purely what creation
     /// planted.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_created_session_dates_its_activity_to_creation_everywhere() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -12298,7 +12298,7 @@ pub(crate) mod tests {
     /// It also pins the negative half — the validation invariant refuses
     /// BEFORE anything is written — because a refusal that still left a
     /// row behind would be far worse than one that never happened.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_creates_snapshot_is_resolved_once_and_stored_with_the_session() {
         let state = StateDir::new();
         let work = tempfile::tempdir().expect("workdir");
@@ -12395,7 +12395,7 @@ pub(crate) mod tests {
     /// (`agent_kind::ensure_no_cwd_program`) — otherwise a wrapper-shaped
     /// invocation given directly to the raw-create path would slip past
     /// the one boundary a profile write goes through.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_raw_create_refuses_a_cwd_placeholder_as_the_program() {
         let state = StateDir::new();
         let work = tempfile::tempdir().expect("workdir");
@@ -12447,7 +12447,7 @@ pub(crate) mod tests {
     /// this test pins the half already in place: "argv shape is
     /// acceptable" is checked here and must not eagerly substitute the
     /// placeholder validation is not responsible for.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_raw_create_accepts_a_cwd_placeholder_in_an_argument_slot() {
         let state = StateDir::new();
         let work = tempfile::tempdir().expect("workdir");
@@ -12491,7 +12491,7 @@ pub(crate) mod tests {
     /// same text, and this test would fail. The `kind` assertion is the
     /// other half of "the same answer": a replay that decayed to
     /// `Internal` would turn the first attempt's 400 into a 500.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_create_replays_its_error_and_a_changed_override_conflicts() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -12614,7 +12614,7 @@ pub(crate) mod tests {
     /// pruned too eagerly would hand a waiter a DIFFERENT mutex for the
     /// same key, and one that never pruned would grow a map entry per key
     /// this process has ever seen.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn intent_locks_exclude_hand_off_and_prune() {
         let locks = Arc::new(KeyedLocks::default());
         let first = locks.claim("key").await;
@@ -12663,7 +12663,7 @@ pub(crate) mod tests {
     /// A second connection is not needed to make this real: what matters is
     /// the ORDER of the durable operations, and the seam pins it exactly
     /// rather than hoping a spawned task interleaves the right way.
-    #[tokio::test(flavor = "multi_thread")]
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_delete_that_lands_mid_launch_wins_and_the_create_tears_down() {
         let state = StateDir::new();
         let db = state.path().join("supervisor.db");
@@ -12779,7 +12779,7 @@ pub(crate) mod tests {
     /// DIFFERENT fingerprint is refused as a key reuse even though its own
     /// cwd is invalid, which can only happen if the fingerprint is compared
     /// before the directory is looked at.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_keyed_precondition_failure_is_recorded_and_replayed_verbatim() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -12862,7 +12862,7 @@ pub(crate) mod tests {
     ///
     /// Observed from inside the launch through the create-lifecycle seam,
     /// because that is the only instant the property is about.
-    #[tokio::test(flavor = "multi_thread")]
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_relaunch_hides_its_session_from_stop_and_delete_until_it_completes() {
         let state = StateDir::new();
         let seen: Arc<std::sync::Mutex<Option<bool>>> = Arc::default();
@@ -12977,7 +12977,7 @@ pub(crate) mod tests {
     /// second agent for an intent that already had its one. The same
     /// applies to an `Error` row (the agent never execed) — both are
     /// outcomes of a launch that happened.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pending_reservation_whose_session_ended_replays_it() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13081,7 +13081,7 @@ pub(crate) mod tests {
     /// — emoji, CJK, spaces — is NOT a control character and must still be
     /// accepted, so the boundary is pinned on both sides rather than only
     /// on the refusal.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_title_with_control_characters_is_rejected_before_anything_is_stored() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13191,7 +13191,7 @@ pub(crate) mod tests {
     /// to let the server pick one, so the server fixes it up — to U+FFFD
     /// rather than to nothing, so the label still shows something was
     /// removed — and the create succeeds.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_title_derived_from_a_control_character_cwd_is_sanitized_not_refused() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13275,7 +13275,7 @@ pub(crate) mod tests {
     /// bug rather than a merge — so it is a `Conflict`, not a belated
     /// success. Modelled on
     /// `a_failed_create_replays_its_error_and_a_changed_override_conflicts`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_keyed_title_refusal_replays_and_a_corrected_title_conflicts() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13394,7 +13394,7 @@ pub(crate) mod tests {
     /// both the create AND the has-session probe that follows it fail;
     /// with the probe unable to confirm absence, the row must survive and
     /// the error must say so.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_ambiguous_tmux_failure_keeps_the_launching_record() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13483,7 +13483,7 @@ pub(crate) mod tests {
     /// later pass to clear whatever broke. Provoked with a DIRECTORY at the
     /// sentinel's path, which fails the read with `EISDIR` rather than
     /// merely being absent.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unreadable_sentinel_blocks_the_relaunch_rather_than_guessing() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13575,7 +13575,7 @@ pub(crate) mod tests {
     /// dead attempt — and a surviving sentinel would be read as evidence
     /// about a launch that has not happened yet. Failing closed leaves the
     /// reservation pending, which is recoverable; launching anyway is not.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_relaunch_refuses_to_start_over_artifacts_it_cannot_remove() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13688,7 +13688,7 @@ pub(crate) mod tests {
     /// something entirely different, and the reply has to say so. Forced
     /// with a trigger that refuses the settlement, so the rollback
     /// transaction (which carries it) fails as a whole.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_create_whose_outcome_cannot_be_recorded_reports_the_ambiguity() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13765,7 +13765,7 @@ pub(crate) mod tests {
     /// caller will still not find. The io error must survive in the chain
     /// as well — the friendly context is an addition, not a replacement
     /// for the errno a bug report needs.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn connect_names_the_socket_and_state_dir_when_nothing_listens() {
         let dir = tempfile::tempdir().expect("state dir");
         let socket = Supervisor::socket_path(dir.path());
@@ -13838,7 +13838,7 @@ pub(crate) mod tests {
     /// "point at a directory" — Linux answers `ConnectionRefused` for ANY
     /// existing non-socket path, so a directory takes the remedy branch
     /// (deliberately, see `connect`) and would not exercise this one.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn connect_keeps_the_generic_context_for_other_failures() {
         let dir = tempfile::tempdir().expect("state dir");
         let not_a_dir = dir.path().join("regular-file");
@@ -13885,7 +13885,7 @@ pub(crate) mod tests {
     /// what is under test is WHERE a late write lands, and the sampler's
     /// own quantization and durable write have their own tests in
     /// `service::ticker` and `store`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_late_activity_write_from_a_pre_restart_entry_reaches_the_live_reply() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -13973,7 +13973,7 @@ pub(crate) mod tests {
     /// The refusal names both paths, because "working directory does not
     /// exist" would send the user looking for a typo when the directory is
     /// right there.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_retry_whose_directory_was_repointed_is_refused_rather_than_relaunched() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -14086,7 +14086,7 @@ pub(crate) mod tests {
     /// deterministic; the serialization that keeps a rename from landing
     /// LATER (between the takeover and the map removal) is the lifecycle
     /// claim `launch_reserved` holds across both.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_retry_publishes_the_title_its_takeover_preserved() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -14212,7 +14212,7 @@ pub(crate) mod tests {
     /// against `relaunch_argv` directly, which is where that path's argv is
     /// built and the only place a stored one is checked before it becomes an
     /// exec.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_argv_naming_no_program_is_refused_on_every_launch_path() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -14329,7 +14329,7 @@ pub(crate) mod tests {
     /// A session with no recorded identity is untouched by either rule,
     /// which is asserted too: rows predating the column would otherwise
     /// become unrestartable forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_relaunch_refuses_a_directory_identity_it_cannot_confirm() {
         let state = StateDir::new();
         let target = state.path().join("target");
@@ -14392,7 +14392,7 @@ pub(crate) mod tests {
     /// there, so the assertion is on the working directory the launched
     /// process actually inherited rather than on anything the supervisor
     /// says about itself.
-    #[tokio::test(flavor = "multi_thread")]
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_retry_launches_into_the_directory_it_verified_not_a_repointed_link() {
         let state = StateDir::new();
         let original = state.path().join("original");
@@ -14525,7 +14525,7 @@ pub(crate) mod tests {
     }
 
     /// Every shell tab receives the same spawn authority as its owning agent.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_tab_environment_carries_the_complete_spawn_contract() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -14616,7 +14616,7 @@ pub(crate) mod tests {
     /// differs between them (`--announce` inside the vendor's quoted
     /// command) while its placement does not; running only the default
     /// would leave the `off` tail's placement unasserted.
-    #[test]
+    #[farhelm_testtrace::test]
     fn with_hook_argv_appends_each_integrated_kinds_own_flags() {
         for kind in [AgentKind::Claude, AgentKind::Codex] {
             for instructions in [
@@ -14659,7 +14659,7 @@ pub(crate) mod tests {
     /// FARHELM_AGENT_HOOKS` if the policy check ran ahead of the
     /// integration check — so the fixture at least matches the case the
     /// ordering rule is about.
-    #[test]
+    #[farhelm_testtrace::test]
     fn with_hook_argv_leaves_a_generic_session_untouched() {
         let argv = vec!["agent".to_string()];
         let (result, hooked) = with_hook_argv_using(
@@ -14681,7 +14681,7 @@ pub(crate) mod tests {
     /// all, they are prompt TEXT typed at the agent. Falling back to the
     /// record scan is the only safe answer, and it is asserted for both
     /// integrated kinds because the rule is about argv shape, not vendor.
-    #[test]
+    #[farhelm_testtrace::test]
     fn with_hook_argv_refuses_an_invocation_containing_a_bare_double_dash() {
         for kind in [AgentKind::Claude, AgentKind::Codex] {
             let argv = vec![
@@ -14729,7 +14729,7 @@ pub(crate) mod tests {
     /// `--settings` at all, so a check that skipped for every kind would
     /// disable Codex hooking over a flag that cannot collide with
     /// anything.
-    #[test]
+    #[farhelm_testtrace::test]
     fn with_hook_argv_yields_to_a_users_own_settings_flag_on_claude_only() {
         for user_flag in [
             vec!["--settings".to_string(), "/my/settings.json".to_string()],
@@ -14797,7 +14797,7 @@ pub(crate) mod tests {
     /// not about configuring anything at all), and the whole rule is
     /// Codex-only — a Claude invocation carrying `-c hooks.…` means
     /// something else entirely, since Claude's injection uses no `-c`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn with_hook_argv_yields_to_an_invocation_that_already_configures_codex_hooks() {
         for user_flags in [
             vec!["--dangerously-bypass-hook-trust".to_string()],
@@ -14880,7 +14880,7 @@ pub(crate) mod tests {
     /// promise. `Only` is checked in BOTH directions from one policy value,
     /// because a bug that ignored the list entirely would still pass a test
     /// that only asserted the allowed kind.
-    #[test]
+    #[farhelm_testtrace::test]
     fn with_hook_argv_honours_the_agent_hooks_opt_out() {
         let argv = vec!["agent".to_string()];
         for kind in [AgentKind::Claude, AgentKind::Codex] {
@@ -14939,7 +14939,7 @@ pub(crate) mod tests {
     /// falls back to the record scan and everything else about the launch
     /// is unchanged, because the shim itself is addressed by path and has
     /// never needed the name to be text.
-    #[test]
+    #[farhelm_testtrace::test]
     fn with_hook_argv_cannot_hook_a_non_utf8_farhelm_path() {
         let argv = vec!["agent".to_string()];
         let (result, hooked) = with_hook_argv_using(
@@ -14970,7 +14970,7 @@ pub(crate) mod tests {
     /// It stops at [`Supervisor::with_hook_argv`] rather than driving a
     /// real create: the decision is what the constructor is on the hook
     /// for, and a create would drag tmux into a test about a struct field.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_startup_opt_out_reaches_the_launch_decision() {
         let state = StateDir::new();
         let startup = |agent_hooks| SupervisorStartup {
@@ -15024,7 +15024,7 @@ pub(crate) mod tests {
     /// The flag is checked as a SUBSTRING of the joined tail: it lives
     /// inside Claude's `--settings` JSON, not as an argv element of its
     /// own.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_startup_instructions_switch_reaches_the_launch_decision() {
         let state = StateDir::new();
         let startup = |agent_instructions| SupervisorStartup {
@@ -15081,7 +15081,7 @@ pub(crate) mod tests {
     /// compares against. (Rewriting the file alone is not a reboot: reload
     /// keeps a pane it still finds, so a harness that leaves tmux running
     /// gets its terminal back rather than an interruption.)
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_startup_boot_id_file_is_what_the_classifier_reads() {
         let state = StateDir::new();
         let boot_file = state.path().join("boot-id");
@@ -15141,7 +15141,7 @@ pub(crate) mod tests {
     /// for the same reason: the file IS the interface to the launch. The
     /// spec survives to be read because this supervisor's shim path is
     /// `dummy_exe`, so nothing ever consumes and unlinks it.
-    #[tokio::test(flavor = "multi_thread")]
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_claude_create_carries_the_hook_flags_into_its_launch_spec() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())

@@ -1391,7 +1391,7 @@ mod tests {
     /// is also `10`, while the post-snapshot single-PID read sees that `10`
     /// now has start-time `999`. Comparing only values inside the snapshot
     /// would admit the child; the independent live identity must reject it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ppid_closure_rejects_children_of_a_recycled_parent_number() {
         let stats = HashMap::from([
             (10, (1, 100)),
@@ -1428,7 +1428,7 @@ mod tests {
     /// child before reparenting, then sees the replacement parent. Parent-only
     /// validation accepts that false edge, so the fresh child read is the
     /// safety fence this case specifically pins.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ppid_closure_rejects_a_reparented_child_of_a_recycled_parent() {
         let stats = HashMap::from([(10, (1, 999)), (20, (10, 200)), (30, (20, 300))]);
         let mut found = HashMap::from([(10, 999)]);
@@ -1454,7 +1454,7 @@ mod tests {
     /// The snapshot identity has start-time `200`, while the live process now
     /// wearing PID `20` has start-time `999` under the same parent. Requiring
     /// the full child identity prevents a stale row from joining the closure.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ppid_closure_rejects_a_recycled_child_identity() {
         let stats = HashMap::from([(10, (1, 100)), (20, (10, 200)), (30, (20, 300))]);
         let mut found = HashMap::from([(10, 100)]);
@@ -1479,7 +1479,7 @@ mod tests {
     /// This is the completeness fence around the PID-reuse fix: requiring a
     /// fresh identity read must narrow only stale edges, not stop the ordinary
     /// root-child-grandchild walk or re-read one parent for every child.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ppid_closure_expands_transitively_through_live_parents() {
         let stats = HashMap::from([
             (10, (1, 100)),
@@ -1515,7 +1515,7 @@ mod tests {
     /// The closure admits and caches parent `20`, then observes that the same
     /// child `30` has been reparented. This pins the lineage invariant that
     /// makes one live read per PID safe across a transitive expansion.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ppid_closure_rejects_reparented_child_despite_cached_live_parent() {
         let stats = HashMap::from([(10, (1, 100)), (20, (10, 200)), (30, (20, 300))]);
         let mut found = HashMap::from([(10, 100)]);
@@ -1541,7 +1541,7 @@ mod tests {
     /// One failed identity read is reported exactly once, while an independent
     /// readable root still admits its child and grandchild transitively. This
     /// keeps a local process-table failure from aborting the rest of the sweep.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ppid_closure_reports_an_unreadable_parent_and_rejects_its_children() {
         let stats = HashMap::from([
             (10, (1, 100)),
@@ -1577,7 +1577,7 @@ mod tests {
     ///
     /// The matching child row is rejected when its parent is gone, descendants
     /// remain unreachable, and the cached absence avoids repeated reads.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ppid_closure_quietly_rejects_children_of_a_gone_parent() {
         let stats = HashMap::from([
             (10, (1, 100)),
@@ -1606,7 +1606,7 @@ mod tests {
 
     /// Non-convergence errors retain stable identity evidence without letting
     /// a fork storm create an unbounded control reply.
-    #[test]
+    #[farhelm_testtrace::test]
     fn quiesce_growth_diagnostics_are_sorted_and_bounded() {
         let newly_found = (1..=MAX_QUIESCE_IDENTITIES_PER_PASS as u32 + 2)
             .map(|pid| (pid, u64::from(pid) * 10))
@@ -1637,7 +1637,7 @@ mod tests {
     /// Comparing only PID numbers would incorrectly declare convergence and
     /// leave the replacement able to fork before the final kill phase. The
     /// returned stop set and diagnostic must both carry its new start time.
-    #[test]
+    #[farhelm_testtrace::test]
     fn quiesce_pass_treats_a_reused_pid_as_new() {
         let previous = ProcessTree {
             identities: HashMap::from([(42, 100)]),
@@ -1661,7 +1661,7 @@ mod tests {
     /// This drives the production accumulator through all five allowed passes,
     /// then proves that twenty earlier per-process failures cannot hide any of
     /// the bounded identity trail.
-    #[test]
+    #[farhelm_testtrace::test]
     fn quiesce_failure_preserves_all_passes_ahead_of_capped_errors() {
         let mut previous = ProcessTree {
             identities: HashMap::new(),
@@ -1709,7 +1709,7 @@ mod tests {
     /// spare the wrong session's processes. Constructed byte buffers, not
     /// a real process, since `environ_markers` is factored exactly so
     /// this needs neither.
-    #[test]
+    #[farhelm_testtrace::test]
     fn environ_markers_match_exact_entries_only() {
         let session = "abc-123";
         let read = |environ: &[u8]| environ_markers(environ, session, None);
@@ -1741,7 +1741,7 @@ mod tests {
     /// capture every future tracing call in the surrounding process scan; it
     /// proves that no credential bytes survive in the value that scan code
     /// can inspect or format after parsing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn environ_marker_results_retain_no_spawn_credential_bytes() {
         let secret = "credential-that-must-not-reach-logs";
         let environ = format!(
@@ -1765,7 +1765,7 @@ mod tests {
     /// The tab flag additionally demands a COMPLETE minted-shaped value:
     /// an empty or malformed `FARHELM_TAB_ID` is not a claim, or anything
     /// that exported the name could shield itself from a stop.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_any_marker_flags_require_a_real_claim() {
         let session = "abc-123";
         let tab = "9c3d5a71-0000-4000-8000-0000000000ff";
@@ -1797,7 +1797,7 @@ mod tests {
     /// Every row starts from the SESSION marker, which every variant
     /// requires: that is what keeps one session's sweep from ever reaching
     /// another session's processes however their other markers read.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_sweep_target_claims_exactly_what_its_operation_promises() {
         let markers = |agent: bool, any_agent: bool, any_tab: bool, tab: bool| EnvironMarkers {
             session: true,
@@ -1925,7 +1925,7 @@ mod tests {
     ///
     /// Runs everywhere, systemd or not: the manager is a fake, and the only
     /// real process involved is one this test spawns itself.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_backstop_sweep_runs_after_the_scope_kill_never_before() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
@@ -2003,7 +2003,7 @@ mod tests {
     /// stubborn cgroup fail a stop that M2 (which has no cgroups at all)
     /// would have called complete. The scope's trouble is diagnostic, the
     /// sweep's verdict is the answer.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_scope_that_never_goes_away_is_reported_but_does_not_fail_the_stop() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
@@ -2037,7 +2037,7 @@ mod tests {
     /// through `StopFailure::Sweep`, refuses a restart — because a cgroup
     /// operation errored while the sweep it exists to reinforce succeeded
     /// completely. The sweep's verdict is the whole answer.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_broken_user_manager_never_fails_a_stop_the_sweep_confirmed() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
@@ -2075,7 +2075,7 @@ mod tests {
     /// manager" is safe precisely because the sweep below remains the whole
     /// mechanism — which this test also re-asserts by watching the marked
     /// process die.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_absent_user_manager_is_never_asked_about_derived_scope_units() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
@@ -2129,7 +2129,7 @@ mod tests {
     /// trusts the number would seed from whatever now holds it, while one
     /// that captured `(pid, starttime)` first correctly finds no identity to
     /// carry at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_dead_pane_pid_is_never_seeded_into_the_sweep() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut gone = spawn_marked_process(&session_id);
@@ -2155,7 +2155,7 @@ mod tests {
     /// Uses a REAL child process (there is no way to fabricate a process
     /// table row) and a starttime that cannot possibly be correct, then
     /// confirms the child is still alive before cleaning it up for real.
-    #[test]
+    #[farhelm_testtrace::test]
     fn signal_validated_skips_a_pid_whose_starttime_does_not_match() {
         let mut child = std::process::Command::new("sleep")
             .arg("5")

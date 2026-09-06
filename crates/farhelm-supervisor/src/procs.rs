@@ -446,7 +446,7 @@ mod imp {
         /// `comm` can contain anything, including `)`, so only the LAST `)`
         /// in the whole line is the real delimiter, no matter how many
         /// look-alikes precede it.
-        #[test]
+        #[farhelm_testtrace::test]
         fn parse_stat_handles_comm_with_parens_and_spaces() {
             // comm = "1 (weird) name)" — spaces, an internal paren pair, AND
             // a trailing stray ')' that is NOT the kernel's own delimiter.
@@ -469,7 +469,7 @@ mod imp {
         /// Failing this would misreport a live, oddly-named process as
         /// unparseable, folding it into a reported sweep error over nothing
         /// more than a name it never chose to be `/proc`-friendly about.
-        #[test]
+        #[farhelm_testtrace::test]
         fn parse_stat_survives_non_utf8_bytes_in_comm() {
             let mut line = b"123 (bad".to_vec();
             line.push(0xff); // not valid UTF-8 on its own or in context here
@@ -486,7 +486,7 @@ mod imp {
         /// produce one) must be a reported parse error, not a silent "gone" —
         /// conflating "malformed" with "absent" would let a genuinely live,
         /// misread process vanish from a sweep without a trace.
-        #[test]
+        #[farhelm_testtrace::test]
         fn parse_stat_rejects_a_line_with_no_delimiter() {
             assert!(parse_stat(b"garbage with no parens at all").is_err());
         }
@@ -496,7 +496,7 @@ mod imp {
         /// REAL process rather than a fixture because the mapping is only
         /// meaningful if the live read produces it: this process is its own
         /// witness, and it is certainly not a zombie.
-        #[test]
+        #[farhelm_testtrace::test]
         fn a_live_process_reads_back_as_running() {
             let me = std::process::id();
             let (_, _, state) = read_process(me)
@@ -1073,7 +1073,7 @@ pub(crate) mod sleeper {
     /// CONFIGURED operations — because a live child's environment only
     /// differs from a clean one on a polluted host, so this is the one
     /// observation that fails the same way everywhere, CI included.
-    #[test]
+    #[farhelm_testtrace::test]
     fn sleeper_command_scrubs_ambient_markers_but_keeps_declared_ones() {
         let cmd = command(&[(crate::launch::SESSION_ID_ENV_VAR, "declared-session")]);
         let configured: std::collections::HashMap<_, _> = cmd
@@ -1105,7 +1105,9 @@ pub(crate) mod sleeper {
     /// immediately as a trivially green test; as a spawned child it
     /// announces readiness and sleeps. The 30s bound is the leak ceiling
     /// if a caller panics before its sweep runs, same as the `sleep 30`
-    /// it replaced.
+    /// it replaced. Keep this stand-in outside automatic trace capture: its
+    /// expected termination belongs to the parent test, and cannot complete
+    /// an independent capture session.
     #[test]
     fn runs_as_a_sleeper_child_when_asked() {
         if std::env::var_os(SLEEPER_MODE_ENV).is_none() {
@@ -1151,7 +1153,7 @@ mod tests {
     /// searched for: an off-by-one in the padding skip or the argc loop
     /// shifts the boundary and silently leaks command-line bytes into what
     /// the sweep treats as a process's environment.
-    #[test]
+    #[farhelm_testtrace::test]
     fn procargs2_parsing_yields_the_environment_region_alone() {
         let buf = procargs2(
             &["thing", "--flag", "value"],
@@ -1172,7 +1174,7 @@ mod tests {
     /// `grep FARHELM_SESSION_ID=<id> logfile` — or an editor with such a
     /// file open — would be SIGKILLed by a stop it has nothing to do with,
     /// on macOS only.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_marker_on_the_command_line_never_reaches_the_environment_block() {
         let marker = "FARHELM_SESSION_ID=abc-123";
         let buf = procargs2(&["grep", marker, "app.log"], &["PATH=/bin"], 3);
@@ -1193,7 +1195,7 @@ mod tests {
     /// straight to exact, whole-entry marker matching, so a half-read entry
     /// admitted as if it were complete could match a marker whose value was
     /// cut short — claiming a process for the wrong session.
-    #[test]
+    #[farhelm_testtrace::test]
     fn procargs2_parsing_stops_at_an_empty_entry_and_drops_a_truncated_tail() {
         let mut buf = procargs2(&["thing"], &["A=1"], 1);
         buf.push(0); // the empty entry that ends the region
@@ -1209,7 +1211,7 @@ mod tests {
     /// reads as "no marker") rather than panicking or inventing an
     /// environment out of whatever bytes are present. A short read from a
     /// process exiting mid-sysctl is the realistic source.
-    #[test]
+    #[farhelm_testtrace::test]
     fn procargs2_parsing_rejects_buffers_it_cannot_trust() {
         assert!(parse_procargs2(b"").is_none());
         assert!(parse_procargs2(b"\x01\x00").is_none(), "argc is truncated");
@@ -1234,7 +1236,7 @@ mod tests {
     /// immediately before signaling; if a platform derived the two
     /// differently, every validated signal would be skipped and the sweep
     /// would silently stop killing anything while still reporting success.
-    #[test]
+    #[farhelm_testtrace::test]
     fn snapshot_and_single_reads_agree_about_this_process() {
         let me = std::process::id();
         let (stats, soft_errors) = snapshot().expect("this host's process table must be readable");
@@ -1262,7 +1264,7 @@ mod tests {
     /// `confirm_gone` counts `Ok(None)` as a process successfully reaped
     /// and treats `Err` as an unconfirmed kill that fails the stop, so
     /// collapsing them in either direction breaks a user-visible promise.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_impossible_pid_reads_as_gone_rather_than_as_an_error() {
         // Above every platform's pid_max, so it can never name a process.
         assert_eq!(read_process(u32::from(u16::MAX) * 1024 + 7), Ok(None));
@@ -1277,7 +1279,7 @@ mod tests {
     /// [`super::sleeper`] for the platform-binary withholding that makes a
     /// `sh` child unreadable there, and the companion macOS test below
     /// that pins the withholding itself.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_childs_exec_time_environment_is_readable_as_nul_delimited_entries() {
         let mut child = sleeper::spawn(&[("FARHELM_PROCS_TEST_MARKER", "sentinel-value")]);
         let environ = read_environ(child.id()).expect("a child's environment must be readable");
@@ -1307,7 +1309,7 @@ mod tests {
     /// started returning environments for platform binaries again: good
     /// news, and the cue to update that documentation rather than a bug.
     #[cfg(target_os = "macos")]
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_platform_binary_childs_environment_is_withheld_on_modern_macos() {
         let mut child = std::process::Command::new("/bin/sleep")
             .arg("30")

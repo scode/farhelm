@@ -1418,7 +1418,7 @@ mod tests {
     /// pane-death event to react to, so the poll is the only trigger. Two
     /// dead tabs in one session because a first-match-only reap would pass
     /// a single-corpse test while leaving simultaneous exits behind.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn dead_tab_panes_are_reaped_by_the_tick_and_live_tabs_survive() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -1567,7 +1567,7 @@ mod tests {
     /// that silently dropped the remainder would strand corpses forever,
     /// and one that ignored its own cap would reintroduce the monopoly it
     /// exists to prevent.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_reap_budget_defers_the_overflow_to_the_next_tick() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -1617,7 +1617,7 @@ mod tests {
     /// behind them, so `record_activity` finds nothing to update. The
     /// durable half is covered where a real create exists — the store's
     /// own tests, and the farhelm crate's e2e suite.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_sampling_pass_dates_a_changing_pane_and_leaves_a_still_one_alone() {
         let state = StateDir::new();
         let sup = supervisor_with(
@@ -1685,7 +1685,7 @@ mod tests {
     /// by-hand window kill is the residual state the product cannot reach,
     /// and it also drops the session toward the single-window regime where
     /// the marker query is skipped server-wide.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_dead_tab_is_reaped_when_no_agent_pane_is_live() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -1741,7 +1741,7 @@ mod tests {
     /// runs against a real planted record rather than a stubbed pass
     /// because the regression worth catching is a ticker that fires on
     /// schedule and does nothing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn capture_advances_on_the_ticker_with_nobody_polling() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -1886,7 +1886,7 @@ mod tests {
     /// for a LATER busy comparison that observes change. Sampling the busy
     /// pane at the instant its peer reaches a threshold can legitimately
     /// catch one unchanged grid on a loaded runner.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn samples_accumulate_for_a_busy_pane_and_stay_quiet_for_a_still_one() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -1961,7 +1961,7 @@ mod tests {
     /// anyway. What the sleep checks is the real property — that samples
     /// stop accumulating and STAY stopped, rather than one more pass
     /// landing after the handle said it was done.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn shutdown_stops_the_ticker_and_waits_for_it() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -1998,7 +1998,7 @@ mod tests {
     /// its very first interval — a task that never reached the upgrade at
     /// all — and the assertion below would pass without the `Weak` being
     /// load-bearing in the slightest.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_task_ends_when_its_supervisor_is_dropped() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -2033,7 +2033,7 @@ mod tests {
     /// session that went quiet once would be idle forever, however busy it
     /// became afterwards, which is the "always wrong in the same
     /// direction" failure that makes a status column worthless.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_first_sample_is_not_evidence_and_any_change_resets_the_streak() {
         let mut sample = ActivitySample::default();
 
@@ -2111,7 +2111,7 @@ mod tests {
     ///
     /// Asserted through the same `observe` the sampler calls, since that
     /// return value is the sole input to whether the stamp moves at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_recovered_capture_re_baselines_without_reporting_activity() {
         // One pane: baseline, failure, recovery to a DIFFERENT screen than
         // the one that was forgotten. Even that is not evidence — the
@@ -2170,7 +2170,7 @@ mod tests {
     /// `SupervisorSeams`, since production reads the constant only through
     /// that default and a seam that drifted would silently give every
     /// supervisor a quantum nothing documents.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_observed_change_advances_the_stamp_only_across_the_quantum() {
         assert_eq!(
             ACTIVITY_STAMP_QUANTUM,
@@ -2293,7 +2293,7 @@ mod tests {
     /// and answering with a value it knows to be stale would be a worse
     /// lie than not writing. So the in-memory cell moves and the row does
     /// not.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_supervisor_that_may_not_record_dates_activity_in_memory_only() {
         let state = StateDir::new();
         let sup = supervisor_with(
@@ -2345,7 +2345,7 @@ mod tests {
     /// build and opened by an older one looks like from this statement's
     /// point of view, and it fails the one statement under test while
     /// leaving the rest of the supervisor working.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_activity_write_leaves_the_in_memory_advance_and_the_pass_standing() {
         let state = StateDir::new();
         let sup = supervisor_with(
@@ -2424,7 +2424,7 @@ mod tests {
     ///   schedules back-to-back passes forever — a supervisor spawning tmux
     ///   subprocesses as fast as it can retire them, on precisely the host
     ///   already too loaded to keep up.
-    #[test]
+    #[farhelm_testtrace::test]
     fn next_deadline_anchors_when_on_cadence_and_backs_off_when_overrunning() {
         const INTERVAL: Duration = Duration::from_millis(100);
         // A fixed origin, so every case below is arithmetic rather than an
@@ -2492,7 +2492,7 @@ mod tests {
     /// which for a "nothing should have happened yet" assertion is exactly
     /// backwards: the clock would jump straight to the tick this test
     /// exists to prove has not arrived.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_loop_waits_out_the_injected_interval_rather_than_the_production_one() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_seams(
@@ -2551,7 +2551,7 @@ mod tests {
     /// from_a_stale_screen`, which reaches that path through
     /// `SupervisorSeams::sample_fault`). The empty case also resets the
     /// rotation cursor, where a failed query leaves it alone.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pass_that_finds_no_live_panes_preserves_every_sample_and_still_captures() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -2612,7 +2612,7 @@ mod tests {
     /// Driven through the real pass with a deliberately mismatched entry,
     /// because the filter is one `&&` away from silently passing
     /// everything and no end state would show it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pane_under_another_sessions_name_is_not_sampled() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -2662,7 +2662,7 @@ mod tests {
     /// the population-replacement bug: a cursor carried across a session
     /// set that no longer exists would make the first pass over its
     /// replacement start partway in.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_over_budget_population_is_covered_by_rotation_across_passes() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -2768,7 +2768,7 @@ mod tests {
     /// before the deletion. Parking it at the head would make "resume after
     /// the missing id" and "start over from the head" the same answer, and
     /// the test would pass either way.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_cursor_whose_session_vanished_resumes_at_the_next_greater_id() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -2831,7 +2831,7 @@ mod tests {
     /// it is an ordinary successful one: an implementation that advanced
     /// only on success would resample the failed session there, which is
     /// exactly what the assertions below refuse.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_capture_still_advances_the_rotation() {
         let state = StateDir::new();
         // Aimed at "b" alone: the pass-wide `pane_states` probe must keep
@@ -2926,7 +2926,7 @@ mod tests {
     /// The other leaves the pre-failure streak standing, so a session that
     /// was nine quiet samples deep stays `Idle` through a screen that has
     /// visibly changed. The continuation below fails on both.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_sample_stops_the_session_being_sharpened_from_a_stale_screen() {
         for read in ["tail", "pane_states"] {
             let state = StateDir::new();
@@ -3209,7 +3209,7 @@ mod tests {
     /// through `handle_control` is the smallest thing that tells the two
     /// designs apart: with a shared semaphore this deadlocks, with
     /// separate ones it replies.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_saturated_sampler_cannot_delay_a_request() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -3282,7 +3282,7 @@ mod tests {
     /// A regression that removed the coalescing (a tick that waited for
     /// the lock instead of skipping) fails this on the timeout rather than
     /// on the count, which is why the tick is driven under one.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_tick_landing_on_an_in_flight_pass_adds_no_second_sweep() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -3340,7 +3340,7 @@ mod tests {
     /// off an older sweep would describe the world before the write it is
     /// racing. A tick, by contrast, has nothing to add when a pass
     /// finished within its interval, and must say so by not sweeping.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn replies_always_sweep_while_a_tick_suppresses_itself_after_a_recent_pass() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -3429,7 +3429,7 @@ mod tests {
     /// would leave the two disagreeing until something re-derived them.
     /// So `shutdown` must PEND while a pass is in flight and complete
     /// after it, with the pass counted as having finished.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn shutdown_waits_out_a_capture_pass_already_in_flight() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -3485,7 +3485,7 @@ mod tests {
     /// production. This drives the real entry point and makes no requests
     /// at all, so the only thing that can move the sample is the ticker
     /// `serve` owns.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn serve_starts_the_ticker_without_any_request_arriving() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -3536,7 +3536,7 @@ mod tests {
     /// The pre-ticker assertion is what makes it a transition rather than
     /// a coincidence: before the first pass the same session classifies
     /// `Running`, so `Idle` below can only have come from being watched.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_busy_pane_classifies_running_and_a_quiet_one_decays_to_idle() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -3595,7 +3595,7 @@ mod tests {
     /// rather than by the ticker so the test controls how many samples each
     /// session gets, with a gap between them big enough that the busy pane
     /// has genuinely printed since its previous look.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_busy_pane_stays_running_when_the_rotation_samples_it_rarely() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
@@ -3656,7 +3656,7 @@ mod tests {
     /// from an agent's numbered prose (see
     /// `agent_kind::looks_like_a_choice_prompt`), and a fixture without it
     /// would be asserting that a paragraph reads as a dialog.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_prompt_on_a_real_pane_classifies_waiting_through_the_sampler() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;

@@ -30,6 +30,9 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# Per-test capture owns each test's dispatcher and Tokio runtime without
+# installing a subscriber shared by concurrently running tests.
+farhelm-testtrace.workspace = true
 tempfile.workspace = true
 # test-util enables tokio's virtual clock (`#[tokio::test(start_paused =
 # true)]`), used by the drain_writer tests so they assert real-time
