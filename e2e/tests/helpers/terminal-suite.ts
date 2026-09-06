@@ -8,7 +8,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { requireHelmBuild } from "./helm-build";
 import { stackScratchDir } from "./scratch";
-import { waitForTermText } from "./term";
+import { attachSession, waitForTermText } from "./term";
+
+export {
+  type ReplayRecord,
+  replayRecord,
+  waitForIslandMounted,
+  waitForReplayReveal,
+} from "./terminal-readiness";
 
 // Any status a session's agent can carry while it is UP (PLAN_M6_75.md
 // item 3's live split: running / waiting / idle).
@@ -249,24 +256,28 @@ export function sharedSessionRow(page: Page) {
 }
 
 /**
- * Load the app and wait until the terminal is genuinely usable — mounted,
- * socket attached, agent listening. Every wait keys on a marker rather
- * than a sleep, which is why these tests are not flaky on a loaded CI box.
+ * Load the app and wait until the shared terminal is genuinely usable.
  *
- * PLAN_M2.md step 7 replaces M1's single hardwired session view with a
- * list-then-terminal navigation, so getting to a live terminal now goes
- * through the list UI itself (goto, wait for the row, click it) rather
- * than landing straight on the terminal — every terminal-family test that
- * used to assume M1's one-view app keeps passing through this same helper.
+ * Readiness proves the selected session's attachment has opened, revealed,
+ * and received terminal focus. The fake-agent banner remains separate: it
+ * proves the fixture's raw-mode/readiness setup, while a later prompt is
+ * separate output. Neither is a property a general attachment oracle can
+ * establish.
+ *
+ * The shared session is identified through the list, then selected only if
+ * auto-selection opened something else. This is fixture setup: tests whose
+ * subject is a row click or the remembered-selection policy perform those
+ * actions themselves.
  */
 export async function openTerminal(page: Page) {
   await page.goto("/");
   const row = sharedSessionRow(page);
   await expect(row).toBeVisible();
-  await row.click();
-  // The island sets this once xterm is mounted and the WS is opening.
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-  // The fake agent prints this banner once its modes are set.
+  const id = await row.getAttribute("data-session-id");
+  expect(id, "the shared session row must identify the terminal it opens").toBeTruthy();
+  await attachSession(page, id!);
+  // The fake agent prints this banner once its raw-mode setup is ready; its
+  // prompt is deliberately later output.
   await waitForTermText(page, "FAKE-AGENT READY");
 }
 
@@ -309,33 +320,6 @@ export async function islandText(page: Page, elementId: string): Promise<string>
     }
     return lines.join("\n");
   }, elementId);
-}
-
-/**
- * Wait until the island at `elementId` is MOUNTED — an xterm instance and
- * a socket exist for it.
- *
- * Presence in terminal.js's registry is exactly that signal and no more:
- * that file publishes an island on the last line of a successful
- * `mount()`, which is after the `WebSocket` is constructed but BEFORE its
- * `onopen` fires and well before the supervisor-side attach that follows.
- * So this says "the client got as far as opening a socket", never "the
- * terminal is attached". A test that needs the latter has to wait for
- * something only a live attachment can produce — output from the pane, or
- * a command the shell answered.
- *
- * Deliberately not a wait on CONTENT: the agent terminal has the fake
- * agent's banner, but a tab holds a login shell whose prompt is whatever
- * the host's `$SHELL` and rc files produce, which is not something a test
- * may assume the shape of.
- */
-export async function waitForIslandMounted(page: Page, elementId: string) {
-  await expect
-    .poll(
-      () => page.evaluate((el) => !!(window as any).__farhelmIslands?.[el], elementId),
-      { timeout: 20_000, message: `waiting for the island at ${elementId} to mount` },
-    )
-    .toBe(true);
 }
 
 /** `waitForTermText`, addressed at one island rather than the agent's. */
@@ -508,56 +492,6 @@ export function shellMarker(marker: string): { command: string; expected: string
   return { command: `sh -c 'echo "${marker}-$((6*7))"'`, expected: `${marker}-42` };
 }
 
-/** One island's catch-up record, as terminal.js publishes it. */
-interface ReplayRecord {
-  buffering: boolean;
-  bufferedBytes: number;
-  bufferedChunks: number;
-  writesWhileHidden: number;
-  revealReason: string | null;
-  revealed: boolean;
-  revealedInWriteCallback: boolean;
-  viewportAtTailOnReveal: boolean | null;
-  holdMarker: boolean;
-  heldReason: string | null;
-  limits: { bufferBytes: number; bufferChunks: number; idleMs: number };
-}
-
-/** One island's catch-up record right now, without waiting for anything. */
-export async function replayRecord(page: Page, elementId: string): Promise<ReplayRecord> {
-  return page.evaluate(
-    (el) => (window as any).__farhelmIslands[el].test.replay,
-    elementId,
-  );
-}
-
-/**
- * Wait until this island has REVEALED, then return its catch-up record.
- *
- * Polled on `revealed` rather than on `revealReason`, and the difference
- * is not pedantry: the reason is recorded when the phase ENDS, which is
- * one asynchronous write-completion ahead of the reveal itself — so a read
- * keyed on the reason can catch `revealedInWriteCallback` and
- * `viewportAtTailOnReveal` before either has been written, and assert
- * against their initial values instead of against what happened.
- */
-export async function waitForReplayReveal(
-  page: Page,
-  elementId: string,
-  timeout = 60_000,
-): Promise<ReplayRecord> {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(
-          (el) => !!(window as any).__farhelmIslands?.[el]?.test?.replay?.revealed,
-          elementId,
-        ),
-      { timeout, message: `waiting for ${elementId} to reveal` },
-    )
-    .toBe(true);
-  return replayRecord(page, elementId);
-}
 
 /**
  * Retune the reconnect ladder, the probe interval, and the heartbeat for
