@@ -162,9 +162,9 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
     )
     .expect("prepare restart script");
 
-    let (_attached_channel, mut attached) = h
+    let (_attached_channel, _initial_replay, mut attached) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -248,9 +248,12 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
         .expect("repeat archive");
     assert_eq!(repeated, archived, "an archive retry returns the same row");
 
+    // This is deliberately raw: archive leaves no terminal, so the refusal
+    // itself is the behavior under test and there is no replay boundary to
+    // settle.
     let attach_error = h
         .client
-        .attach_terminal(
+        .attach_terminal_at_boundary(
             &session.id,
             80,
             24,
@@ -272,9 +275,9 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
         .expect("restart archived session");
     assert!(!restarted.archived);
     assert!(restarted.tabs.is_empty(), "archive's tabs must not return");
-    let (_channel, mut terminal) = h
+    let (_channel, initial_replay, mut terminal) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -283,7 +286,7 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
         )
         .await
         .expect("attach fresh terminal");
-    let mut seen = Vec::new();
+    let mut seen = initial_replay;
     wait_for(&mut terminal, &mut seen, "ARCHIVE_ATTACHMENT_OK", 10).await;
     drop(terminal);
     wait_for_file(&second_pid, 10).await;

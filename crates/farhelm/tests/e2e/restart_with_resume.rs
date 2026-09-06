@@ -70,8 +70,12 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let tmux_name = format!("fh-{}", session.id);
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
@@ -143,8 +147,12 @@ async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing(
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
@@ -198,8 +206,12 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     let (session, _work) = basic_session(&h).await;
     let tmux_name = format!("fh-{}", session.id);
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client
         .send_input(chan, b"PRIOR-RUN-MARKER\r".to_vec())
@@ -261,12 +273,12 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     // its replay covers that scrollback (SPEC.md: at least the current
     // screen plus 10,000 lines of it).
     h.client.detach(chan).await;
-    let (_chan2, mut rx2) = h
+    let (_chan2, initial_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("attach after restart");
-    let mut replay = Vec::new();
+    let mut replay = initial_replay;
     wait_for_after(
         &mut rx2,
         &mut replay,
@@ -309,8 +321,12 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
@@ -612,8 +628,12 @@ async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attach
         .restart_session(&session.id, farhelm_proto::RestartMode::Resume, false)
         .await
         .expect("resume archived session");
-    let (_channel, mut stream) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_channel, initial_replay, mut stream) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut stream, &mut seen, "ARCHIVE_RESUME_ATTACHMENT", 30).await;
     wait_for(
         &mut stream,
@@ -698,8 +718,11 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
             .await
             .expect("create the record-writing session");
 
-        let (chan, mut rx) = client.attach(&session.id, 80, 24).await.expect("attach");
-        let mut seen = Vec::new();
+        let (chan, initial_replay, mut rx) = client
+            .attach_live(&session.id, 80, 24)
+            .await
+            .expect("attach");
+        let mut seen = initial_replay;
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
         client.send_input(chan, b"first prompt\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
@@ -778,11 +801,11 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         "the identity is the conversation's, not the run's — it survives the relaunch too"
     );
 
-    let (chan, mut rx) = client
-        .attach(&session.id, 80, 24)
+    let (chan, initial_replay, mut rx) = client
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("the relaunch built a fresh terminal to attach to");
-    let mut seen = Vec::new();
+    let mut seen = initial_replay;
     wait_for(
         &mut rx,
         &mut seen,
@@ -963,8 +986,11 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
             .await
             .expect("create the hook-reporting session");
 
-        let (chan, mut rx) = client.attach(&session.id, 200, 24).await.expect("attach");
-        let mut seen = Vec::new();
+        let (chan, initial_replay, mut rx) = client
+            .attach_live(&session.id, 200, 24)
+            .await
+            .expect("attach");
+        let mut seen = initial_replay;
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
         client.send_input(chan, b"report conv-h\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "HOOK-REPORTED:conv-h", 30).await;
@@ -1020,11 +1046,11 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         .restart_session(&session.id, farhelm_proto::RestartMode::Resume, false)
         .await
         .expect("an interrupted session has nothing running to consent about");
-    let (_chan, mut rx) = client
-        .attach(&session.id, 200, 24)
+    let (_chan, initial_replay, mut rx) = client
+        .attach_live(&session.id, 200, 24)
         .await
         .expect("the relaunch built a fresh terminal to attach to");
-    let mut seen = Vec::new();
+    let mut seen = initial_replay;
     // Anchored on the substituted id rather than on the argv marker: the
     // relaunch is what has to produce it, and no earlier generation's
     // output contains it.
@@ -1087,8 +1113,12 @@ async fn a_configured_fallback_template_is_what_a_restart_runs() {
         "a configured placeholder-free template is an offer in its own right, not a fresh launch"
     );
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "LAUNCH-INVOCATION", 20).await;
 
     // The mode has to match the offer exactly — a `Fresh` restart of a
@@ -1117,12 +1147,12 @@ async fn a_configured_fallback_template_is_what_a_restart_runs() {
     wait_for_live_status(&h.client, &session.id, 30).await;
 
     h.client.detach(chan).await;
-    let (_chan2, mut rx2) = h
+    let (_chan2, initial_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("attach after restart");
-    let mut replay = Vec::new();
+    let mut replay = initial_replay;
     wait_for_after(
         &mut rx2,
         &mut replay,
@@ -1215,8 +1245,12 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
         .await
         .expect("create");
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, &format!("ENV:{RC_MARKER_VAR}="), 20).await;
     let observed = marker_value(&seen, &format!("ENV:{RC_MARKER_VAR}="));
     if observed != "first" {
@@ -1258,16 +1292,16 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
     // is also how it gets the reused terminal's scrollback replayed,
     // first run's line included.
     h.client.detach(chan).await;
-    let (_chan2, mut rx2) = h
+    let (_chan2, initial_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("attach after restart");
     // Anchored AFTER the first run's own line, which is still in the
     // reused terminal's scrollback: an unanchored wait would match the
     // pre-restart value and pass without the relaunch having sourced
     // anything.
-    let mut replay = Vec::new();
+    let mut replay = initial_replay;
     wait_for_after(
         &mut rx2,
         &mut replay,
