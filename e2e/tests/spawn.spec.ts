@@ -9,7 +9,8 @@
 // FARHELM_REAL_AGENT=1 because vendor credentials and network access are
 // intentionally absent from CI, and it emits the same visible skip line as
 // real-agent.spec.ts when ungated.
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";

@@ -13,7 +13,8 @@
 // ---------------------------------------------------------------------
 
 
-import { test, expect, type Page } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { type Page } from "@playwright/test";
 import { openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
@@ -645,6 +646,7 @@ test("replay-degrades-on-idle: a progressing replay keeps buffering; a quiet one
 // `Detached` the supervisor really sends.
 test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, under the banner", async ({
   browser,
+  timeline,
   page,
   request,
 }) => {
@@ -667,7 +669,7 @@ test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, und
 
     // A second client takes the session, which detaches this one where it
     // stands: mid-catch-up, with a marker it will now never receive.
-    second = await browser.newContext();
+    second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
     await page2.goto("/");
     await page2.locator(`[data-session-id="${id}"]`).click();

@@ -7,7 +7,8 @@
 // can show is that the retry a USER performs actually carries the same key
 // the first attempt did.
 
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Locator } from "@playwright/test";
 import { fillCreateForm } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {

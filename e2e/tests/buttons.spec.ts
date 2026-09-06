@@ -19,7 +19,8 @@
  * call site in the sheet — the point is to witness the SYSTEM working, not
  * to duplicate app.css itself here.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { type Page } from "@playwright/test";
 import {
   cleanupSession,
   createSession,
@@ -344,7 +345,7 @@ test("the row kebab is hidden at rest and revealed by hover, focus, selection, o
  * `page.emulateMedia()` — that API only overrides `prefers-color-scheme`
  * and a handful of other features, `any-pointer` not among them (verified
  * against the installed Playwright directly before writing this test).
- * `browser.newContext({ hasTouch: true })` does reach it: Chromium's touch
+ * `newObservedContext(browser, timeline, { hasTouch: true })` does reach it: Chromium's touch
  * emulation flips `(hover: hover)` to false and BOTH `(any-pointer: coarse)`
  * and `(pointer: coarse)` to true together.
  *
@@ -361,6 +362,7 @@ test("the row kebab is hidden at rest and revealed by hover, focus, selection, o
  */
 test("the row kebab stays revealed at rest under Playwright's touch emulation", async ({
   browser,
+  timeline,
   request,
 }) => {
   test.setTimeout(60_000);
@@ -371,7 +373,7 @@ test("the row kebab stays revealed at rest under Playwright's touch emulation", 
   });
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
-    context = await browser.newContext({ hasTouch: true });
+    context = await newObservedContext(browser, timeline, { hasTouch: true });
     const page = await context.newPage();
     await page.goto("/");
     const kebab = row(page, session.id).locator(".session-row-menu");

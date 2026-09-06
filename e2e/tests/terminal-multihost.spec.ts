@@ -30,7 +30,8 @@
 // reset and restoration hooks.
 // =====================================================================
 
-import { test, expect, Page, APIRequestContext, Locator, Route } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page, APIRequestContext, Locator, Route } from "@playwright/test";
 import {
   cleanupProfile,
   createProfile,

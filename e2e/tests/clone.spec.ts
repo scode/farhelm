@@ -10,7 +10,8 @@
 // archived session gets a fresh, running agent again without touching the
 // archived original (row.rs's `row_control_visibility`).
 
-import { expect, Locator, Page, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Locator, Page } from "@playwright/test";
 import {
   cleanupProfile,
   cleanupSession,

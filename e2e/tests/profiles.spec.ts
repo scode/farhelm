@@ -38,7 +38,8 @@
 // Registration happens as soon as the object EXISTS server-side, before any
 // assertion about the page — a repaint that never happens must not leak a
 // profile or a session into a stack every later run shares.
-import { APIRequestContext, expect, Locator, Page, Route, test } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { APIRequestContext, Locator, Page, Route } from "@playwright/test";
 import {
   cleanupProfile,
   cleanupSession,
@@ -58,6 +59,7 @@ import {
 } from "./helpers/fleet";
 import type { FeedStub } from "./helpers/fleet";
 import { sharedSessionRow } from "./helpers/terminal-suite";
+import { recordPage } from "./helpers/timeline";
 
 /** The value of the picker's placeholder — `profiles::UNRESOLVED_VALUE`, the
  * option a dialog shows while nothing is selected and a create is blocked. */
@@ -182,8 +184,10 @@ async function openProfilesAtBoundary(page: Page): Promise<void> {
  * ordinary setup wait for catalog completion.
  */
 async function openProfiles(page: Page): Promise<void> {
+  recordPage(page, "profile-focus-begin", [["action", "open"]]);
   await openProfilesAtBoundary(page);
   await expect(section(page).locator(".new-profile-button")).toBeFocused();
+  recordPage(page, "profile-focus-settled", [["action", "open"]]);
 }
 
 /**
@@ -193,9 +197,11 @@ async function openProfiles(page: Page): Promise<void> {
  * otherwise a subsequent fill can race the product's asynchronous autofocus.
  */
 async function openNewProfile(page: Page): Promise<Locator> {
+  recordPage(page, "profile-focus-begin", [["action", "new"]]);
   await section(page).locator(".new-profile-button").click();
   const form = section(page).locator(".profile-form");
   await expect(form.locator(".profile-name-input")).toBeFocused();
+  recordPage(page, "profile-focus-settled", [["action", "new"]]);
   return form;
 }
 
@@ -207,9 +213,12 @@ async function openNewProfile(page: Page): Promise<Locator> {
  * ready for ordinary form input.
  */
 async function openProfileEditor(row: Locator): Promise<Locator> {
+  const page = row.page();
+  recordPage(page, "profile-focus-begin", [["action", "edit"]]);
   await row.locator(".profile-edit").click();
   const form = row.locator(".profile-form");
   await expect(form.locator(".profile-name-input")).toBeFocused();
+  recordPage(page, "profile-focus-settled", [["action", "edit"]]);
   return form;
 }
 
@@ -2987,6 +2996,7 @@ test.describe("agent profiles", () => {
   test("a profile edited in another browser reaches this one over the real feed", async ({
     page,
     browser,
+    timeline,
     request,
   }) => {
     const before = `two-client-${Date.now()}`;
@@ -3012,7 +3022,7 @@ test.describe("agent profiles", () => {
     const observed = profileRow(page, profile.id).locator(".profile-name");
     await expect(observed).toHaveText(before, { timeout: 20_000 });
 
-    const second = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    const second = await newObservedContext(browser, timeline, { baseURL: new URL(page.url()).origin });
     try {
       const editor = await second.newPage();
       await editor.goto("/");
