@@ -159,8 +159,8 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
         )
         .await
         .expect("create the self-exiting session");
-    let (killed, _killed_work) = basic_session_ready(&h).await;
-    let (untouched, _untouched_work) = basic_session_ready(&h).await;
+    let (killed, _killed_work) = basic_session(&h).await;
+    let (untouched, _untouched_work) = basic_session(&h).await;
 
     wait_for_dead_pane(&sock, &format!("fh-{}", exiting.id)).await;
     let out = tmux_query(
@@ -244,8 +244,8 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
 #[tokio::test]
 async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     let h = harness_believing_boot("boot-a").await;
-    let (live, _live_work) = basic_session_ready(&h).await;
-    let (stopped, _stopped_work) = basic_session_ready(&h).await;
+    let (live, _live_work) = basic_session(&h).await;
+    let (stopped, _stopped_work) = basic_session(&h).await;
     // A session that ends on its own AND is listed before the reboot: listing
     // is where its exit code is witnessed, so what survives below is the
     // supervisor's durable recording rather than anything recovered from the
@@ -427,7 +427,7 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
         )
         .await
         .expect("create");
-    // Hand-built rather than through `basic_session_ready`, because this
+    // Hand-built rather than through `basic_session`, because this
     // test owns two supervisors over one state dir; the barrier is the
     // same one for the same reason — the live-status check below must be
     // about an agent that execed, not a login shell holding a pane.
@@ -558,8 +558,8 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
 async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let (stopped, _stopped_work) = basic_session_ready(&h).await;
-    let (killed, _killed_work) = basic_session_ready(&h).await;
+    let (stopped, _stopped_work) = basic_session(&h).await;
+    let (killed, _killed_work) = basic_session(&h).await;
 
     h.client.stop_session(&stopped.id).await.expect("stop");
     let out = tmux_query(
@@ -611,7 +611,7 @@ async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere()
 /// first.
 ///
 /// The setup waits for the agent to have actually STARTED
-/// (`basic_session_ready`) rather than only for `create` to have replied,
+/// (`basic_session`) rather than only for `create` to have replied,
 /// and that is not a timing tweak: the subject of this test is a stop of a
 /// RUNNING agent, and a launch that died before the exec shim classifies
 /// as `Error` — the assertion below then reports the annotation as lost
@@ -621,7 +621,7 @@ async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere()
 #[tokio::test]
 async fn a_list_polling_through_a_stop_never_erases_the_annotation() {
     let h = harness().await;
-    let (session, _work) = basic_session_ready(&h).await;
+    let (session, _work) = basic_session(&h).await;
 
     let poller = h.second_client().await;
     let id = session.id.clone();
@@ -719,7 +719,7 @@ async fn stopping_an_already_exited_session_records_no_annotation() {
 #[tokio::test]
 async fn an_unreadable_boot_id_defers_rather_than_deciding() {
     let h = harness_believing_boot("boot-a").await;
-    let (session, _work) = basic_session_ready(&h).await;
+    let (session, _work) = basic_session(&h).await;
 
     // The reboot happens; the next supervisor cannot read the boot id.
     kill_tmux_server_and_wait(&h.state.path().join("tmux.sock")).await;

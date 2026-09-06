@@ -640,17 +640,16 @@ pub(crate) async fn connect_client(sup: &Arc<Supervisor>) -> Arc<SupervisorClien
     SupervisorClient::start(r, w).await.expect("handshake")
 }
 
-/// Create a basic-script fake-agent session in a fresh working
-/// directory — the preamble almost every test in the suite shares.
-/// Returns the workdir too: it must outlive the launch (it is the
-/// session's cwd), so callers hold it as `_work`.
+/// Return a basic fake-agent session while its launch may still be in flight.
 ///
 /// Returns as soon as `create` has REPLIED, which says a pane exists and
 /// nothing more — the agent inside it may not have execed yet, and may
-/// never. Prefer [`basic_session_ready`] wherever the test's assertions
-/// are about a running agent; see [`wait_for_agent_ready`] for the flake
-/// that distinction produces when it is skipped.
-pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
+/// never. Use this only when acting before startup is part of the test's
+/// premise; [`basic_session`] supplies the normal ready fixture. Keep the
+/// returned workdir alive as `_work`, because it is the session's cwd.
+pub(crate) async fn basic_session_mid_launch(
+    h: &Harness,
+) -> (SessionInfo, farhelm_teststate::TestDir) {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
@@ -818,18 +817,19 @@ async fn pane_format(
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// [`basic_session`] plus [`wait_for_agent_ready`]: the shape to prefer
-/// whenever a test's assertions are about an agent that is actually
-/// RUNNING — which is to say almost all of them.
+/// Create a basic fake-agent session and observe its post-exec ready marker.
 ///
-/// Kept separate from [`basic_session`] rather than folded into it so that
-/// adopting the barrier stays a per-test decision: a handful of tests
-/// deliberately act on a launch mid-flight, and a create that silently
-/// waited for the agent would change what those pin. See
-/// [`wait_for_agent_ready`] for the never-started failure this converts
-/// from a corrupted assertion into a named setup failure.
-pub(crate) async fn basic_session_ready(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
-    let (session, work) = basic_session(h).await;
+/// A create reply only establishes that the pane exists. Most tests need
+/// an agent that actually started; [`wait_for_agent_ready`] makes a failed
+/// launch a named setup failure instead of corrupting a later assertion.
+/// Tests deliberately acting during launch choose [`basic_session_mid_launch`].
+///
+/// The returned SessionInfo is still the original create reply, not a fresh
+/// listing. Readiness does not imply that the prompt or an attachment's
+/// replay has settled: retain those stronger barriers where needed. Keep
+/// the returned workdir alive as `_work` for the session's lifetime.
+pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
+    let (session, work) = basic_session_mid_launch(h).await;
     wait_for_agent_ready(&h.state.path().join("tmux.sock"), &session.id).await;
     (session, work)
 }
