@@ -740,7 +740,7 @@ mod tests {
     /// tested is about the later one, so a test that only waited for
     /// registration could pass while classifying a request the queue had
     /// never accepted.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_connection_lost_after_queueing_is_unknown_only_for_a_mutation() {
         for (verb, expected) in [
             (AgentVerb::Sessions {}, ErrorKind::Unavailable),
@@ -817,7 +817,7 @@ mod tests {
     /// `start_paused` runs the budget out without spending it: the answer
     /// timeout is real, and waiting thirty seconds for it would make this
     /// the slowest test in the crate.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_mutations_fence_outlives_the_answer_budget() {
         for release_by_answer in [true, false] {
             let locks: Arc<KeyedLocks> = Arc::new(KeyedLocks::default());
@@ -952,7 +952,7 @@ mod tests {
     /// What this test owns is the composition: a fence held across a full
     /// upcall keeps the next one off the link entirely, rather than merely
     /// delaying its answer.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_second_mutation_from_one_asker_waits_for_the_first() {
         let locks: Arc<KeyedLocks> = Arc::new(KeyedLocks::default());
         let (link, mut queue) = link();
@@ -1053,7 +1053,7 @@ mod tests {
     /// outcome-unknown vocabulary, since its request was queued), its fence
     /// must be RELEASED, and the link must refuse later upcalls rather than
     /// silently accepting requests nobody will answer.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_response_under_a_never_issued_id_retires_the_link() {
         let locks: Arc<KeyedLocks> = Arc::new(KeyedLocks::default());
         let (link, mut queue) = link();
@@ -1195,7 +1195,7 @@ mod tests {
     /// `start_paused` is what makes a ten-minute production bound testable;
     /// the local `retain` is small only so the arithmetic in this test stays
     /// readable, since paused time costs the same either way.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_retained_fence_is_released_when_its_last_bound_expires() {
         let retain = Duration::from_secs(60);
         let locks: Arc<KeyedLocks> = Arc::new(KeyedLocks::default());

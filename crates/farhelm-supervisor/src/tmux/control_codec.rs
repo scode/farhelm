@@ -789,7 +789,7 @@ mod tests {
 
     /// The octal unescaping is the one lossy-looking transform in the
     /// output path; pin it against real control-mode escaping shapes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unescape_handles_octal_sequences() {
         assert_eq!(unescape_control_output(b"plain"), b"plain");
         assert_eq!(
@@ -808,7 +808,7 @@ mod tests {
     /// without unwrapping the terminal treats it as an unknown DCS and
     /// drops the contents — losing OSC 52 clipboard writes and inline
     /// images from any agent that uses them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn passthrough_wrappers_are_unwrapped_with_esc_undoubled() {
         // ESC P tmux; <ESC ESC ]52;c;aGk= BEL> ESC backslash
         let wrapped = b"before\x1bPtmux;\x1b\x1b]52;c;aGk=\x07\x1b\\after";
@@ -840,7 +840,7 @@ mod tests {
     /// boundaries. Every possible two-chunk split of the wrapper must
     /// decode identically to the one-shot form, including splits inside
     /// the opener, doubled ESC, and closing ST.
-    #[test]
+    #[farhelm_testtrace::test]
     fn passthrough_decoder_survives_every_notification_split() {
         let wrapped = b"before\x1bPtmux;\x1b\x1b]52;c;aGk=\x1b\x1b\\\x1b\\after";
         let expected = b"before\x1b]52;c;aGk=\x1b\\after";
@@ -861,7 +861,7 @@ mod tests {
     /// An unterminated control notification must fail at the configured
     /// boundary rather than letting `read_until` grow a process-sized
     /// allocation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn control_mode_lines_are_bounded() {
         use tokio::io::AsyncWriteExt;
 
@@ -880,7 +880,7 @@ mod tests {
     /// EOF cannot turn a truncated notification into terminal data. Tmux
     /// control records are newline-delimited, so a partial final record
     /// means the control client died mid-write.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn control_mode_partial_line_at_eof_is_an_error() {
         use tokio::io::AsyncWriteExt;
 
@@ -900,7 +900,7 @@ mod tests {
     /// `%` are ordinary content unless they exactly close this block.
     /// A loose prefix parser would truncate a pane displaying tmux
     /// protocol examples or diagnostics.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn command_block_requires_its_exact_end_marker() {
         let input = b"%session-changed $0 session\n\
                       %begin 10 20 1\n\
@@ -934,7 +934,7 @@ mod tests {
     /// asserted to produce the SAME error, since which dialect a client
     /// speaks depends only on whether `pause-after` is set and is not
     /// this function's business.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn live_output_before_the_cutover_fails_the_attach_in_either_dialect() {
         for live in [
             &b"%output %0 live\n"[..],
@@ -976,7 +976,7 @@ mod tests {
     ///
     /// Both dialects, and both a payload and a `%pause`, because a foreign
     /// pane can produce either.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_neighbouring_panes_notifications_between_blocks_are_not_a_broken_cutover() {
         // TWO complete blocks read back to back, with foreign chatter
         // before the first, BETWEEN them, and in both dialects — the
@@ -1016,7 +1016,7 @@ mod tests {
     /// carried. Exercised through `classify_control_line` (the same
     /// function `next_output` calls) rather than a live tmux, so the
     /// notification GRAMMAR is what is pinned.
-    #[test]
+    #[farhelm_testtrace::test]
     fn notifications_carry_their_pane_id_so_a_stream_can_keep_only_its_own() {
         let mine = b"%0";
         let mut kept = Vec::new();
@@ -1057,7 +1057,7 @@ mod tests {
     /// `%error` closes the matching command block and must retain tmux's
     /// plain-text diagnostic. Otherwise an attach failure becomes an
     /// unexplained protocol error at the service boundary.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn command_block_reports_tmux_error_text() {
         let input = b"%begin 10 20 1\ncan't find pane: %9\n%error 10 20 1\n";
         let mut reader = BufReader::new(&input[..]);
@@ -1081,7 +1081,7 @@ mod tests {
     /// replay. The outer line reader also rejects a partial final line;
     /// this pins the distinct case where the last content line was
     /// complete but the closing marker never arrived.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn command_block_rejects_eof_before_its_end_marker() {
         let input = b"%begin 10 20 1\ncomplete content line\n";
         let mut reader = BufReader::new(&input[..]);
@@ -1105,7 +1105,7 @@ mod tests {
     /// the first live notification buffered for `next_output`, even when
     /// the underlying read splits that notification. This boundary is
     /// the whole no-gap handoff contract.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn final_cutover_block_leaves_live_output_unconsumed() {
         use tokio::io::AsyncWriteExt;
 
@@ -1139,7 +1139,7 @@ mod tests {
     /// Control mode adds one newline around command output. Removing it
     /// before capture normalization preserves the capture's own final
     /// terminator, which normalization must remove separately.
-    #[test]
+    #[farhelm_testtrace::test]
     fn command_output_and_capture_terminators_are_distinct() {
         let block = b"row one\nrow two\n\n";
         assert_eq!(
@@ -1153,7 +1153,7 @@ mod tests {
     /// healthy tmux and stayed silent on genuinely old ones — precisely
     /// inverted). Pin all three: modern tmux quiet, old tmux warns,
     /// no-pane expansion quiet.
-    #[test]
+    #[farhelm_testtrace::test]
     fn bracket_paste_warning_fires_only_for_genuinely_old_tmux() {
         // Modern tmux: both fields populated.
         assert!(!bracket_paste_flag_is_missing("0,1,0,0,0,0,1,0,0,0"));
@@ -1175,7 +1175,7 @@ mod tests {
     /// Also pins that the ORDINALS are parsed rather than left to the
     /// caller: every consumer wants creation order, and `@10` sorts
     /// before `@9` as a string.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_pane_facts_reads_live_and_dead_panes() {
         let out = "%0 @0 0 0 s fh-alive\n%1 @4 2 1 s3 fh-dead\n";
         let states = parse_pane_facts(out);
@@ -1201,7 +1201,7 @@ mod tests {
     /// parser that split it on whitespace would silently truncate the
     /// name, and `session_status`'s pane-belongs-to-this-session check
     /// compares it verbatim.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_pane_facts_takes_a_session_name_with_spaces_whole() {
         let states = parse_pane_facts("%0 @0 0 0 s a session with spaces\n");
         assert_eq!(states["%0"].session_name, "a session with spaces");
@@ -1211,7 +1211,7 @@ mod tests {
     /// tmux happens to report a leftover nonzero value there — only a
     /// dead pane's status is a real exit code. Parsing it regardless would
     /// fabricate a death that has not happened.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_pane_facts_ignores_status_of_a_live_pane() {
         let states = parse_pane_facts("%0 @0 0 0 s7 fh-live\n");
         assert_eq!(
@@ -1231,7 +1231,7 @@ mod tests {
     /// must read back as `Some(0)`. tmux's `#{?cond,a,b}` conditional
     /// treats the string `"0"` as false, so routing the status through
     /// one turned every clean exit into "no code".
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_pane_facts_tolerates_an_unparseable_dead_status() {
         let states = parse_pane_facts("%0 @0 0 1 s fh-signalled\n");
         assert_eq!(
@@ -1247,7 +1247,7 @@ mod tests {
     /// in turn: a truncated row, a pane id that is not `%N`, a window id
     /// that is not `@N`, a non-numeric window index, an unrecognized
     /// `pane_dead`, and an empty session name.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_pane_facts_skips_every_malformed_row_shape() {
         let states = parse_pane_facts(
             "%0\n\
@@ -1273,7 +1273,7 @@ mod tests {
     /// direction: the pane reports through the ordinary absent-pane path
     /// as `Exited { exit_code: None }`, which is a nuisance a same-server
     /// pane can inflict and never a liveness claim it can forge.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_pane_facts_drops_a_pane_that_appears_twice() {
         let states =
             parse_pane_facts("%0 @0 0 0 s fh-real\n%0 @9 9 0 s fh-forged\n%1 @1 1 0 s fh-real\n");
@@ -1299,7 +1299,7 @@ mod tests {
     /// a parse or names something outside tmux's own namespace; safety in
     /// USE comes from every operation addressing a pane paired with its
     /// session (`pane_in_session`).
-    #[test]
+    #[farhelm_testtrace::test]
     fn join_pane_markers_accepts_only_complete_minted_shaped_values() {
         const TAB: &str = "9c3d5a71-0000-4000-8000-0000000000ff";
         const AGENT: &str = "2b1f0e4c-0000-4000-8000-000000000001";
@@ -1337,7 +1337,7 @@ mod tests {
     /// names a real pane, it collides with that pane's own row and BOTH
     /// are discarded, leaving the victim merely unmarked. Neither outcome
     /// lets one pane's option value hand another pane a marker.
-    #[test]
+    #[farhelm_testtrace::test]
     fn join_pane_markers_contains_a_row_fabricated_by_a_newline() {
         const TAB: &str = "9c3d5a71-0000-4000-8000-0000000000ff";
         let mut states: HashMap<String, PaneState> = ["%0", "%1"]
@@ -1369,7 +1369,7 @@ mod tests {
     /// The second query is skipped when it cannot matter — the
     /// optimization that keeps a tab-less deployment paying exactly the
     /// one subprocess it always paid.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_marker_query_is_skipped_only_when_no_session_has_two_windows() {
         let one_each: HashMap<String, PaneState> = [("%0", "fh-a", "@0"), ("%1", "fh-b", "@1")]
             .into_iter()
@@ -1399,7 +1399,7 @@ mod tests {
     /// receives an empty string from that path. This test exists purely
     /// so the parser itself does not panic or misbehave if it ever did
     /// receive one (a future caller feeding it something else, say).
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_pane_facts_handles_empty_output() {
         assert!(parse_pane_facts("").is_empty());
     }

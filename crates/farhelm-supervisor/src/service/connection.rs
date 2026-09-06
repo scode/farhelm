@@ -1616,7 +1616,7 @@ mod tests {
     /// One oversized title is enough to clear the limit (JSON escaping
     /// plus the frame header add overhead on top of the title itself), so
     /// a single `SessionInfo` suffices here.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reply_frame_substitutes_error_for_oversized_reply() {
         let req_id = 42;
         let oversized = ControlMsg::SessionList {
@@ -1676,7 +1676,7 @@ mod tests {
     /// serializes and size-checks the message — there is no cheaper path
     /// that skips that for the common case — but the *result* for a
     /// fitting reply must be indistinguishable from the unwrapped frame.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reply_frame_passes_through_normal_reply_unchanged() {
         let msg = ControlMsg::SessionCreated {
             req_id: 7,
@@ -1709,7 +1709,7 @@ mod tests {
     /// farhelm-proto — is what would catch a future refactor that forgets
     /// this arm and reintroduces the panic for a message the
     /// `RestartSession` handler sends on every successful restart.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reply_frame_accepts_session_restarted() {
         let msg = ControlMsg::SessionRestarted {
             req_id: 9,
@@ -1744,7 +1744,7 @@ mod tests {
     /// than four near-identical copies of
     /// `reply_frame_accepts_session_restarted`, since none of them nests
     /// a `SessionInfo` the way that one does.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reply_frame_accepts_the_tab_and_upload_replies() {
         for msg in [
             ControlMsg::TabOpened {
@@ -1775,7 +1775,7 @@ mod tests {
     /// function exists to close, just for a different message shape. If a
     /// future caller ever routes an event message (like `Detached`)
     /// through `reply_frame`, this test is what catches it.
-    #[test]
+    #[farhelm_testtrace::test]
     #[should_panic(expected = "carries no req_id")]
     fn reply_frame_panics_on_message_without_req_id() {
         reply_frame(&ControlMsg::Detached {
@@ -1790,7 +1790,7 @@ mod tests {
     /// Keeping the row present distinguishes token validation from the
     /// already-covered stale-session case: accepting any token for a known id
     /// would otherwise pass a test that authenticates only missing rows.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_authenticated_spawn_hello_with_the_wrong_token_is_unauthorized() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -1878,7 +1878,7 @@ mod tests {
     /// The `spawn` role remains descriptive wire metadata. Without an auth
     /// bearer this is the same local Unix-socket peer as every helm client and
     /// therefore retains the full dispatcher, including `ListSessions`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_spawn_role_without_authentication_retains_full_authority() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -1922,7 +1922,7 @@ mod tests {
 
     /// A valid credential enters the restricted request loop rather than
     /// receiving the handshake-level refusal used for a forgery.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_valid_session_credential_is_admitted_with_restricted_authority() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2078,7 +2078,7 @@ mod tests {
     /// about the OLD assertions here would have caught that regression.
     /// Asserting `owns_state_dir()` on the second instance is what turns
     /// that silent substitution into a loud one.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn supervisor_hello_carries_a_real_stable_host_identity() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2141,7 +2141,7 @@ mod tests {
     /// conflicts at the syscall level regardless of which process (or
     /// which in-process registry) holds it, which is what actually forces
     /// the second construction below to lose the race.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn supervisor_hello_reports_the_owners_identity_to_a_claimless_reader() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2219,7 +2219,7 @@ mod tests {
     /// dispatch, reap) and asserting the tracked task count returns to
     /// ZERO every time, rather than growing with the number of requests
     /// issued so far.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn steady_state_reaping_keeps_the_tracked_task_count_bounded() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2278,7 +2278,7 @@ mod tests {
     /// immediately regardless of how many permits are free, since nothing
     /// would then block spawning it — the bounded-timeout assertion in
     /// the middle of this test is exactly what catches that.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn spawn_admitted_acquires_the_permit_before_spawning_not_inside_the_task() {
         let admission = Arc::new(tokio::sync::Semaphore::new(2));
         let mut tasks = tokio::task::JoinSet::new();
@@ -2394,7 +2394,7 @@ mod tests {
     /// never elapses, so the window boundary is crossed deterministically
     /// at the next await point instead of racing a wall-clock sleep
     /// against scheduler jitter.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn drain_writer_aborts_and_awaits_on_sustained_no_progress() {
         let dropped = Arc::new(AtomicBool::new(false));
         let guard = DropSignal(Arc::clone(&dropped));
@@ -2439,7 +2439,7 @@ mod tests {
     /// otherwise depend on real sleeps landing inside real window
     /// boundaries, which is exactly the kind of timing assumption that is
     /// fine on a fast idle machine and flaky under load.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
 
     async fn drain_writer_waits_through_progress_and_returns_on_completion() {
         let frames_written = Arc::new(AtomicU64::new(0));
@@ -2494,7 +2494,7 @@ mod tests {
     /// channel and [`stalled_past_deadline`]'s own virtual sleep — is a
     /// timer the paused-clock driver tracks explicitly, so `advance` only
     /// ever moves exactly as far as this test tells it to.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn repeated_pause_spam_never_moves_the_stall_anchor() {
         let stall_timeout = Duration::from_secs(3);
         // Shorter than the timeout, mirroring a client that re-sends
@@ -2561,7 +2561,7 @@ mod tests {
     /// The `let () =` binding is the mutation guard for the first half:
     /// it fails to COMPILE if `notify_detached` ever becomes async or
     /// otherwise starts returning a future.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn notify_detached_never_blocks_on_a_full_queue_and_never_drops_the_notice() {
         let (tx, mut rx) = mpsc::channel::<Frame>(1);
         tx.send(Frame::data(1, b"occupying the only slot".to_vec()))

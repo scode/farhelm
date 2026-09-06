@@ -833,7 +833,7 @@ mod tests {
     /// one directory poison each other, and the horizon decides when a
     /// match may become durable. Bounds are inclusive — an off-by-one here
     /// would silently change which pairs bail.
-    #[test]
+    #[farhelm_testtrace::test]
     fn capture_windows_are_inclusive_and_overlap_symmetrically() {
         let bounds = CaptureWindowBounds::new(
             Duration::from_secs(2),
@@ -893,7 +893,7 @@ mod tests {
     /// be exactly the silently-wrong-conversation resume SPEC.md forbids.
     /// The diagnostic has to NAME them, because the user is about to be
     /// offered a fresh launch and the log is the only place that says why.
-    #[test]
+    #[farhelm_testtrace::test]
     fn exactly_one_in_window_candidate_is_captured_and_two_bail() {
         let window = CaptureWindow {
             start: 100,
@@ -928,7 +928,7 @@ mod tests {
     /// must produce a log line a human can read, not a thousand ids. The
     /// COUNT stays exact, because that is the part that says how bad the
     /// collision was.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_ambiguity_diagnostic_is_bounded_but_still_counts_everything() {
         let window = CaptureWindow {
             start: 100,
@@ -954,7 +954,7 @@ mod tests {
     /// belonged to — the wrong-conversation failure reached through the
     /// back door. Table-driven because the failure modes are many and each
     /// one is a different way of being lenient.
-    #[test]
+    #[farhelm_testtrace::test]
     fn rfc3339_parsing_rejects_everything_that_is_not_an_instant() {
         for bad in [
             "",
@@ -1021,7 +1021,7 @@ mod tests {
     /// read as "changed" (otherwise a filesystem reporting none would
     /// freeze re-verification forever), and the same-second same-length
     /// blind spot must be a documented no-op rather than an accident.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_record_stamp_change_predicate_is_conservative_about_unknowns() {
         let a = RecordStamp {
             len: 10,
@@ -1051,7 +1051,7 @@ mod tests {
     /// does NOT filter by cwd (Codex's root is shared by every session on
     /// the host), so this pins that both records come back carrying the
     /// distinguishing field for the caller to bucket on.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_munged_cwd_collision_is_separated_by_the_recorded_cwd_field() {
         let home = tempfile::tempdir().unwrap();
         let dir = home
@@ -1115,7 +1115,7 @@ mod tests {
     /// never run on this host is the ordinary case on a fresh machine, and
     /// reporting it incomplete would block capture for every session
     /// forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn codex_descends_exactly_its_declared_depth_and_a_missing_root_is_complete() {
         let home = tempfile::tempdir().unwrap();
         let root = CodexIntegration.record_root(home.path(), "/work");
@@ -1152,7 +1152,7 @@ mod tests {
     /// creation time). Pinned by making the skipped file UNPARSEABLE: if
     /// the filter ever stopped applying before the open, this test fails
     /// with an incomplete scan rather than passing quietly.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_mtime_floor_skips_files_without_ever_parsing_them() {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".claude").join("projects").join("-work");
@@ -1188,7 +1188,7 @@ mod tests {
     /// [`read_prefix`] is then exercised directly on the FIFO, which is
     /// exactly the post-TOCTOU state — a regular file replaced between
     /// `readdir` and `open` — and must fail rather than hang.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_record_named_fifo_is_recognized_and_never_parks_the_reader() {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".claude").join("projects").join("-work");
@@ -1237,7 +1237,7 @@ mod tests {
     /// record should be could point anywhere the supervisor's user can
     /// read, and a scan that chased one would read files outside the home
     /// it was given.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn symlinked_records_are_skipped_without_failing_the_scan() {
         let home = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -1273,7 +1273,7 @@ mod tests {
     /// are pinned: correlators just inside are found, and correlators
     /// pushed just outside make the file unparseable (an error, marking
     /// the scan incomplete) rather than silently absent.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_record_prefix_bounds_are_exact() {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".claude").join("projects").join("-work");
@@ -1329,7 +1329,7 @@ mod tests {
     /// or not any of them is a `.jsonl`. Hitting it must report
     /// incompleteness, which is what stops a partial view from producing a
     /// claim.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_entry_budget_counts_non_record_files_and_reports_incompleteness() {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".claude").join("projects").join("-work");

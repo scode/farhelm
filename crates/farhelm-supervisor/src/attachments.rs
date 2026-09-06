@@ -501,7 +501,7 @@ mod tests {
     /// expressible rather than merely refused), and a name that is
     /// already safe is left exactly as it was — the recognizability half
     /// of the contract, which an over-eager sanitizer would quietly break.
-    #[test]
+    #[farhelm_testtrace::test]
     fn sanitizing_makes_names_shell_safe_without_rewriting_safe_ones() {
         for (proposed, expected) in [
             ("screenshot.png", "screenshot.png"),
@@ -532,7 +532,7 @@ mod tests {
     /// all. `.staging` is the same shape one layer up: publishable, but
     /// it would put a user's file exactly where the startup
     /// reconciliation deletes debris.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unusable_proposals_take_a_generated_name_instead_of_a_refusal() {
         for proposed in ["", ".", "..", "/", "dir/..", "some/path/", ".staging"] {
             let name = publish_name(proposed);
@@ -559,7 +559,7 @@ mod tests {
     /// filesystem limit (a path component is 255 bytes, and the staging
     /// name adds ~42 more), so exceeding it would fail the upload at
     /// `open` rather than merely look untidy.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_over_long_name_is_truncated_with_its_extension_kept() {
         let name = publish_name(&format!("{}.png", "a".repeat(500)));
         assert!(
@@ -589,7 +589,7 @@ mod tests {
     /// walk the sequence continues with GENERATED names rather than
     /// ending, because an upload that cannot be named is still an upload
     /// SPEC.md does not let us refuse.
-    #[test]
+    #[farhelm_testtrace::test]
     fn collision_candidates_suffix_the_stem_then_fall_back_to_generated_names() {
         let candidates: Vec<String> = name_candidates("screenshot.png").take(3).collect();
         assert_eq!(
@@ -627,7 +627,7 @@ mod tests {
     /// published attachments alone — including one whose NAME looks
     /// exactly like a staging file, which is the case that makes the
     /// directory split load-bearing rather than stylistic.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reconciliation_empties_staging_and_keeps_published_files() {
         let state = tempfile::tempdir().unwrap();
         let session = "9f8e7d6c-0000-4000-8000-000000000000";
@@ -672,7 +672,7 @@ mod tests {
     /// Both are cases where the alternative — leaving them — means a
     /// deleted session's files living on indefinitely, which is exactly
     /// what SPEC.md's "removed when their session is deleted" forbids.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reconciliation_removes_orphans_and_quarantined_directories() {
         let state = tempfile::tempdir().unwrap();
         ensure_session_dirs(state.path(), "live-session")
@@ -706,7 +706,7 @@ mod tests {
     /// (under the reserved directory) until the caller discards them, and
     /// a session that never received an attachment quarantines nothing
     /// rather than failing its own delete.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn quarantining_moves_the_directory_and_tolerates_absence() {
         let state = tempfile::tempdir().unwrap();
         ensure_session_dirs(state.path(), "session-a")

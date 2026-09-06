@@ -1741,7 +1741,7 @@ mod tests {
     /// RELOADED ambiguity comes back as, so a comparison that happened to
     /// work only for the in-flight flag would leave every restarted session
     /// unreportable.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_report_displaces_every_scan_derived_verdict() {
         for scanned in scan_derived_states() {
             let mut state = scanned.clone();
@@ -1770,7 +1770,7 @@ mod tests {
     /// spoken, no amount of later scanning may talk the supervisor out of
     /// it. A pass that found the old record, or two records, or none, must
     /// leave the reported identity exactly where it is.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_another_report_may_replace_a_report() {
         let mut state = reported("conv-first");
         assert!(
@@ -1810,7 +1810,7 @@ mod tests {
     /// whose identity is already known — nothing on disk can improve on the
     /// agent's own answer, and re-verification is excluded for the same
     /// reason.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_reported_identity_is_advertised_and_settled() {
         let state = reported("conv-hook");
         assert_eq!(state.committed_conversation(), Some("conv-hook"));
@@ -1841,7 +1841,7 @@ mod tests {
     /// subscriber. That the explanation is a callback at all exists for
     /// exactly this case — a caller that logged before delegating here
     /// would describe a refusal that never happened.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_ambiguity_is_neither_recorded_nor_logged_for_a_reported_session() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -1908,7 +1908,7 @@ mod tests {
     /// in that gap. Their windows deliberately do NOT overlap, so the
     /// window-overlap bail is out of the picture and each ambiguity comes
     /// from its own pair of in-window records.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pass_skips_the_ambiguity_write_for_a_session_reported_mid_pass() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -1992,7 +1992,7 @@ mod tests {
     /// would otherwise be a two-candidate bail into the correct single
     /// match. A report is strictly more evidence for the rivals, never
     /// less.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_rival_never_claims_a_conversation_another_session_reported() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2072,7 +2072,7 @@ mod tests {
     /// Ages the anchor rather than sleeping: the horizon is `after` +
     /// `grace` past first input, and moving first input into the past is
     /// the same arithmetic seen from the other end.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_tripwire_warns_once_for_a_hooked_launch_that_never_reported() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2131,7 +2131,7 @@ mod tests {
     /// point: the launch-to-first-prompt gap is unbounded by construction,
     /// so a session nobody has typed into has not yet given a Codex hook
     /// anything to fire on and cannot be late.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_tripwire_stays_silent_without_a_hook_or_a_first_input() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2166,7 +2166,7 @@ mod tests {
     /// that is already accounted for. A collection that gathered reported
     /// ids only from sessions with an anchor would leave exactly the common
     /// case unprotected.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_from_a_session_with_no_first_input_still_excludes_its_record() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2200,7 +2200,7 @@ mod tests {
     /// conversation. The id filter alone does not save it, because the
     /// filter can only remove candidates the rival can see; ambiguity is
     /// about the ones it cannot.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_reported_session_still_occupies_its_window_against_a_rival() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2233,7 +2233,7 @@ mod tests {
     /// `HashMap<_, String>` where this uses a set — would pass every
     /// single-report test above while silently leaving one of the two
     /// records claimable.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn every_reported_id_in_a_group_is_excluded() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2274,7 +2274,7 @@ mod tests {
     /// captures across the whole host, and the symptom would be sessions
     /// that mysteriously never offer a resume rather than anything that
     /// looks like a bug in this filter.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_outside_the_group_hides_nothing() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2336,7 +2336,7 @@ mod tests {
     /// pending claim alone — because a check that dropped every pending
     /// claim whenever ANY report existed in the group would pass the first
     /// half and quietly disable capture for every busy directory.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pending_claim_a_rival_has_reported_is_dropped_rather_than_committed() {
         let state = StateDir::new();
         let home = tempfile::tempdir().expect("agent home");
@@ -2388,7 +2388,7 @@ mod tests {
     /// for. A tripwire that warned per pass would produce a line every
     /// couple of seconds for the life of the session and bury the log it
     /// was meant to be visible in.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_tripwire_warns_once_across_consecutive_evaluations() {
         let ordering = std::sync::atomic::Ordering::Relaxed;
         let bounds = fast_bounds();
@@ -2429,7 +2429,7 @@ mod tests {
     /// own settling point (`after` + `grace` past first input) rather than
     /// inventing a deadline, so a session cannot be called late while the
     /// scan still considers its evidence open.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_tripwire_is_silent_until_the_horizon_and_speaks_at_it() {
         let ordering = std::sync::atomic::Ordering::Relaxed;
         let bounds = fast_bounds();
@@ -2466,7 +2466,7 @@ mod tests {
     /// and this repo's tests never mutate the test process's environment.
     /// An empty override is filtered out at construction and yields exactly
     /// the homeless supervisor production gets when `HOME` is unset.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_tripwire_still_runs_where_there_is_no_agent_home() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_seams(

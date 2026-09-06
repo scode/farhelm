@@ -318,7 +318,7 @@ mod tests {
     /// handler because the same order decides what the cap drops, so a
     /// wrong tiebreak here would silently change WHICH sessions a fleet
     /// past the cap loses.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_order_is_newest_first_with_ids_ascending_on_ties() {
         let items = vec![
             fake_session("b", 10),
@@ -339,7 +339,7 @@ mod tests {
     /// that notice over a list the client did read to the end, and a cut
     /// that kept the oldest rows would hide exactly the sessions a person
     /// is looking for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_cap_keeps_the_newest_rows_and_flags_only_a_real_cut() {
         let at_cap: Vec<SessionInfo> = (0..LIST_SESSIONS_CAP)
             .map(|i| fake_session(&format!("s{i:04}"), i as i64))

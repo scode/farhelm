@@ -1517,7 +1517,7 @@ mod tests {
     /// and the `:` are ignored rather than counted, so a future tmux
     /// argument cannot shift the payload), and that a payload containing
     /// colons and spaces of its own is not mistaken for the separator.
-    #[test]
+    #[farhelm_testtrace::test]
     fn extended_output_is_decoded_with_and_without_extra_fields() {
         let events = events_from_transcript(&[
             br"%extended-output %0 0 : plain\015\012",
@@ -1541,7 +1541,7 @@ mod tests {
     /// the two in one transcript is deliberate — passthrough-wrapper state
     /// is carried ACROSS notifications, so a dialect boundary landing
     /// inside a wrapper must decode exactly as if it never happened.
-    #[test]
+    #[farhelm_testtrace::test]
     fn both_output_dialects_share_one_decoder() {
         let events = events_from_transcript(&[
             br"%output %0 before\033Ptmux;\033\033]52;c;",
@@ -1576,7 +1576,7 @@ mod tests {
     /// callers a variant they must remember to ignore. This pins that it
     /// is discarded like any other chatter AND that discarding it does not
     /// swallow or reorder the adjacent pane output.
-    #[test]
+    #[farhelm_testtrace::test]
     fn pause_surfaces_as_an_event_while_continue_is_discarded_intact() {
         let events = events_from_transcript(&[
             b"%extended-output %0 0 : a",
@@ -1744,7 +1744,7 @@ mod tests {
         writer.flush().await.expect("flushing pane payload");
     }
 
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn next_output_emits_only_its_own_panes_events_through_a_split_wrapper() {
         let transcript: &[u8] = b"%output %0 before\\033Ptmux;\\033\\033]52;c;\n\
                                   %output %7 foreign-one\n\
@@ -1782,7 +1782,7 @@ mod tests {
     /// The identical bare query is stripped because tmux parsed and answered
     /// it. Testing every wrapper split pins both the provenance boundary and
     /// the decoder's existing ability to carry that boundary across lines.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn passthrough_queries_bypass_stripping_across_every_wrapper_split() {
         let wrapped = b"\x1bPtmux;\x1b\x1b[6n\x1b\\";
         for split in 0..=wrapped.len() {
@@ -1820,7 +1820,7 @@ mod tests {
 
     /// `%exit` is a stream boundary, so a retained prefix must be emitted
     /// once before callers learn that the control client ended.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn exit_flushes_a_retained_query_prefix_before_end_of_stream() {
         let (mut stream, _command_sink) = stream_over_transcript(b"%output %0 \x1b[\n%exit\n");
         assert_eq!(
@@ -1835,7 +1835,7 @@ mod tests {
 
     /// An open pipe with no further own-pane bytes must release a pending
     /// prefix at the idle deadline instead of waiting forever for EOF.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn idle_flushes_a_retained_query_prefix_from_an_open_stream() {
         let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
         feed_own_payload(&mut writer, b"\x1b[").await;
@@ -1853,7 +1853,7 @@ mod tests {
 
     /// EOF settles a retained prefix as ordinary output before `next_output`
     /// reports the end, matching the `%exit` boundary contract.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn eof_flushes_a_retained_query_prefix_before_end_of_stream() {
         let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
         feed_own_payload(&mut writer, b"\x1b[").await;
@@ -1871,7 +1871,7 @@ mod tests {
     /// spaced inside the 50 ms window without making the regression wall-clock
     /// sensitive. A deadline restarted by each line would remain pending at
     /// the final advance; only the original own-pane deadline may govern it.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn unrelated_control_traffic_does_not_starve_the_idle_flush() {
         let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
         feed_own_payload(&mut writer, b"\x1b[").await;
@@ -1911,7 +1911,7 @@ mod tests {
     /// their own is exactly the mistake that loses the filter to tmux's
     /// per-pane state reset (see [`attach_cutover_command`]), and it would
     /// still read perfectly well at the call site.
-    #[test]
+    #[farhelm_testtrace::test]
     fn attach_cutover_sets_pause_after_while_clearing_no_output() {
         assert_eq!(
             attach_cutover_command(&[]),
@@ -1932,7 +1932,7 @@ mod tests {
     /// The empty case is not pedantry — it is what keeps a session with no
     /// other panes from turning its cutover into a differently-spelled
     /// command than the one the test above pins.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_pane_filter_names_every_foreign_pane_once() {
         assert_eq!(
             silence_pane_args(&["%1".to_string(), "%12".to_string()]),
@@ -1949,7 +1949,7 @@ mod tests {
     /// make every attach on it fail outright. The boundary is checked
     /// exactly at the live cap and one past it, and every pane must retain
     /// both transitions in the required order.
-    #[test]
+    #[farhelm_testtrace::test]
     fn live_pane_filters_are_ordered_and_chunked_below_tmuxs_argument_ceiling() {
         let panes = |n: usize| (0..n).map(|i| format!("%{i}")).collect::<Vec<_>>();
         let live_cap = MAX_CUTOVER_PANE_FILTERS / 2;
@@ -1995,7 +1995,7 @@ mod tests {
     /// on a struct that lives as long as an attachment does. The memo is
     /// only an optimization (see [`MAX_SILENCED_PANES`]), so forgetting is
     /// free; what this pins is that it forgets rather than grows.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_filtered_pane_memo_stays_bounded_under_pane_churn() {
         // One line per pane, more of them than the cap, so a set that
         // never forgot would end up strictly larger than it.
@@ -2034,7 +2034,7 @@ mod tests {
     /// boundary, not a formatting nicety: without it a crafted
     /// notification could put arbitrary text into a command this process
     /// sends to its own tmux server.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_real_pane_ids_reach_the_pane_filter() {
         for good in ["%0", "%7", "%1234"] {
             assert!(is_pane_id_shaped(good.as_bytes()), "{good} is a pane id");
@@ -2051,7 +2051,7 @@ mod tests {
     /// form; the pane id keeps its leading `%` and the argument is quoted
     /// because of the `:`. A wrong spelling here would surface only as a
     /// pane that never resumes after a stall.
-    #[test]
+    #[farhelm_testtrace::test]
     fn continue_command_uses_the_pane_state_form() {
         assert_eq!(
             continue_pane_command("%7"),
@@ -2065,7 +2065,7 @@ mod tests {
     /// leave a queued block pointing at bytes tmux has already freed, while
     /// `pause` clears that queue first. Keeping both states in one command
     /// prevents pane output from reopening the vulnerable gap.
-    #[test]
+    #[farhelm_testtrace::test]
     fn late_pane_filter_pauses_before_turning_output_off() {
         assert_eq!(
             silence_live_pane_command(&["%7".to_string()]),
@@ -2079,7 +2079,7 @@ mod tests {
     /// before an input client or forwarder exists. The provisional guard must
     /// keep that client alive through the external `no-output` acknowledgement,
     /// then reap it without taking the private tmux server down.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_abandoned_replay_candidate_is_reaped_after_no_output() {
         let mut server = ScratchServer::start().await;
         let pane = server
@@ -2170,7 +2170,7 @@ mod tests {
     /// proves both sides of the boundary: the output client remains alive
     /// until `no-output` is visible, then it is reaped without taking down the
     /// private server.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn shutdown_acks_no_output_despite_unread_positional_replies() {
         let mut server = ScratchServer::start().await;
         let pane = server
@@ -2291,7 +2291,7 @@ mod tests {
     /// stdout. Reopening a fresh client per boundary proves shutdown never
     /// depends on how many of those old replies the interrupted reader happened
     /// to consume.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn shutdown_survives_every_four_block_reply_boundary() {
         let server = ScratchServer::start().await;
         let pane = server
@@ -2376,7 +2376,7 @@ mod tests {
     /// between the visible capture and the cutover: their adjacency is
     /// what makes the cutover lossless (see the function's own comment
     /// for the issue-4 attempt this refuses to readmit).
-    #[test]
+    #[farhelm_testtrace::test]
     fn replay_command_group_differs_only_in_its_cutover() {
         let attach = replay_command_group("fh-s", "%1", &attach_cutover_command(&[]));
         let resume = replay_command_group("fh-s", "%1", &continue_pane_command("%1"));
@@ -2429,7 +2429,7 @@ mod tests {
     /// coin flip. The pane state reached is identical either way, which is
     /// what this test is about; the e2e suite covers the delay-driven path
     /// end to end, tolerating both outcomes.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_paused_pane_surfaces_and_recovers_through_the_replay_path() {
         let server = ScratchServer::start().await;
         let pane = server
@@ -2515,7 +2515,7 @@ mod tests {
     /// while the query bytes themselves stay out of live output. The explicit
     /// catalog is independent of the production table so deleting an entry
     /// cannot quietly delete the guard case that would catch it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn pinned_tmux_answers_every_stripped_query() {
         const REQUIRED_QUERY_ENTRIES: &[&[u8]] = &[
             b"\x1b[6n",
@@ -2634,7 +2634,7 @@ mod tests {
     /// must still be making progress, observed outside tmux through a file
     /// it writes — the difference between "filtered" and "frozen", which
     /// is invisible from this client's stream by construction.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_flooding_neighbour_reaches_a_terminals_control_client_not_at_all() {
         let server = ScratchServer::start().await;
         let progress = server.dir.path().join("neighbour-progress");
@@ -2712,7 +2712,7 @@ mod tests {
     /// first one is what triggers it), so the property is that the stream
     /// converges to exactly zero new ones, and a late filter that never
     /// took effect would keep climbing with the producer.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pane_created_after_attach_is_silenced_when_it_first_speaks() {
         let server = ScratchServer::start().await;
         let progress = server.dir.path().join("late-progress");
@@ -2803,7 +2803,7 @@ mod tests {
     /// it from outside. Writing the command directly puts the stream in
     /// exactly the state a filter written moments before a `%pause` leaves
     /// it in, which is the state the catch-up path has to survive.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_late_pane_filter_does_not_desynchronize_the_catch_up_replay() {
         let server = ScratchServer::start().await;
         let progress = server.dir.path().join("racing-progress");

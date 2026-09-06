@@ -829,7 +829,7 @@ mod tests {
     /// a hard-coded syscall): a regression that reordered these calls, or
     /// dropped one of them entirely while leaving the others in place,
     /// changes what this log records and fails the assertion either way.
-    #[test]
+    #[farhelm_testtrace::test]
     fn durable_write_syncs_file_before_rename_and_dir_after() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("sentinel");
@@ -851,7 +851,7 @@ mod tests {
     /// exactly as it was before the call: absent, here. This is the
     /// window a crash between opening the temp file and writing to it
     /// occupies in real life.
-    #[test]
+    #[farhelm_testtrace::test]
     fn durable_write_failure_at_write_leaves_destination_untouched() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("sentinel");
@@ -869,7 +869,7 @@ mod tests {
     /// A failure injected AT the file fsync — content is written but the
     /// syscall proving it durable never completes — must behave
     /// identically: nothing at the destination, no orphaned temp file.
-    #[test]
+    #[farhelm_testtrace::test]
     fn durable_write_failure_at_file_fsync_leaves_destination_untouched() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("sentinel");
@@ -885,7 +885,7 @@ mod tests {
     /// must leave a PRE-EXISTING destination's OLD content completely
     /// intact — the temp file is debris (cleaned up), and nothing was
     /// ever published.
-    #[test]
+    #[farhelm_testtrace::test]
     fn durable_write_failure_at_rename_leaves_old_content_intact() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("sentinel");
@@ -909,7 +909,7 @@ mod tests {
     /// reports an error" and "the write actually succeeded" are
     /// simultaneously true, matching a real crash between `rename` and
     /// the directory `fsync`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn durable_write_failure_at_dir_fsync_still_publishes_complete_content() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("sentinel");
@@ -926,7 +926,7 @@ mod tests {
     /// at CREATE time, never by chmod" property [`overwrite_private_file_sync`]
     /// already relies on, pinned separately here because this tier's
     /// temp file is additionally fsync'd before it is ever renamed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn durable_write_result_is_0600() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("sentinel");
@@ -944,7 +944,7 @@ mod tests {
     /// — item 19's sharpening — DO fsync the file before rename, but must
     /// still skip the directory fsync entirely (that omission is this
     /// tier's whole cost savings).
-    #[test]
+    #[farhelm_testtrace::test]
     fn best_effort_write_fsyncs_file_but_never_the_directory() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("snapshot");
@@ -979,7 +979,7 @@ mod tests {
     /// fresh destination untouched — the best-effort tier's analogue of
     /// the durability-bearing test above, proving the shared
     /// [`write_staged`] engine behaves the same way here.
-    #[test]
+    #[farhelm_testtrace::test]
     fn best_effort_write_failure_at_write_leaves_destination_untouched() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("snapshot");
@@ -996,7 +996,7 @@ mod tests {
     /// injected AT rename, against a PRE-EXISTING destination, must leave
     /// that OLD content completely intact — proving "never torn" holds
     /// even when there is something real to tear.
-    #[test]
+    #[farhelm_testtrace::test]
     fn best_effort_write_failure_at_rename_leaves_old_content_intact() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("snapshot");
@@ -1018,7 +1018,7 @@ mod tests {
     /// destination reliably makes `rename` fail here: POSIX `rename(2)`
     /// refuses to replace a directory with a non-directory regardless of
     /// permissions.
-    #[test]
+    #[farhelm_testtrace::test]
     fn best_effort_write_removes_the_temp_file_when_rename_fails() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("snapshot");
@@ -1036,7 +1036,7 @@ mod tests {
     /// `path` itself and following it. Pins both halves: the destination
     /// ends up a plain, 0600 regular file with the new content, and
     /// whatever the symlink used to point at is completely untouched.
-    #[test]
+    #[farhelm_testtrace::test]
     fn best_effort_write_replaces_a_symlink_without_following_it() {
         let tmp = tempfile::tempdir().unwrap();
         let target = tmp.path().join("target");
@@ -1068,7 +1068,7 @@ mod tests {
     /// `truncate`-in-place implementation would leave this hole open; the
     /// rename-based replacement (a fresh 0600 temp file swapped in) fixes
     /// it structurally rather than by remembering to `chmod` afterward.
-    #[test]
+    #[farhelm_testtrace::test]
     fn best_effort_write_repairs_a_pre_existing_wide_mode() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("snapshot");
@@ -1090,7 +1090,7 @@ mod tests {
     /// `create_new` at the final path directly (item 9), so a collision
     /// is detected by the PUBLISH step (`link` failing `EEXIST`), not by
     /// the temp file's own `create_new`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn write_private_file_is_0600_and_never_overwrites() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("spec.json");
@@ -1113,7 +1113,7 @@ mod tests {
     /// between the temp write and the link, or a genuine collision) must
     /// never leave a partial file visible at the destination — the launch
     /// shim must never be able to observe a torn spec (item 9).
-    #[test]
+    #[farhelm_testtrace::test]
     fn write_private_file_failure_at_link_leaves_destination_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("spec.json");
@@ -1132,7 +1132,7 @@ mod tests {
     /// respect in which it is cheaper than even the best-effort tier
     /// (see the module docs for why: nothing ever reads a spec across a
     /// crash boundary, only within this process's own launch sequence).
-    #[test]
+    #[farhelm_testtrace::test]
     fn write_private_file_never_syncs_anything() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("spec.json");
@@ -1148,7 +1148,7 @@ mod tests {
     /// this pins that it still produces the exact same on-disk result as
     /// its `_sync` twin, rather than merely trusting `spawn_blocking`'s
     /// plumbing by inspection.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn write_private_file_matches_its_sync_counterpart() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("spec.json");
@@ -1162,7 +1162,7 @@ mod tests {
     /// it, or a sweep would delete live state instead of leftover temp
     /// files. This only pins the substring contract the function's own
     /// docs describe — it is not a full parse of the `.tmp-<uuid>` shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_temp_name_pattern_matches_only_temp_files() {
         assert!(is_staged_temp_name(".sentinel.tmp-abc123"));
         assert!(!is_staged_temp_name("sentinel"));
@@ -1176,7 +1176,7 @@ mod tests {
     /// side effect, rather than only indirectly through a write that
     /// would need to touch the real current working directory (unsafe to
     /// do from a test that may run concurrently with others).
-    #[test]
+    #[farhelm_testtrace::test]
     fn parent_dir_normalizes_a_bare_filenames_empty_parent_to_dot() {
         assert_eq!(parent_dir(Path::new("bare-name")).unwrap(), Path::new("."));
         assert_eq!(
@@ -1209,7 +1209,7 @@ mod tests {
     /// (never on this, the running test's, environment) and, once
     /// recognized, performs the real write and exits with a bare status
     /// code instead of running the harness's normal pass/fail path.
-    #[test]
+    #[farhelm_testtrace::test]
     fn write_durable_sync_defeats_a_hostile_creation_time_umask() {
         const CHILD_MARKER: &str = "FARHELM_FILES_TEST_UMASK_CHILD_PATH";
         if let Ok(path) = std::env::var(CHILD_MARKER) {
@@ -1236,6 +1236,10 @@ mod tests {
                 ),
             ))
             .env(CHILD_MARKER, &path)
+            // This stand-in exits before capture completion, and its hostile
+            // umask would make a newly allocated trace slot unreadable. The
+            // parent wrapper owns the test verdict and retained diagnostics.
+            .env_remove("FARHELM_TEST_TRACE_DIR")
             .status()
             .expect("spawning the hostile-umask child process");
         assert!(
@@ -1260,7 +1264,7 @@ mod tests {
     /// The end state alone would be satisfied by an implementation that
     /// accumulated every chunk in memory and wrote once at commit, which
     /// is precisely what an upload with no size cap must never do.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_writes_each_chunk_then_flushes_once_before_publishing() {
         let tmp = tempfile::tempdir().unwrap();
         let seam = TestSeam::default();
@@ -1304,7 +1308,7 @@ mod tests {
     /// with a pre-existing file whose content is checked afterwards,
     /// because a `rename`-based publication would pass every other
     /// assertion here while silently destroying it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_publication_walks_past_taken_names_without_clobbering() {
         let tmp = tempfile::tempdir().unwrap();
         let taken = tmp.path().join("shot.png");
@@ -1335,7 +1339,7 @@ mod tests {
     /// published and no temp left behind — never a fallback that
     /// overwrites the last candidate, which would turn a naming problem
     /// into silent data loss.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_publication_that_runs_out_of_names_publishes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("taken"), b"original").unwrap();
@@ -1359,7 +1363,7 @@ mod tests {
     /// runs) publishes nothing and leaves no temp behind — the streaming
     /// analogue of the whole-file tiers' write-failure tests, and the
     /// window a disk filling up mid-upload occupies in real life.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_failure_at_a_chunk_write_publishes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let seam = TestSeam::failing_at("write");
@@ -1385,7 +1389,7 @@ mod tests {
     /// not yet durable, and durable but not yet named — and the promise
     /// this tier makes is that neither is ever observable as a partial
     /// file at the published path.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_failures_around_publication_never_expose_a_partial_file() {
         for window in ["fsync_file", "link"] {
             let tmp = tempfile::tempdir().unwrap();
@@ -1417,7 +1421,7 @@ mod tests {
     /// no call site has to remember, and a refactor that removed it would
     /// leave every cancelled upload's temp file on disk until the next
     /// startup sweep, with nothing else failing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_cleans_up_on_abandon_and_on_a_bare_drop() {
         let tmp = tempfile::tempdir().unwrap();
         let seam = TestSeam::recording_cleanup();
@@ -1452,7 +1456,7 @@ mod tests {
     /// that triggered it, not swallowed: the temp file is then still on
     /// disk, which is exactly the debris the caller needs to know about
     /// (and the startup sweep's whole reason for existing).
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_folds_a_failed_cleanup_into_the_original_error() {
         let tmp = tempfile::tempdir().unwrap();
         let seam = TestSeam {
@@ -1509,7 +1513,7 @@ mod tests {
     /// on the running test's environment — repo rule), takes the
     /// measurement alone, and exits with a bare status code the parent
     /// turns back into a legible failure.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_does_not_grow_memory_with_the_size_of_the_upload() {
         const CHILD_MARKER: &str = "FARHELM_FILES_TEST_STREAM_RSS_CHILD";
         const CHUNK: usize = 256 * 1024;
@@ -1565,6 +1569,10 @@ mod tests {
             .arg("files::tests::staged_stream_does_not_grow_memory_with_the_size_of_the_upload")
             .arg("--exact")
             .env(CHILD_MARKER, "1")
+            // The measurement process exits directly instead of completing a
+            // test capture. Keep persistence with the parent that interprets
+            // its exit status, rather than leaving a partial child slot.
+            .env_remove("FARHELM_TEST_TRACE_DIR")
             .status()
             .expect("spawning the measurement child process");
         match status.code() {
@@ -1588,7 +1596,7 @@ mod tests {
     /// caller can log the truth (and, in the supervisor's case, retry)
     /// rather than report a cleanup that did not happen. The staging file
     /// left behind is exactly what the startup reconciliation exists for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn staged_stream_abandon_reports_a_cleanup_it_could_not_perform() {
         let tmp = tempfile::tempdir().unwrap();
         let seam = TestSeam::failing_at("remove_temp");
