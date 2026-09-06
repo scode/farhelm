@@ -17,7 +17,7 @@ Climb one rung at a time, and only when the rung below failed to reproduce:
 
 1. The exact failing test, repeated in a loop.
 2. Its module (Rust) or spec file (Playwright), still on one engine.
-3. Its test binary at CI's thread count, or the spec file on both engines.
+3. Its test binary at the release gate's thread count, or the spec file on both engines.
 4. The full battery, exactly as AGENTS.md states it.
 
 Repetition belongs on every rung: a flake that fires once in twenty runs needs twenty runs of evidence, and twenty runs
@@ -60,8 +60,9 @@ silently green.
 
 Two caveats before trusting a narrow non-reproduction:
 
-- Thread count. The narrow run has no contention; CI runs the full suite at `--test-threads=4`. Before concluding "only
-  fails in the big run", rerun rung 3 as the whole binary at 4 threads:
+- Thread count. The narrow run has no contention; the release gate runs its retained Rust targets at `--test-threads=4`.
+  Ordinary CI does not run Rust tests, and the full e2e binary remains excluded from the release gate. Before concluding
+  "only fails in the big run", reproduce that thread budget locally at rung 3:
   `cargo test -p farhelm --test e2e -- --test-threads=4 --show-output`.
 - Ambient environment. A shell inside a farhelm session carries `FARHELM_AGENT_ID`, and the supervisor's sweep tests
   inspect live `/proc` environs. Four `service::sweep::tests` cases in `farhelm-supervisor` have failed under an ambient

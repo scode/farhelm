@@ -191,9 +191,10 @@ is a clean gate.
   above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
   viewer RSS, degenerate-size READY, replacement claim, malformed-sentinel, and forced-pause helper cases still block
   restoring the entire `farhelm` integration target in `.github/dist-build-setup.yml`. Browser flakes are separate
-  coverage and do not themselves gate that Rust target. The integration suite still runs in CI's test job for ready PRs.
-  A single clean combined run cannot establish that these latent failures are fixed; retain the release exclusion until
-  the evidence supports reversing it.
+  coverage and do not themselves gate that Rust target. The integration suite remains available for explicit local or
+  worker validation; ordinary CI and the release gate do not run it while this exclusion stands. A single clean combined
+  run cannot establish that these latent failures are fixed; retain the release exclusion until the evidence supports
+  reversing it.
 
 ### Systematic deflake
 
@@ -208,15 +209,11 @@ problems before turning out to be invalid premises. That is why the scale factor
 deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
 than behind it.
 
-- Ledger and CI plumbing, effort low. CI's concurrency group keys on the ref with `cancel-in-progress`, so landing a
-  stack cancels every main run but the tip's: 34 of the last 40 main runs were cancelled and 5 completed, which means
-  the full suite finishes about once per landed stack. Give main pushes a per-sha group so every landed commit's run
-  completes, make the `test` job upload failing output on `if: failure()`, and stop clearing a red main run with a later
-  green one until a FLAKES.md entry or fix PR exists (the `manager::tests` twin failure on main run 33992744776 is in no
-  ledger). Record substrate and environment identity in every failure output and FLAKES entry (`command -v tmux`,
-  `tmux -V`, binary hash, locale, ambient `FARHELM_*`), asserted against `source-pins.env` in CI and hunt jobs: the
-  forced-pause entry claims a determinism on pinned 3.7c that CI run 34006471792 contradicts, and nothing recorded what
-  that worker ran. Re-verify the 2026-09-05 baseline reproductions' substrate before citing them.
+- Ledger and execution evidence, effort low. Preserve every local, worker, and applicable release failure rather than
+  clearing it with a later green run: retain the command, tested commit and tree state, run identity, selection,
+  concurrency, redacted environment identity, resolved tmux path/version/hash, locale, and bounded failure output.
+  Controlled release and hunt runs assert the pin; differing local substrates warn clearly. Re-verify the 2026-09-05
+  baseline substrate before citing it, and preserve release failure artifacts without adding hosted test runs.
 - Readiness oracles by naming, effort medium. The oracles exist and are unused: `wait_for_replay_complete` at 3 of 161
   attach sites, `basic_session_ready` at 11 of 159 session creations, `waitForReplayReveal` in three specs while
   `__farhelmTermReady` is read raw 106 times. Rename so every call site chooses and the exclusion set is a grep, never a
@@ -235,31 +232,29 @@ than behind it.
   for the ledger, and retries that report "flaky." nextest interleaves binaries where `cargo test` runs them
   sequentially, so the profile needs an explicit `test-threads`, a `max-threads` group for the e2e binary (the harness's
   `SLOTS` semaphore becomes inert at one holder per process), and `success-output = immediate` to keep loud skips
-  visible. CLAUDE.md's gate list and CI change together, or the class survives locally and vanishes in CI. Retries only
-  for the load-sensitive group, always reported. The RSS test's allowance is re-baselined, since it starts measuring
-  what it claims to.
-- Hunt on the gate's shape, effort low for Rust and medium for the browser leg. Nightly or on demand: the full e2e
-  binary at four threads on a 4-vCPU runner with pinned tmux, plus `--repeat-each` over the load-sensitive group, with
-  the artifacts from the evidence entry. Per PR, an adjunct over changed tests (twenty fresh invocations per changed
-  Rust test, `--repeat-each=20` on both engines per changed spec, the whole binary or suite when `harness.rs`,
-  `terminal-suite.ts`, or `terminal.js` changes) as a CI job whose JUnit is the record of what it caught. The browser
-  leg costs a `cargo build`, a `dx` release build, and a Playwright install per run, the cost that got the e2e job
-  disabled; nightly only until measured.
+  visible. Maintained local/worker instructions and release execution change together, so the class does not disappear
+  from the evidence model. Retries only for the diagnosed load-sensitive group, always reported. The RSS test's
+  allowance is re-baselined, since it starts measuring what it claims to.
+- Local/worker hunt tooling, effort low for Rust and medium for the browser leg. Explicit developer-invoked commands
+  reproduce the relevant pinned substrate and concurrency, repeat selected or changed tests within a stated bound, and
+  retain commands, counts, environment identity, and failure artifacts. Twenty repetitions remain a focused mode, not a
+  PR requirement. Shared harness or terminal-asset changes can require the whole binary or suite, and browser runs cover
+  both engines. No nightly workflow, workflow-dispatch hunt, or per-PR stress job is added.
 - Authoring rules as a reviewer checklist and a sleep allowlist, effort low. A short checklist the review swarm's
   test-quality lens loads verbatim and CLAUDE.md's "Finishing work" names for PRs touching tests: premise asserted;
   readiness from the named oracle; confirm the other party is still there before writing or tearing down; no lock or fd
   across a spawn; measure an owned process; assert on something that distinguishes two mechanisms; no megabyte polls;
-  reset pointer and focus state. Sleeps live in harness helpers; a test-body sleep carries `// sleep-ok: <why>` and CI
-  requires zero un-annotated ones. A count ratchet was rejected: 28 of about 103 sleeps are poll intervals and
-  `feed.spec.ts`'s observation windows are legitimate.
+  reset pointer and focus state. Sleeps live in harness helpers; a test-body sleep carries `// sleep-ok: <why>` and an
+  existing lightweight validation path requires zero un-annotated ones. A count ratchet was rejected: 28 of about 103
+  sleeps are poll intervals and `feed.spec.ts`'s observation windows are legitimate.
 
 Deferred, with triggers, detailed in the plan: a typed scale factor on harness budgets (trigger: a budget-class
 recurrence after the oracle entry lands); product observables that attribute their cause without changing the shared
 detach reason string (product work, belongs under "Near term"); running the tag gate's suite away from the release build
-(nothing to measure until "Restore the release integration gate" lands). Tracking: a monthly script over FLAKES.md
-headings and archived JUnit reports failures per hunt run, the share of new entries whose `Cause:` line says
-established, flakes the per-PR loop caught, and new entries per class; a class recurring after its entry landed means
-sharpen the entry, not add a retry.
+(nothing to measure until "Restore the release integration gate" lands). Tracking: an explicit manual script over
+FLAKES.md and retained local/worker/release summaries, distinguishing development runs, focused repetitions, and release
+runs; it reports incomplete evidence rather than claiming a rate from sparse samples. A class recurring after its entry
+landed means sharpen the entry, not add a retry.
 
 ## Maybe later
 

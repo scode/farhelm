@@ -12,8 +12,8 @@ goal. Those entries and FLAKES.md are evidence of which kinds of flakes this cod
 whether it stops producing those kinds, not by whether it closes those tickets.
 
 Execution order is not the same as the weight of the sub-goals. Prevention is the largest lever by count, and its inputs
-(the diagnosed classes) already exist, so it runs in parallel with the evidence work rather than behind it. Cheap
-discovery multipliers go first because they change every later number at no new cost.
+(the diagnosed classes) already exist, so it runs in parallel with the evidence work rather than behind it. The early
+evidence work makes local/worker runs inspectable without adding a hosted hunt or a mandatory stress campaign.
 
 ## What the evidence says
 
@@ -59,23 +59,19 @@ Observations that drive the ordering:
 
 ## The items, in order
 
-### 1. Ledger and CI plumbing (low)
+### 1. Ledger and execution evidence (low)
 
 Cheapest discovery multiplier on the page, and the precondition for every metric below.
 
-- Give pushes to main a per-sha concurrency group (or `cancel-in-progress: false` when the ref is main) so every landed
-  commit's run completes. Multiplies the free hunt sample by the stack length with no new jobs.
-- The `test` job uploads failing output as an artifact (`upload-artifact` with `if: failure()`, the pattern the disabled
-  e2e job already has).
-- A failed `test` job on main or a ready PR is not cleared by a later green run: a FLAKES.md entry or a fix PR exists
-  first. The entry may be short, but it follows the file's shape.
+- A failed local, worker, or applicable release run is not cleared by a later green run: retain its evidence until a
+  FLAKES.md entry or a fix PR exists. The entry may be short, but it follows the file's shape.
 - Substrate and environment identity recorded in every failure output and every FLAKES entry: `command -v tmux`,
   `tmux -V`, sha256 of the resolved binary, locale, and any ambient `FARHELM_*` variables. The harness already runs
-  `tmux -V`; this widens what it keeps. CI and hunt jobs assert equality with `source-pins.env`; the developer loop
-  records and warns. The harness scrubs or refuses ambient `FARHELM_*` at startup. Motivated by the forced-pause entry
-  claiming a determinism CI contradicts, with no way to check what the worker ran.
-- Any job cloned from the disabled e2e job drops its `apt-get install tmux`; the supervisor's floor would refuse a
-  distro tmux, but the parity point is the pinned build, not the floor.
+  `tmux -V`; this widens what it keeps. Controlled release and hunt runs assert equality with `source-pins.env`; the
+  developer loop records and warns. The harness scrubs or refuses ambient `FARHELM_*` at startup. Motivated by the
+  forced-pause entry claiming a determinism CI contradicts, with no way to check what the worker ran.
+- Preserve bounded failure artifacts in existing applicable release jobs. Do not add hosted test jobs, schedules, or
+  workflow-dispatch hunts merely to collect evidence.
 - Re-verify the 2026-09-05 baseline reproductions' substrate before "Difficult deflake" entries cite them as baseline
   evidence, and correct the forced-pause entry.
 
@@ -125,25 +121,25 @@ Retires cross-test interference as a class instead of fixing instances, and supp
   defaults to logical CPUs, and the harness's `SLOTS` semaphore becomes inert at one permit holder per process), a test
   group with `max-threads` for the e2e binary, and `success-output = immediate` so loudly-skipped tests keep their
   reason visible.
-- One runner: CLAUDE.md's gate list and CI change together, or the shared-process class survives locally and vanishes in
-  CI, inverting the ledger's "passes locally, fails elsewhere" premise.
+- One runner model: CLAUDE.md's gate list, explicit local/worker instructions, and release execution change together, or
+  the shared-process class survives locally and vanishes from the evidence model.
 - Retries only for the load-sensitive group (initial membership: the "Difficult deflake" entries), always reported, with
   the JUnit "flaky" outcome feeding FLAKES.md. Deterministic failures do not retry away.
 - The RSS test starts measuring the supervisor plus one test's harness instead of everything co-resident, which is the
   measurement it claims; re-baseline the allowance and say so in the test.
 
-### 5. Hunt on the gate's shape (low for Rust, medium for the browser leg)
+### 5. Local/worker hunt tooling (low for Rust, medium for the browser leg)
 
-- Nightly or on-demand: the gate's own shape (full e2e binary, four threads, 4-vCPU runner, pinned tmux) with item 3's
-  artifacts, plus a `--repeat-each` pass over the load-sensitive group. This is the shape that produced the corpus; the
+- Developer- or worker-invoked tools reproduce the gate's relevant substrate and concurrency, run bounded repetitions
+  over selected or changed tests, and preserve item 3's evidence. This is the shape that produced the corpus; the
   2026-09-05 "two CPU-load children" shape reproduced only part of it (the profiles pair, over-one-megabyte, and the
   sentinel all failed with no extra load).
-- Per-PR adjunct: changed Rust e2e test names run twenty fresh invocations; a changed Playwright spec runs
-  `--repeat-each=20` on both engines; a change to `harness.rs`, `terminal-suite.ts`, or `terminal.js` runs the whole
-  binary or suite, since every module imports them. A CI job whose JUnit is the record of what it caught. Twenty
-  repetitions are a filter, not a proof: #355 passed three gates and a sandbox before failing once.
+- A changed Rust test can use twenty fresh invocations, and a changed Playwright spec can use `--repeat-each=20` on both
+  engines. A change to `harness.rs`, `terminal-suite.ts`, or `terminal.js` may require the whole binary or suite, since
+  every module imports them. Twenty repetitions are a filter, not a proof: #355 passed three gates and a sandbox before
+  failing once. The command and its cost stay explicit; no repetition is mandatory for every PR or edit.
 - The browser leg needs `cargo build`, a `dx` release build, and a Playwright install per run, the cost that got the e2e
-  job disabled. Nightly, not per PR, until that cost is measured.
+  job disabled. It remains explicit local/worker work, never a nightly, on-demand workflow, or per-PR stress job.
 
 ### 6. Authoring rules as a reviewer checklist, and a sleep allowlist (low)
 
@@ -160,9 +156,10 @@ tests; `docs/watch-items.md` keeps the fingerprints and mechanisms and cites the
 - Polls do not return megabyte buffers; measure processing and serialization separately.
 - Reset pointer and focus state between steps that depend on it.
 - Sleeps live in harness helpers (`poll_until`, `observe_quiet_for`); a sleep in a test body carries a
-  `// sleep-ok: <why>` annotation and CI requires zero un-annotated ones. A count ratchet was considered and rejected:
-  of about 103 sleeps in e2e test bodies, 28 are poll intervals and `feed.spec.ts`'s deliberate observation windows are
-  legitimate, so a count punishes the wrong thing and is gamed by a named constant.
+  `// sleep-ok: <why>` annotation and an existing lightweight validation path requires zero un-annotated ones. A count
+  ratchet was considered and rejected: of about 103 sleeps in e2e test bodies, 28 are poll intervals and
+  `feed.spec.ts`'s deliberate observation windows are legitimate, so a count punishes the wrong thing and is gamed by a
+  named constant.
 
 ## Deferred, with triggers
 
@@ -180,20 +177,20 @@ tests; `docs/watch-items.md` keeps the fingerprints and mechanisms and cites the
 
 ## Tracking
 
-FLAKES.md is append-only and excludes same-session flakes, so it cannot measure creation rate alone. A short script
-(under `scripts/`) run monthly over FLAKES.md headings and retained CI JUnit reports:
+FLAKES.md is append-only and excludes same-session flakes, so it cannot measure creation rate alone. A short explicit
+manual script (under `scripts/`) summarizes FLAKES.md headings and retained local/worker/release reports:
 
 - failures per hunt run (item 5), the denominator;
 - share of new FLAKES entries whose last line is `Cause: established`, against `hypothesis` and `unknown`, and the count
   still saying "on recurrence" or "not kept" (FLAKES.md's header is amended to require the `Cause:` line on new
   entries);
-- flakes the per-PR loop caught before merge, from its JUnit, the prevention numerator; not FLAKES entries, since the
-  file's header excludes same-session flakes and that rule stands;
+- development runs, focused repetitions, and release runs separately, with missing or incomplete evidence called out;
 - new entries per class, tagged on new entries only; existing entries are classified in the table above.
 
-GitHub artifacts expire, so the script archives per-run JUnit summaries under a repo path or runs inside retention. The
-first reading that means anything is months out; a class recurring before then is the signal to sharpen its item, not to
-add a retry.
+The operator chooses where portable summaries are archived; raw local output and environment identities stay out of
+public source. The first reading that means anything is months out; a class recurring before then is the signal to
+sharpen its item, not to add a retry. The script must report its denominator and must not claim a long-term reduction
+from a handful of development runs.
 
 ## Review record
 
