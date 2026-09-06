@@ -47,7 +47,8 @@ import {
   type SessionRow,
   stubFeed,
 } from "./helpers/fleet";
-import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { waitForSessionReady } from "./helpers/terminal-readiness";
 import {
   FAKE_AGENT_INVOCATION,
   findSessionIdByTitle,
@@ -672,6 +673,56 @@ test("input round-trips through the real terminal path", async ({ page }) => {
   await waitForTermText(page, "echo:hello-from-playwright", 10_000);
 });
 
+/**
+ * A primary island's element id is reused as the selected session changes.
+ *
+ * This exercises the readiness oracle's identity guard with real supervisor
+ * routes and sockets: session A is ready in `#terminal`, but asking for the
+ * known session B must time out until the row action actually replaces that
+ * attachment. A registry-only readiness check would pass B at the first
+ * observation and hide the exact stale-island error callers need to avoid.
+ */
+test("session readiness rejects a reused primary island until the requested session opens", async ({
+  page,
+  request,
+}) => {
+  const stamp = Date.now();
+  const first = await createSession(request, {
+    title: `readiness-first-${stamp}`,
+    cwd: "/tmp",
+    invocation: FAKE_AGENT_INVOCATION,
+  });
+  try {
+    const second = await createSession(request, {
+      title: `readiness-second-${stamp}`,
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+    });
+    // Each returned session immediately owns a cleanup scope, including
+    // when later setup or the other session's teardown fails.
+    try {
+      await page.goto("/");
+      await attachSession(page, first.id);
+      // Opening an already selected fixture must preserve its settled input
+      // focus; a redundant row click would leave focus on that button.
+      await attachSession(page, first.id);
+
+      // This is deliberately a bounded rejection, not a manufactured socket
+      // failure: the first session remains healthy under the primary element
+      // id while the oracle is asked for the second session's identity.
+      await expect(waitForSessionReady(page, second.id, { timeout: 750 })).rejects.toThrow(
+        `session ${second.id} agent`,
+      );
+
+      await attachSession(page, second.id);
+    } finally {
+      await cleanupSession(request, second.id);
+    }
+  } finally {
+    await cleanupSession(request, first.id);
+  }
+});
+
 // Regression test for a real bug: xterm.js auto-answers a DECRQM mode
 // query (e.g. vim's own cursor-blink probe, `ESC[?12$p`, which tmux passes
 // through unmodified from the pane) with a DECRPM reply (`ESC[?12;2$y`)
@@ -1044,9 +1095,9 @@ test("second client takes over; first shows the detach banner", async ({
 
   const second = await browser.newContext();
   const page2 = await second.newPage();
-  // A fresh context has its own list view, so it goes through the same
-  // list-then-click path as `page` did in openTerminal(page) above —
-  // there is no direct terminal URL to land on.
+  // A fresh context opens through its own list and auto-selection, with a
+  // row click only if needed to select the shared session. Its attachment
+  // must settle independently before it can be the takeover winner.
   await openTerminal(page2);
 
   // SPEC.md: last attach wins, and the loser sees it happened.
