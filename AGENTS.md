@@ -59,13 +59,12 @@ the intervening diff leaves their coverage intact; and checks skipped, with the 
   `.github/release/source-pins.env`, which the build script makes available under `.ci-tmux/` (one-time build, then
   cached); a run against whatever tmux is on your PATH exercises a different substrate than CI does. `--show-output` is
   what makes a loudly-skipped test's reason visible; the cgroup tests skip themselves where no systemd user manager
-  exists, and libtest hides a passing test's output otherwise. CI adds `--test-threads=4` to match its 4-vCPU runners
-  and keep the process-heavy tmux integration suite's aggregate load predictable; a beefier local machine does not need
-  the cap.
-- `scripts/test-tmux-pinned-shutdown.sh` — builds the exact checksummed release named by
+  exists, and libtest hides a passing test's output otherwise. The x86_64 Linux release gate uses `--test-threads=4` for
+  its retained Rust targets; ordinary CI does not run this full suite. A beefier local machine does not need the cap.
+- `scripts/test-tmux-pinned-shutdown.sh` — the x86_64 Linux release gate builds the exact checksummed release named by
   `.github/release/source-pins.env` on cache miss, then runs every focused output-client teardown regression in its own
-  test process. CI uses the same script separately from the distro tmux used by the full suite because silently
-  substituting another version loses the affected-version coverage.
+  test process. It remains separate from the full suite so each scenario gets a fresh process; silently substituting a
+  distro tmux loses the affected-version coverage.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
@@ -74,20 +73,20 @@ the intervening diff leaves their coverage intact; and checks skipped, with the 
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
 - `cargo test -p farhelm-ui --features desktop` — exercises the desktop-only persistence and IPC seams; needs the same
-  webkit2gtk/gtk dev packages as the desktop compile check.
+  webkit2gtk/gtk dev packages as the desktop compile check. It runs in the x86_64 Linux release gate, not ordinary CI.
 - `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
   compile WebKit), which means `-p` is the only thing that ever compiles it.
 - `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
-  set, in both directions. Needs `dx` and the wasm32 target; takes a few minutes, since it wipes `target/dx` and
-  rebuilds both bundles.
-- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — before any of it needs Xvfb, four
-  pre-display process legs drive `farhelm-desktop`'s own entry point directly: a missing tmux and a below-floor tmux
-  each refuse with one exact plain stderr line and exit status 1 (the app's own preflight, run before it would spawn its
-  managed supervisor), and a non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary
-  fallback path with no panic. The non-pixel Xvfb integration gate that follows covers the embedded helm, managed
-  supervisor, desktop authentication, the tmux override reaching the managed supervisor, hard-exit tether, restart
-  persistence, and that every asset the window requested went through the desktop asset handler. The optional
-  coordinate-driven leg is not part of CI.
+  set, in both directions. The shipped desktop-artifact builder calls `--compare` on its actual embedded bundle, so
+  release validation preserves parity without a duplicate CI rebuild.
+- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this
+  with an isolated `CARGO_TARGET_DIR`; before any of it needs Xvfb, four pre-display process legs drive
+  `farhelm-desktop`'s own entry point directly: a missing tmux and a below-floor tmux each refuse with one exact plain
+  stderr line and exit status 1 (the app's own preflight, run before it would spawn its managed supervisor), and a
+  non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary fallback path with no panic. The
+  non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
+  tmux override reaching the managed supervisor, hard-exit tether, restart persistence, and that every asset the window
+  requested went through the desktop asset handler. The optional coordinate-driven leg is not part of CI.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
@@ -101,17 +100,19 @@ the intervening diff leaves their coverage intact; and checks skipped, with the 
   edge shapes), and that nothing outside `FARHELM_INSTALL_DIR` and that bundle — no `systemctl`/`launchctl` call,
   nothing else under `$HOME` — ever changes. Every invocation goes through `env -i` with an explicit environment, never
   this process's own.
-- `scripts/test-provision-centos.sh` — boots a systemd CentOS Stream 9 container and makes the helm provision it over
-  ssh, which is the only coverage of a helm installing onto a distribution other than its own. Needs docker and
-  `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux, because the workspace's
-  glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the container image and the tmux
-  build are both cached after the first run.
+- `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
+  the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
+  own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,
+  because the workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the
+  container image and the tmux build are both cached after the first run.
 - `dprint check`
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
 
-These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
+This inventory names the relevant local checks. Ordinary CI retains formatter, Clippy, desktop compilation, the JS
+harness, installer validation, and generated-workflow validation; costly Rust, pinned-tmux, desktop runtime, and CentOS
+gates run in the x86_64 Linux release artifact job. If either workflow changes, update this list in the same change.
 
 CI does not run on DRAFT pull requests, and every PR in a stack is opened as a draft. A stack gets rewritten and
 re-pushed many times before anyone wants a verdict, and each rewrite used to cost a full run per PR (73 runs in one day
@@ -122,10 +123,11 @@ landing them, never on the agent's own initiative.
 The RELEASE workflow is not on that list and has nothing to run locally. `.github/workflows/release.yml` is generated by
 cargo-dist from `dist-workspace.toml` — never hand-edit it; change the config and run `dist init --yes && dprint fmt` to
 regenerate. It runs on tag pushes only (`pr-run-mode = "skip"`, D19), so a PR exercises none of it: the release path is
-validated when a tag is cut, by the gate `.github/dist-build-setup.yml` puts at the top of every build job — every test
-target except the tmux-driven e2e suite on the x86_64 Linux one (that suite is out of the gate until its load-sensitive
-tests are deflaked; TODO.md lists them and the condition for putting it back), an Apple compile on the macOS one. That
-gate lives inside the build jobs rather than in a `plan-jobs` workflow because dist 0.32 lets a failed plan job SKIP the
+validated when a tag is cut, by the gate `.github/dist-build-setup.yml` puts at the top of every build job — the
+retained Rust targets, pinned shutdown regression, JS harness, CentOS provisioning, desktop unit test, and desktop smoke
+on the x86_64 Linux one; an Apple CLI compile and desktop unit test on macOS. The tmux-driven e2e suite remains out of
+the Linux gate until its load-sensitive tests are deflaked; TODO.md lists the condition for putting it back. That gate
+lives inside the build jobs rather than in a `plan-jobs` workflow because dist 0.32 lets a failed plan job SKIP the
 build jobs, and its `host` job accepts a skip; a failure inside a build job is the only kind it refuses. What a change
 to release plumbing CAN be checked locally is `dist plan` (the config parses and the asset list is what you expect), the
 release scripts' own `--self-test` modes (`scripts/check-release-archive.py`, `scripts/check-static-elf.sh`,
@@ -165,8 +167,9 @@ With both settled, the process is:
   under it — a version mismatch makes the desktop archive silently vanish from the release.
 - Give the bump its own PR like any other commit (stacked on the stack tip, or based on main), but do not merge anything
   for the release's sake: push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
-  gate runs every test target except the tmux e2e suite on the tagged commit (see "Finishing work" above); that gate is
-  the release's validation, so local slow-battery reruns are not a prerequisite for tagging.
+  gate runs the retained Rust targets, pinned shutdown regression, JS, CentOS, and native desktop checks while excluding
+  the tmux e2e suite (see "Finishing work" above); that gate is the release's validation, so local slow-battery reruns
+  are not a prerequisite for tagging.
 - Watch the workflow run to completion rather than fire-and-forgetting it, then verify the published release: every
   asset present including `SHA256SUMS` and `SHA256SUMS.minisig`, and the release marked prerelease (cargo-dist does that
   for `-rc.N` versions on its own — `releases/latest` must still point at the last stable, so ordinary installs are

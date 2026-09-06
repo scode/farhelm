@@ -146,6 +146,20 @@ jobs:
             exit 1
           fi
           echo "ok: $GITHUB_REF_NAME matches [workspace.package].version"
+      - name: "Free unused image toolchains before native desktop gates"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /usr/local/.ghcup \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/lib/jvm \
+            /usr/local/share/powershell \
+            /usr/local/julia* \
+            /usr/share/miniconda
+          df -h /
       - name: "Install pinned tmux build dependencies"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: "sudo apt-get update && sudo apt-get install -y python3-venv"
@@ -199,6 +213,40 @@ jobs:
         run: "sudo apt-get update && sudo apt-get install -y musl-tools"
       - name: "Install the pinned Dioxus CLI"
         run: "cargo install --locked dioxus-cli --version 0.7.10"
+      - name: "Install native desktop smoke dependencies"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
+      - name: "Test the native desktop seams"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: "cargo test -p farhelm-ui --features desktop"
+      - name: "Run the native desktop smoke gate"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          PATH="$PWD/.ci-tmux:$PATH" scripts/desktop-smoke.sh
+          rm -rf -- "$CARGO_TARGET_DIR"
+        env:
+          "CARGO_TARGET_DIR": "${{ runner.temp }}/desktop-smoke-target"
+          "CI": true
+          "DESKTOP_SMOKE_DIR": "${{ runner.temp }}/desktop-smoke"
+      - name: "Collect native desktop smoke failure evidence"
+        if: "failure() && runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          evidence_dir="$RUNNER_TEMP/desktop-smoke-evidence"
+          mkdir -p "$evidence_dir"
+          for evidence in "$RUNNER_TEMP"/desktop-smoke/*.log "$RUNNER_TEMP"/desktop-smoke/*.png "$RUNNER_TEMP"/desktop-smoke/*.txt; do
+            if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
+              cp -- "$evidence" "$evidence_dir/"
+            fi
+          done
+      - name: "Upload native desktop smoke failure evidence"
+        uses: "actions/upload-artifact@v4"
+        if: "failure() && runner.os == 'Linux' && runner.arch == 'X64'"
+        with:
+          "if-no-files-found": "warn"
+          "name": "desktop-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}"
+          "path": "${{ runner.temp }}/desktop-smoke-evidence"
       - name: "Let the toolchain's rust-objcopy find libLLVM on macOS"
         if: "runner.os == 'macOS'"
         run: |
