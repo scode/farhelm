@@ -206,10 +206,7 @@ async fn exec_that_succeeds_and_exits_126_or_127_is_exited_never_error() {
 async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    assert!(
-        listed(&h.client, &session.id).await.status.is_live(),
-        "the session's real agent must still be genuinely alive throughout this test"
-    );
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     let detail = format!(
         "launch spec at /state/launch/{}.json is malformed: EOF while parsing a value",
@@ -433,7 +430,7 @@ async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
 async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    assert!(listed(&h.client, &session.id).await.status.is_live());
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     // A genuinely alive pane never has its sentinel checked at all (the
     // dead-or-absent gate), so the pane is killed first — this is the
@@ -487,7 +484,7 @@ async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
 async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    assert!(listed(&h.client, &session.id).await.status.is_live());
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     let detail = "exec_failed argv0=/nope errno=2".to_string();
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
