@@ -2865,6 +2865,26 @@ samp {
   background: var(--bg-1);
 }
 
+/* The surface an interrupted session gets INSTEAD of terminal panes: the
+   host rebooted and took the terminal with it, so there is nothing to
+   attach and nothing to retry (SPEC.md's missing-terminal rule — metadata
+   and the reason, never an empty pane). Same band treatment as the stale
+   notice, since both explain an absent terminal, plus the one control the
+   situation calls for: restart, which for an interrupted session offers
+   to resume the conversation. The header already carries that control;
+   this one sits where the terminal was, because that is where the user
+   is looking when they wonder why nothing is there. */
+.interrupted-notice {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--bg-1);
+}
+
 /* The rest of SPEC.md's metadata triple for a stale session: the header
    above already carries the title and the directory, and this carries the
    LAST-KNOWN status, drawn with the list's own badge so one session cannot
