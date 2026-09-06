@@ -15,7 +15,8 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { stubFeed } from "./helpers/fleet";
-import { cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   addTab,
   createTabSession,
@@ -26,7 +27,6 @@ import {
   selectTerminal,
   sharedSessionRow,
   shellMarker,
-  waitForIslandMounted,
   waitForIslandText,
   installTerminalSuiteHooks,
 } from "./helpers/terminal-suite";
@@ -139,8 +139,7 @@ test("a tab runs a real shell in the session's working directory, leaving the ag
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     const tabId = await addTab(page, 0);
@@ -150,7 +149,7 @@ test("a tab runs a real shell in the session's working directory, leaving the ag
     await expect(
       page.locator(`.terminal-pane[data-terminal="${tabId}"]`),
     ).toBeVisible();
-    await waitForIslandMounted(page, element);
+    await waitForSessionReady(page, id, { tabId });
 
     // `$PWD` is what makes this about the SHELL's directory rather than
     // about the echo: the typed line carries the variable, only the
@@ -192,8 +191,7 @@ test("the strip labels tabs positionally and gives the agent terminal no close c
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     await expect(page.locator(".tab-strip .tab-agent")).toHaveText("agent");
     await expect(page.locator(".tab-slot")).toHaveCount(0);
@@ -237,8 +235,7 @@ test("a tab survives a reload, reattaching with its scrollback while still unsel
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     const tabId = await addTab(page, 0);
     const element = `terminal-${tabId}`;
@@ -248,8 +245,7 @@ test("a tab survives a reload, reattaching with its scrollback while still unsel
     await page.reload();
     // A reload resets the app's navigation state, so it lands on the list
     // again — the same round trip the agent-terminal reload test makes.
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     // The tab is listed again from the server's own rediscovery, not from
     // anything this client remembered across the reload.
@@ -258,6 +254,7 @@ test("a tab survives a reload, reattaching with its scrollback while still unsel
     // Still on the agent terminal: selection is not persisted, which is
     // what makes the assertion below one about a HIDDEN, attached tab.
     await expect(page.locator(`.terminal-pane[data-terminal="${tabId}"]`)).toBeHidden();
+    await waitForSessionRevealed(page, id, { tabId });
     await waitForIslandText(page, element, before.expected, 30_000);
 
     // And it is genuinely live once shown, not just replaying history.
@@ -292,8 +289,7 @@ test("closing a tab confirms in-page, then kills its shell and drops it from the
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     const tabId = await addTab(page, 0);
     const element = `terminal-${tabId}`;
@@ -380,8 +376,7 @@ test("a tab opened from another client appears in the strip without a reload", a
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
     await expect(page.locator(".tab-slot")).toHaveCount(0);
 
     const opened = await request.post(`/api/sessions/${id}/tabs`);
@@ -394,7 +389,7 @@ test("a tab opened from another client appears in the strip without a reload", a
     // Discovered through polling, and then actually attached and live — a
     // strip entry with no working terminal behind it would be a worse bug
     // than not showing the tab at all.
-    await waitForIslandMounted(page, `terminal-${tabId}`);
+    await waitForSessionRevealed(page, id, { tabId });
     await selectTerminal(page, tabId);
     const marker = shellMarker("POLLED-TAB");
     await runInShell(page, `terminal-${tabId}`, marker.command, marker.expected);
@@ -440,8 +435,7 @@ test("a second view of the same session detaches every terminal of the first", a
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
     const tabId = await addTab(page, 0);
     // A REAL attach signal, not merely a mounted island: terminal.js
     // publishes an island at the end of `mount()`, which is before the
@@ -472,8 +466,7 @@ test("a second view of the same session detaches every terminal of the first", a
     // clear reason instead of somewhere downstream as a mysterious
     // navigation.
     expect(new URL(page2.url()).origin).toBe(new URL(page.url()).origin);
-    await page2.locator(`[data-session-id="${id}"]`).click();
-    await page2.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page2, id);
 
     // Both of the first view's terminals lost their attachment. Asserted
     // on text rather than visibility: only one pane is on screen at a
@@ -512,8 +505,13 @@ test("a second view of the same session detaches every terminal of the first", a
 });
 
 /**
- * Open a session in `page` with `count` tabs already added, returning the
- * session and its tab ids in strip order.
+ * Open a session in `page` with `count` revealed tabs, returning its ids in
+ * strip order.
+ *
+ * The agent attachment is input-ready and every returned tab has completed
+ * replay, but this does not promise final input focus or a shell prompt.
+ * Callers deliberately choose focus and use their own command witness when
+ * either is part of the behavior they exercise.
  *
  * Adds them through the UI rather than the API because that is also how a
  * user gets here, and because the returned ids are read back out of the
@@ -527,12 +525,11 @@ async function openSessionWithTabs(
 ): Promise<{ id: string; cwd: string; tabs: string[] }> {
   const session = await createTabSession(request, title);
   await page.goto("/");
-  await page.locator(`[data-session-id="${session.id}"]`).click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await attachSession(page, session.id);
   const tabs: string[] = [];
   for (let i = 0; i < count; i++) {
     const id = await addTab(page, i);
-    await waitForIslandMounted(page, `terminal-${id}`);
+    await waitForSessionRevealed(page, session.id, { tabId: id });
     tabs.push(id);
   }
   return { ...session, tabs };
@@ -583,8 +580,7 @@ test("a displaced view discovers the winner's new tab without attaching it, unti
     second = await browser.newContext();
     const page2 = await second.newPage();
     await page2.goto("/");
-    await page2.locator(`[data-session-id="${id}"]`).click();
-    await page2.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page2, id);
     await expect(
       page.locator('.terminal-pane[data-terminal="agent"] .banner'),
     ).toContainText("Detached", { timeout: 15_000 });
@@ -592,7 +588,7 @@ test("a displaced view discovers the winner's new tab without attaching it, unti
     // B opens a second tab, through its own UI — the ordinary thing a
     // session's owner does, and the trigger for the whole bug.
     const secondTab = await addTab(page2, 1);
-    await waitForIslandMounted(page2, `terminal-${secondTab}`);
+    await waitForSessionReady(page2, id, { tabId: secondTab });
     const winnerTab = shellMarker("RECLAIM-B-TAB");
     await runInShell(page2, `terminal-${secondTab}`, winnerTab.command, winnerTab.expected);
 
@@ -788,8 +784,7 @@ test("leaving a session with tabs tears down every island and reopening builds n
       // Node-side context to name the constant by.
       .toEqual([3, 3, 3]);
 
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
     await expect(page.locator(".tab-slot")).toHaveCount(2);
     await expect
       .poll(() => mountedIslands(page), { timeout: 20_000 })
@@ -996,8 +991,7 @@ test("a pending tab mount is cancelled when the tab leaves the desired set", asy
     const session = await createTabSession(request, title);
     id = session.id;
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     // Withheld AFTER the agent mounted, so only the tab below is left
     // pending — the agent terminal staying up is what lets this test keep
@@ -1061,8 +1055,7 @@ test("repeated activations while an open is in flight produce exactly one tab", 
     });
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     // Three activations in ONE synchronous turn, so they all land before
     // any re-render can disable the control — which is the window the
@@ -1105,8 +1098,7 @@ test("an open the supervisor refuses shows its own words and leaves the control 
     const session = await createTabSession(request, title);
     id = session.id;
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     // The session's working directory disappears. Removed only now, with
     // the session already up, so this is the vanished-cwd case rather
@@ -1680,7 +1672,7 @@ test("a tab opened after closing another starts with a clean island", async ({
     });
 
     const fresh = await addTab(page, 0);
-    await waitForIslandMounted(page, `terminal-${fresh}`);
+    await waitForSessionRevealed(page, id, { tabId: fresh });
     await selectTerminal(page, fresh);
     // Wait for the shell to have painted anything at all, then assert the
     // cursor is the bottom of the painted content.
@@ -1744,8 +1736,7 @@ test("a tab the supervisor cannot attach explains itself instead of showing a bl
     });
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
     await expect(page.locator(".tab-slot")).toHaveCount(1, { timeout: 15_000 });
 
     await selectTerminal(page, phantom);
@@ -1855,8 +1846,7 @@ test("a tab opened and closed before any poll observes it does not come back", a
     const session = await createTabSession(request, title);
     id = session.id;
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     const tabId = await addTab(page, 0);
     await page.locator(`.tab-slot[data-tab-id="${tabId}"] .tab-close`).click();
@@ -1890,8 +1880,7 @@ test("a tab closed elsewhere before this view ever listed it stops being shown",
     const session = await createTabSession(request, title);
     id = session.id;
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     const tabId = await addTab(page, 0);
     // Closed from elsewhere immediately, so this view's own state never
@@ -1958,8 +1947,7 @@ test("a tab list past the island cap is listed in full but only partly attached"
     });
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     // Every tab the session claims is listed — silently dropping some
     // would be its own lie about what the session holds.
@@ -2009,16 +1997,11 @@ async function resolveToken(page: Page, token: string): Promise<string> {
  * reasoning as chrome.spec.ts's own focus-visible test: a script `.focus()`
  * call is treated as keyboard arrival by the `:focus-visible` heuristic
  * without having to crawl the page's whole tab order to land on this one
- * element. Unlike that test, though, a single throwaway `Tab` press has to
- * come FIRST here — `openSessionWithTabs` above ends in a real row click,
- * which leaves the browser's input modality on "pointer", and a `.focus()`
- * called right after a click ANYWHERE on the page does not read as
- * keyboard arrival (confirmed empirically while writing this test: with
- * the fix below reverted and no `Tab` press, this test still passed,
- * because `:focus-visible` never matched at all). The `Tab` press only
- * needs to shift the modality back to keyboard; where it actually sends
- * focus does not matter; the explicit `.focus()` that follows is what
- * lands it on the tab under test.
+ * element. A throwaway `Tab` press first establishes keyboard modality
+ * regardless of whether setup needed a selection click. This caller adds
+ * no tabs, and auto-selection can make its attachment entirely click-free.
+ * Where Tab sends focus does not matter: the explicit `.focus()` that
+ * follows lands it on the tab under test.
  */
 test("a keyboard-focused selected tab keeps its resting accent even while hovered", async ({
   page,
@@ -2041,17 +2024,8 @@ test("a keyboard-focused selected tab keeps its resting accent even while hovere
     // meaning anything.
     expect(accentFill).not.toBe(accentFillHover);
 
-    // A bare `.focus()` here is not enough: the row-open click above
-    // (inside `openSessionWithTabs`) leaves the browser's own input
-    // modality set to "pointer", and Chromium's `:focus-visible`
-    // heuristic keys off that modality rather than merely off HOW this
-    // element itself gained focus — a `.focus()` called right after a
-    // click anywhere on the page does not show a focus ring (confirmed
-    // empirically while writing this test). A throwaway `Tab` press first
-    // shifts the modality back to "keyboard" — it does not matter what it
-    // focuses — so the following `.focus()` on the tab reads as keyboard
-    // arrival the way chrome.spec.ts's own focus-visible test does when
-    // nothing but page load preceded it.
+    // Establish keyboard modality explicitly before the focused sample;
+    // `.focus()` alone would inherit whichever modality setup left behind.
     // A prior mount can legitimately leave the selected tab focused. Clear
     // that state before sampling ordinary hover; the later Tab-plus-focus
     // sequence is the distinct keyboard-visible state this test specifies.
