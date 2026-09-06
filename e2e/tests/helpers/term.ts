@@ -2,6 +2,7 @@
 // here. Divergent one-off helpers remain local to the specs that need them.
 
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { waitForSessionReady } from "./terminal-readiness";
 
 /**
  * Read the complete terminal buffer, including scrollback rather than only
@@ -38,19 +39,30 @@ export async function waitForTermText(page: Page, needle: string, timeout = 15_0
 }
 
 /**
- * Open a newly created session and wait until its terminal can receive input.
+ * Select a session and wait until its terminal can receive keyboard input.
  *
- * Mounting alone is insufficient: terminal.js exposes its readiness global
- * before the WebSocket necessarily reaches OPEN, and input sent in that gap
- * is dropped. This helper intentionally relies on the same terminal-island
- * test surface as `termText`.
+ * Opening a row is not enough: an island can exist while its socket is still
+ * connecting or its replay remains hidden, and the row click must leave the
+ * terminal's own focus intact for keyboard-driven callers. This does not
+ * prove that a fixture agent reached a prompt; callers that need one keep
+ * their own agent-specific witness. This ordinary fixture expects an
+ * unfiltered session list and the initial focus handoff. Tests that already
+ * moved focus into another control must choose a focus-neutral boundary.
  */
 export async function attachSession(page: Page, id: string): Promise<void> {
   const target = page.locator(`[data-session-id="${id}"]`);
   await expect(target).toBeVisible({ timeout: 20_000 });
-  await target.locator(".session-row-open").click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-  await page.waitForFunction(() => (window as any).__farhelmWs?.readyState === WebSocket.OPEN);
+  // A fresh page auto-selects before any test action. Wait for that choice
+  // to commit before deciding whether a click is needed: clicking the same
+  // row after its terminal revealed would move focus back to the row, with
+  // no new reveal to hand it to xterm again.
+  await expect(page.locator('.session-row[data-session-selected="true"]')).toHaveCount(1, {
+    timeout: 20_000,
+  });
+  if ((await target.getAttribute("data-session-selected")) !== "true") {
+    await target.locator(".session-row-open").click();
+  }
+  await waitForSessionReady(page, id);
 }
 
 /**

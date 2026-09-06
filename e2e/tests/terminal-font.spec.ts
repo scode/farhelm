@@ -72,7 +72,25 @@
 // coverage for.
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, termText, waitForTermText } from "./helpers/term";
+import { termText, waitForTermText } from "./helpers/term";
+import { waitForSessionSocketOpen } from "./helpers/terminal-readiness";
+
+/**
+ * Open a session at the font mount boundary this suite tests.
+ *
+ * `attachSession` now promises revealed, focused input readiness. That is the
+ * correct boundary for callers about to type, but F8 must not await replay or
+ * focus before reading constructor state. Normal mounting already waits for
+ * font settlement; this helper only preserves the earlier attachment
+ * boundary, leaving the test to read the terminal family before unrelated
+ * readiness work can obscure a regression.
+ */
+async function attachAtFontMountBoundary(page: Page, id: string): Promise<void> {
+  const target = page.locator(`[data-session-id="${id}"]`);
+  await expect(target).toBeVisible({ timeout: 20_000 });
+  await target.locator(".session-row-open").click();
+  await waitForSessionSocketOpen(page, id);
+}
 
 /**
  * Intercept both JetBrains Mono weight requests — `app.css`'s `@font-face`
@@ -114,7 +132,7 @@ test("a failed font fetch still mounts a usable terminal in the fallback font (F
   });
   try {
     await page.goto("/");
-    await attachSession(page, session.id);
+    await attachAtFontMountBoundary(page, session.id);
 
     // A rejection is a DEFINITIVE answer (terminal.js's `pollFontWeight`
     // settles on it immediately rather than waiting out the deadline — see
@@ -196,11 +214,11 @@ test("the font settles before mount in the common case, selected directly by the
   });
   try {
     await page.goto("/");
-    await attachSession(page, session.id);
+    await attachAtFontMountBoundary(page, session.id);
 
     // Read the moment the terminal is ready — no `fonts.ready` wait of
-    // this test's OWN, and no delay beyond what `attachSession` already
-    // waits for (mount plus socket-open). That absence is the point: if
+    // this test's OWN, and no delay beyond `attachAtFontMountBoundary`'s
+    // mount-plus-socket-open boundary. That absence is the point: if
     // the family only became correct via the post-mount backstop rather
     // than the constructor, a read this immediate would frequently still
     // catch the fallback family, racing the backstop's own promise

@@ -26,7 +26,7 @@ import {
   openRowMenu,
   pinAutoSelect,
 } from "./helpers/fleet";
-import { attachSession } from "./helpers/term";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { addTab } from "./helpers/terminal-suite";
 
 function row(page: Page, id: string) {
@@ -162,7 +162,11 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
     // it), so this opens a second tab first: adding one selects IT
     // instead (session_view.rs's `on_add_tab`), which leaves the agent
     // tab genuinely unselected and ghost for this check.
-    await attachSession(page, session.id);
+    // This section observes button styling after interacting with the rename
+    // form. It needs a revealed attachment, while focus may legitimately
+    // remain on a row control; the next action clicks the tab-add button.
+    await target.locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
     const agentTab = page.locator('.tab-strip [data-terminal="agent"]');
     await addTab(page, 0);
     await expect(agentTab).not.toHaveClass(/selected/);
