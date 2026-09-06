@@ -33,7 +33,8 @@
 // its own observation window. A single test on the list would leave half the
 // claim resting on code it never mounted. `countReads` classifies by
 // endpoint for the same reason.
-import { expect, Page, Route, test } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { Page, Route } from "@playwright/test";
 import {
   cleanupSession,
   countReads,
@@ -294,13 +295,14 @@ test.describe("the invalidation feed", () => {
    */
   test("a rename in one client appears in another without a refresh", async ({
     browser,
+    timeline,
     request,
   }) => {
     const session = await createSession(request, { title: `two-client-${Date.now()}` });
     created.push(session.id);
 
-    const first = await browser.newContext();
-    const second = await browser.newContext();
+    const first = await newObservedContext(browser, timeline);
+    const second = await newObservedContext(browser, timeline);
     try {
       const author = await first.newPage();
       const observer = await second.newPage();

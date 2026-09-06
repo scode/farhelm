@@ -18,7 +18,8 @@
 // invalidation feed's consumers. Their generation and epoch guards are now
 // load-bearing for a mechanism nobody had written when the tests were
 // postponed, so they land here checking more than they were written for.
-import { APIRequestContext, expect, Page, Route, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { APIRequestContext, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
   createSession,

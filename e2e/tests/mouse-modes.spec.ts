@@ -27,7 +27,8 @@
 // `node --test` unit contract, and that unit test alone cannot prove the
 // extracted helper is actually wired to the page — this test is what
 // closes that gap.
-import { test, expect, Page, APIRequestContext } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";

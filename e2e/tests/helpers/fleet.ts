@@ -12,6 +12,7 @@
 import { APIRequestContext, expect, Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { recordPage } from "./timeline";
 
 /**
  * The fake agent's `basic` script, as the create form's `invocation` string
@@ -397,6 +398,10 @@ export interface FeedStub {
 
 export async function stubFeed(page: Page): Promise<FeedStub> {
   let live: WebSocketRoute | undefined;
+  // A later arrival advances `connections` while an older socket can still
+  // close. Keep the live socket's immutable arrival identity beside it so a
+  // notify, kill, or delayed close never borrows another socket's number.
+  let liveConnection: number | undefined;
   let connections = 0;
   let greeting: number | undefined;
   // The sockets that have not closed. A SET rather than a counter because
@@ -407,32 +412,48 @@ export async function stubFeed(page: Page): Promise<FeedStub> {
   await page.routeWebSocket("**/api/events**", (ws) => {
     live = ws;
     connections += 1;
+    const connection = connections;
+    liveConnection = connection;
     open.add(ws);
+    recordPage(page, "feed-arrival", [["connection", connection]]);
     ws.onClose(() => {
       open.delete(ws);
-      if (live === ws) live = undefined;
+      if (live === ws) {
+        live = undefined;
+        liveConnection = undefined;
+      }
+      recordPage(page, "feed-close", [["connection", connection]]);
     });
     // Deliberately no automatic handshake unless one was ARMED: every spec
     // here is about WHEN the client is told the current revision, so the
     // moment has to be the test's to choose — and arming is how a test
     // chooses "the moment a socket appears at all".
-    if (greeting !== undefined) ws.send(JSON.stringify({ revision: greeting }));
+    if (greeting !== undefined) {
+      recordPage(page, "feed-greeting", [["connection", connection], ["revision", greeting]]);
+      ws.send(JSON.stringify({ revision: greeting }));
+    }
   });
   return {
     connections: () => connections,
     openSockets: () => open.size,
     notify(revision: number) {
-      if (!live) throw new Error("no feed socket is open to notify on");
+      if (!live || liveConnection === undefined) throw new Error("no feed socket is open to notify on");
+      recordPage(page, "feed-notify", [["revision", revision], ["connection", liveConnection]]);
       live.send(JSON.stringify({ revision }));
     },
     notifyOnConnect(revision?: number) {
       greeting = revision;
+      if (revision === undefined) recordPage(page, "feed-greeting-disarm");
+      else recordPage(page, "feed-greeting-arm", [["revision", revision]]);
     },
     kill() {
-      if (!live) throw new Error("no feed socket is open to kill");
+      if (!live || liveConnection === undefined) throw new Error("no feed socket is open to kill");
       const socket = live;
+      const connection = liveConnection;
       live = undefined;
+      liveConnection = undefined;
       open.delete(socket);
+      recordPage(page, "feed-kill", [["connection", connection]]);
       socket.close();
     },
     async waitForConnection(nth: number) {

@@ -16,7 +16,8 @@
 // REACHES THE HELM and the reply's two counts reach the banner, which is
 // what makes "N matching of M sessions" a claim about the fleet rather than
 // about whatever this page happens to hold.
-import { expect, Page, Route, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page, Route } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import {

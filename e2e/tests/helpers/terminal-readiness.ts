@@ -2,6 +2,7 @@
 // client-side facts a test needs without manufacturing input, focus, or replay.
 
 import { expect, type Page } from "@playwright/test";
+import { recordPage } from "./timeline";
 
 /** One island's catch-up record, as terminal.js publishes it. */
 export interface ReplayRecord {
@@ -200,6 +201,7 @@ async function waitForSession(
   kind: SessionWaitKind,
   accepts: (observation: SessionObservation) => boolean,
 ): Promise<void> {
+  recordPage(page, "readiness-begin", [["requested", terminal.id], ["kind", kind]]);
   let last: SessionObservation = {
     pathname: "(not observed)",
     pathnameMatches: false,
@@ -214,18 +216,45 @@ async function waitForSession(
     await expect
       .poll(
         async () => {
-          last = await observeSession(page, terminal);
+          const next = await observeSession(page, terminal);
+          if (!sameObservation(next, last)) {
+            recordPage(page, "readiness-transition", [
+              ["requested", terminal.id],
+              ["kind", kind],
+              ["mounted", next.islandMounted],
+              ["socket_open", next.socketOpen],
+              ["revealed", next.replayRevealed],
+              ["focused", next.focused],
+              ["tab", terminal.tabId ?? ""],
+              ["socket_matches", next.socketMatches],
+              ["path_matches", next.pathnameMatches],
+            ]);
+          }
+          last = next;
           return accepts(last);
         },
         { timeout, message: `waiting for ${requested} to become ${kind}` },
       )
       .toBe(true);
   } catch (cause) {
+    recordPage(page, "readiness-failure", [["requested", terminal.id], ["kind", kind]]);
     throw new Error(
       `waiting for ${requested} to become ${kind} failed with a ${timeout}ms budget; last observation: ${describeObservation(last)}`,
       { cause },
     );
   }
+  recordPage(page, "readiness-success", [["requested", terminal.id], ["kind", kind]]);
+}
+
+/** Compare the fixed readiness snapshot without serializing browser-derived data for diagnostics. */
+function sameObservation(left: SessionObservation, right: SessionObservation): boolean {
+  return left.pathname === right.pathname &&
+    left.pathnameMatches === right.pathnameMatches &&
+    left.islandMounted === right.islandMounted &&
+    left.socketOpen === right.socketOpen &&
+    left.socketMatches === right.socketMatches &&
+    left.replayRevealed === right.replayRevealed &&
+    left.focused === right.focused;
 }
 
 /**

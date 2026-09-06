@@ -90,7 +90,8 @@
 // passed and stopped looking. Waiting for the sentinel first, THEN reading
 // the whole delta through it in one shot, closes that trailing-duplicate
 // window.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, termText, waitForTermText } from "./helpers/term";
 

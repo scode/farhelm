@@ -70,7 +70,8 @@
 // change, not a test-file one, which is why this gap is recorded here
 // rather than silently left for a later reader to rediscover missing
 // coverage for.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { termText, waitForTermText } from "./helpers/term";
 import { waitForSessionSocketOpen } from "./helpers/terminal-readiness";

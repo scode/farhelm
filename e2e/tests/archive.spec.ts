@@ -3,7 +3,8 @@
 // denominator, the terminal-less retained view, and restart as the route
 // back.
 
-import { expect, Page, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page } from "@playwright/test";
 import {
   cleanupSession,
   createSession,

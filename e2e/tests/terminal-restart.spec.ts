@@ -8,7 +8,8 @@
 // previous run, with the new run drawing below it. All four are below.
 // ---------------------------------------------------------------------
 
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Locator, type Page } from "@playwright/test";
 import { hideSeenState, SESSION_LISTING } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";

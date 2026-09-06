@@ -26,7 +26,8 @@
 // what makes the next manual round a
 // `FARHELM_REAL_AGENT=1 npx playwright test real-agent.spec.ts` away
 // instead of a re-discovery.
-import { test, expect, Page, APIRequestContext } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 import {

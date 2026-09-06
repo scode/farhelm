@@ -3,7 +3,8 @@
 // Every file in this family MUST call `installTerminalSuiteHooks`; otherwise
 // its `fulfillAsHelm` fixtures play an unstamped helm and trigger skew UI.
 
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test } from "./evidence";
 import fs from "node:fs";
 import path from "node:path";
 import { requireHelmBuild } from "./helm-build";

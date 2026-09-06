@@ -13,7 +13,8 @@
 // this file's one property confirm_consequence-shaped unit tests cannot
 // see).
 
-import { expect, Page, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page } from "@playwright/test";
 import { cleanupSession, createSession, FAKE_AGENT, openRowMenu, type SessionRow } from "./helpers/fleet";
 import { attachSession, waitForTermText } from "./helpers/term";
 
