@@ -11,10 +11,22 @@ that are still open and the "Systematic deflake" bucket that is meant to retire 
 history either way, including the fixed ones, because a fixed flake that recurs is the most useful thing this file can
 show.
 
-Each entry is one paragraph under a dated heading naming the test and its file, without line numbers (they move). Say
-what was observed, where (which machine or runner, what load), what the cause turned out or is suspected to be, and the
-disposition: fixed in which PR, ignored with what reason, or open. When a fixed flake recurs, add a new dated entry
-rather than editing the old one.
+Each entry has one observation paragraph under a dated heading naming the test and its file, without line numbers (they
+move). Say what was observed, where (which machine or runner, what load), what the cause turned out or is suspected to
+be, and the disposition: fixed in which PR, ignored with what reason, or open. When a fixed flake recurs, add a new
+dated entry rather than editing the old one.
+
+New entries also identify the retained run or release job, tested commit and dirty-tree status, exact selection and
+concurrency, tmux version and executable SHA256 (or explicitly unavailable), locale, and relevant `FARHELM_*` variable
+names. Use portable runner descriptions and redacted paths/commands; never put hostnames, usernames, credentials, or raw
+private manifests here. Distinguish a recorded executable identity from a configured or reported version. The recorder
+and retention rules are in `docs/test-run-evidence.md` and AGENTS.md.
+
+After the paragraph, add `Class: <class>` and `Cause: <confidence>` as separate paragraphs. Classes are `readiness`,
+`replay-live`, `fixture-premise`, `peer-lifecycle`, `process-interference`, `budget`, `ambiguous-observable`,
+`pointer-focus`, `substrate`, `product`, `deterministic-regression`, or `unknown`. Confidence is `established`,
+`hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new entries. Missing historical fields
+are missing evidence, not an implicit cause classification.
 
 ## 2026-09-02 — `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e)
 
@@ -409,3 +421,21 @@ supervisor's sixty-second stall interval. The unchanged helm outgoing-channel ba
 paused; the trace establishes the ordering, not that queue-level cause. Disposition: still open under Difficult deflake
 in TODO.md. Add detach-reason and queue receipts to the existing gate/write/replay measurements before repeating the
 expensive scenario or changing its budget.
+
+## 2026-09-06 — forced-pause baseline substrate caveat
+
+The 2026-09-05 forced-pause entry in `crates/farhelm/tests/e2e/replay_marker.rs` and
+`crates/farhelm/tests/e2e/terminal_backpressure.rs` records real failed observations, but does not establish
+deterministic failure on the same executable used by CI. Rechecking
+[CI run 34006471792](https://github.com/scode/farhelm/actions/runs/34006471792), test job 101414574943, shows all four
+named cases passing at `2069e0c83e8a7775daf68798fff08a85528d5e4a` with four libtest threads and the successful pinned
+tmux builder on PATH. The available worker record does not retain resolved executable hashes; the CI log supplies the
+pin/build assertion rather than an executable digest or a dirty-tree fingerprint. Locale and ambient FARHELM variable
+names were not retained in these receipts either. Those inputs cannot be reconstructed from a reported version alone.
+Disposition: the delimiter failure remains open in TODO.md, but the worker substrate and underlying cause are
+unverified; obtain a retained command, raw delimiter bytes, and executable identity before treating the worker failure
+as a same-substrate baseline. This bookkeeping correction does not claim a new reproduction or a fix.
+
+Class: substrate
+
+Cause: unknown
