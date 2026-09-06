@@ -1589,7 +1589,7 @@ mod tests {
     /// which operation it was attempting) and because a `downcast_ref` on
     /// the chain alone would not see through it — the reason
     /// [`crate::find_cause`] exists.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_dead_target_connection_is_classified_by_phase_and_verb_class() {
         let wrapped = |lost: crate::SupervisorTransportError| {
             anyhow::Error::new(lost).context("stopping session s9 on host builder")
@@ -1668,7 +1668,7 @@ mod tests {
     /// question. A listing has nothing to double-apply, so this classifier
     /// declines it and `error_kind`'s `Internal` stands, which is the honest
     /// word for a peer that should not have said that.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_wrong_lifecycle_reply_is_outcome_unknown_for_a_mutation_only() {
         let wrapped = anyhow::Error::new(crate::SupervisorTransportError::SentWrongReply {
             request: "StopSession",
@@ -1722,7 +1722,7 @@ mod tests {
     /// way `clone_for_agent` builds it — the marker over the drain's own
     /// context over the typed cause — so the layering it depends on is part
     /// of what is asserted.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_read_only_phase_of_a_mutating_verb_is_classified_as_a_listing() {
         let snapshot_failure = |lost: crate::SupervisorTransportError| {
             anyhow::Error::new(lost)
@@ -1782,7 +1782,7 @@ mod tests {
     /// renders, and U+200B lets two visibly identical ids be different
     /// strings — both of which turn "which session acted on which" into a
     /// question the log answers wrongly rather than not at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn log_escaping_covers_bidi_and_zero_width_as_well_as_control_characters() {
         assert_eq!(escape_for_log("ordinary-id"), "ordinary-id");
         assert_eq!(
@@ -1840,7 +1840,7 @@ mod tests {
     /// panel. `hosts::phase_matches_the_serialized_tag` is what holds those
     /// literals to the serializer's own vocabulary, so the two together
     /// cover the whole chain without either one restating the other.
-    #[test]
+    #[farhelm_testtrace::test]
     fn hosts_are_projected_with_the_helms_own_phase_vocabulary() {
         let connected = host_view(
             1,
@@ -1892,7 +1892,7 @@ mod tests {
     /// handle left once a profile is gone: a later "does this profile still
     /// exist?" check that fell back to the invocation would be both
     /// misleading and, for a raw command line, potentially secret-bearing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_sessions_agent_is_its_profile_name_or_its_program_basename() {
         // `session_info`'s invocation is `claude --dangerously`; only the
         // program survives.
@@ -1943,7 +1943,7 @@ mod tests {
     /// so if the asker is the later claimant, an id-only comparison marks
     /// the OTHER host's retained row as the asker's own. The merge chose to
     /// fail closed there; this keeps the projection from reopening it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_the_asking_session_on_the_asking_host_is_current() {
         let mine = session_row(session_info("s1", SessionStatus::Idle), "this machine");
         let other = session_row(session_info("s2", SessionStatus::Idle), "builder");
@@ -1970,7 +1970,7 @@ mod tests {
     /// rather than something to go and act on. Folding either into the
     /// status word would also break that column's promise of being a word
     /// an agent can match against.
-    #[test]
+    #[farhelm_testtrace::test]
     fn archive_and_staleness_travel_as_their_own_fields() {
         let mut archived = session_info("s1", SessionStatus::Running);
         archived.archived = true;
@@ -2000,7 +2000,7 @@ mod tests {
     /// cheap implementation — serialize the tag — would put the word
     /// "unknown" in front of an agent as though the helm had decided
     /// something about the session.
-    #[test]
+    #[farhelm_testtrace::test]
     fn status_words_match_the_ui_and_unknown_renders_as_nothing() {
         assert_eq!(status_word(&SessionStatus::Running), "running");
         assert_eq!(status_word(&SessionStatus::Waiting), "waiting");
@@ -2119,7 +2119,7 @@ mod tests {
     /// host's NEW name asserted as fresh (the row's machine changed in that
     /// same window). Both used to slip through a fresh, unchecked snapshot
     /// lookup with no incarnation check at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn agent_session_reply_only_trusts_a_host_name_pinned_to_the_claims_incarnation() {
         let (h, local, _remote) = two_host_fleet().await;
         let state = &h.state;
@@ -2194,7 +2194,7 @@ mod tests {
     /// cannot see: a handler that listed only the local host, or passed the
     /// default archive-excluding filter, or listed one host and called it
     /// the fleet, would satisfy every one of them.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_production_handler_lists_the_whole_fleet_with_its_flags() {
         let (h, local, _remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -2287,7 +2287,7 @@ mod tests {
     /// The fixture is deliberately well past the allowance: 120 rows of
     /// 64 KiB is 7.5 MiB against a 6 MiB budget, split across two hosts so
     /// the cut lands inside a merged list rather than at one host's edge.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_fat_fleet_is_cut_at_the_reply_byte_allowance() {
         const ROWS_PER_HOST: usize = 60;
         const TITLE_BYTES: usize = 64 * 1024;
@@ -2391,7 +2391,7 @@ mod tests {
     /// production handler rather than `aggregate::session_list` alone,
     /// because this is where the listing's own `truncated` has to survive
     /// the projection into the agent reply.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_fleet_past_the_row_cap_is_cut_at_the_cap() {
         // Split across two hosts because no single host may serve more than
         // the cap — the drain refuses past it — while the MERGED fleet can
@@ -2451,7 +2451,7 @@ mod tests {
     /// handler that marked the local row, or the first row, or none, would
     /// look correct in every serialized shape — and would tell an agent it
     /// is sitting on a machine it is not.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_production_handler_marks_the_asking_hosts_row() {
         let (h, local, _remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -2495,7 +2495,7 @@ mod tests {
     /// manager already refuses to record a mutation against a stale
     /// incarnation for exactly this reason; this is the same rule on the
     /// read path.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_superseded_connection_is_refused() {
         let (h, local, _remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -2570,7 +2570,7 @@ mod tests {
     /// `sync_registry`) rather than by calling any teardown directly, which
     /// is the point: this test fails if the manager gains another way to
     /// withdraw a client that forgets to retire it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_withdrawn_connection_never_delivers_its_parked_answer() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
@@ -2661,7 +2661,7 @@ mod tests {
     /// turn a shutdown into a panic inside a spawned task — which the
     /// supervisor on the far end experiences as an upcall that never
     /// answers.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_dropped_helm_state_is_refused_rather_than_panicking() {
         let (h, local, _remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -2746,7 +2746,7 @@ mod tests {
     /// bundle from the helm catalog over the real framed relay. This matters
     /// for `farhelm spawn --agent`: it cannot use the helm's REST surface and
     /// must get exactly the snapshot the subsequent create records.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn resolve_profile_round_trips_over_the_upward_relay() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
@@ -2848,7 +2848,7 @@ mod tests {
     /// different rows: a fixture with only one session could not
     /// distinguish "targeted the named session" from "always acts on the
     /// asker and ignored the field".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rename_can_target_any_named_session_and_returns_its_updated_row() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -2928,7 +2928,7 @@ mod tests {
     /// "asker" explicitly, which is the only way to tell "the helm
     /// substituted the asker" apart from "the helm forwarded an empty or
     /// missing id and got lucky with a single-session fleet".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rename_with_no_session_id_targets_the_asking_session() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3009,7 +3009,7 @@ mod tests {
     /// `Rename` rather than `Stop`/`Archive` on purpose: it is the one
     /// lifecycle verb whose self-targeting form does not also end the
     /// asking session, so the scenario stays about target resolution.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn naming_the_asking_session_explicitly_matches_omitting_the_target() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3096,7 +3096,7 @@ mod tests {
     /// `Rename` is the verb, for [`naming_the_asking_session_explicitly_matches_omitting_the_target`]'s
     /// reason: it leaves the asking session alive and keeps the test about
     /// the one property it names.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_lifecycle_verb_may_target_an_already_archived_session() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3183,7 +3183,7 @@ mod tests {
     /// error came back — `rename_session_invalid_title_returns_400_with_
     /// supervisor_message` in `sessions_tests.rs` pins the identical
     /// contract on the REST route with the same technique.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rename_refusal_reaches_the_agent_verbatim() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3258,7 +3258,7 @@ mod tests {
     /// exactly this.) Proving a real kill happened is
     /// `tests/e2e/agent_listing_real_stack.rs`'s job, against a real
     /// supervisor and a real fake-agent process.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn stop_routes_to_the_target_and_returns_the_empty_stopped_reply() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3320,7 +3320,7 @@ mod tests {
     /// named session" from "always acts on the asker and ignored the
     /// field" — a bug that field-substitution mistake would have shipped
     /// invisibly.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn stop_can_target_a_named_session_other_than_the_asker() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3389,7 +3389,7 @@ mod tests {
     /// the stronger property and invited exactly that misreading. Real
     /// archiving is `do_archive_session`'s own contract, exercised against
     /// a real supervisor in the e2e suite.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_routes_to_the_owner_and_projects_the_reply() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3453,7 +3453,7 @@ mod tests {
     /// the helm knows, not only the asking one — see
     /// `stop_can_target_a_named_session_other_than_the_asker`'s docs for
     /// why `session_id: None` alone cannot prove this.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_can_target_a_named_session_other_than_the_asker() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3534,7 +3534,7 @@ mod tests {
     /// mutation is the only frame that ever reaches it; the local
     /// (asking) host is served standalone, exactly as every read-only
     /// fleet test above already does.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_can_target_a_session_on_a_different_host_than_the_asker() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3652,7 +3652,7 @@ mod tests {
     /// to act through (`Conflict`, caught BY routing) — two different
     /// refusals a caller needs to tell apart, since only one of them
     /// clears on its own once the host reconnects.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_lifecycle_verb_on_a_disconnected_hosts_session_is_a_conflict() {
         let (h, local, _remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -3705,7 +3705,7 @@ mod tests {
     /// regression would hang this ONE test (and, on a suite run without
     /// per-test isolation, potentially the whole binary) rather than
     /// failing cleanly with a diagnosis pointing at what actually broke.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_lifecycle_verb_on_an_unknown_session_is_not_found() {
         let harness = FleetBuilder::new()
             .await
@@ -3921,7 +3921,7 @@ mod tests {
     /// a bare "no such host" would send it back for a second round trip to
     /// `farhelm agent hosts` — which is the listing this refusal is
     /// summarizing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_on_an_unknown_host_name_is_not_found() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let _seen = spawn_create_responder(peer, None);
@@ -3964,7 +3964,7 @@ mod tests {
     /// `view.name`, and the alias IS that name once set
     /// (`aggregate::host_display_name`), so this needs no code path of its
     /// own to prove, only that the wire actually reaches the aliased host.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_resolves_by_alias_once_one_is_set() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4035,7 +4035,7 @@ mod tests {
     /// would have worked. This is host-aliases' one deliberate behavior
     /// change to existing name resolution, so it gets its own test rather
     /// than riding along with the alias-resolves case above.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_on_the_raw_destination_is_refused_once_aliased() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let _seen = spawn_create_responder(peer, None);
@@ -4101,7 +4101,7 @@ mod tests {
     /// created that session from a command line, so a copy of it is that
     /// command line. This is the one case where the invocation legitimately
     /// crosses hosts, which is exactly why the refusal above must not.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn clone_of_a_raw_session_sends_its_invocation() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4148,7 +4148,7 @@ mod tests {
     /// the destination is another host. The target receives the current
     /// catalog bundle, while a missing id would be refused before this wire
     /// call instead of falling back to the snapshot name or raw invocation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn profile_clone_to_another_host_follows_the_helm_profile_id() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4209,7 +4209,7 @@ mod tests {
     /// Falling back to the old name or the source invocation would silently
     /// launch settings the catalog no longer authorizes. The clone-specific
     /// `InvalidRequest` tells the agent to choose a new create explicitly.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn profile_clone_with_a_dangling_snapshot_never_contacts_the_target() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4256,7 +4256,7 @@ mod tests {
     /// fully resolved bundle to the chosen supervisor. This pins the lookup
     /// side of the ownership move; the target never receives the name or
     /// performs a second catalog read.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_profile_name_resolves_in_the_helm() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4326,7 +4326,7 @@ mod tests {
     /// machine nobody is looking at. A sentinel string is what proves the
     /// exact bytes crossed both hops, the same technique
     /// [`rename_refusal_reaches_the_agent_verbatim`] uses.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_create_refusal_from_the_target_reaches_the_agent_verbatim() {
         const SENTINEL: &str = "SENTINEL-agent-create: no such directory: /srv/absent";
 
@@ -4430,7 +4430,7 @@ mod tests {
     /// through three layers — the typed transport error, `transport_outcome`,
     /// and the verb's own mutating flag — and only the last of them is what
     /// an agent reads.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unusable_created_session_id_is_outcome_unknown_for_every_shape() {
         let oversized = "x".repeat(crate::manager::MAX_SESSION_ID_BYTES + 1);
         for (shape, id) in [
@@ -4498,7 +4498,7 @@ mod tests {
     /// name spends the whole allowance and every other host disappears —
     /// which is worse than a truncated list, because the omission would be
     /// invisible. Hence the count.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_known_host_list_is_bounded_and_says_what_it_left_out() {
         assert_eq!(known_hosts(&[]), "none");
         assert_eq!(
@@ -4539,7 +4539,7 @@ mod tests {
     /// control character. Without this sentence an agent has no way to tell
     /// "I typed the name wrong" from "that host cannot be named at all",
     /// and the fix — a rename — is not a verb it has.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_unknown_host_refusal_names_hosts_that_can_never_be_targeted() {
         assert_eq!(unnameable_hosts(&["this machine", "user@builder"]), None);
         let warned = unnameable_hosts(&["ok", "bad\nname"]).expect("one host is unnameable");
@@ -4577,7 +4577,7 @@ mod tests {
     /// every client to a change nobody made. The replayed payload also
     /// carries a title the cache has never seen, which is what makes "the
     /// row was not seeded" observable at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_clone_that_replays_the_asking_session_is_refused() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4709,7 +4709,7 @@ mod tests {
     /// reached the target only in refusal cases. A regression that dropped
     /// raw routing — or seeded the cache wrongly for it, or projected the
     /// reply from the wrong side — would leave all of them green.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_from_a_raw_invocation_reaches_the_target_whole() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4759,7 +4759,7 @@ mod tests {
     /// early life in, and the two ways to get it wrong are both silent: a
     /// fallback to some other profile launches an agent nobody chose, and a
     /// create sent with no selector at all is forwarded without a bundle.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_with_no_selector_and_no_remembered_default_is_refused() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4803,7 +4803,7 @@ mod tests {
     /// durable id remains stable. The target receives no unresolved selector,
     /// only the exact invocation, integration fields, template, and snapshot
     /// from the current helm row.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn selectorless_create_sends_the_remembered_profiles_current_bundle() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4879,7 +4879,7 @@ mod tests {
     /// The id remains durable after deletion so clients can ask rather than
     /// guess. The agent surface follows the same rule: it reports the missing
     /// resource instead of substituting a starter or forwarding no bundle.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn selectorless_create_with_a_dangling_default_never_contacts_the_target() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
@@ -4929,7 +4929,7 @@ mod tests {
     /// `.find` — which this used to be — would send the session to a
     /// machine the agent never chose, and the reply would look like an
     /// ordinary success naming the name the agent asked for.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_on_an_ambiguous_host_name_is_refused() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);

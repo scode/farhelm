@@ -381,7 +381,7 @@ mod tests {
     ///
     /// Multi-megabyte rather than merely large: the point is that the size
     /// of the input does not appear in the size of what is retained at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_newline_free_stderr_flood_stays_bounded() {
         let flood = vec![b'x'; 4 * 1024 * 1024];
         let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(flood));
@@ -406,7 +406,7 @@ mod tests {
     /// line reader: a version that truncated every line, or lost the last
     /// one, or never terminated, would satisfy the flood test and destroy
     /// the diagnostics the relay exists to carry.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn capped_line_reading_keeps_short_lines_whole() {
         let long = "y".repeat(SSH_STDERR_LINE_CAP + 50);
         let input = format!("first\nsecond\n{long}\nlast-with-no-newline");

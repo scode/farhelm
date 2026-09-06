@@ -607,7 +607,7 @@ mod tests {
     /// The creation order is time descending, then session id, then host —
     /// total down to the third component, so two reads of an unchanged
     /// fleet come back identical and the cap always cuts the same rows.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_order_is_time_descending_then_id_then_host() {
         let mut rows = vec![
             row("a", 100, 2),
@@ -634,7 +634,7 @@ mod tests {
     /// pinning: a sort whose leading component ties has to break that tie
     /// identically to every other sort, or the same fleet could come back
     /// in two different sequences on two reads.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_other_orders_lead_with_their_own_component_and_share_the_tail() {
         let keyed = |id: &str, created_at: i64, activity: i64, title: &str| {
             let mut row = row(id, created_at, 1);
@@ -679,7 +679,7 @@ mod tests {
     /// holds exactly the matches. Pinned on the pure core because this is
     /// the arithmetic the UI's "N matching of M sessions" banner prints,
     /// and the one place a count could disagree with the rows beside it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn counts_describe_the_view_and_the_filter_from_one_array() {
         let mut keep = row("keep", 300, 1);
         keep.info.title = "keep me".to_string();
@@ -721,7 +721,7 @@ mod tests {
     /// reports `matching` too — the UI relies on the count being present to
     /// print "N matching" wording only for filters a person applied, and
     /// decides that on its own side.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_default_view_reports_a_matching_count() {
         let body = assemble(
             vec![row("a", 1, 1)],
@@ -739,7 +739,7 @@ mod tests {
     /// cap (or `matching` would describe rows the client cannot see), the
     /// cut keeps what sorts FIRST in the requested order, and the flag is
     /// never raised over a list the client did read to the end.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_cap_cuts_the_sorted_filtered_array_and_flags_it() {
         let view: Vec<SessionRow> = (0..=LIST_SESSIONS_CAP)
             .map(|i| row(&format!("s{i:04}"), i as i64, 1))
@@ -807,7 +807,7 @@ mod tests {
     /// OLDEST-created row in the view, so an implementation that first kept
     /// the newest-created cap's worth and only then re-sorted the survivors
     /// would drop it and pass every creation-order test.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_cap_selects_membership_in_the_requested_order() {
         // `LIST_SESSIONS_CAP` filler rows created after the special row,
         // with titles and activity stamps that sort AFTER it.
@@ -846,7 +846,7 @@ mod tests {
     /// before the row can reach either the browser or agent-facing listing.
     /// This test pins the ownership boundary rather than merely exercising
     /// the pure three-way comparison.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_supervisor_unresolved_profile_is_resolved_in_the_fleet_listing() {
         use crate::rest_harness;
 
@@ -899,7 +899,7 @@ mod tests {
     /// detect it. The cache is gone; this test is what keeps a future one
     /// from coming back with the same hole, by staging the mutation through
     /// [`session_list_staged`]'s seam so the barrier stands over the code.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_live_change_before_the_snapshot_is_counted_by_the_reply_that_returns_it() {
         use crate::rest_harness;
 
@@ -1000,7 +1000,7 @@ mod tests {
     /// write must still carry the pre-write `host_identity` (null) on the
     /// host's rows. An implementation that samples identities after the
     /// seam returns the new identity instead and fails here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_retarget_between_the_identity_read_and_the_snapshot_fails_safe() {
         use crate::rest_harness;
 
@@ -1061,7 +1061,7 @@ mod tests {
     /// equal `Option`s in Rust — because the field's whole contract is that
     /// a client can tell "never seen" from "this helm predates the field"
     /// by whether the KEY is present at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_listing_carries_each_sessions_seen_stamp() {
         use crate::rest_harness;
 

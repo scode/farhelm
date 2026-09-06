@@ -446,7 +446,7 @@ mod tests {
     /// Both renders are UNMARKED: [`managed`] is setup's own step, and
     /// provisioning must never emit the marker. That property is asserted
     /// separately, below.
-    #[test]
+    #[farhelm_testtrace::test]
     fn both_units_render_to_their_exact_reviewed_text() {
         let supervisor = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/home/u/.local/bin/farhelm"),
@@ -508,7 +508,7 @@ mod tests {
     /// away from the supervisor's — while `--port` appears only when
     /// pinned. Order is fixed so that an unchanged configuration
     /// re-renders byte-identically and setup keeps reporting `unchanged`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_helm_unit_always_pins_state_and_only_pins_a_given_port() {
         let both = render_helm_unit(&HelmUnitInputs {
             farhelm: Path::new("/bin/farhelm"),
@@ -539,7 +539,7 @@ mod tests {
     /// check compares a parsed `ExecStart` against a real path, and a
     /// doubled dollar surviving that round trip would make a unit that IS
     /// ours look like somebody else's.
-    #[test]
+    #[farhelm_testtrace::test]
     fn dollars_are_escaped_in_commands_and_decoded_on_read_back() {
         for path in [
             "/home/u/$NAME/farhelm",
@@ -588,7 +588,7 @@ mod tests {
     /// expectations here: a quote or backslash reaching systemd unescaped
     /// ends the assignment early and leaves the supervisor with a PATH or
     /// a pinned tmux that is not the one this render chose.
-    #[test]
+    #[farhelm_testtrace::test]
     fn environment_values_escape_quotes_and_backslashes() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/opt/a\"b/farhelm"),
@@ -613,7 +613,7 @@ mod tests {
     /// reason, and the invariant is worth a test because the obvious
     /// simplification — chained `str::replace` — would corrupt such a
     /// path while every other test stayed green.
-    #[test]
+    #[farhelm_testtrace::test]
     fn inserted_text_is_never_rescanned_as_template_syntax() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/opt/@STATE_DIR@/farhelm"),
@@ -637,7 +637,7 @@ mod tests {
     /// A path that cannot cross the unit file's text boundary must fail
     /// before anything is written, and a `PATH` component holding the
     /// separator systemd uses cannot be represented at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unrepresentable_paths_are_refused_rather_than_approximated() {
         let percent = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/tmp/%h/farhelm"),
@@ -694,7 +694,7 @@ mod tests {
     /// grammar rather than borrowing shell quoting rules. A `%h` that
     /// reached systemd unexpanded would name a different binary than the
     /// caller chose.
-    #[test]
+    #[farhelm_testtrace::test]
     fn systemd_argument_rendering_covers_every_supported_escape() {
         for (path, expected) in [
             ("/tmp/a b", "\"/tmp/a b\""),
@@ -710,7 +710,7 @@ mod tests {
     /// `PATH` component: POSIX reads one as the current directory, which
     /// would let a stray `tmux` in whatever directory the user manager
     /// started in win.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_bare_program_name_contributes_no_path_entry() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/opt/farhelm"),
@@ -727,7 +727,7 @@ mod tests {
     /// The ownership rule is exact-match by construction. These are the
     /// near misses that must NOT be adopted, because adopting one means
     /// overwriting a file somebody else wrote.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_an_exact_first_line_marker_counts_as_managed() {
         assert!(is_managed(&managed("[Unit]\n".to_string())));
         assert!(is_managed(MANAGED_MARKER));
@@ -742,7 +742,7 @@ mod tests {
     /// `ExecStart=` names the running helm's own binary is a unit the
     /// hosts panel must not touch. It has to survive our own quoting and
     /// reject spellings it cannot resolve.
-    #[test]
+    #[farhelm_testtrace::test]
     fn exec_start_program_reads_back_what_the_renderer_wrote() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/home/u/we ird/%farhelm\""),
@@ -790,7 +790,7 @@ mod tests {
     /// scoping, last-assignment-wins, and the empty reset — have to be
     /// the ones this parser follows, because a unit that exercises any of
     /// them is still a unit systemd runs.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_the_effective_service_assignment_is_reported() {
         // An assignment outside [Service] is not a command at all.
         assert_eq!(
@@ -840,7 +840,7 @@ mod tests {
     /// actually searches. Both branches of the `${XDG_CONFIG_HOME:-…}`
     /// rule are pinned here because a wrong answer produces a
     /// valid-looking unit that is never loaded.
-    #[test]
+    #[farhelm_testtrace::test]
     fn user_unit_dir_follows_the_xdg_rule_in_both_directions() {
         let home = Path::new("/home/u");
         assert_eq!(
@@ -868,7 +868,7 @@ mod tests {
     /// live" is a safety property: the first permits the panel to
     /// install, the second must not. An absolute `XDG_CONFIG_HOME`
     /// answers on its own; nothing usable at all is an error.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_indeterminate_unit_directory_is_an_error_not_an_absence() {
         assert_eq!(
             user_unit_dir_for(Some(OsStr::new("/xdg")), None).unwrap(),

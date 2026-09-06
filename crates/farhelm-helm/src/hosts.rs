@@ -770,7 +770,7 @@ mod tests {
     /// only safe while something compares it to the original. Without this
     /// test, a renamed phase would reach the browser under its new word and
     /// reach an agent under its old one, with both sides looking correct.
-    #[test]
+    #[farhelm_testtrace::test]
     fn phase_matches_the_serialized_tag() {
         for state in [
             HostStateView::Connecting {
@@ -876,7 +876,7 @@ mod tests {
     /// SPEC.md: the machine running the helm is always in the list, "never
     /// a ghost, never needing registration". Asserted on the JSON because
     /// that is what a hosts panel decodes.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_local_host_is_always_listed_and_carries_no_destination() {
         let harness = lone_local_helm().await;
         let (status, body, _) = call(&harness, "GET", "/api/hosts", None).await;
@@ -910,7 +910,7 @@ mod tests {
     /// plan prepared against one connection is not left actionable on the
     /// next; the change-on-reconnect half is what makes that binding mean
     /// anything.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_hosts_view_publishes_the_connection_token() {
         let harness = lone_local_helm().await;
         let local = rest_harness::local_id(&harness.store).await;
@@ -955,7 +955,7 @@ mod tests {
     /// machine that is simply switched off when it is added, and it is what
     /// `--ensure-hosts` depends on: a startup floor that only registered
     /// reachable hosts would guarantee nothing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adding_a_host_that_is_down_still_registers_it() {
         let harness = lone_local_helm().await;
         // Down BEFORE the POST, which is the case that matters: a host
@@ -1017,7 +1017,7 @@ mod tests {
     /// together because they share one mapping (`http_error`'s
     /// `HostStoreError` arm) and a regression there would move all of them
     /// at once.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn host_management_refusals_map_to_their_own_statuses() {
         let harness = lone_local_helm().await;
         let local = rest_harness::local_id(&harness.store).await;
@@ -1126,7 +1126,7 @@ mod tests {
     /// until the old connection incidentally drops is the failure this
     /// pins against: the edit tears the current connection down and dials
     /// the new address.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn retargeting_a_host_reconnects_it_to_the_new_destination() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1183,7 +1183,7 @@ mod tests {
     /// The cache half is the part worth asserting: a removal that dropped
     /// the registry row but left cache rows behind would leave sessions in
     /// the merged list with no host to name.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn removing_a_host_forgets_it_and_its_cached_sessions() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1233,7 +1233,7 @@ mod tests {
     /// never the identity the manager actually dials — and the `alias` key
     /// itself carries the value back so a client can prefill the editor
     /// without reverse-engineering it out of `name`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn setting_an_alias_renames_the_listing_without_touching_the_destination() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1276,7 +1276,7 @@ mod tests {
     /// Clearing an alias with an explicit JSON `null` restores the derived
     /// name — the raw destination, for an ssh row — and the `alias` key
     /// itself goes back to `null` rather than disappearing from the reply.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn clearing_an_alias_with_null_restores_the_derived_name() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1317,7 +1317,7 @@ mod tests {
     /// case (`update_alias_rejects_a_collision_with_another_hosts_alias`
     /// and its sibling in `store.rs` cover the derived-name and mirror
     /// cases at the store layer).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn aliasing_onto_another_hosts_name_is_a_conflict() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1360,7 +1360,7 @@ mod tests {
     /// when the store reports a real change (a registry reconcile that
     /// changes no host's shape is itself a no-op bump-wise; see
     /// `events.rs`).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn setting_an_alias_bumps_the_revision_only_on_a_real_change() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1405,7 +1405,7 @@ mod tests {
     /// The local row accepts an alias through the REST route too — the
     /// store-level acceptance (`update_alias_accepts_the_local_row` in
     /// `store.rs`) reaching all the way through `set_alias`'s handler.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_local_host_accepts_an_alias() {
         let harness = lone_local_helm().await;
         let local = rest_harness::local_id(&harness.store).await;
@@ -1426,7 +1426,7 @@ mod tests {
     /// snapshot's alias reaching the session view the same way it reaches
     /// the hosts listing's `name`, so a session row and the host panel
     /// never disagree about what a host is called.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn session_rows_carry_the_alias_in_host_name() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1473,7 +1473,7 @@ mod tests {
     /// aliases and this host has none" from "this key was never sent"
     /// without inspecting `name`, and the two would be indistinguishable if
     /// an unset alias were simply omitted.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_alias_key_is_always_present_even_when_unset() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1508,7 +1508,7 @@ mod tests {
     /// through this route: `AliasTaken` is proven at 409 elsewhere in this
     /// file, and every other host-management route already pins the shared
     /// `HostNotFound` -> 404 branch.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_invalid_alias_is_refused_with_400_and_leaves_the_stored_alias_untouched() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1558,7 +1558,7 @@ mod tests {
     /// `#[serde(default)]` under serde's derive macro, which would make
     /// `{}` decode identically to an explicit `{"alias": null}`;
     /// `AliasSpec`'s own doc explains the fix.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_alias_body_missing_the_key_is_refused_and_leaves_the_stored_alias_untouched() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1613,7 +1613,7 @@ mod tests {
     /// second write. `set_alias`'s own doc explains why bumping only on the
     /// store's `changed` flag would leave every already-subscribed client
     /// stale indefinitely in exactly this sequence.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn retrying_the_same_alias_after_a_stranded_write_still_bumps_once_synced() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1668,7 +1668,7 @@ mod tests {
     /// purge is the part that would be easy to get wrong and hard to
     /// notice: carrying the old identity's sessions forward would
     /// misattribute one install's history to another.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adopting_resolves_an_identity_mismatch_and_purges_the_old_cache() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1759,7 +1759,7 @@ mod tests {
     /// and the bump — which is exactly what makes the ordering safe — so a
     /// woken subscriber is polled after both have happened and cannot tell
     /// the two orders apart. See `manager::FleetEvents::on_bump`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_adoption_settles_the_hosts_state_before_it_invalidates() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1832,7 +1832,7 @@ mod tests {
     /// Adopting a host that is not asking for a decision is a client bug,
     /// not a no-op: it must be refused with the phase the host is actually
     /// in, so a UI that fired the wrong verb learns which one.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adopting_a_host_that_is_not_mismatched_is_refused_naming_its_phase() {
         let harness = lone_local_helm().await;
         let local = rest_harness::local_id(&harness.store).await;
@@ -1857,7 +1857,7 @@ mod tests {
     /// UI builds against this body, so the contract — that an absent or
     /// stale `reported` never silently adopts whatever is current — belongs
     /// here as well as one layer down.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adopting_without_the_displayed_identity_is_refused() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1921,7 +1921,7 @@ mod tests {
     /// asserted by pushing the re-probe cadence an hour out: anything that
     /// reconnects within the test's own patience did so because retry made
     /// it happen.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn retrying_a_retired_host_respawns_its_actor_and_reconnects() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -1981,7 +1981,7 @@ mod tests {
     /// The harness's re-probe interval is an hour, so an attempt observed
     /// here can only have come from the retry — which is the whole point of
     /// the control existing beside an always-visible connection state.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn retrying_an_unreachable_host_dials_immediately() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -2018,7 +2018,7 @@ mod tests {
     /// row: a `remote_farhelm`/`remote_state_dir` that were recorded and
     /// then ignored would look identical in every API response and fail
     /// only against a real host.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_hosts_remote_fields_reach_the_transport_that_dials_it() {
         let harness = lone_local_helm().await;
         let (status, body, text) = call(
@@ -2069,7 +2069,7 @@ mod tests {
     /// user to guess WHICH side is behind. PR 7's host panel renders these
     /// fields directly, so their presence is a contract rather than a
     /// convenience.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_version_skewed_host_reports_both_versions_and_its_remediation() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -2120,7 +2120,7 @@ mod tests {
     /// evidence that a respawn was needed. The stuck state is now
     /// unconstructible: a reconcile that finds a dead handle respawns it,
     /// whether or not the row changed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn editing_a_retired_host_respawns_it_rather_than_wedging_it() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -2193,7 +2193,7 @@ mod tests {
     /// and come back. The token is now drawn from a manager-wide counter
     /// that is never reused, and the write also re-checks that the map's
     /// entry is the very handle the claim was taken through.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_claim_from_a_previous_incarnation_never_validates() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -2269,7 +2269,7 @@ mod tests {
     /// registry just before a removal committed would install an actor into
     /// a map the removal had already drained: nothing would ever stop it,
     /// and nothing would ever show it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_retry_racing_a_removal_leaves_no_ghost() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
@@ -2326,7 +2326,7 @@ mod tests {
     /// visible (so it can be edited or removed) but connects nothing and
     /// contributes no sessions, so the host behind it is still listed once,
     /// under the entry that owns it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_second_entry_for_one_install_is_marked_duplicate_and_serves_nothing() {
         let harness = lone_local_helm().await;
         let (_, first, _) = call(

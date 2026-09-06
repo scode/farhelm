@@ -1089,7 +1089,7 @@ mod embedded_ui_tests {
     /// Spec: `/` serves the embedded tree's `index.html` verbatim, byte for
     /// byte, as `text/html` — the content type a browser needs to actually
     /// render it rather than offer it as a download.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn root_serves_embedded_index() {
         let response = embedded_router().await.oneshot(get("/")).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -1105,7 +1105,7 @@ mod embedded_ui_tests {
     /// the `mime_guess`-derived content type — `.js` as `text/javascript`,
     /// the same type `ServeDir` would return for `UiSource::Dir`, so a
     /// browser sees identical types regardless of which source answered.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn asset_path_serves_the_file_with_its_guessed_content_type() {
         let response = embedded_router()
             .await
@@ -1126,7 +1126,7 @@ mod embedded_ui_tests {
     /// unescaped names, so a request for the URL-escaped form of an asset
     /// whose actual name needs escaping (a literal space, here) must still
     /// resolve to it rather than 404.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn percent_encoded_path_resolves_to_the_real_asset() {
         let response = embedded_router()
             .await
@@ -1152,7 +1152,7 @@ mod embedded_ui_tests {
     /// still-encoded path instead, `app%2Ejs` would look extensionless and
     /// wrongly fall back to `index.html` instead of resolving to the real
     /// `app.js`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn percent_encoded_dot_resolves_to_the_real_asset() {
         let response = embedded_router()
             .await
@@ -1173,7 +1173,7 @@ mod embedded_ui_tests {
     /// to `.`, `missing%2Ejs` names a path WITH an extension that matches no
     /// compiled file, so it must take the extensioned-miss branch (a real
     /// 404) rather than the extensionless SPA fallback to `index.html`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn percent_encoded_dot_missing_asset_is_404() {
         let response = embedded_router()
             .await
@@ -1189,7 +1189,7 @@ mod embedded_ui_tests {
     /// is exactly the fallible step `serve_embedded_get` guards for this; this
     /// test exercises it through the real router rather than only trusting
     /// that guard exists.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn invalid_percent_encoding_is_404_not_a_panic() {
         let response = embedded_router().await.oneshot(get("/%FF")).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -1200,7 +1200,7 @@ mod embedded_ui_tests {
     /// Locks down Step 1's agreed fallback rule for single-page-application
     /// routes in general, not a claim that the UI as it exists today has
     /// deep links or history-dependent routing of its own to depend on it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn extensionless_miss_falls_back_to_index_for_spa_routing() {
         let response = embedded_router()
             .await
@@ -1220,7 +1220,7 @@ mod embedded_ui_tests {
     /// method, regardless of which production UI fallback is configured.
     /// This prevents a removed GET route from becoming index.html and keeps
     /// non-GET misses from inheriting a static service's 405 contract.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn api_misses_never_fall_through_either_ui_source() {
         let embedded_harness = rest_harness::idle_helm().await;
         let embedded_secret = embedded_harness.state.auth.mint_device().await.unwrap();
@@ -1276,7 +1276,7 @@ mod embedded_ui_tests {
     /// fallback that `UiSource`'s own docstring calls out. A typo in an
     /// asset URL must surface as a failed request, not silently render a
     /// page that looks like it loaded.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn extensioned_miss_is_a_404() {
         let response = embedded_router()
             .await
@@ -1291,7 +1291,7 @@ mod embedded_ui_tests {
     /// the same contract `ServeDir` enforces for `UiSource::Dir`, asserted
     /// here for `Embedded` and below for `Dir` so the parity is checked
     /// rather than assumed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn post_to_embedded_ui_is_405_with_allow_header() {
         let response = embedded_router()
             .await
@@ -1318,7 +1318,7 @@ mod embedded_ui_tests {
     /// axum's own router-level `Content-Length` computation (see that
     /// function's doc comment) and produced `Content-Length: 0` on every
     /// `HEAD` response instead of the real size.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn head_asset_returns_get_headers_with_empty_body() {
         let router = embedded_router().await;
         let get_response = router.clone().oneshot(get("/assets/app.js")).await.unwrap();
@@ -1352,7 +1352,7 @@ mod embedded_ui_tests {
     /// `serve_embedded` now does for `Embedded` — the `Dir` half of the
     /// method-parity pair started above (`post_to_embedded_ui_is_405_with_allow_header`,
     /// `head_asset_returns_get_headers_with_empty_body`).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn post_to_dir_ui_is_405_with_allow_header() {
         let (router, _dist) = dir_router_over_fixtures().await;
         let response = router.oneshot(request(Method::POST, "/")).await.unwrap();
@@ -1366,7 +1366,7 @@ mod embedded_ui_tests {
     /// requests), so this side was never at risk of the round-2 bug —
     /// asserted anyway so the parity between the two `UiSource` variants is
     /// checked, not assumed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn head_to_dir_ui_returns_get_headers_with_empty_body() {
         let (router, _dist) = dir_router_over_fixtures().await;
         let get_response = router.clone().oneshot(get("/assets/app.js")).await.unwrap();
@@ -1399,7 +1399,7 @@ mod embedded_ui_tests {
     /// Spec: `--ui-dist` outranks whatever this build embedded, which in
     /// turn outranks serving nothing — `select_ui_source`'s whole contract,
     /// and pure enough to assert without a router at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn select_ui_source_prefers_flag_over_embedded_and_falls_back_to_none() {
         let flag = std::path::PathBuf::from("/some/dev/ui-dist");
 
@@ -1450,7 +1450,7 @@ mod embedded_ui_tests {
     /// (see [`build_router`]'s own comment on why), so it must reach a
     /// perfectly ordinary successful static-asset response too, not just the
     /// API routes it was originally added for.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn successful_embedded_response_carries_build_stamp_header() {
         let response = embedded_router().await.oneshot(get("/")).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -1466,7 +1466,7 @@ mod embedded_ui_tests {
     /// [`middleware::stamp_build`]'s outer layering means even THAT rejection
     /// carries the build stamp: a confused, DNS-rebound client asking why its
     /// requests are failing needs the same skew signal a working one gets.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn foreign_host_is_rejected_but_still_carries_build_stamp_header() {
         let foreign_request = Request::builder()
             .method(Method::GET)
@@ -1817,7 +1817,7 @@ mod tests {
     /// that bypasses the host selection the create API exists to make
     /// explicit. clap's own grammar is the only thing that catches a
     /// reintroduction, so it is asserted here directly.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_dropped_argv_session_flags_are_refused_and_ensure_hosts_replaces_them() {
         use clap::Parser;
 
@@ -1880,7 +1880,7 @@ mod tests {
     /// process, by
     /// [`payload_selection_env_wiring_is_isolated_in_a_child_process`]
     /// below.
-    #[test]
+    #[farhelm_testtrace::test]
     fn payload_selection_prefers_directory_over_release_base_url() {
         let args = crate::HelmArgs {
             payload_dir: Some(std::path::PathBuf::from("/opt/farhelm-payloads")),
@@ -1899,7 +1899,7 @@ mod tests {
     /// remaining corners of `payload_selection`'s match that the precedence
     /// test above does not cover. See that test's docstring (F7) for why
     /// this constructs `HelmArgs` directly instead of parsing argv.
-    #[test]
+    #[farhelm_testtrace::test]
     fn payload_selection_falls_back_to_release_then_default() {
         let with_url = crate::HelmArgs {
             release_base_url: Some(url::Url::parse("https://example.invalid/release/").unwrap()),
@@ -2005,7 +2005,7 @@ mod tests {
     /// - The RETIRED `FARHELM_PAYLOAD_DIR` set ALONE selects `Default` —
     ///   proving the old build-time variable was not silently reused as
     ///   the new runtime one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn payload_selection_env_wiring_is_isolated_in_a_child_process() {
         if std::env::var_os(PAYLOAD_SELECTION_ENV_CHILD).is_some() {
             use clap::Parser;
@@ -2063,7 +2063,7 @@ mod tests {
     /// sentinel-bearing URL set ONLY there (this project's tests never
     /// mutate the shared test binary's own environment), so a leak can
     /// never bleed into any other test's output either.
-    #[test]
+    #[farhelm_testtrace::test]
     fn cli_help_names_the_release_url_env_var_but_never_its_value() {
         if std::env::var_os(HELP_LEAK_CHILD).is_some() {
             use clap::Parser;
@@ -2159,7 +2159,7 @@ mod tests {
     /// Asserted through the parser rather than by calling the validator
     /// directly, so the `value_parser` wiring is covered too: a validator
     /// nothing is wired to would pass its own unit test forever.
-    #[test]
+    #[farhelm_testtrace::test]
     fn release_base_url_refuses_unusable_shapes_without_echoing_them() {
         use clap::Parser;
 
@@ -2199,7 +2199,7 @@ mod tests {
     /// refusal to the real stderr on `Parser::parse_from`'s exit path, and
     /// the sentinel is set only for that child — this project's tests never
     /// mutate the shared test binary's environment.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_rejected_release_url_never_reaches_stderr() {
         const SENTINEL: &str =
             "https://sentinel-user:sentinel-pass@example.invalid/release/?token=sentinel-token";
@@ -2244,7 +2244,7 @@ mod tests {
     /// caller (`connect_supervisor`, say) is free to add its own context
     /// on the way out, and the status mapping must survive that. Spec:
     /// `NotFound` → 404 regardless of how many context layers sit on top.
-    #[test]
+    #[farhelm_testtrace::test]
     fn http_error_maps_context_wrapped_not_found_to_404() {
         let err = anyhow::Error::new(SupervisorError {
             kind: farhelm_proto::ErrorKind::NotFound,
@@ -2259,7 +2259,7 @@ mod tests {
     /// 500 — the honest default for a failure the caller could not have
     /// avoided by sending a different request, distinct from `NotFound`/
     /// `InvalidRequest` mapping to their own codes above.
-    #[test]
+    #[farhelm_testtrace::test]
     fn http_error_maps_internal_supervisor_error_to_500() {
         let err = anyhow::Error::new(SupervisorError {
             kind: farhelm_proto::ErrorKind::Internal,
@@ -2277,7 +2277,7 @@ mod tests {
     /// identifier already means something else" (see `ErrorKind::Conflict`'s
     /// own doc comment in farhelm-proto for the full rationale, and this
     /// function's own docstring for the mapping table).
-    #[test]
+    #[farhelm_testtrace::test]
     fn http_error_maps_conflict_supervisor_error_to_409() {
         let err = anyhow::Error::new(SupervisorError {
             kind: farhelm_proto::ErrorKind::Conflict,
@@ -2290,7 +2290,7 @@ mod tests {
     /// PLAN_M7.md item 2's authorization refusal maps to 401 so a client
     /// can distinguish rejected credentials from a malformed request or a
     /// supervisor fault.
-    #[test]
+    #[farhelm_testtrace::test]
     fn http_error_maps_unauthorized_supervisor_error_to_401() {
         let err = anyhow::Error::new(SupervisorError {
             kind: farhelm_proto::ErrorKind::Unauthorized,
@@ -2304,7 +2304,7 @@ mod tests {
     /// bare `anyhow` error from a layer that never classified anything —
     /// must default to 500 rather than panicking or silently guessing a
     /// more specific status.
-    #[test]
+    #[farhelm_testtrace::test]
     fn http_error_maps_unclassified_error_to_500() {
         let err = anyhow::anyhow!("supervisor connection closed");
         let response = super::http_error(err);
@@ -2329,7 +2329,7 @@ mod tests {
     /// that happens to be (or itself wrap) a `HostStoreError` is exactly
     /// what an intermediate caller composing both layers could produce
     /// without meaning to.
-    #[test]
+    #[farhelm_testtrace::test]
     fn error_kind_prefers_the_host_store_family_over_a_supervisor_error_in_the_same_chain() {
         let inner = anyhow::Error::new(SupervisorError {
             kind: farhelm_proto::ErrorKind::Internal,

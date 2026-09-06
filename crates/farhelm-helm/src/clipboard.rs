@@ -122,7 +122,7 @@ mod tests {
     /// The auth boundary must be exactly client-log's: no device session, no
     /// clipboard write — and the desktop webview can READ the structured
     /// refusal thanks to the CORS layering order.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn unauthenticated_post_is_a_structured_401_readable_by_the_desktop_webview() {
         let harness = rest_harness::idle_helm().await;
         let mut request = post(serde_json::json!({"text": "hello"}));
@@ -146,7 +146,7 @@ mod tests {
     /// even to an authenticated caller: the endpoint's existence IS the
     /// desktop capability, and a remote page must never be able to write
     /// the helm machine's clipboard.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn without_a_sink_an_authenticated_write_is_404() {
         let harness = rest_harness::idle_helm().await;
         let response = harness
@@ -161,7 +161,7 @@ mod tests {
     /// helm reaches the sink byte-for-byte and answers 204. Asserted through
     /// an injected sink because a 204 alone stays green while the pipeline
     /// discards everything.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_authenticated_write_reaches_the_sink_and_answers_204() {
         let written: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink_written = Arc::clone(&written);
@@ -185,7 +185,7 @@ mod tests {
     /// A failing native write is still a 204 — SPEC.md's best-effort
     /// clipboard contract — and must not panic, error, or leak the reason to
     /// the caller.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failing_sink_is_still_a_silent_204() {
         let harness = rest_harness::idle_helm_with_clipboard_sink(Arc::new(|_: &str| {
             Err("pasteboard said no".to_string())
@@ -201,7 +201,7 @@ mod tests {
 
     /// Text over the cap is the caller's bug and gets told so; the sink must
     /// never see it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn oversized_text_is_413_and_never_reaches_the_sink() {
         let written: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink_written = Arc::clone(&written);
@@ -222,7 +222,7 @@ mod tests {
 
     /// An unknown field is refused rather than ignored — the
     /// `deny_unknown_fields` contract the request struct documents.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn unknown_fields_are_refused() {
         let harness = rest_harness::idle_helm_with_clipboard_sink(Arc::new(|_: &str| Ok(()))).await;
         let response = harness
