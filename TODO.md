@@ -4,18 +4,57 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Six buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "near term" is what should be picked up next; "difficult deflake" holds
-unresolved test failures after targeted investigation, with evidence and the next useful measurement; "systematic
-deflake" is the plan for making the test suites stop failing under load as a class, distinct from the per-test entries
-it is meant to retire; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is everything not yet
-sorted, which carries no implication either way. Within a bucket, no order.
+Five buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
+the decision is made, only the work remains; "near term" is what should be picked up next; "deflake" gathers test and
+harness reliability work, including CI execution and restoring gates; "maybe later" is wanted but not soon, and may
+never happen; "unbucketized" is everything not yet sorted, which carries no implication either way. Within a bucket, no
+order.
+
+Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
+investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
+product fix out of "Deflake" rather than changing user-visible behavior as a test correction.
 
 ## Definite simplification
 
 ## Near term
 
-## Difficult deflake
+- Fix the opening-focus obligation exposed by `an inert sidebar click dismisses the profiles popup` in
+  `e2e/tests/profiles.spec.ts`. In the final Chromium run at `6903cf90`, the test observed body focus after its outside
+  click, then found the popup still mounted with its new-profile button focused: the delayed opening handoff returned
+  focus inside and canceled dismissal. This is a product focus-obligation defect: a trusted outside click must override
+  or invalidate the stale opening-focus request, as `SPEC_impl.md` requires. Preserve that immediate click in the test;
+  waiting for opening focus first would hide the defective ordering. The shared reproduction evidence with the separate
+  profile-creation fixture race is retained under "Deflake". Repeat both engines and retain focus-event traces after
+  correction; do not add retries.
+
+- Product-side policies that only show under load, worth their own decisions rather than test tweaks: the profiles
+  popup's "an unknown focus classification never dismisses" rule leaves the popup open on a slow renderer (retries were
+  bolted on; the real fix is retrying on the next focus event instead of dropping), and the launch shim consuming a
+  planted spec before a delete runs (pin the spec or make delete's fail-closed check independent of shim timing).
+
+## Deflake
+
+- Correct the editor-focus fixture in `a popup-created profile is offered on every host`, in
+  `e2e/tests/profiles.spec.ts`. The shared evidence below also records the separate inert-click product defect tracked
+  under "Near term"; only the profile-creation fixture correction belongs in this bucket.
+
+  Shared evidence for the distinct focus failures in `an inert sidebar click dismisses the profiles popup` and
+  `a popup-created profile is offered on every host`, in `e2e/tests/profiles.spec.ts`. Both failed in the final Chromium
+  run at `6903cf90` on the worker shape and pin documented under "Difficult deflake", without extra load. The first
+  observed body focus after its outside click, then found the popup still mounted with its new-profile button focused:
+  the delayed opening handoff returned focus inside and canceled dismissal. The second filled invocation while an editor
+  handoff was still pending; the trace shows that text appended to the name, an empty required invocation field, and no
+  POST to the profile route. Its catalog wait therefore timed out without a save ever being sent. A pinned candidate
+  batch passed the first case once, then failed the second on its first attempt. Separate exact baseline batches on
+  untouched `d71a87fb`, with `--repeat-each=20 --max-failures=1 --workers=1`, failed the inert case immediately and the
+  profile case after one pass. Both failures therefore predate this work; passing retries would not settle them. The
+  relevant popup production code is unchanged. The inert-click failure is a product focus-obligation defect: a trusted
+  outside click must override or invalidate the stale opening-focus request, as `SPEC_impl.md` requires. Preserve that
+  immediate click in the test; waiting for opening focus first would hide the defective ordering. The profile-creation
+  failure is a separate fixture handoff race: apply the existing editor-name-focus precondition before filling fields.
+  Repeat both engines and retain focus-event traces after each correction. Do not add retries or widen the catalog wait.
+
+### Difficult deflake
 
 These entries remain unresolved after targeted investigation; clean repetitions are non-reproduction evidence, not
 fixes. The 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs, 8 GiB RAM, and pinned tmux 3.7c.
@@ -55,22 +94,8 @@ is a clean gate.
   older fingerprint recurred. The previous event-driven retry/classification-ordinal attempt made pending focus failures
   more frequent and did not settle Escape dismissal; do not revive it as a proven solution. On recurrence, retain the
   full browser/bridge trace and feed open/close timestamps, separating no socket request from a late request and a
-  classifier exhausting observations. A new retry policy needs that evidence first.
-- Fix the distinct focus failures in `an inert sidebar click dismisses the profiles popup` and
-  `a popup-created profile is offered on every host`, in `e2e/tests/profiles.spec.ts`. Both failed in the final Chromium
-  run at `6903cf90` on the worker shape and pin above, without extra load. The first observed body focus after its
-  outside click, then found the popup still mounted with its new-profile button focused: the delayed opening handoff
-  returned focus inside and canceled dismissal. The second filled invocation while an editor handoff was still pending;
-  the trace shows that text appended to the name, an empty required invocation field, and no POST to the profile route.
-  Its catalog wait therefore timed out without a save ever being sent. A pinned candidate batch passed the first case
-  once, then failed the second on its first attempt. Separate exact baseline batches on untouched `d71a87fb`, with
-  `--repeat-each=20 --max-failures=1 --workers=1`, failed the inert case immediately and the profile case after one
-  pass. Both failures therefore predate this work; passing retries would not settle them. The relevant popup production
-  code is unchanged. The inert-click failure is a product focus-obligation defect: a trusted outside click must override
-  or invalidate the stale opening-focus request, as `SPEC_impl.md` requires. Preserve that immediate click in the test;
-  waiting for opening focus first would hide the defective ordering. The profile-creation failure is a separate fixture
-  handoff race: apply the existing editor-name-focus precondition before filling fields. Repeat both engines and retain
-  focus-event traces after each correction. Do not add retries or widen the catalog wait.
+  classifier exhausting observations. A new retry policy needs that evidence first; the older product-policy proposal
+  under "Near term" is not a proven fix.
 - Investigate `opening the actions menu enters it, and Tab leaves it` in `e2e/tests/sidebar.spec.ts`, WebKit. At
   `6903cf90`, the full run failed to open the menu with ArrowDown. Its trace shows the toggle focus assertion passing,
   then terminal focus in the keyboard-action snapshot about 23 ms later; the menu handler never received that key.
@@ -170,7 +195,7 @@ is a clean gate.
   A single clean combined run cannot establish that these latent failures are fixed; retain the release exclusion until
   the evidence supports reversing it.
 
-## Systematic deflake
+### Systematic deflake
 
 Context for every entry here: cutting 0.3.0 on 2026-09-02/03 produced fourteen distinct test failures that reproduced
 only under load (a 4-vCPU sandbox running the browser suite beside a live stack, or the GitHub-hosted 4-vCPU release
@@ -188,7 +213,9 @@ certain to most speculative.
   every wait multiplies by, and set it in CI's `test` job and the release gate; for Playwright, the same via
   `expect.configure`/`test.setTimeout` from an env variable in `playwright.config.ts`. A measured latency probe at
   harness start (time one trivial tmux control exchange) could set the factor automatically, but the env knob is the
-  first step because it separates "the machine is slow" from "the code is wrong" without touching a single test.
+  first step because it separates "the machine is slow" from "the code is wrong" without touching a single test. The
+  factor applies only to harness waits, never product deadlines such as popup focus settlement or relay answer budgets.
+  Product failures under "Near term" need their own fixes.
 - Retries scoped to named tests, reported as flaky, not hidden. `cargo nextest` runs each test in its own process,
   supports `retries` per test through filtersets, and reports "flaky" as its own outcome in JUnit output; Playwright has
   per-project `retries`. A single load hiccup then stops being fatal to a gate while the ledger of what flaked stays
@@ -208,10 +235,6 @@ certain to most speculative.
   the wrong mount) was found by the sandbox run hours after it was written. Give ready PRs a loaded run (the browser
   suite on a 4-vCPU runner, drafts excluded as today) and add a nightly `--repeat-each` hunt over the load-sensitive
   tier so new members are caught before they block a tag.
-- Product-side policies that only show under load, worth their own decisions rather than test tweaks: the profiles
-  popup's "an unknown focus classification never dismisses" rule leaves the popup open on a slow renderer (retries were
-  bolted on; the real fix is retrying on the next focus event instead of dropping), and the launch shim consuming a
-  planted spec before a delete runs (pin the spec or make delete's fail-closed check independent of shim timing).
 
 ## Maybe later
 
