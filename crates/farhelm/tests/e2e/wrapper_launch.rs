@@ -405,7 +405,7 @@ fn comm_and_ppid(pid: u32) -> (String, u32) {
 /// its records under that other directory, correlates against nothing,
 /// and leaves the session with no captured identity and no resume offer —
 /// the exact silent failure `{cwd}` exists to prevent.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_wrapper_profile_receives_the_sessions_directory() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
@@ -467,7 +467,7 @@ async fn a_wrapper_profile_receives_the_sessions_directory() {
 /// wrapper has to forward it to the agent — the "a wrapper passes
 /// trailing arguments through" property the docs promise, and the thing
 /// that keeps a resumed session able to report a later `/clear`.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_wrapper_session_resumes_through_the_wrapper() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
@@ -569,7 +569,7 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
 /// resolution. A restart substitutes the VERIFIED path, and
 /// [`a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart`]
 /// is where that distinction is made observable.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
@@ -679,7 +679,7 @@ async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
 /// invocation again" tell apart in the transcript. It carries no
 /// `{conversation}`, and that placeholder-free shape is the only thing
 /// that produces a `FallbackTemplate` offer at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_generic_wrapper_with_a_template_falls_back_through_the_wrapper() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -785,7 +785,7 @@ async fn a_generic_wrapper_with_a_template_falls_back_through_the_wrapper() {
 /// the same reason as
 /// [`a_wrapper_session_fresh_restarts_into_the_same_directory`]: an offer
 /// of `Resume` would make `Fresh` a conflict.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
@@ -878,7 +878,7 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
 /// `-c` script, and there the trailing `exit` is the whole difference.
 /// The assertion is what keeps the difference from going unnoticed on
 /// whichever kind of host this runs.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stopping_a_wrapper_session_reaps_the_wrapper_and_the_agent() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -942,7 +942,7 @@ async fn stopping_a_wrapper_session_reaps_the_wrapper_and_the_agent() {
 /// can only be fresh. Kind derivation reads the invocation's FIRST word,
 /// and for a wrapper that word is the wrapper — so `generic` is the
 /// correct answer here and the profile has to say otherwise itself.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_generic_wrapper_profile_gets_no_resume_offer() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");

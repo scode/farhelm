@@ -160,7 +160,7 @@ async fn stored_title(state: &std::path::Path, session_id: &str) -> String {
 ///
 /// The reply's own `SessionInfo` is checked alongside, because it is what
 /// the UI paints before its next poll arrives.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_is_visible_in_the_next_list_reply_without_a_restart() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -183,7 +183,7 @@ async fn a_rename_is_visible_in_the_next_list_reply_without_a_restart() {
 /// the cheapest of the three built-not-echoed pins; the other two cover
 /// status and the restart offer, which need a session in a more particular
 /// state to say anything.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_rename_reply_rediscovers_tabs_from_tmux() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -218,7 +218,7 @@ async fn the_rename_reply_rediscovers_tabs_from_tmux() {
 /// `launch_sentinel_error_status`): reaching this class end to end means
 /// corrupting supervisor-internal state either way, and planting it tests
 /// the reader rather than whichever shim path produced the file.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -312,7 +312,7 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
 /// than through `wait_for_capture`, for the same reason: that helper polls
 /// `list_sessions`, and a list would have captured the identity itself,
 /// retroactively making the assertion above pass for the wrong reason.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -365,7 +365,7 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
 ///
 /// The ordering is therefore load-bearing: attach first (so a route pins
 /// the pre-rename entry), rename second, and only then type.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_before_first_input_still_captures_the_conversation() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -398,7 +398,7 @@ async fn a_rename_before_first_input_still_captures_the_conversation() {
 /// a metadata change rather than a per-process relabeling. A restarted
 /// supervisor rebuilds every entry from SQLite, so this is also the only
 /// way to observe that the row itself was written and not merely the map.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_renamed_title_survives_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -437,7 +437,7 @@ async fn a_renamed_title_survives_a_supervisor_restart() {
 /// reality — someone deleted it in another window, or on another client
 /// entirely. Inventing the row back, or reporting success against nothing,
 /// would leave the caller believing a session exists that does not.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn renaming_a_deleted_session_is_not_found() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -463,7 +463,7 @@ async fn renaming_a_deleted_session_is_not_found() {
 /// when the session really does exist and only the ID was mistyped
 /// alongside a title that was also wrong. Pinning the precedence keeps a
 /// later reordering from silently swapping the two answers.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_malformed_rename_of_a_missing_session_reports_the_malformed_title() {
     let h = harness().await;
     let (kind, message) = refusal(
@@ -494,7 +494,7 @@ async fn a_malformed_rename_of_a_missing_session_reports_the_malformed_title() {
 /// disagree: an implementation that wrote the row before validating would
 /// leave the refused title in SQLite and only look correct until the next
 /// restart.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_control_character_title_is_refused_with_the_supervisors_words() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -524,7 +524,7 @@ async fn a_control_character_title_is_refused_with_the_supervisors_words() {
 /// limit makes an oversized reply structurally impossible instead of
 /// merely unlikely. SPEC.md documents the bound as of this milestone, so
 /// it is user-visible behavior rather than an internal guard.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_oversized_title_is_refused_before_anything_changes() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -551,7 +551,7 @@ async fn an_oversized_title_is_refused_before_anything_changes() {
 /// it all the way through a list reply also proves the accepted maximum is
 /// genuinely deliverable — a cap that refused nothing but produced replies
 /// the frame layer had to degrade would be worse than no cap at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_title_of_exactly_the_cap_is_accepted_end_to_end() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -575,7 +575,7 @@ async fn a_title_of_exactly_the_cap_is_accepted_end_to_end() {
 /// asymmetry between two verbs that share one validation. A future "reject
 /// blank titles" change is welcome to exist — but it has to change create,
 /// this test, and SPEC.md together rather than drifting in on one side.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_explicit_empty_title_is_accepted() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -612,7 +612,7 @@ async fn an_explicit_empty_title_is_accepted() {
 /// this test does pin is the observable contract: both callers succeed,
 /// neither is refused for conflicting with the other, and the store and
 /// the list agree on one winner.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_concurrent_renames_both_succeed_and_agree_on_one_winner() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -644,7 +644,7 @@ async fn two_concurrent_renames_both_succeed_and_agree_on_one_winner() {
 /// view is watching that terminal while they do it. The input round trip
 /// afterwards is what proves the attachment is still whole rather than
 /// merely un-detached.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_leaves_an_active_attachment_alone() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -681,7 +681,7 @@ async fn a_rename_leaves_an_active_attachment_alone() {
 /// The replay must also come back describing the session as it is NOW,
 /// renamed — a replay is the authoritative answer to "what did this
 /// intent produce", not a recording of an old reply.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_does_not_disturb_the_create_intent_key() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -759,7 +759,7 @@ async fn a_rename_does_not_disturb_the_create_intent_key() {
 /// never reads. That one rests on the single-acquisition structure being
 /// visible in `Supervisor::rename_session`, which returns the permit with
 /// BOTH outcomes for this reason.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn more_concurrent_renames_than_admission_slots_all_complete() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -846,7 +846,7 @@ async fn more_concurrent_renames_than_admission_slots_all_complete() {
 /// into the task) and would need instrumentation to observe. What this
 /// pins is the OUTCOME: a rename nobody is left to reply to still lands,
 /// both halves of it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_whose_client_vanishes_still_lands() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -909,7 +909,7 @@ async fn a_rename_whose_client_vanishes_still_lands() {
 /// to base a reply on an inference an unreadable sentinel might contradict
 /// (PLAN_M3.md item 3), and that refusal is what propagates here. It needs
 /// a dead pane, since that is the only state whose sentinel is consulted.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rename_whose_reply_cannot_be_built_reports_that_it_landed_anyway() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;

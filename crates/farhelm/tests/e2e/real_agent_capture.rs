@@ -291,7 +291,7 @@ async fn real_agent_captures_its_conversation(
 /// authenticated (`claude` run once interactively, or a vendor credential
 /// in the environment the login shell sources) and able to reach the API.
 /// The prompt costs one short completion.
-#[tokio::test]
+#[farhelm_testtrace::test]
 #[ignore = "needs real Claude Code credentials and network; run deliberately"]
 async fn real_claude_session_captures_its_conversation_identity() {
     // No flags and the user's real home: the plain invocation is the one
@@ -340,7 +340,7 @@ async fn real_claude_session_captures_its_conversation_identity() {
 /// appear, and pressing enter at a modal that ignores enter would only
 /// burn the deadline two seconds at a time. If it ever does appear, the
 /// wait fails with the rendered pane printed, which diagnoses itself.
-#[tokio::test]
+#[farhelm_testtrace::test]
 #[ignore = "needs real Codex credentials and network; run deliberately"]
 async fn real_codex_session_captures_its_conversation_identity() {
     real_agent_captures_its_conversation("OpenAI Codex (v", &[], |work| {
@@ -598,7 +598,7 @@ fn assert_resume_names(snapshot: &SessionSnapshot, conversation: &str) {
 /// distinguishing them, nothing would break — but if it stopped FIRING the
 /// second time, everything would, silently. Both lines are checked so a
 /// regression names which of the two it is.
-#[tokio::test]
+#[farhelm_testtrace::test]
 #[ignore = "needs real Claude Code credentials; run deliberately"]
 async fn real_claude_session_reports_its_identity_across_clear() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -764,7 +764,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
 /// folder-trust modal makes it the only path that works, and for the shim
 /// that carries the variable into the launch while keeping basename
 /// derivation honest.
-#[tokio::test]
+#[farhelm_testtrace::test]
 #[ignore = "needs real Codex credentials and network; run deliberately"]
 async fn real_codex_session_reports_its_identity_across_new() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");

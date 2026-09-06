@@ -1934,7 +1934,7 @@ mod tests {
     /// observe that exit, so the wording is pinned here instead, on every
     /// platform, where a rewrite that dropped the pointer to the desktop
     /// app would fail the build rather than ship silently.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_non_linux_setup_message_names_the_platform_and_the_alternative() {
         assert_eq!(
             NON_LINUX_SETUP_MESSAGE,
@@ -1945,7 +1945,7 @@ mod tests {
 
     /// Both token verbs accept the state directory after the verb, matching
     /// the command shape the e2e harness and user-facing plan document.
-    #[test]
+    #[farhelm_testtrace::test]
     fn token_cli_parses_show_and_rotate_with_an_explicit_state_dir() {
         for verb in ["show", "rotate"] {
             let cli = Cli::try_parse_from([
@@ -1970,7 +1970,7 @@ mod tests {
     /// exact invocation e2e/start-stack.sh performs, pinned here so a
     /// rename breaks a test instead of silently breaking the script's
     /// startup sweep.
-    #[test]
+    #[farhelm_testtrace::test]
     fn internal_sweep_test_state_parses() {
         let cli = Cli::try_parse_from(["farhelm", "internal", "sweep-test-state"]).unwrap();
         assert!(matches!(
@@ -1992,7 +1992,7 @@ mod tests {
     /// property the `FAKE-AGENT ARGV:` marker relies on to let a test
     /// assert injection happened without the fixture parsing the injected
     /// flags itself.
-    #[test]
+    #[farhelm_testtrace::test]
     fn internal_fake_agent_parses_with_injected_vendor_tail() {
         let cli = Cli::try_parse_from([
             "farhelm",
@@ -2035,7 +2035,7 @@ mod tests {
     /// so this pins that `--script` and `--record-home` still bind to
     /// their own fields — rather than being swallowed into `extra` — when
     /// an injected tail follows them on the same command line.
-    #[test]
+    #[farhelm_testtrace::test]
     fn internal_fake_agent_named_flags_still_parse_before_the_tail() {
         let cli = Cli::try_parse_from([
             "farhelm",
@@ -2108,7 +2108,7 @@ mod tests {
     /// different problem with a different right answer (display width, not
     /// character count), and folding them in here would turn one regression
     /// test into an argument about which approximation is being pinned.
-    #[test]
+    #[farhelm_testtrace::test]
     fn column_widths_count_characters_not_bytes() {
         // "café" is 4 characters and 5 bytes; "tea" is 3 of each. Under
         // byte counting the first row's TITLE column would be padded one
@@ -2140,7 +2140,7 @@ mod tests {
     /// above it, or reach terminal features that have nothing to do with
     /// printing. Escaping rather than stripping is deliberate: a silently
     /// removed newline turns two forged rows into one plausible row.
-    #[test]
+    #[farhelm_testtrace::test]
     fn control_characters_in_a_cell_are_escaped_into_one_visible_line() {
         let rendered = render_agent_reply(&sessions(vec![agent_session(
             "s1",
@@ -2170,7 +2170,7 @@ mod tests {
     /// create-time cap — so one long value in a middle column multiplies by
     /// the row count into an output far larger than the reply that produced
     /// it. The final column is exempt because nothing is padded to it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn non_final_columns_are_clamped_and_the_last_is_not() {
         let long = "x".repeat(MAX_CELL_WIDTH * 3);
         let mut row = agent_session("s1", &long);
@@ -2201,7 +2201,7 @@ mod tests {
     /// clearly marked. An archived session's live status is worse than
     /// uninformative: it is history the user filed away, so showing
     /// `running` there invites an agent to go and interact with it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_status_column_reports_archive_and_staleness() {
         let mut archived = agent_session("s1", "t");
         archived.archived = true;
@@ -2227,7 +2227,7 @@ mod tests {
     /// The notice is the only thing distinguishing a partial fleet from a
     /// whole one — the table itself is shaped identically either way, so
     /// without it "no such session" and "past the cut" are the same answer.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_truncated_listing_warns_and_a_complete_one_does_not() {
         assert!(truncation_notice(&sessions(vec![agent_session("s1", "t")])).is_none());
         let notice = truncation_notice(&AgentReply::Sessions {

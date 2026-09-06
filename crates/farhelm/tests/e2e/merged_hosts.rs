@@ -103,7 +103,7 @@ async fn await_listed(client: &reqwest::Client, base: &str, ids: &[&str]) -> ser
 /// Skipped loudly where passwordless `ssh localhost` is unavailable: the
 /// repo's established pattern for a precondition that belongs to the host
 /// rather than to the code.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     if !self_ssh_available().await {
         eprintln!(

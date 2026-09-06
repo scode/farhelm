@@ -460,7 +460,7 @@ async fn wait_for_flood_marker_with_progress(
 }
 
 /// Late data rearms the quiet deadline, subject to the fixed hard bound.
-#[test]
+#[farhelm_testtrace::test]
 fn quiet_deadline_rearms_but_keeps_its_overall_bound() {
     let base = tokio::time::Instant::now();
     let mut deadline = QuietDeadline::new(base, Duration::from_secs(1), Duration::from_secs(2));
@@ -475,7 +475,7 @@ fn quiet_deadline_rearms_but_keeps_its_overall_bound() {
 }
 
 /// Only a newer numbered record may rearm the flood's stall detector.
-#[test]
+#[farhelm_testtrace::test]
 fn flood_progress_deadline_ignores_duplicate_old_and_unrelated_bytes() {
     let base = tokio::time::Instant::now();
     let stall = Duration::from_secs(1);
@@ -574,7 +574,7 @@ pub(crate) async fn force_tmux_pause(h: &Harness, pane: &str) {
 /// measured runs across 3.3a/3.4/3.7b — real coverage, but not coverage
 /// anything may depend on. Here the pause is forced, so a regression in
 /// the reset, the replay, or the continue cutover fails every time.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
     let h = harness().await;
     // The counter fixture, not the flood: this test asserts that LIVE
@@ -653,7 +653,7 @@ async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
 /// a full-screen app) and must re-enter the alternate buffer BEFORE the
 /// content, since `\x1b[?1049h` clears the buffer it switches to. A
 /// regression in either shows up here and in no normal-screen test.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_forced_tmux_pause_recovers_an_alternate_screen_pane() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -718,7 +718,7 @@ async fn a_forced_tmux_pause_recovers_an_alternate_screen_pane() {
 /// through a different caller, so a regression there (dropping the mode
 /// replay, or emitting it before the content that overwrites it) would go
 /// unnoticed by every content-only assertion.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_forced_tmux_pause_restores_modes_and_cursor_state() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -800,7 +800,7 @@ async fn a_forced_tmux_pause_restores_modes_and_cursor_state() {
 /// at a slightly different offset around the stall deadline, so the sweep
 /// covers before, during, and after. Any iteration that lands in the
 /// window and gets this wrong fails the test.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
     let stall = Duration::from_millis(800);
     let h = harness_with_timeouts(SupervisorTimeouts {
@@ -897,7 +897,7 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
 /// that five-second policy, and an out-of-band acknowledgement plus a final
 /// test-controlled gate prove the producer spans the full sample; stable
 /// memory cannot be explained by a producer that finished during setup.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn memory_stays_flat_while_a_viewer_is_stalled() {
     /// Resident bytes of a process, from `/proc/<pid>/statm` (field 2 is
     /// resident pages).
@@ -1045,7 +1045,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
 /// The counter fixture rather than the flood: it paces itself, so
 /// "nothing arrived" cannot be an artifact of the producer having
 /// finished, and the in-flight backlog to drain first is small.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_paused_attachment_stops_receiving_until_it_resumes() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1107,7 +1107,7 @@ async fn a_paused_attachment_stops_receiving_until_it_resumes() {
 /// that lasts too long", and one every end-state test would otherwise
 /// miss. It is the direct complement to the stall-detach test: together
 /// they pin both halves of what "continuous" means.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
     let h = harness_with_timeouts(SupervisorTimeouts {
         stall_detach: Duration::from_secs(2),
@@ -1240,7 +1240,7 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
 /// THIS test proves that the unit test cannot: that a real, continuously
 /// spammed client attached through the real stack genuinely gets detached
 /// with the right reason, rather than wedging forever.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {
     let stall_detach = Duration::from_secs(3);
     let spam_period = Duration::from_millis(300);
@@ -1331,7 +1331,7 @@ async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam(
 /// supervisor-side over-detach under test. Liveness is asserted by typing
 /// instead: an echo proves both the attachment and its input route
 /// survived.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
     let h = harness_with_timeouts(SupervisorTimeouts {
         stall_detach: Duration::from_secs(2),
@@ -1404,7 +1404,7 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
 /// enforce. A fresh echo after the losing pause has been handled proves
 /// the winner still receives output; a chatty fixture's queued bytes could
 /// otherwise make a wrongly paused attachment look alive.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1486,7 +1486,7 @@ async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() 
 /// drains residual frames to a quiet boundary, and proves the finite stream
 /// is still outstanding before holding the pause past tmux's window. That
 /// boundary keeps either branch from passing on a completed retained tail.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
     let h = harness().await;
     let (session, _work) = gated_flood_session(&h, 80).await;
@@ -1658,7 +1658,7 @@ async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
 /// then has to reach a quiet interval while the burst is still outstanding,
 /// and the records delivered after resume must continue across that exact
 /// boundary. A finished retained tail cannot satisfy either premise.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn shallow_pause_resumes_without_reset_or_replay() {
     let h = harness().await;
     let (session, _work) = gated_flood_session(&h, 80).await;
@@ -1734,7 +1734,7 @@ async fn shallow_pause_resumes_without_reset_or_replay() {
 /// what makes the detach an acceptable answer at all: SPEC.md promises a
 /// stuck viewer never harms the agent, so the pane must still be running
 /// and must still replay correctly to the next client.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy() {
     // Short enough to wait out, long enough that ordinary scheduling
     // jitter on a loaded CI runner cannot trip it early.
@@ -1839,7 +1839,7 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
 /// crates, with no shared build step. A test that pinned only the Rust
 /// constants would go green while the JavaScript drifted, which is
 /// precisely the failure this exists to catch.
-#[test]
+#[farhelm_testtrace::test]
 fn browser_scrollback_stays_within_the_product_floor_and_the_tmux_history_ceiling() {
     /// SPEC.md: "the terminal retains, and replay covers, at least the
     /// current screen plus 10,000 lines of scrollback."

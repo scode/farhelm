@@ -340,7 +340,7 @@ pub(crate) async fn settle_past_horizon(h: &Harness) {
 /// is that restart resumes that conversation, and an id captured into a
 /// template that never gets filled would satisfy the letter of a weaker
 /// test while failing the actual promise.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversation() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -382,7 +382,7 @@ async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversatio
 /// tree that is NOT partitioned by working directory at all, so the
 /// recorded-cwd filter carries all the weight here, and the scan cache is
 /// keyed on a root every Codex session on the host shares.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_codex_sessions_in_one_directory_each_capture_their_own_conversation() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -417,7 +417,7 @@ async fn two_codex_sessions_in_one_directory_each_capture_their_own_conversation
 /// kind as well as the directory. Without that scoping the natural
 /// implementation (group by directory) would make a mixed pair — which is
 /// an ordinary thing for a user to do — permanently uncapturable.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_claude_and_a_codex_session_in_one_directory_do_not_poison_each_other() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -446,7 +446,7 @@ async fn a_claude_and_a_codex_session_in_one_directory_do_not_poison_each_other(
 /// could plausibly have used; list passes run throughout, so such an
 /// implementation would have settled the session `UncapturedFinal` before
 /// the prompt ever arrived.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_first_prompt_delayed_past_every_window_constant_still_captures() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -484,7 +484,7 @@ async fn a_first_prompt_delayed_past_every_window_constant_still_captures() {
 /// two would look like a shared-directory collision and BOTH would bail —
 /// so a passing test proves the field filter ran before the ambiguity rule
 /// ever had anything to complain about.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_directories_that_munge_alike_are_separated_by_the_recorded_cwd() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir");
@@ -518,7 +518,7 @@ async fn two_directories_that_munge_alike_are_separated_by_the_recorded_cwd() {
 /// find its own records; without the resolution its munged directory name
 /// and its recorded-cwd comparison would both miss, and capture would
 /// simply never happen for anyone whose path was not already canonical.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_symlinked_or_dotted_working_directory_still_correlates() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir");
@@ -548,7 +548,7 @@ async fn a_symlinked_or_dotted_working_directory_still_correlates() {
 /// name, while Codex has no per-directory tree at all and uses it only for
 /// the recorded-field comparison. A fix that resolved the path for one
 /// path and not the other would pass a Claude-only test.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_symlinked_working_directory_still_correlates_for_codex() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir");
@@ -574,7 +574,7 @@ async fn a_symlinked_working_directory_still_correlates_for_codex() {
 /// same recorded cwd and a timestamp inside the window, can only be caught
 /// by re-deriving the verdict from scratch on every pass — which is
 /// exactly what the provisional state exists to make happen.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -642,7 +642,7 @@ async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() 
 /// captured identity must simply stay put — and the stored STAMP must
 /// advance, which is what proves the re-verification actually re-read the
 /// file rather than skipping it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -714,7 +714,7 @@ async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
 /// that re-derived the verdict from what is on disk right now would see
 /// one clean candidate and claim it — on strictly worse evidence than the
 /// pass that bailed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_near_simultaneous_sessions_in_one_directory_stay_uncaptured() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -777,7 +777,7 @@ async fn two_near_simultaneous_sessions_in_one_directory_stay_uncaptured() {
 /// supervisor was down — and it is the one a list-driven test would never
 /// exercise. Only the DURABLE first-input time is polled for, because that
 /// is the fact the successor needs to correlate at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -865,7 +865,7 @@ async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
 /// that re-derived the verdict from what is on disk would see one clean
 /// candidate and claim it — resuming a conversation the first supervisor
 /// had already established it could not attribute.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -945,7 +945,7 @@ async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
 /// and worse: correlation still works for this process, but a restart
 /// would lose the anchor entirely, so the retry is the only thing that
 /// makes capture survivable across the restart it exists for.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_failed_durable_write_never_advertises_resume_and_is_retried() {
     let failing = Arc::new(AtomicBool::new(true));
     let armed = Arc::clone(&failing);
@@ -994,7 +994,7 @@ async fn a_failed_durable_write_never_advertises_resume_and_is_retried() {
 /// flushing nothing), and starting the window on it would anchor the
 /// session before its user has typed — narrowing, and possibly missing,
 /// the window the real prompt lands in.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_empty_input_frame_never_starts_the_correlator() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1038,7 +1038,7 @@ async fn an_empty_input_frame_never_starts_the_correlator() {
 /// poisoning rival is one of them: it is a Claude session in the same
 /// canonical directory whose first input lands inside the real session's
 /// window, and it exists only as a row.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn capture_considers_sessions_beyond_the_list_reply_cap() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1171,7 +1171,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
 /// because none has a UI caller — the API and these tests are the only
 /// consumers until M6.75's profiles, so an untested override is an unexercised
 /// one.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1271,7 +1271,7 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
 /// restart do for this session" changes the moment an identity is claimed.
 /// A replay frozen at create time would tell a retrying client `FreshOnly`
 /// for a session that can in fact resume.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1331,7 +1331,7 @@ async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
 /// outside, and pinning it here is what makes a future change that starts
 /// correlating on appends a deliberate decision rather than an accident —
 /// see the plan for why that correlation is not free.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_resuming_an_old_conversation_is_not_captured() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
