@@ -55,7 +55,7 @@ default-members = [
 # (`PROTOCOL_VERSION`) and refuses at connect. This number is what stands in
 # for that handshake on the browser edge, which has none.
 [workspace.package]
-version = "0.5.0-rc.1"
+version = "0.5.0-rc.2"
 edition = "2024"
 # cargo-dist reads `repository` to know where to cut releases, and warns
 # without a `homepage` because the (deferred) Homebrew formula renders one.
