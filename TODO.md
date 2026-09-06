@@ -212,13 +212,6 @@ problems before turning out to be invalid premises. That is why the scale factor
 deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
 than behind it.
 
-- Readiness oracles by naming, effort medium. The oracles exist and are unused: `wait_for_replay_complete` at 3 of 161
-  attach sites, `basic_session_ready` at 11 of 159 session creations, `waitForReplayReveal` in three specs while
-  `__farhelmTermReady` is read raw 106 times. Rename so every call site chooses and the exclusion set is a grep, never a
-  list: `attach_live()` positioned after `ReplayComplete` versus `attach_at_boundary()` for the tests that pin the
-  boundary; `basic_session` takes the ready-waiting behavior and today's form becomes `basic_session_mid_launch`;
-  `attachSession` in `term.ts` is the browser chokepoint. Add a named poll helper for single-shot reads of an
-  eventually-consistent listing, the older corpus's variant of the same class.
 - Evidence on first failure, effort medium. Per-test `tracing` capture dumped on failure (the existing capture layer is
   process-global via `try_init`; use `with_default` around the test body or partition by thread) reaches four of the
   five unknowns, whose next steps are supervisor-internal, and reaches unit-test binaries. A harness `Drop` that runs
