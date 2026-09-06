@@ -8,7 +8,7 @@ Five buckets, assigned by the maintainer: "definite simplification" is complexit
 the decision is made, only the work remains; "near term" is what should be picked up next; "deflake" gathers test and
 harness reliability work, including CI execution and restoring gates; "maybe later" is wanted but not soon, and may
 never happen; "unbucketized" is everything not yet sorted, which carries no implication either way. Within a bucket, no
-order.
+order unless the bucket explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
@@ -197,44 +197,69 @@ is a clean gate.
 
 ### Systematic deflake
 
-Context for every entry here: cutting 0.3.0 on 2026-09-02/03 produced fourteen distinct test failures that reproduced
-only under load (a 4-vCPU sandbox running the browser suite beside a live stack, or the GitHub-hosted 4-vCPU release
-runner running the Rust suite beside its own build), never on a developer machine. Three tag builds of rc.1 and two of
-rc.2 failed on a different one or two of them each time. They were not evenly spread: almost all of them came from two
-seams, the tmux attach boundary in the Rust e2e harness and fixed time budgets tuned for a fast box, with the profiles
-popup's focus machinery a third on the browser side. The historical cases from those runs are now retained under
-"difficult deflake"; the work below is what retires them as a class. Order is a suggestion, from cheapest and most
-certain to most speculative.
+Ordered; execute top-down. The goal is the rate, not the tickets: fewer flaky tests written, and the ones that are
+written found and diagnosed while the author still has the context. The entries under "Difficult deflake" and the
+FLAKES.md corpus are evidence of which classes this codebase produces, not the work list. `plans/systematic-deflake.md`
+holds the classification of that corpus (26 distinct issues: 13 diagnosed, 8 hypothesis, 5 unknown), the mechanism notes
+behind each entry, and the two adversarial reviews the list went through. What the classification says: ordering races
+dominate (about twelve of the twenty-one diagnosed-or-hypothesized issues acted, measured, or tore down before the
+system was in the assumed state); fixed budgets account for one, and three "timed out" failures were read as budget
+problems before turning out to be invalid premises. That is why the scale factor that used to head this list is now
+deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
+than behind it.
 
-- One scaled time budget instead of literals. The waits that failed are all fixed numbers chosen on a fast machine: the
-  relay peer's 20 s `answer()`, the backpressure wait at terminal_backpressure.rs:289, terminal-flood's 30 s stall poll,
-  the profiles popup's 250 + 120 ms settlement, the stub feed's socket wait, and every 5 s Playwright `expect`.
-  Introduce one factor the harness reads from the environment (something like `FARHELM_TEST_SLOW=3`, default 1) that
-  every wait multiplies by, and set it in CI's `test` job and the release gate; for Playwright, the same via
-  `expect.configure`/`test.setTimeout` from an env variable in `playwright.config.ts`. A measured latency probe at
-  harness start (time one trivial tmux control exchange) could set the factor automatically, but the env knob is the
-  first step because it separates "the machine is slow" from "the code is wrong" without touching a single test. The
-  factor applies only to harness waits, never product deadlines such as popup focus settlement or relay answer budgets.
-  Product failures under "Near term" need their own fixes.
-- Retries scoped to named tests, reported as flaky, not hidden. `cargo nextest` runs each test in its own process,
-  supports `retries` per test through filtersets, and reports "flaky" as its own outcome in JUnit output; Playwright has
-  per-project `retries`. A single load hiccup then stops being fatal to a gate while the ledger of what flaked stays
-  visible. Nextest also removes the "one hung test wedges the binary" failure shape. Adopt it for the e2e suite first;
-  keep plain `cargo test` working for the developer loop.
-- Tier by sensitivity, not by suite. The 0.3.0 emergency cut removed the whole tmux e2e suite from the release gate (see
-  the "put the tmux e2e suite back" entry above); the durable form is a "load-sensitive" tier — a nextest test group or
-  a Playwright tag — that the gate runs with retries or on a quieter runner, while everything else gates as before.
-  Membership starts as the historical cases from those 0.3.0 runs now under "difficult deflake" and shrinks as they are
-  fixed. Newly encountered failures share that bucket for tracking; adding one does not automatically enroll it in this
-  initial tier.
-- Run the gate's suite where it is not competing with the release build. The tag build runs the suite inside the build
-  job on a 4-vCPU runner while the release build itself is warm; `--test-threads=2` there, or a separate job on a larger
-  runner, is a cheap experiment that may remove most of the load by itself. Measure before and after.
-- Find harness bugs under load early, not at the end. Every deterministic harness mistake in the 0.3.0 stack (a
-  fabricated reply without the build stamp latching skew, a click target the popup could cover, a test hook consumed by
-  the wrong mount) was found by the sandbox run hours after it was written. Give ready PRs a loaded run (the browser
-  suite on a 4-vCPU runner, drafts excluded as today) and add a nightly `--repeat-each` hunt over the load-sensitive
-  tier so new members are caught before they block a tag.
+- Ledger and CI plumbing, effort low. CI's concurrency group keys on the ref with `cancel-in-progress`, so landing a
+  stack cancels every main run but the tip's: 34 of the last 40 main runs were cancelled and 5 completed, which means
+  the full suite finishes about once per landed stack. Give main pushes a per-sha group so every landed commit's run
+  completes, make the `test` job upload failing output on `if: failure()`, and stop clearing a red main run with a later
+  green one until a FLAKES.md entry or fix PR exists (the `manager::tests` twin failure on main run 33992744776 is in no
+  ledger). Record substrate and environment identity in every failure output and FLAKES entry (`command -v tmux`,
+  `tmux -V`, binary hash, locale, ambient `FARHELM_*`), asserted against `source-pins.env` in CI and hunt jobs: the
+  forced-pause entry claims a determinism on pinned 3.7c that CI run 34006471792 contradicts, and nothing recorded what
+  that worker ran. Re-verify the 2026-09-05 baseline reproductions' substrate before citing them.
+- Readiness oracles by naming, effort medium. The oracles exist and are unused: `wait_for_replay_complete` at 3 of 161
+  attach sites, `basic_session_ready` at 11 of 159 session creations, `waitForReplayReveal` in three specs while
+  `__farhelmTermReady` is read raw 106 times. Rename so every call site chooses and the exclusion set is a grep, never a
+  list: `attach_live()` positioned after `ReplayComplete` versus `attach_at_boundary()` for the tests that pin the
+  boundary; `basic_session` takes the ready-waiting behavior and today's form becomes `basic_session_mid_launch`;
+  `attachSession` in `term.ts` is the browser chokepoint. Add a named poll helper for single-shot reads of an
+  eventually-consistent listing, the older corpus's variant of the same class.
+- Evidence on first failure, effort medium. Per-test `tracing` capture dumped on failure (the existing capture layer is
+  process-global via `try_init`; use `with_default` around the test body or partition by thread) reaches four of the
+  five unknowns, whose next steps are supervisor-internal, and reaches unit-test binaries. A harness `Drop` that runs
+  when `std::thread::panicking()` adds the tmux side: client and pane listings with flags, pane capture with dead state
+  and dimensions, the harness event timeline. About 34 sites build `TmuxServerGuard` by hand and need a shared
+  constructor. Browser helpers emit timestamped console events so retained traces answer ordering questions.
+- Process-per-test with cargo-nextest, workspace-wide, effort medium. Retires cross-test interference as a class (the
+  one confirmed instance, #384, is in `farhelm-teststate`'s unit binary, not e2e) and supplies per-test timeouts, JUnit
+  for the ledger, and retries that report "flaky." nextest interleaves binaries where `cargo test` runs them
+  sequentially, so the profile needs an explicit `test-threads`, a `max-threads` group for the e2e binary (the harness's
+  `SLOTS` semaphore becomes inert at one holder per process), and `success-output = immediate` to keep loud skips
+  visible. CLAUDE.md's gate list and CI change together, or the class survives locally and vanishes in CI. Retries only
+  for the load-sensitive group, always reported. The RSS test's allowance is re-baselined, since it starts measuring
+  what it claims to.
+- Hunt on the gate's shape, effort low for Rust and medium for the browser leg. Nightly or on demand: the full e2e
+  binary at four threads on a 4-vCPU runner with pinned tmux, plus `--repeat-each` over the load-sensitive group, with
+  the artifacts from the evidence entry. Per PR, an adjunct over changed tests (twenty fresh invocations per changed
+  Rust test, `--repeat-each=20` on both engines per changed spec, the whole binary or suite when `harness.rs`,
+  `terminal-suite.ts`, or `terminal.js` changes) as a CI job whose JUnit is the record of what it caught. The browser
+  leg costs a `cargo build`, a `dx` release build, and a Playwright install per run, the cost that got the e2e job
+  disabled; nightly only until measured.
+- Authoring rules as a reviewer checklist and a sleep allowlist, effort low. A short checklist the review swarm's
+  test-quality lens loads verbatim and CLAUDE.md's "Finishing work" names for PRs touching tests: premise asserted;
+  readiness from the named oracle; confirm the other party is still there before writing or tearing down; no lock or fd
+  across a spawn; measure an owned process; assert on something that distinguishes two mechanisms; no megabyte polls;
+  reset pointer and focus state. Sleeps live in harness helpers; a test-body sleep carries `// sleep-ok: <why>` and CI
+  requires zero un-annotated ones. A count ratchet was rejected: 28 of about 103 sleeps are poll intervals and
+  `feed.spec.ts`'s observation windows are legitimate.
+
+Deferred, with triggers, detailed in the plan: a typed scale factor on harness budgets (trigger: a budget-class
+recurrence after the oracle entry lands); product observables that attribute their cause without changing the shared
+detach reason string (product work, belongs under "Near term"); running the tag gate's suite away from the release build
+(nothing to measure until "Restore the release integration gate" lands). Tracking: a monthly script over FLAKES.md
+headings and archived JUnit reports failures per hunt run, the share of new entries whose `Cause:` line says
+established, flakes the per-PR loop caught, and new entries per class; a class recurring after its entry landed means
+sharpen the entry, not add a retry.
 
 ## Maybe later
 
