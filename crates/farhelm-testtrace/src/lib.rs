@@ -668,6 +668,36 @@ impl ThreadContext {
         dispatcher::with_default(&self.dispatch, body)
     }
 
+    /// Runs a fixture-owned Tokio runtime inside this test's existing capture.
+    ///
+    /// Use this when a synchronous fixture or a raw server thread must own its
+    /// runtime independently of the test attribute. The calling thread, worker
+    /// threads and blocking pool share this context, including cancellation and
+    /// thread-local destruction when the runtime is dropped. The runtime is
+    /// destroyed before this method leaves the context, even if `body` panics;
+    /// the outer test still owns capture completion and its eventual verdict.
+    ///
+    /// `body` receives the runtime so it can preserve the fixture's existing
+    /// `block_on` and spawn boundaries. Call this outside a Tokio runtime on the
+    /// current thread: Tokio forbids nested blocking or runtime destruction in
+    /// an asynchronous context. Invalid configuration and errors returned by
+    /// Tokio's builder return an error without calling `body`. Tokio can also
+    /// panic during construction, including when it cannot create a worker
+    /// thread; construction and body panics propagate unchanged after restoring
+    /// the calling thread's context.
+    pub fn with_runtime<R>(
+        &self,
+        config: RuntimeConfig,
+        body: impl FnOnce(&tokio::runtime::Runtime) -> R,
+    ) -> io::Result<R> {
+        validate_runtime(config)
+            .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason))?;
+        self.enter(|| {
+            let runtime = build_runtime(config, self.clone())?;
+            Ok(body(&runtime))
+        })
+    }
+
     /// Keeps the dispatcher installed until user thread-local destructors have finished.
     ///
     /// Initialize tracing's TLS and our context stack before the guard's TLS, and install the
@@ -974,7 +1004,8 @@ pub fn run_async<R: TestOutcome>(
     let context = session.thread_context();
     let result = context.enter(|| {
         catch_unwind(AssertUnwindSafe(|| {
-            let runtime = build_runtime(runtime_config, context.clone());
+            let runtime = build_runtime(runtime_config, context.clone())
+                .expect("farhelm test tracing could not build the requested Tokio runtime");
             let result = runtime.block_on(AssertUnwindSafe(body).catch_unwind());
             // Dropping before the session is finished keeps cancellation and thread-stop events in
             // the same bounded window that the eventual failure dump reads.
@@ -1092,8 +1123,11 @@ fn validate_runtime(config: RuntimeConfig) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Builds only configurations the macro has already validated.
-fn build_runtime(config: RuntimeConfig, context: ThreadContext) -> tokio::runtime::Runtime {
+/// Builds a validated runtime while leaving capture completion with its caller.
+fn build_runtime(
+    config: RuntimeConfig,
+    context: ThreadContext,
+) -> io::Result<tokio::runtime::Runtime> {
     let mut builder = match config.flavor {
         RuntimeFlavor::CurrentThread => tokio::runtime::Builder::new_current_thread(),
         RuntimeFlavor::MultiThread => tokio::runtime::Builder::new_multi_thread(),
@@ -1105,9 +1139,7 @@ fn build_runtime(config: RuntimeConfig, context: ThreadContext) -> tokio::runtim
     builder.start_paused(config.start_paused);
     let started = context.clone();
     builder.on_thread_start(move || started.enter_runtime_thread());
-    builder
-        .build()
-        .expect("farhelm test tracing could not build the requested Tokio runtime")
+    builder.build()
 }
 
 /// Pops only the explicit thread context pushed by this lexical scope.
@@ -2294,7 +2326,7 @@ mod tests {
                 let handle = session.handle();
                 let context = session.thread_context();
                 context.enter(|| {
-                    let runtime = build_runtime(config, context.clone());
+                    let runtime = build_runtime(config, context.clone()).unwrap();
                     runtime.block_on(async move {
                         barrier.wait();
                         tokio::spawn(async move { shared_runtime_callsite(owner) })
@@ -2313,6 +2345,115 @@ mod tests {
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].fields.get("owner"), Some(&owner.into()));
         }
+    }
+
+    /// Fixture-owned runtimes keep one capture through owner, worker, blocking
+    /// and cancellation events, including when the runtime body unwinds.
+    ///
+    /// Running on a foreign thread makes implicit inheritance impossible. The
+    /// ready channel proves the pending task owns its drop probe before runtime
+    /// teardown, so observing its final event tests cancellation attribution.
+    #[crate::test]
+    fn fixture_owned_runtimes_keep_capture_through_teardown() {
+        /// A distinctive payload detects replacement panics during teardown.
+        #[derive(Debug, PartialEq)]
+        struct FixturePanic(u32);
+
+        /// A pending task's last event must survive cancellation on runtime Drop.
+        struct CancellationProbe;
+        impl Drop for CancellationProbe {
+            fn drop(&mut self) {
+                tracing::info!("fixture runtime cancellation");
+            }
+        }
+
+        for flavor in [RuntimeFlavor::CurrentThread, RuntimeFlavor::MultiThread] {
+            for unwind in [false, true] {
+                let context = current_thread_context().unwrap();
+                thread::spawn(move || {
+                    assert!(current_capture().is_none());
+                    let config = RuntimeConfig {
+                        flavor,
+                        worker_threads: (flavor == RuntimeFlavor::MultiThread).then_some(1),
+                        start_paused: false,
+                    };
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        context.with_runtime(config, |runtime| {
+                            assert!(current_capture().is_some());
+                            tracing::info!("fixture runtime owner");
+                            runtime.block_on(async {
+                                tokio::spawn(async {
+                                    assert!(current_capture().is_some());
+                                    tracing::info!("fixture runtime worker");
+                                })
+                                .await
+                                .unwrap();
+                                tokio::task::spawn_blocking(|| {
+                                    assert!(current_capture().is_some());
+                                    tracing::info!("fixture runtime blocking");
+                                })
+                                .await
+                                .unwrap();
+                                let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+                                tokio::spawn(async move {
+                                    let _probe = CancellationProbe;
+                                    ready_tx.send(()).unwrap();
+                                    std::future::pending::<()>().await;
+                                });
+                                ready_rx.await.unwrap();
+                            });
+                            if unwind {
+                                std::panic::panic_any(FixturePanic(73));
+                            }
+                        })
+                    }));
+                    assert_eq!(result.is_err(), unwind);
+                    match result {
+                        Ok(result) => result.unwrap(),
+                        Err(payload) => {
+                            assert_eq!(
+                                payload.downcast_ref::<FixturePanic>(),
+                                Some(&FixturePanic(73))
+                            );
+                        }
+                    }
+                    assert!(
+                        current_capture().is_none(),
+                        "foreign context must be restored"
+                    );
+                })
+                .join()
+                .unwrap();
+            }
+        }
+        let capture = current_capture().unwrap();
+        for message in [
+            "fixture runtime owner",
+            "fixture runtime worker",
+            "fixture runtime blocking",
+            "fixture runtime cancellation",
+        ] {
+            assert_eq!(capture.matching(message).unwrap().len(), 4, "{message}");
+        }
+    }
+
+    /// Bad fixture runtime options fail before executing user work, leaving
+    /// the caller's existing capture intact for the eventual test verdict.
+    #[crate::test]
+    fn fixture_owned_runtime_rejects_invalid_options_before_body() {
+        let context = current_thread_context().unwrap();
+        let config = RuntimeConfig {
+            flavor: RuntimeFlavor::CurrentThread,
+            worker_threads: Some(1),
+            start_paused: false,
+        };
+        let called = std::cell::Cell::new(false);
+        let error = context
+            .with_runtime(config, |_| called.set(true))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(!called.get());
+        assert!(current_capture().is_some());
     }
 
     /// The same callsite proves both the foreign-thread negative control and explicit carry path.
