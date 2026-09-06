@@ -533,9 +533,9 @@ mod tests {
         /// the entry named, with the source label attached — asserted
         /// through the capture layer, because a 204 alone would stay green
         /// while the whole pipeline silently discarded everything.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn accepted_entries_become_webview_console_tracing_events() {
-            let captured = crate::test_capture::install();
+            let captured = crate::test_capture::current();
             let harness = rest_harness::idle_helm().await;
             let marker = format!("emit-{}", uuid::Uuid::new_v4());
             let response = harness
@@ -570,9 +570,9 @@ mod tests {
         /// raw: a newline forges extra log lines, an escape byte can
         /// repaint the terminal reading the log. The peer-text escaping
         /// renders both inert.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn control_characters_are_escaped_before_tracing() {
-            let captured = crate::test_capture::install();
+            let captured = crate::test_capture::current();
             let harness = rest_harness::idle_helm().await;
             let marker = format!("esc-{}", uuid::Uuid::new_v4());
             let response = harness
@@ -610,9 +610,9 @@ mod tests {
         /// the visible `(truncated)` marker — the field a caller could
         /// otherwise use to smuggle a body-sized payload past the message
         /// cap.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn an_oversized_source_is_truncated_with_a_visible_marker() {
-            let captured = crate::test_capture::install();
+            let captured = crate::test_capture::current();
             let harness = rest_harness::idle_helm().await;
             let marker = format!("src-{}", uuid::Uuid::new_v4());
             let response = harness
@@ -646,9 +646,9 @@ mod tests {
         /// tail while the first 32 are still emitted, the response stays
         /// 204, and the drop is announced — the renamed, honest version of
         /// what an earlier draft mislabeled "capped down to nothing".
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn surplus_entries_are_dropped_and_announced_while_the_rest_emit() {
-            let captured = crate::test_capture::install();
+            let captured = crate::test_capture::current();
             let harness = rest_harness::idle_helm().await;
             let marker = format!("surplus-{}", uuid::Uuid::new_v4());
             let entries: Vec<_> = (0..super::super::MAX_ENTRIES_PER_REQUEST + 10)
@@ -682,9 +682,9 @@ mod tests {
         /// while emitting nothing — and must NOT add one warn per rejected
         /// request. This drives the same helm through three requests, so it
         /// also proves the budget is genuinely shared across requests.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn a_fully_rate_capped_request_is_a_silent_204() {
-            let captured = crate::test_capture::install();
+            let captured = crate::test_capture::current();
             let harness = rest_harness::idle_helm().await;
             let marker = format!("exhaust-{}", uuid::Uuid::new_v4());
             let batch = |tag: &str| {
@@ -786,9 +786,9 @@ mod tests {
         /// being per-instance rather than process-global — an embedded
         /// second helm's diagnostics must not vanish because an unrelated
         /// window is flooding.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn rate_budgets_are_per_helm_instance() {
-            let captured = crate::test_capture::install();
+            let captured = crate::test_capture::current();
             let first = rest_harness::idle_helm().await;
             let second = rest_harness::idle_helm().await;
             let marker = format!("iso-{}", uuid::Uuid::new_v4());
