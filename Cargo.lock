@@ -1859,6 +1859,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "farhelm-testtrace"
+version = "0.5.0-rc.2"
+dependencies = [
+ "farhelm-testtrace-macros",
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "farhelm-testtrace-macros"
+version = "0.5.0-rc.2"
+dependencies = [
+ "libc",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "farhelm-ui"
 version = "0.5.0-rc.2"
 dependencies = [

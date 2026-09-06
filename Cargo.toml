@@ -7,9 +7,11 @@ members = [
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
   "crates/farhelm-teststate",
+  "crates/farhelm-testtrace",
+  "crates/farhelm-testtrace-macros",
   "crates/farhelm-ui",
 ]
-# Every member EXCEPT `farhelm-desktop`, so that a bare `cargo
+# Application and ordinary library members, excluding `farhelm-desktop`, so that a bare `cargo
 # build`/`test`/`clippy --all-targets` — the workspace checks CLAUDE.md's
 # "Finishing work" list runs on every change, and CI runs on an ordinary
 # runner — never compiles WebKit. `farhelm-desktop` unconditionally enables
@@ -22,6 +24,10 @@ members = [
 # crate gets compiled: nothing in the default battery will notice it break.
 # That is what the `desktop` job's `cargo check -p farhelm-desktop` step is
 # for, and why it is not optional.
+#
+# The tracing support crates are also selected explicitly for their own checks. Selecting them
+# as normal build roots would unify their Tokio test-util feature into application builds;
+# consumers must reach that support through dev-dependencies only.
 default-members = [
   "crates/farhelm",
   "crates/farhelm-helm",
@@ -214,6 +220,8 @@ farhelm-helm = { path = "crates/farhelm-helm" }
 farhelm-proto = { path = "crates/farhelm-proto" }
 farhelm-supervisor = { path = "crates/farhelm-supervisor" }
 farhelm-teststate = { path = "crates/farhelm-teststate" }
+farhelm-testtrace = { path = "crates/farhelm-testtrace" }
+farhelm-testtrace-macros = { path = "crates/farhelm-testtrace-macros" }
 # Only `farhelm-desktop` depends on this, and only with the `desktop`
 # feature on — see that crate's Cargo.toml and the `default-members` note
 # above for why the dependency is deliberately unreachable from the default

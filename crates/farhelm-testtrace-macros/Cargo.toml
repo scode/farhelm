@@ -1,0 +1,23 @@
+[package]
+name = "farhelm-testtrace-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Attribute expansion for Farhelm's test-owned tracing support"
+
+[package.metadata.dist]
+dist = false
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[dev-dependencies]
+libc.workspace = true
+tempfile.workspace = true
+toml.workspace = true
