@@ -54,8 +54,7 @@ uuid.workspace = true
 # no-progress bound is asserted exactly instead of waited out.
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
-# Installs a process-global `tracing` layer in store.rs's
-# skip-and-log tests, the only way to observe a `tracing::warn!` emitted
-# from inside a `spawn_blocking` closure (a different OS thread than the
-# test body, so a merely thread-local subscriber override would miss it).
-tracing-subscriber.workspace = true
+# Test-owned capture carries the wrapped test's dispatcher into its Tokio
+# runtime, including worker and blocking threads, without a subscriber shared
+# by concurrently running tests.
+farhelm-testtrace.workspace = true
