@@ -7,7 +7,8 @@
  * control, and that the truncated identity fields still carry their full
  * value somewhere a user can read it.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Page } from "@playwright/test";
 import { createSession, cleanupSession } from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";

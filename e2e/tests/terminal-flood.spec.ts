@@ -2,7 +2,8 @@
 // stalled-client detachment, replay after detachment, and bounded reconnect
 // behavior all run against the real terminal stack.
 
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type APIRequestContext, type Page } from "@playwright/test";
 import path from "node:path";
 import { DEVICE_SECRET_KEY, requireProductPageAuth } from "./helpers/device-auth";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";

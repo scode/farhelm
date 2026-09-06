@@ -37,7 +37,8 @@
 // contracts: the former defines "the feed is healthy"; the latter owns
 // `window.__farhelmTerm`, `term.buffer.active`, and readiness globals. A
 // genuinely one-off snippet still stays local with the test that needs it.
-import { test, expect, type APIRequestContext, type Locator } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { type APIRequestContext, type Locator } from "@playwright/test";
 import {
   createSession,
   listSessions,
@@ -1140,11 +1141,12 @@ test("resize reaches the real terminal", async ({ page }) => {
 
 test("second client takes over; first shows the detach banner", async ({
   browser,
+  timeline,
   page,
 }) => {
   await openTerminal(page);
 
-  const second = await browser.newContext();
+  const second = await newObservedContext(browser, timeline);
   const page2 = await second.newPage();
   // A fresh context opens through its own list and auto-selection, with a
   // row click only if needed to select the shared session. Its attachment

@@ -35,7 +35,8 @@
  * rather than growing the terminal spec family. An area file keeps one
  * subject's tests findable and runnable together.
  */
-import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import {
   cleanupProfile,
   cleanupSession,
@@ -2931,6 +2932,7 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
  */
 test("a second client's launch alone takes the terminal over", async ({
   browser,
+  timeline,
   page,
   request,
 }) => {
@@ -2957,7 +2959,7 @@ test("a second client's launch alone takes the terminal over", async ({
       .toBe(session.id);
 
     // The second client merely LOADS.
-    second = await browser.newContext({
+    second = await newObservedContext(browser, timeline, {
       storageState: await page.context().storageState(),
     });
     const page2 = await second.newPage();
@@ -4432,6 +4434,7 @@ test("the dot click marks a different row read without moving the selection", as
  */
 test("a manual mark-unread is visible to a second client that never touched the session", async ({
   browser,
+  timeline,
   page,
   request,
 }) => {
@@ -4467,7 +4470,7 @@ test("a manual mark-unread is visible to a second client that never touched the 
       timeout: 20_000,
     });
 
-    second = await browser.newContext({
+    second = await newObservedContext(browser, timeline, {
       storageState: await page.context().storageState(),
     });
     const page2 = await second.newPage();

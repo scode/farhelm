@@ -3,6 +3,7 @@
 
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { waitForSessionReady } from "./terminal-readiness";
+import { recordPage } from "./timeline";
 
 /**
  * Read the complete terminal buffer, including scrollback rather than only
@@ -50,6 +51,7 @@ export async function waitForTermText(page: Page, needle: string, timeout = 15_0
  * moved focus into another control must choose a focus-neutral boundary.
  */
 export async function attachSession(page: Page, id: string): Promise<void> {
+  recordPage(page, "attach-session-intent", [["session", id]]);
   const target = page.locator(`[data-session-id="${id}"]`);
   await expect(target).toBeVisible({ timeout: 20_000 });
   // A fresh page auto-selects before any test action. Wait for that choice
@@ -60,7 +62,10 @@ export async function attachSession(page: Page, id: string): Promise<void> {
     timeout: 20_000,
   });
   if ((await target.getAttribute("data-session-selected")) !== "true") {
+    recordPage(page, "attach-session-selection", [["session", id], ["branch", "open"]]);
     await target.locator(".session-row-open").click();
+  } else {
+    recordPage(page, "attach-session-selection", [["session", id], ["branch", "already-selected"]]);
   }
   await waitForSessionReady(page, id);
 }

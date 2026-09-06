@@ -9,7 +9,8 @@
 // local connection-state changes without stopping the shared supervisor used
 // by every other spec.
 
-import { expect, Page, APIRequestContext, test, TestInfo } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page, APIRequestContext, TestInfo } from "@playwright/test";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 

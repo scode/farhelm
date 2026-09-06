@@ -3,7 +3,8 @@
 // the behavior only a browser can prove: the in-page prompt, localStorage's
 // natural persistence in a closed-and-reopened browser profile, and live
 // WebSocket teardown on rotation.
-import { chromium, expect, Page, Route, test, webkit } from "@playwright/test";
+import { expect, newObservedContext, observeContext, test } from "./helpers/evidence";
+import { chromium, Page, Route, webkit } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -59,9 +60,10 @@ async function authenticate(page: Page, value: string) {
 
 test("an unauthenticated browser gets an in-page token prompt", async ({
   browser,
+  timeline,
   baseURL,
 }) => {
-  const context = await browser.newContext({
+  const context = await newObservedContext(browser, timeline, {
     storageState: { cookies: [], origins: [] },
     extraHTTPHeaders: {},
   });
@@ -81,7 +83,7 @@ test("an unauthenticated browser gets an in-page token prompt", async ({
   await context.close();
 });
 
-test("a device secret survives a browser restart", async ({ browserName, baseURL }) => {
+test("a device secret survives a browser restart", async ({ browserName, baseURL, timeline }) => {
   const profile = stackScratchDir("farhelm-auth-profile-");
   try {
     const browserType = browserName === "webkit" ? webkit : chromium;
@@ -89,6 +91,7 @@ test("a device secret survives a browser restart", async ({ browserName, baseURL
       storageState: { cookies: [], origins: [] },
       extraHTTPHeaders: {},
     });
+    await observeContext(first, timeline);
     const page = first.pages()[0] ?? (await first.newPage());
     await page.goto(baseURL!);
     await expect(page.locator(".auth-page")).toBeVisible();
@@ -100,6 +103,7 @@ test("a device secret survives a browser restart", async ({ browserName, baseURL
       storageState: { cookies: [], origins: [] },
       extraHTTPHeaders: {},
     });
+    await observeContext(restarted, timeline);
     const reopened = restarted.pages()[0] ?? (await restarted.newPage());
     await reopened.goto(baseURL!);
     await expect(reopened.locator(".session-list")).toBeVisible();
@@ -112,9 +116,10 @@ test("a device secret survives a browser restart", async ({ browserName, baseURL
 
 test("blank and rejected tokens stay on the prompt and allow retry", async ({
   browser,
+  timeline,
   baseURL,
 }) => {
-  const context = await browser.newContext({
+  const context = await newObservedContext(browser, timeline, {
     storageState: { cookies: [], origins: [] },
     extraHTTPHeaders: {},
   });
@@ -144,9 +149,10 @@ test("blank and rejected tokens stay on the prompt and allow retry", async ({
 
 test("a mismatched build stamp beats a 401 without raising the token prompt", async ({
   browser,
+  timeline,
   baseURL,
 }) => {
-  const context = await browser.newContext({
+  const context = await newObservedContext(browser, timeline, {
     storageState: AUTH_STORAGE_STATE_PATH,
   });
   const page = await context.newPage();
@@ -166,9 +172,10 @@ test("a mismatched build stamp beats a 401 without raising the token prompt", as
 
 test("a same-build supervisor 401 does not invalidate the device", async ({
   browser,
+  timeline,
   baseURL,
 }) => {
-  const context = await browser.newContext({
+  const context = await newObservedContext(browser, timeline, {
     storageState: AUTH_STORAGE_STATE_PATH,
   });
   const probe = await context.request.get(baseURL!);

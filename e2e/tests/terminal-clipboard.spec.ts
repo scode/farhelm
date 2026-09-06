@@ -62,7 +62,8 @@
 // terminal.spec.ts's own DECRPM test works around the same way): the write
 // happens live, while this test is already attached and parsing, which is
 // the path every one of these mechanisms is actually meant to serve.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, termText, waitForTermText } from "./helpers/term";
 

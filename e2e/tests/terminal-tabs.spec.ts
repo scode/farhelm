@@ -12,7 +12,8 @@
 // this serially-run suite, and the per-project `beforeAll` reset is too
 // coarse to catch that within a project's own pass.
 // ---------------------------------------------------------------------
-import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
@@ -423,6 +424,7 @@ test("a tab opened from another client appears in the strip without a reload", a
 // over the last) and pass on the banners alone.
 test("a second view of the same session detaches every terminal of the first", async ({
   browser,
+  timeline,
   page,
   request,
 }) => {
@@ -455,14 +457,14 @@ test("a second view of the same session detaches every terminal of the first", a
     expect(firstLeases.agent, "the agent terminal must carry a lease too").toBeTruthy();
     expect(firstLeases[tabId]).toBe(firstLeases.agent);
 
-    second = await browser.newContext();
+    second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
     await page2.goto("/");
     // Playwright's `use.baseURL` reaching a MANUALLY created context is
     // load-bearing for the line above and easy to assume wrongly, so it is
     // checked rather than trusted: the two pages must have resolved "/"
     // against the same origin. If a future Playwright stopped applying
-    // config options to `browser.newContext()`, this fails here with a
+    // config options to a manual context, this fails here with a
     // clear reason instead of somewhere downstream as a mysterious
     // navigation.
     expect(new URL(page2.url()).origin).toBe(new URL(page.url()).origin);
@@ -562,6 +564,7 @@ async function mountedIslands(page: Page): Promise<string[]> {
  */
 test("a displaced view discovers the winner's new tab without attaching it, until take control", async ({
   browser,
+  timeline,
   page,
   request,
 }) => {
@@ -577,7 +580,7 @@ test("a displaced view discovers the winner's new tab without attaching it, unti
     await runInShell(page, `terminal-${firstTab}`, alive.command, alive.expected);
 
     // B takes the session.
-    second = await browser.newContext();
+    second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
     await page2.goto("/");
     await attachSession(page2, id);

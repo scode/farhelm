@@ -46,7 +46,8 @@
  * orders are exact reverses of each other, which is the strongest contrast a
  * three-row fixture can carry.
  */
-import { APIRequestContext, expect, Page, Route, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { APIRequestContext, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
   createSession,

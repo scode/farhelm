@@ -21,7 +21,8 @@
 // it, which is also what keeps these tests from passing when the mechanism
 // under test is deleted: a queued repair landing microseconds after the
 // damage is invisible to any assertion taken afterwards.
-import { expect, Page, Route, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { Page, Route } from "@playwright/test";
 import {
   cleanupSession,
   countReads,
