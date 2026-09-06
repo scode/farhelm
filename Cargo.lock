@@ -1759,6 +1759,7 @@ dependencies = [
  "farhelm-proto",
  "farhelm-supervisor",
  "farhelm-teststate",
+ "farhelm-testtrace",
  "libc",
  "reqwest",
  "serde_json",
