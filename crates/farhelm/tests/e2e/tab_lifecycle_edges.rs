@@ -99,9 +99,9 @@ async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-    let (chan, mut rx) = h
+    let (chan, initial_replay, mut rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -110,7 +110,7 @@ async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
         )
         .await
         .expect("attach the tab");
-    let mut seen = Vec::new();
+    let mut seen = initial_replay;
     wait_for_shell(&h.client, chan, &mut rx, &mut seen, "READY").await;
     assert_eq!(
         listed_tabs(&h.client, &session.id).await,
@@ -149,7 +149,9 @@ async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
     // a tick; this window must not behave differently from after it).
     let err = h
         .client
-        .attach_terminal(
+        // The refusal itself is the observation, so consuming a replay
+        // boundary would add an unrelated wait before this assertion.
+        .attach_terminal_at_boundary(
             &session.id,
             80,
             24,
@@ -220,12 +222,12 @@ async fn closing_an_unknown_but_well_formed_tab_id_is_not_found_and_harms_nothin
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-    let (agent_chan, mut agent_rx) = h
+    let (agent_chan, initial_replay, mut agent_rx) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
         .await
         .expect("attach the agent");
-    let mut agent_seen = Vec::new();
+    let mut agent_seen = initial_replay;
     wait_for(&mut agent_rx, &mut agent_seen, "FAKE-AGENT READY", 20).await;
 
     let err = h
@@ -264,9 +266,9 @@ async fn a_closed_tabs_channel_receives_its_detached_notice() {
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-    let (chan, mut rx) = h
+    let (chan, initial_replay, mut rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -275,7 +277,7 @@ async fn a_closed_tabs_channel_receives_its_detached_notice() {
         )
         .await
         .expect("attach the tab");
-    let mut seen = Vec::new();
+    let mut seen = initial_replay;
     wait_for_shell(&h.client, chan, &mut rx, &mut seen, "READY").await;
 
     h.client
@@ -359,16 +361,16 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
     let _bystander_cleanup = MarkerCleanupGuard::new(bystander.id.clone());
 
     let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-    let (_agent_chan, mut agent_rx) = h
+    let (_agent_chan, initial_replay, mut agent_rx) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "first-lease")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "first-lease")
         .await
         .expect("attach the agent");
-    let mut agent_seen = Vec::new();
+    let mut agent_seen = initial_replay;
     wait_for(&mut agent_rx, &mut agent_seen, "FAKE-AGENT READY", 20).await;
-    let (tab_chan, mut tab_rx) = h
+    let (tab_chan, initial_replay, mut tab_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -377,14 +379,14 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
         )
         .await
         .expect("attach the tab");
-    let mut tab_seen = Vec::new();
+    let mut tab_seen = initial_replay;
     wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
     // The SAME client also holds the bystander session, under the same
     // lease: a lease groups a client's channels per session, never across
     // sessions.
-    let (bystander_chan, mut bystander_rx) = h
+    let (bystander_chan, initial_replay, mut bystander_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &bystander.id,
             80,
             24,
@@ -393,7 +395,7 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
         )
         .await
         .expect("attach the bystander");
-    let mut bystander_seen = Vec::new();
+    let mut bystander_seen = initial_replay;
     wait_for(
         &mut bystander_rx,
         &mut bystander_seen,
@@ -404,8 +406,8 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
 
     // A different lease attaches to just ONE of the two terminals.
     let second = h.second_client().await;
-    let (_winner_chan, mut winner_rx) = second
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "second-lease")
+    let (_winner_chan, initial_replay, mut winner_rx) = second
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "second-lease")
         .await
         .expect("take over");
 
@@ -444,7 +446,7 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
     )
     .await;
     // And the winner really has the terminal.
-    let mut winner_seen = Vec::new();
+    let mut winner_seen = initial_replay;
     wait_for(&mut winner_rx, &mut winner_seen, "FAKE-AGENT READY", 20).await;
 }
 
@@ -470,12 +472,12 @@ async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemon
     let (session, work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_agent_chan, mut agent_rx) = h
+    let (_agent_chan, initial_replay, mut agent_rx) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
         .await
         .expect("attach the agent");
-    let mut agent_seen = Vec::new();
+    let mut agent_seen = initial_replay;
     wait_for(&mut agent_rx, &mut agent_seen, "FAKE-AGENT READY", 20).await;
 
     let mut tab_streams = Vec::new();
@@ -483,9 +485,9 @@ async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemon
     let mut guards = Vec::new();
     for which in ["a", "b"] {
         let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-        let (chan, mut rx) = h
+        let (chan, initial_replay, mut rx) = h
             .client
-            .attach_terminal(
+            .attach_terminal_live(
                 &session.id,
                 80,
                 24,
@@ -494,7 +496,7 @@ async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemon
             )
             .await
             .expect("attach the tab");
-        let mut seen = Vec::new();
+        let mut seen = initial_replay;
         wait_for_shell(&h.client, chan, &mut rx, &mut seen, "READY").await;
         let pid_file = work.path().join(format!("cloaked-{which}.pid"));
         let script =
@@ -578,8 +580,8 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let tab = client.open_tab(&session.id).await.expect("open a tab");
 
-    let (chan, mut rx) = client
-        .attach_terminal(
+    let (chan, initial_replay, mut rx) = client
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -588,7 +590,7 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
         )
         .await
         .expect("attach the tab");
-    let mut seen = Vec::new();
+    let mut seen = initial_replay;
     wait_for_shell(&client, chan, &mut rx, &mut seen, "READY").await;
     run_in_shell(
         &client,
@@ -621,8 +623,8 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
         "a supervisor restart must rediscover the SAME shells, not start new ones"
     );
 
-    let (_chan2, mut rx2) = client
-        .attach_terminal(
+    let (_chan2, initial_replay, mut rx2) = client
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -631,7 +633,7 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
         )
         .await
         .expect("attach the rediscovered tab");
-    let mut replay = Vec::new();
+    let mut replay = initial_replay;
     wait_for(&mut rx2, &mut replay, "BEFORE-RESTART", 20).await;
     drop(slot);
 }
@@ -672,16 +674,16 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
         .await
         .expect("open a second tab");
 
-    let (agent_chan, mut agent_rx) = h
+    let (agent_chan, initial_replay, mut agent_rx) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
         .await
         .expect("attach the agent");
-    let mut agent_seen = Vec::new();
+    let mut agent_seen = initial_replay;
     wait_for(&mut agent_rx, &mut agent_seen, "FAKE-AGENT READY", 20).await;
-    let (sibling_chan, mut sibling_rx) = h
+    let (sibling_chan, initial_replay, mut sibling_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -692,7 +694,7 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
         )
         .await
         .expect("attach the sibling tab");
-    let mut sibling_seen = Vec::new();
+    let mut sibling_seen = initial_replay;
     wait_for_shell(
         &h.client,
         sibling_chan,
@@ -701,9 +703,9 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
         "SIB",
     )
     .await;
-    let (stalling_chan, mut stalling_rx) = h
+    let (stalling_chan, initial_replay, mut stalling_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -714,7 +716,7 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
         )
         .await
         .expect("attach the stalling tab");
-    let mut stalling_seen = Vec::new();
+    let mut stalling_seen = initial_replay;
     wait_for_shell(
         &h.client,
         stalling_chan,
@@ -772,9 +774,9 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
 
     // And the stalled terminal reattaches like any reconnect, with the
     // scrollback it had before it wedged.
-    let (_again, mut again_rx) = h
+    let (_again, initial_replay, mut again_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -785,7 +787,7 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
         )
         .await
         .expect("a stall detach must leave the tab reattachable");
-    let mut replay = Vec::new();
+    let mut replay = initial_replay;
     wait_for(&mut again_rx, &mut replay, "BEFORE-STALL", 30).await;
 }
 
@@ -811,8 +813,12 @@ async fn an_open_tab_racing_a_delete_leaves_one_coherent_winner() {
         let (session, _work) = basic_session(&h).await;
         let cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-        let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-        let mut seen = Vec::new();
+        let (_chan, initial_replay, mut rx) = h
+            .client
+            .attach_live(&session.id, 80, 24)
+            .await
+            .expect("attach");
+        let mut seen = initial_replay;
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
         let opener = h.second_client().await;
@@ -872,8 +878,12 @@ async fn a_close_tab_racing_a_delete_leaves_one_coherent_winner() {
         let (session, _work) = basic_session(&h).await;
         let cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-        let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-        let mut seen = Vec::new();
+        let (_chan, initial_replay, mut rx) = h
+            .client
+            .attach_live(&session.id, 80, 24)
+            .await
+            .expect("attach");
+        let mut seen = initial_replay;
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
         let tab = h.client.open_tab(&session.id).await.expect("open a tab");
 
