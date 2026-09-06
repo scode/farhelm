@@ -126,7 +126,7 @@ mod tests {
     /// Spec: the published archive filename is `{package}-{target}.tar.gz`
     /// for every entry — the literal contract `install.sh`'s asset table
     /// and the directory/download payload sources rely on.
-    #[test]
+    #[farhelm_testtrace::test]
     fn archive_name_is_package_dash_target_dot_tar_gz() {
         assert_eq!(
             archive_name(&RELEASE_ARCHIVES[0]),
@@ -141,7 +141,7 @@ mod tests {
     /// Spec: `tmux_name` names the two published Linux tmux builds and
     /// nothing else — there is no macOS or Windows tmux payload to confuse
     /// this with.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tmux_name_covers_both_linux_architectures() {
         assert_eq!(
             tmux_name(PayloadArch::X86_64),
@@ -156,7 +156,7 @@ mod tests {
     /// Spec: both provisioning architectures resolve to a musl Linux
     /// `farhelm` archive (D4) — never the macOS or desktop-shell entries
     /// [`RELEASE_ARCHIVES`] also carries.
-    #[test]
+    #[farhelm_testtrace::test]
     fn farhelm_archive_for_maps_both_arches_to_musl_archives() {
         for (arch, target) in [
             (PayloadArch::X86_64, "x86_64-unknown-linux-musl"),
@@ -172,7 +172,7 @@ mod tests {
     /// Spec: `sums_members` is exactly the six published names — four
     /// archives plus two tmux builds — sorted, which is the order
     /// `SHA256SUMS` itself must list them in (plan §1).
-    #[test]
+    #[farhelm_testtrace::test]
     fn sums_members_is_exactly_the_six_sorted_names() {
         // Already lexically sorted (F25, review round 1): the literal
         // itself expresses the required order, so nothing here mutates it.
@@ -198,7 +198,7 @@ mod tests {
     /// refusing to provision because an asset it wants is "not in
     /// SHA256SUMS". YAML cannot import Rust, so the two lists are separate by
     /// necessity; this test is what makes the duplication safe.
-    #[test]
+    #[farhelm_testtrace::test]
     fn sign_sums_workflow_lists_exactly_sums_members() {
         const WORKFLOW: &str = include_str!("../../../../.github/workflows/sign-sums.yml");
         const BEGIN: &str = "# BEGIN SUMS MEMBERS";
@@ -333,7 +333,7 @@ mod tests {
     /// workflow honest. The `parser_*` tests below exercise malformed and
     /// duplicated input this equality check alone would not distinguish
     /// from an already-passing table.
-    #[test]
+    #[farhelm_testtrace::test]
     fn install_sh_asset_table_matches_release_archives_exactly() {
         const SCRIPT: &str = include_str!("../../../../scripts/install.sh");
         const BEGIN: &str = "# BEGIN ASSET TABLE";
@@ -369,7 +369,7 @@ mod tests {
     /// read` would fold that whitespace into the compared value, so a
     /// target like `" aarch64-apple-darwin"` never matches `uname`'s bare
     /// output and the row becomes permanently unreachable at runtime.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parser_rejects_leading_whitespace_in_a_field() {
         let block = "\nASSET_TABLE='\n aarch64-apple-darwin|farhelm-aarch64-apple-darwin.tar.gz|farhelm\n'\n";
         assert!(parse_asset_table_rows(block).is_err());
@@ -380,7 +380,7 @@ mod tests {
     /// row_target row_archive row_binary` would otherwise leave
     /// `row_binary` empty and the row would try to install a binary named
     /// "".
-    #[test]
+    #[farhelm_testtrace::test]
     fn parser_rejects_a_row_with_a_missing_field() {
         let block =
             "\nASSET_TABLE='\naarch64-apple-darwin|farhelm-aarch64-apple-darwin.tar.gz\n'\n";
@@ -391,7 +391,7 @@ mod tests {
     /// than silently absorbed into the last named variable — `IFS='|'
     /// read -r a b c` assigns every field past the third onto `c`, which
     /// would smuggle a fourth column into the binary name unnoticed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parser_rejects_a_row_with_an_extra_field() {
         let block = "\nASSET_TABLE='\naarch64-apple-darwin|farhelm-aarch64-apple-darwin.tar.gz|farhelm|extra\n'\n";
         assert!(parse_asset_table_rows(block).is_err());
@@ -400,7 +400,7 @@ mod tests {
     /// Spec: a row with an empty field (e.g. two adjacent `|`s) is
     /// rejected rather than producing an empty target, archive, or binary
     /// name.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parser_rejects_a_row_with_an_empty_field() {
         let block = "\nASSET_TABLE='\naarch64-apple-darwin||farhelm\n'\n";
         assert!(parse_asset_table_rows(block).is_err());
@@ -415,7 +415,7 @@ mod tests {
     /// `Vec`-based equality check above actually catches; this test proves
     /// the parser gives it real duplicate rows to catch in the first
     /// place.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parser_preserves_duplicate_rows_rather_than_deduplicating_them() {
         let block = "\nASSET_TABLE='\n\
              x86_64-unknown-linux-musl|farhelm-x86_64-unknown-linux-musl.tar.gz|farhelm\n\
@@ -441,7 +441,7 @@ mod tests {
     /// user's `install.sh` failing to find its asset. A version bump is
     /// exactly when this is easiest to forget, so the check lives in the
     /// suite that runs on every change.
-    #[test]
+    #[farhelm_testtrace::test]
     fn desktop_dist_package_version_matches_the_workspace() {
         const MANIFEST: &str = include_str!("../../../../packaging/farhelm-desktop/dist.toml");
 

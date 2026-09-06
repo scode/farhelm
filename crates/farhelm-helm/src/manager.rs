@@ -4078,7 +4078,7 @@ mod tests {
     ///
     /// The freeze is a state of its OWN rather than a mismatch, because the
     /// remedy differs: nothing was presented, so there is nothing to adopt.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn an_identified_row_meeting_an_identity_less_peer_freezes() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -4143,7 +4143,7 @@ mod tests {
     /// store — so the same malformed reply was accepted there, and a merged
     /// list could show one session twice under one host. Checking on the
     /// drain covers both branches with one rule.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_drain_refuses_a_list_that_names_one_session_twice() {
         let malformed = Script {
             // One id, twice — a list that contradicts itself.
@@ -4192,7 +4192,7 @@ mod tests {
     /// one no such request could carry. Bounded where the value first
     /// enters this process rather than at each of the places it is later
     /// embedded.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_drain_refuses_an_unusably_long_session_id() {
         let script = Script {
             sessions: vec![session(&"x".repeat(MAX_SESSION_ID_BYTES + 1), 100)],
@@ -4818,7 +4818,7 @@ mod tests {
     /// refresh drain and a create/rename/restart reply both write this
     /// list, nothing orders them, and a reply only ever echoes whatever
     /// the supervisor's entry held when it was built.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn an_in_memory_reply_never_walks_the_activity_stamp_backwards() {
         let listed = SessionInfo {
             last_activity_at: 900,
@@ -4907,7 +4907,7 @@ mod tests {
     /// a refusal here (the old behavior) would leave a session the caller
     /// was just told exists unroutable until the next refresh, on exactly
     /// the host whose list vanishes with its connection.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn an_in_memory_seed_past_the_cap_evicts_the_oldest_row_and_flags_the_cut() {
         let full: Vec<SessionInfo> = (0..farhelm_proto::LIST_SESSIONS_CAP)
             .map(|n| session(&format!("s-{n:04}"), 1_000 + n as i64))
@@ -4990,7 +4990,7 @@ mod tests {
     /// its sequence is older) — under the bare-id contract, disappearance
     /// alone no longer replaces a default, so a genuinely newer survivor is
     /// what makes the default move while the session rows stay identical.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn default_changed_alone_bumps_the_fleet_revision() {
         let profiled = SessionInfo {
             creation_seq: Some(1),
@@ -5109,7 +5109,7 @@ mod tests {
     /// actually being dialed every few seconds forever, which is exactly
     /// the hammering the bounded-then-periodic contract exists to prevent.
     /// Only the dial TIMES catch it.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn active_retries_follow_the_ladder_then_settle_into_reprobing() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5166,7 +5166,7 @@ mod tests {
     /// A host that comes back while it is being re-probed must reconnect
     /// on its own, with no user action — SPEC.md's "a host that comes back
     /// overnight resurfaces by itself", pinned at the cadence it promises.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_returning_host_reconnects_on_the_reprobe_cadence() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5215,7 +5215,7 @@ mod tests {
     /// by hand is back within a second or two, and forty-five seconds of
     /// visible downtime for it would be a papercut of the manager's own
     /// making.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_lost_connection_re_enters_the_active_window_immediately() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5261,7 +5261,7 @@ mod tests {
     /// must expire after exactly [`CONNECT_ATTEMPT_TIMEOUT`] and the ladder
     /// must then step as usual, so the dials land at the deadline plus each
     /// backoff rather than at the backoffs alone.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_peer_that_accepts_and_never_says_hello_still_advances_the_ladder() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5309,7 +5309,7 @@ mod tests {
     /// host is upgraded, the same forty-five-second re-probe that serves
     /// unreachable hosts brings it back with no user action at all, so an
     /// upgraded host resurfaces alone.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn version_skew_names_both_versions_and_recovers_when_the_host_upgrades() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store.add_ssh_host("old.example", None, None).await.unwrap();
@@ -5374,7 +5374,7 @@ mod tests {
     /// First contact records the identity the host reported, and the
     /// connected state carries it — the precondition every cache write
     /// downstream is bound to.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_first_contact_records_the_hosts_identity() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store.add_ssh_host("new.example", None, None).await.unwrap();
@@ -5430,7 +5430,7 @@ mod tests {
     /// untouched (so declining to decide costs nothing), and the actor
     /// makes no further attempts (so a freeze is really frozen, not a slow
     /// retry loop that would re-ask a question only a human can answer).
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn an_identity_mismatch_freezes_the_host_and_writes_nothing() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5488,7 +5488,7 @@ mod tests {
     /// acknowledgment, and it must do all three things at once: swap the
     /// identity, purge the dead install's cached sessions, and reconnect
     /// — without the user having to do anything else.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn adopting_a_mismatched_identity_purges_the_old_cache_and_reconnects() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5579,7 +5579,7 @@ mod tests {
     /// perform a compare-and-swap against whatever the state happened to
     /// be, which is exactly the silent merge the whole mechanism exists to
     /// prevent.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn adopting_a_host_that_is_not_mismatched_is_refused() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5619,7 +5619,7 @@ mod tests {
     /// empty-bodied "adopt current" would let a user shown "adopt install B?"
     /// silently adopt install C. Nothing is written, and the caller's correct
     /// response is to re-render and ask again about what is on offer now.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn adopting_a_superseded_identity_is_refused_and_writes_nothing() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5679,7 +5679,7 @@ mod tests {
     /// than on states is what makes the difference visible: a manager that
     /// merely reconnected to the old address would satisfy every
     /// state-shaped assertion here.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn editing_a_connected_hosts_destination_reconnects_to_the_new_one() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5747,7 +5747,7 @@ mod tests {
     /// to retry got one early poll on the same connection — which is
     /// precisely the thing that was already not working. One dial before
     /// and two after is the whole assertion.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn retry_now_on_a_connected_host_reconnects_rather_than_refreshing() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5804,7 +5804,7 @@ mod tests {
     /// "connecting" for the duration — an entry that has been down for
     /// hours reads as down, which is the same rule background re-probing
     /// follows.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn retry_now_on_an_unreachable_host_is_a_single_probe() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5866,7 +5866,7 @@ mod tests {
     /// done. What this pins is that an edit is treated as the user action
     /// it is: the same ladder a resolved freeze earns, not the single probe
     /// a background re-check would make.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn fixing_a_mismatched_hosts_destination_runs_the_full_ladder() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -5935,7 +5935,7 @@ mod tests {
     /// The twin is pre-recorded rather than raced into existence, so the
     /// test pins the detection rather than which of two concurrent actors
     /// happened to win.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_second_entry_reaching_a_known_identity_is_a_duplicate() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let first = store
@@ -5996,7 +5996,7 @@ mod tests {
     /// cadence — the "edit it or remove it" resolution actually working
     /// end to end, rather than leaving the surviving entry stuck in a
     /// state whose cause is gone.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_duplicate_resolves_itself_once_the_twin_is_gone() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let first = store
@@ -6065,7 +6065,7 @@ mod tests {
     ///
     /// The dial count is pinned across several re-probe intervals, which is
     /// what distinguishes "not dialing" from "not dialing yet".
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn an_unresolved_duplicate_rechecks_the_registry_without_redialing() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let first = store
@@ -6141,7 +6141,7 @@ mod tests {
     /// The scripted peer's identity is changed together with the
     /// destination, which is what "this address is a different machine"
     /// means for a transport keyed by row rather than by address.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn editing_a_duplicates_destination_resolves_it_while_the_twin_lives() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let first = store
@@ -6218,7 +6218,7 @@ mod tests {
     /// A refresh takes the supervisor's whole list in one reply and
     /// replaces the whole cache slice with it — PLAN_M6.md item 5's
     /// drain-then-replace, minus the drain.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_refresh_replaces_the_cache_with_the_whole_list() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6284,7 +6284,7 @@ mod tests {
     /// `drain_sessions` alone because the actor is where the word could be
     /// dropped (a `RefreshStep` built without it) or wrongly cleared (a
     /// failed refresh that reset it), and neither shows at the drain.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_supervisors_cap_flag_is_published_and_persisted_and_kept_across_a_failed_refresh() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6392,7 +6392,7 @@ mod tests {
     /// becomes the only data there is. The failure modelled here is the
     /// real one PLAN_M6.md names: the supervisor's `Internal` refusal for a
     /// record too large to ship.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_failed_refresh_keeps_the_previous_cache() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store.add_ssh_host("fat.example", None, None).await.unwrap();
@@ -6480,7 +6480,7 @@ mod tests {
     /// point — the store's own test proves the check exists, this one
     /// proves the connection actor is actually subject to it, which is
     /// where a real deployment would find out otherwise.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_refresh_under_a_superseded_identity_tears_the_connection_down() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6579,7 +6579,7 @@ mod tests {
     /// identity so the cache "works", would make every such host look
     /// permanently identified under a value the host itself has never
     /// heard of.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_host_reporting_no_identity_connects_but_caches_nothing() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6636,7 +6636,7 @@ mod tests {
     /// advancing forever. Expiry drops the connection so the ordinary loss
     /// path runs, and the previous cache — the whole reason the cache
     /// exists — is left exactly as it was.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_host_that_stops_answering_its_list_is_dropped_and_keeps_its_cache() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6704,7 +6704,7 @@ mod tests {
     /// than a theoretical one: a walk that wrote what it had so far would
     /// replace a complete list with a partial one, and the resulting stale
     /// view would be missing exactly the sessions that were listed last.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_connection_lost_during_a_refresh_keeps_the_previous_cache() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store.add_ssh_host("cut.example", None, None).await.unwrap();
@@ -6768,7 +6768,7 @@ mod tests {
     /// a walk that gave up but then wiped the cache, or dropped the
     /// connection, would satisfy the drain's own test and still be wrong
     /// here.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_refresh_past_the_session_ceiling_keeps_the_previous_cache() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6850,7 +6850,7 @@ mod tests {
     /// that never dropped the sessions missing from the new list would mean
     /// the replacement is really an upsert. Sessions that VANISH are what
     /// separates the two.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_periodic_refresh_replaces_the_cached_list_wholesale() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6916,7 +6916,7 @@ mod tests {
     /// every request is a whole-host scan on the far side (see
     /// [`drain_sessions`]). A drain that asked twice — to confirm a count,
     /// say — would double that cost on every host on every refresh.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_refresh_is_one_list_request() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -6967,7 +6967,7 @@ mod tests {
     /// first. (An actor can also retire itself when it finds its own row
     /// gone, which is the backstop `HostActor::run` documents; that path is
     /// not what this pins.)
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn sync_registry_starts_and_stops_actors_to_match_the_registry() {
         let fixture = fixture(Cadence::default(), |_store, transport| async move {
             transport.set_script(
@@ -7030,7 +7030,7 @@ mod tests {
     /// state directory, not a scripted peer: the whole claim is about how
     /// a real unix-socket dial failure is classified, which a script could
     /// only assert about itself.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_local_row_with_no_supervisor_says_so() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = HelmStore::open(&dir.path().join("helm.db"))
@@ -7085,7 +7085,7 @@ mod tests {
     /// would both satisfy it. This one watches the transport instead — the
     /// added host is really connected to, and the removed host's peer
     /// really sees its connection close and is never dialed again.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn sync_registry_starts_and_stops_the_actors_work_not_just_their_entries() {
         let fixture = fixture(Cadence::default(), |_store, _transport| async {}).await;
 
@@ -7130,7 +7130,7 @@ mod tests {
     /// stops them on its own: without the explicit teardown they would keep
     /// dialing, keep writing to a store nobody reads, and keep holding
     /// connections open against hosts that have no manager left to serve.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn dropping_the_manager_stops_every_actor_and_closes_its_connections() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -7180,7 +7180,7 @@ mod tests {
     /// list shows it as healthy, and no timer ever corrects either, because
     /// every mechanism that would is inside the task that died. The
     /// retired state is a worse-looking answer and a truthful one.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_panicking_actor_is_retired_rather_than_left_claiming_its_host() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -7234,7 +7234,7 @@ mod tests {
     /// non-connected state (routing onto a corpse). This samples hard
     /// across a real connection loss and a real reconnection and asserts
     /// the invariant on every sample.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn the_status_pair_is_coherent_across_a_transition() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -7343,7 +7343,7 @@ mod tests {
     /// The `yield_now` is the barrier: it lets the spawned reconcile get as
     /// far as its store read before the shutdown runs, which is exactly the
     /// interleaving that used to lose.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_shutdown_beats_a_reconciliation_that_is_already_running() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -7466,7 +7466,7 @@ mod tests {
 
     /// `peer_text`'s two jobs, at the unit level: bound the length, and
     /// escape what a terminal would otherwise act on.
-    #[test]
+    #[farhelm_testtrace::test]
     fn peer_text_bounds_and_escapes() {
         let short = peer_text("connection refused");
         assert!(
@@ -7609,7 +7609,7 @@ mod tests {
     /// requires anyhow's own downcast rather than a `chain()` walk — a
     /// distinction that compiles either way and silently answers "no" if
     /// gotten wrong (see [`failure`]'s own comment).
-    #[test]
+    #[farhelm_testtrace::test]
     fn local_dial_failures_are_classified_by_kind_including_wrapped_ones() {
         use std::io::ErrorKind;
 
@@ -7663,7 +7663,7 @@ mod tests {
     /// The same classification must NOT fire for an ssh row, whatever the
     /// io error says: "start a supervisor on this machine" is advice about
     /// the wrong machine entirely when the host is remote.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_remote_rows_refused_dial_is_never_the_local_supervisor_hint() {
         let remote = HostRow {
             id: 2,
@@ -7692,7 +7692,7 @@ mod tests {
     /// best and as advice about a machine that does not exist at worst —
     /// and skew is precisely the state SPEC.md requires to carry an
     /// actionable remedy rather than a diagnosis.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_skewed_local_row_is_told_to_update_this_machine() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             transport.set_script(
@@ -7735,7 +7735,7 @@ mod tests {
     /// list on its say-so. Pinned directly rather than only through an
     /// actor because the bound is a safety property, not a behavior: it
     /// should hold for every caller this function ever gains.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn draining_a_peer_that_ignores_the_cap_is_refused() {
         let script = Script {
             sessions: (0..=farhelm_proto::LIST_SESSIONS_CAP)
@@ -7782,7 +7782,7 @@ mod tests {
     /// flag values are exercised because a full-cap list is legal either
     /// way — cut (more existed) or complete (the count landed on the
     /// ceiling) — and the drain must not infer one from the length.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn draining_exactly_the_cap_is_accepted_with_the_peers_flag() {
         for peer_truncated in [false, true] {
             let script = Script {

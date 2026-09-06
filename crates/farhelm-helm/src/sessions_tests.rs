@@ -13,7 +13,7 @@ use std::time::Duration;
 /// plants one through SQLite as a damaged database could. A catalog read
 /// would fail on its unknown agent kind; successful resolution therefore
 /// proves the raw-only early return happens before any store access.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn raw_only_profile_resolution_ignores_a_corrupt_catalog_row() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = dir.path().join("helm.db");
@@ -66,7 +66,7 @@ async fn raw_only_profile_resolution_ignores_a_corrupt_catalog_row() {
 /// inventing a value — the fields are deliberately accepted here for
 /// non-UI API callers that basename recognition cannot classify, not
 /// because every production caller is expected to omit them forever.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
@@ -188,7 +188,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
 /// would not be an error but a SECOND session appearing on a retry —
 /// the failure the whole feature exists to prevent, visible only under
 /// a lost reply.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{AgentKind, ControlMsg, Frame, SessionInfo};
@@ -277,7 +277,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
 /// `SessionStopped`, and the route must answer 200 with an empty JSON
 /// object — the uniform success body `stop`/`delete` share so a caller
 /// does not need to special-case "no content".
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_session_happy_path_returns_200_with_empty_object_body() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -339,7 +339,7 @@ async fn stop_session_happy_path_returns_200_with_empty_object_body() {
 /// through [`silent_supervisor`] — that the connected host was not
 /// asked. Without the second half a helm that forwarded the request AND
 /// answered locally would pass.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
     use tower::ServiceExt;
 
@@ -373,7 +373,7 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
 /// `DELETE /api/sessions/{id}` happy path, mirroring the stop test
 /// above: a scripted `SessionDeleted` reply must reach the caller as
 /// 200 with the same empty-object body shape.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_session_happy_path_returns_200_with_empty_object_body() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -424,7 +424,7 @@ async fn delete_session_happy_path_returns_200_with_empty_object_body() {
 /// `stop_session_unknown_id_returns_404_with_supervisor_message` — see
 /// that test's docs for why this contract inverted with M6's routing,
 /// and why the silent supervisor is half the assertion.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
     use tower::ServiceExt;
 
@@ -464,7 +464,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
 /// before the delete and checking the store directly afterward, since the
 /// REST reply carries no evidence either way (SPEC.md's "delete" leaves
 /// nothing behind to inspect through the API once the session is gone).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_session_drops_the_seen_row() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -523,7 +523,7 @@ async fn delete_session_drops_the_seen_row() {
 /// clear, and another listing read, checking `seen_activity_at` at each
 /// step — the round trip the idle dot's grey/blue split actually depends
 /// on (SPEC.md, Status).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn mark_seen_route_records_and_clears_the_stamp() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
@@ -564,7 +564,7 @@ async fn mark_seen_route_records_and_clears_the_stamp() {
 /// this id" lookup every other per-session route uses
 /// ([`super::resolve_owner`]) — a session nothing knows about is a 404
 /// whether or not any host is even connected.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn mark_seen_route_unknown_id_returns_404() {
     let harness = rest_harness::idle_helm().await;
     let (status, body) = put_json(
@@ -589,7 +589,7 @@ async fn mark_seen_route_unknown_id_returns_404() {
 /// it (reopening a session, or a staleness/capability transition —
 /// `session_view.rs`'s `mark_key`), and a bump on every one of those would
 /// wake every other connected client for nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
@@ -657,7 +657,7 @@ async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
 /// truncated client request must not be able to clear a session's seen
 /// state by accident, and must leave the store and the fleet-events
 /// revision exactly as they were.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn mark_seen_route_rejects_a_body_with_the_key_omitted() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
@@ -701,7 +701,7 @@ async fn mark_seen_route_rejects_a_body_with_the_key_omitted() {
 /// that reused `route_session`'s reachability gate would refuse this
 /// request instead of returning 200 and storing the write, which is
 /// exactly what this test would catch.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn mark_seen_route_succeeds_on_an_unreachable_host() {
     let (builder, host) = rest_harness::FleetBuilder::new()
         .await
@@ -774,7 +774,7 @@ async fn mark_seen_route_succeeds_on_an_unreachable_host() {
 /// field (`aggregate::row_of`) — a direct fetch (the recovery path
 /// `list::ListView`'s remembered-selection resolver uses) must see the
 /// same seen-state a listing read would have shown.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn get_session_route_carries_seen_activity_at_when_live() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
@@ -801,7 +801,7 @@ async fn get_session_route_carries_seen_activity_at_when_live() {
 /// cache) — `get_session` constructs a separate `SessionRow` literal for
 /// each branch (see its own doc), so a fix that carries the field on the
 /// live branch is not evidence the stale one does too.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn get_session_route_carries_seen_activity_at_when_stale() {
     let (builder, host) = rest_harness::FleetBuilder::new()
         .await
@@ -839,7 +839,7 @@ async fn get_session_route_carries_seen_activity_at_when_stale() {
 /// best-effort. `break_session_seen_table_for_test` makes the failure
 /// real (the table is genuinely gone) rather than simulated, without a
 /// mock trait or an env var.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -955,7 +955,7 @@ async fn spliced_replace_harness(
 /// is a NEW id carrying the source's cwd, title, and invocation, with the
 /// old id gone from the list at once — this pins that promise against the
 /// real handler and a scripted supervisor.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
@@ -1094,7 +1094,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
 /// would send `DeleteSession` for the id just "created", forget it, and
 /// report success describing the session it had just destroyed — violating
 /// every promise replace makes. This pins the refusal instead.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
@@ -1169,7 +1169,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
 /// A profile-backed source's replacement follows the SAME profile — the
 /// happy path `mode_from_source` shares with `clone_for_agent`, exercised
 /// here through the REST route instead of the agent relay.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn replace_of_a_profile_backed_session_follows_its_profile() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, ProfileSnapshot, SessionInfo, SourceProfile};
@@ -1293,7 +1293,7 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
 /// written for one machine may not run on another, while replace never
 /// changes machine, so the refusal clone needs has nothing to guard against
 /// here. Pinned so this divergence is not "fixed" into a refusal later.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invocation() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
@@ -1389,7 +1389,7 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
 /// bullet: there is no agent to kill on one, only a record to delete). The
 /// replacement is an ordinary, RUNNING create — archiving is never a
 /// create-time flag.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn replace_of_an_archived_session_creates_a_fresh_replacement() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
@@ -1471,7 +1471,7 @@ async fn replace_of_an_archived_session_creates_a_fresh_replacement() {
 /// ever sending a delete, and the row stays listed exactly as it was — the
 /// "nothing was lost" half of `do_replace_session`'s asymmetric failure
 /// rule (see its own doc).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_create_refusal_leaves_the_source_listed() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind, Frame};
@@ -1521,7 +1521,7 @@ async fn a_create_refusal_leaves_the_source_listed() {
 /// proves the delete did not happen. Rolling the create back would kill an
 /// agent the caller just asked for, and plain failure would hide a session
 /// the caller was never told still exists.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_both_rows() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
@@ -1644,7 +1644,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
 /// from the OUTSIDE instead — `ScriptedFleet::kill_connection`, the same
 /// primitive the reconnect-path tests use — timed with a handshake so it
 /// fires only once the delete frame has genuinely reached the peer.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcome() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
@@ -1752,7 +1752,7 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
 /// state named, before anything is created — the same owner-lookup refusal
 /// every lifecycle operation gets (`route_session`), exercised here through
 /// `/replace`.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn replace_on_an_unreachable_host_is_refused_before_anything_is_created() {
     let (builder, host) = rest_harness::FleetBuilder::new()
         .await
@@ -1798,7 +1798,7 @@ async fn replace_on_an_unreachable_host_is_refused_before_anything_is_created() 
 /// chains the retry off exactly that state, and the peer script plays the
 /// supervisor's own idempotent reply by hand (this helm keeps no local
 /// dedup of its own; the guarantee is entirely the supervisor's).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creates_only_once() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
@@ -1961,7 +1961,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
 /// decodes JSON: a serialization change that a round trip through the
 /// same Rust types would hide is exactly what would break the list in
 /// the browser.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn list_sessions_returns_the_merged_listing_object_shape() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
@@ -2029,7 +2029,7 @@ async fn list_sessions_returns_the_merged_listing_object_shape() {
 /// happens to coincide — any of those regressions stays green with one
 /// host whose identities all agree. Two hosts with distinct recorded
 /// identities make the join's key observable.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn each_listing_row_carries_its_own_hosts_identity() {
     let (builder, remote) = rest_harness::FleetBuilder::new()
         .await
@@ -2080,7 +2080,7 @@ async fn each_listing_row_carries_its_own_hosts_identity() {
 /// `ListSessions` reply to the JSON body a browser decodes — this
 /// replaces an earlier version of the same check aimed at the bulk
 /// LISTING route, which no session view reads tabs from.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn get_session_passes_a_non_empty_tabs_list_through() {
     let harness = rest_harness::helm_listing(vec![farhelm_proto::SessionInfo {
         tabs: vec![
@@ -2134,7 +2134,7 @@ async fn get_session_passes_a_non_empty_tabs_list_through() {
 /// while a session's own detail view kept showing the destination.
 /// `hosts.rs`'s `session_rows_carry_the_alias_in_host_name` pins the
 /// listing side; this pins the detail side.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn get_session_carries_the_hosts_alias() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("aliased-detail", 1_700_000_000)])
@@ -2190,7 +2190,7 @@ async fn get_session_carries_the_hosts_alias() {
 /// A status variant or annotation field that failed to persist would
 /// fail here too, which is exactly the coverage a durable cache of
 /// supervisor-authored data needs.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn list_sessions_passes_interrupted_status_and_stop_annotation_through() {
     let session = |id: &str, status, annotation: Option<&str>| farhelm_proto::SessionInfo {
         status,
@@ -2249,7 +2249,7 @@ async fn list_sessions_passes_interrupted_status_and_stop_annotation_through() {
 /// `Ok(None)` at that point means nothing but the handshake was ever
 /// written to it. A frame arriving instead (a bypassed guard) would read
 /// as `Ok(Some(_))`, which is what this actually distinguishes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn foreign_origin_is_refused_on_the_stop_route() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
     use tower::ServiceExt;
@@ -2308,7 +2308,7 @@ async fn foreign_origin_is_refused_on_the_stop_route() {
 /// and complementary: prove the *client-and-HTTP* half of the chain
 /// (scripted `Error` reply in, status code out) without needing a real
 /// supervisor, tmux, or filesystem precondition to produce one.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_session_error_reply_maps_to_bad_request_status() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind, Frame};
@@ -2374,7 +2374,7 @@ async fn create_session_error_reply_maps_to_bad_request_status() {
 /// against the current offer, so a route that dropped or defaulted
 /// either would be a silent safety regression rather than a visible
 /// failure.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restart_session_passes_mode_and_consent_through_and_returns_the_session() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -2460,7 +2460,7 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
 /// re-presenting it is the client's prescribed response (the wire
 /// vocabulary's staleness contract). A route that flattened it to a
 /// generic 500 would leave the UI with nothing to say.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restart_session_conflict_reaches_the_caller_as_409_with_its_message() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind};
@@ -2530,7 +2530,7 @@ async fn restart_session_conflict_reaches_the_caller_as_409_with_its_message() {
 /// `SessionRenamed`'s own docs warn against — see
 /// `ControlMsg::SessionRenamed`) would still pass an id/title-only
 /// check while failing every other field.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn rename_session_forwards_the_title_verbatim() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, RestartOffer, SessionInfo, SessionStatus, TabInfo};
@@ -2640,7 +2640,7 @@ async fn rename_session_forwards_the_title_verbatim() {
 /// live in this one test, rather than as two that could quietly drift
 /// apart, because "missing" and "explicit empty" are exactly the pair
 /// a route that collapsed `Option<String>` handling could confuse.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_accepted() {
     use tower::ServiceExt;
 
@@ -2771,7 +2771,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
 /// lookup, without reaching a supervisor — the rename-side twin of
 /// `stop_session_unknown_id_returns_404_with_supervisor_message`, whose
 /// docs carry the reasoning.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
     use tower::ServiceExt;
 
@@ -2809,7 +2809,7 @@ async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
 /// supervisor's own refusal text — the UI's only source for that
 /// message, since this route performs no local validation of its own
 /// to phrase a redundant one from.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn rename_session_invalid_title_returns_400_with_supervisor_message() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind};
@@ -2869,7 +2869,7 @@ async fn rename_session_invalid_title_returns_400_with_supervisor_message() {
 /// scripted `TabOpened` reply's `TabInfo` must round-trip through the
 /// success body under a `tab` key — the shape a client needs before it
 /// can attach the new tab via `?tab=<id>` on `term_ws`.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn open_tab_happy_path_returns_200_with_tab() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, TabInfo};
@@ -2925,7 +2925,7 @@ async fn open_tab_happy_path_returns_200_with_tab() {
 /// asserts both path segments landed in the right `CloseTab` fields —
 /// a route that swapped `id`/`tab_id` would still 200 here, just
 /// against the wrong tab.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn close_tab_happy_path_returns_200_with_empty_object_body() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -2987,7 +2987,7 @@ async fn close_tab_happy_path_returns_200_with_empty_object_body() {
 /// not a substring: a handler that truncated or rewrapped the
 /// supervisor's message would still pass a status-only check here,
 /// which is exactly the gap an exact-body assertion closes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn open_tab_error_reply_maps_to_404_with_the_supervisors_message() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind};
@@ -3047,7 +3047,7 @@ async fn open_tab_error_reply_maps_to_404_with_the_supervisors_message() {
 /// assertion), aimed at `close_tab` instead so a route wired to the
 /// wrong client method (or dropping `http_error` entirely) cannot hide
 /// behind the open-tab coverage above.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind};
@@ -3116,7 +3116,7 @@ async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
 /// "Reaches no supervisor" is asserted by ORDER rather than by a timeout:
 /// the peer asserts on the FIRST create it is sent, and a forwarded stale
 /// create would arrive in that slot and fail there by name.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
@@ -3224,7 +3224,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
 /// replacement. Reintroducing a claim check around the default — or letting
 /// a refused cache seed short-circuit the bookkeeping — would pass every
 /// other test in this file and fail here.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
     use farhelm_proto::SessionInfo;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
@@ -3445,7 +3445,7 @@ async fn three_host_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
 /// interleaves creation times across hosts specifically so a
 /// per-host-then-append implementation fails here instead of passing by
 /// coincidence.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_session_list_merges_every_host_into_one_creation_order() {
     let (harness, alpha, beta) = three_host_fleet().await;
     let local = rest_harness::local_id(&harness.store).await;
@@ -3489,7 +3489,7 @@ async fn the_session_list_merges_every_host_into_one_creation_order() {
 /// unreachable host stay in the list from the helm's last-known
 /// knowledge, clearly marked stale, rather than vanishing" — at the
 /// REST boundary, where the UI actually reads it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_down_hosts_sessions_stay_listed_and_marked_stale() {
     let (harness, alpha, beta) = three_host_fleet().await;
 
@@ -3532,7 +3532,7 @@ async fn a_down_hosts_sessions_stay_listed_and_marked_stale() {
 /// cannot distinguish "routed correctly" from "sent to the only
 /// connection there is" — which is exactly the bug this whole lookup
 /// exists to prevent once a fleet has more than one member.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_operation_routes_to_the_host_that_owns_it() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3619,7 +3619,7 @@ async fn a_session_operation_routes_to_the_host_that_owns_it() {
 /// Each host CONNECTS first, so its session is genuinely in the merged
 /// view before the host breaks — otherwise there would be nothing to
 /// operate on and the 409 under test would be a 404 instead.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn every_non_connected_state_refuses_a_session_operation_naming_itself() {
     struct Case {
         /// How the far side changes under the host's feet.
@@ -3709,7 +3709,7 @@ async fn every_non_connected_state_refuses_a_session_operation_naming_itself() {
 /// no state falls through to a generic message. A seventh state added
 /// later without a case here fails this test rather than silently
 /// refusing operations with nothing a user can act on.
-#[test]
+#[farhelm_testtrace::test]
 fn refusal_text_names_every_non_connected_state() {
     use crate::manager::{HostState, UnreachableCause};
 
@@ -3799,7 +3799,7 @@ fn refusal_text_names_every_non_connected_state() {
 /// is what turns "no session anywhere" into an assertion rather than a
 /// claim — a helm that refused the caller but still sent the create
 /// would leave a real agent running that nobody asked for.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn creating_on_a_non_connected_host_is_refused_with_no_session() {
     let (alpha_client, alpha_peer) = tokio::io::duplex(64 * 1024);
     let alpha_task = tokio::spawn(silent_supervisor(alpha_peer));
@@ -3861,7 +3861,7 @@ async fn creating_on_a_non_connected_host_is_refused_with_no_session() {
 /// requirement is what leaves a curl or a script meaning the obvious
 /// thing. Both halves are asserted against a two-host fleet, since a
 /// single-host fleet cannot tell a default from an accident.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_create_defaults_to_the_local_host_and_honors_an_explicit_one() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3945,7 +3945,7 @@ async fn a_create_defaults_to_the_local_host_and_honors_an_explicit_one() {
 /// silent close is exactly a pretense the browser would blame on the
 /// network. Riding the existing notice shape is also what lets the UI
 /// render this without a new message type.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_terminal_socket_on_a_down_host_is_refused_with_the_hosts_state() {
     let (builder, host) = rest_harness::FleetBuilder::new()
         .await
@@ -3996,7 +3996,7 @@ async fn a_terminal_socket_on_a_down_host_is_refused_with_the_hosts_state() {
 /// No refresh tick is allowed to rescue it: the harness's cadence
 /// refreshes once at connect and then not for an hour, so anything that
 /// works here worked because the create seeded it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_created_here_is_routable_before_any_refresh() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4100,7 +4100,7 @@ async fn a_session_created_here_is_routable_before_any_refresh() {
 /// nobody "fixes" it later: with no durable copy there is nothing to
 /// vouch for these rows once the connection is gone, so they must not
 /// linger as stale entries the helm cannot stand behind.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4236,7 +4236,7 @@ async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after(
 /// That second half is asserted here because it is what makes the
 /// refusal a temporary, self-clearing condition rather than a session
 /// bricked by someone else's bug.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4380,7 +4380,7 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
 /// list reply is held until the create has completed, so the
 /// interleaving under test is the one that actually happens rather than
 /// whichever one a sleep happened to produce.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_refresh_that_predates_a_create_cannot_erase_it() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4485,7 +4485,7 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
 /// agent somewhere the user never asked for, and the reply would look
 /// like success. The silent supervisor is what turns "no fallback" into
 /// an assertion rather than a claim.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn creating_on_an_unknown_host_is_refused_without_falling_back() {
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let peer = tokio::spawn(silent_supervisor(peer_side));
@@ -4514,7 +4514,7 @@ async fn creating_on_an_unknown_host_is_refused_without_falling_back() {
 /// suite happens to list newest-first, so a validator accidentally retained
 /// (or a REST path trusting peer order) would pass everything else and fail
 /// only here.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_supervisors_reply_order_is_accepted_and_resorted_per_request() {
     let harness = rest_harness::helm_listing(vec![
         // OLDEST first — the reverse of what every real supervisor sends.
@@ -4540,7 +4540,7 @@ async fn a_supervisors_reply_order_is_accepted_and_resorted_per_request() {
 /// cache, so its `truncated` word travels on the snapshot beside its rows —
 /// a different branch of the merge, and one nothing else exercises end to
 /// end.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_identity_less_hosts_cap_flag_reaches_the_rest_reply() {
     let harness = rest_harness::FleetBuilder::new()
         .await
@@ -4578,7 +4578,7 @@ async fn an_identity_less_hosts_cap_flag_reaches_the_rest_reply() {
 /// of the connection. The whole path is exercised end to end — scripted
 /// supervisor reply, drain, registry row, merge, REST body — because each
 /// hop is a place the word can be dropped.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_capped_hosts_notice_survives_the_host_going_down_and_a_helm_restart() {
     let (builder, host) = rest_harness::FleetBuilder::new()
         .await
@@ -4636,7 +4636,7 @@ async fn a_capped_hosts_notice_survives_the_host_going_down_and_a_helm_restart()
 /// registry entry and mask a broken persistence path — the assertion is
 /// that the destination, the identity, and the stale sessions all come
 /// from helm.db.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_stale_list_survives_a_helm_restart_from_helm_db_alone() {
     let (builder, host) = rest_harness::FleetBuilder::new()
         .await
@@ -4705,7 +4705,7 @@ async fn the_stale_list_survives_a_helm_restart_from_helm_db_alone() {
 /// precisely the hosts whose sessions are hardest to see. The promise is
 /// "created here is routable now", and it cannot hold for one storage
 /// shape and not the other.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4794,7 +4794,7 @@ async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
 /// found two rows where the test meant one. The merged view serves what
 /// the helm has RECORDED, so every mutation that changes what a session
 /// is — or whether it is — records the result.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn lifecycle_mutations_reach_the_list_without_waiting_for_a_refresh() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4966,7 +4966,7 @@ async fn lifecycle_mutations_reach_the_list_without_waiting_for_a_refresh() {
 /// only profile decoding fail, then proves all four handlers refuse without
 /// sending a mutation frame. The profile-backed create also pins that its
 /// otherwise necessary bundle lookup shares this preflight read.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn catalog_failure_precedes_every_session_mutation() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
 
@@ -5036,7 +5036,7 @@ async fn catalog_failure_precedes_every_session_mutation() {
 /// supervisor-only marker from every live reply shape and checks the public
 /// JSON after a catalog rename and deletion, covering all three public
 /// verdicts without relying on a periodic refresh to rewrite the rows first.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn every_live_session_reply_resolves_profile_existence_before_json() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ProfileExistence, SessionInfo, SourceProfile};
@@ -5208,7 +5208,7 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
 /// only `Unknown` defers to what was already known. Every other field
 /// of the reply is taken as given in both cases — the status alone is
 /// knowledge the reply does not have.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reply_carrying_unknown_never_erases_a_known_status() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -5308,7 +5308,7 @@ async fn a_reply_carrying_unknown_never_erases_a_known_status() {
 /// must also be a POST-seed one — it samples the seed epoch when it
 /// starts, so a pre-seed snapshot would correctly decline to commit and
 /// leave the lag in place.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -5416,7 +5416,7 @@ async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
 /// (pinned above). The source profile is deleted after the cache write so
 /// this also pins that detail replies re-read the helm catalog instead of
 /// leaking the cache's older existence verdict.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
     let (builder, host) = rest_harness::FleetBuilder::new()
         .await
@@ -5608,7 +5608,7 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
 /// and the assertions are one line each; what matters is that each
 /// parameter selects a DIFFERENT subset, which is only visible with all
 /// six side by side.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn every_filter_dimension_narrows_the_list_on_its_own() {
     let (harness, local, alpha) = filterable_fleet().await;
 
@@ -5658,7 +5658,7 @@ async fn every_filter_dimension_narrows_the_list_on_its_own() {
 /// name they remember, and rewriting historical rows on a profile
 /// delete (the shape PLAN_M6_75.md item 3 rejects) would have erased
 /// the name this filter matches.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_deleted_profiles_sessions_still_filter_under_their_snapshotted_name() {
     let (harness, _local, _alpha) = filterable_fleet().await;
 
@@ -5693,7 +5693,7 @@ async fn a_deleted_profiles_sessions_still_filter_under_their_snapshotted_name()
 /// Pinned because the alternative (OR, or last-parameter-wins) reads
 /// identically in a single-filter test: a client refining a search would
 /// see the list GROW, which is the opposite of what refining means.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn combined_filters_narrow_rather_than_widen() {
     let (harness, _local, alpha) = filterable_fleet().await;
 
@@ -5730,7 +5730,7 @@ async fn combined_filters_narrow_rather_than_widen() {
 /// substitution is meant for a helm that predates filtering, and the
 /// default view's archive exclusion IS a predicate this helm applied. A
 /// present count is what lets the client tell the two apart.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_default_archive_predicate_reports_both_counts() {
     let (harness, _local, _alpha) = filterable_fleet().await;
 
@@ -5747,7 +5747,7 @@ async fn the_default_archive_predicate_reports_both_counts() {
 /// hand-editing a URL) that misspells a status would otherwise be told
 /// there are no such sessions, which is indistinguishable from the truth
 /// and far more likely to be believed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_unknown_status_filter_is_refused_rather_than_matching_nothing() {
     let (harness, _local, _alpha) = filterable_fleet().await;
 
@@ -5768,7 +5768,7 @@ async fn an_unknown_status_filter_is_refused_rather_than_matching_nothing() {
 /// by what the user typed; and trimming makes `?title=%20` mean the same
 /// as `?title=`, so typing a space would silently clear the filter and
 /// show everything — a change the user can see and cannot explain.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
     use farhelm_proto::SessionStatus;
 
@@ -5819,7 +5819,7 @@ async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
 /// The denominator half is the point: the served `total` is a count of the
 /// view the request asked for, so the ordinary list can never show ten rows
 /// above "of 12 sessions" with nothing typed into any filter.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
     let mut archived = filterable(
         "archived",
@@ -5868,7 +5868,7 @@ async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
 /// not the other would let such a host's rows flow through unfiltered, so
 /// a search would return sessions that plainly do not match beside ones
 /// that do, with `matching` counting them.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
     use farhelm_proto::SessionStatus;
 
@@ -5923,7 +5923,7 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
 /// identity-less host would show the ordinary list under a total that counts
 /// one row it does not display, which is the incoherence the whole change
 /// removes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_identity_less_hosts_archived_rows_leave_the_default_view_s_total() {
     use farhelm_proto::SessionStatus;
 
@@ -6051,7 +6051,7 @@ async fn sortable_fleet() -> rest_harness::Harness {
 /// reason, one dimension over: a list quietly served in a different order
 /// than the one asked for looks entirely plausible, so a typo would be
 /// believed rather than noticed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
     let harness = sortable_fleet().await;
 
@@ -6118,7 +6118,7 @@ async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
 /// to be at the front and serve a list in neither order. The fixture keeps
 /// all three sequences distinct precisely so that failure could not hide
 /// behind orders that happen to coincide.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
     let (builder, alpha) = rest_harness::FleetBuilder::new()
         .await

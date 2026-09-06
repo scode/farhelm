@@ -555,7 +555,7 @@ mod tests {
 
     /// A successful discovery is use-as-is: it creates the SSH registry row
     /// and returns the peer's hello without constructing an install plan.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn probe_registers_an_answering_supervisor_as_is() {
         let (builder, expected_host) = FleetBuilder::new()
             .await
@@ -641,7 +641,7 @@ mod tests {
 
     /// Positive absence may offer a plan, but probing itself must not create
     /// a registry row, directory, unit, or payload transfer.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn positive_absence_returns_a_concrete_plan_without_touching_the_host() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -703,7 +703,7 @@ mod tests {
 
     /// Unsupported hosts stay on the manual-run path without retaining
     /// confirmation authority or touching either registry or executor.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn manual_fallback_retains_nothing_and_mutates_nothing() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -736,7 +736,7 @@ mod tests {
 
     /// A development build resolves its absent payload before directories or
     /// any other host state changes, then releases the host for another run.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn no_payloads_fails_before_the_first_mutation_and_releases_the_host() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -784,7 +784,7 @@ mod tests {
 
     /// Preflight visits every required payload before mutating, even when an
     /// earlier payload exists and only the private-tmux artifact is missing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn payload_preflight_validates_the_complete_required_set() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -840,7 +840,7 @@ mod tests {
 
     /// A failed post-insert actor reconciliation rolls back only the new row,
     /// leaving the consumed confirmation recoverable through a fresh probe.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn failed_registry_sync_rolls_back_a_newly_registered_host() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -897,7 +897,7 @@ mod tests {
 
     /// Confirming an already-registered but absent SSH host replaces stale
     /// dial coordinates with the installation paths before attachment.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn confirmed_add_repairs_stale_registered_paths() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -948,7 +948,7 @@ mod tests {
 
     /// A remote literally named `local` remains an SSH destination; transport
     /// choice comes from the request tag rather than hostname spelling.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn local_hostname_does_not_alias_the_local_transport() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -975,7 +975,7 @@ mod tests {
 
     /// UPDATE previews the installation coordinates already stored on the
     /// row and leaves both registry and host untouched until confirmation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_plan_uses_registered_paths_without_mutation() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1009,7 +1009,7 @@ mod tests {
     /// sees the host STILL skewed → execution). Regression test for the
     /// 2026-09-01 field failure where the skew refusal aborted planning as
     /// a probe error.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_plans_and_executes_against_a_skewed_supervisor() {
         let (builder, host) = FleetBuilder::new()
             .await
@@ -1084,7 +1084,7 @@ mod tests {
     /// directory, and once registered the host carries the manager's
     /// version-skew state and the update action that fixes it. Identity is
     /// recorded as unknown — the refusal precedes identity exchange.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn probe_registers_a_skewed_supervisor_for_update() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1134,7 +1134,7 @@ mod tests {
     /// the operator at the update action, the one thing that fixes skew.
     /// Covers the confirmation-revalidation arm the other skew tests do not
     /// reach.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn add_confirmation_registers_a_supervisor_that_turned_skewed() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1207,7 +1207,7 @@ mod tests {
     /// fixture, not an input — the fix must hold whether or not planning
     /// ever looks at the lib directory, which is why the assertion is on
     /// the frozen unit text.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_pins_the_accepted_host_tmux_over_a_stale_private_one() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1258,7 +1258,7 @@ mod tests {
 
     /// Manual and backend planning failures retain no UPDATE claim; once
     /// inspection recovers, the same host can immediately produce a plan.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_planning_failures_release_the_host_for_retry() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1295,7 +1295,7 @@ mod tests {
 
     /// UPDATE is not an identity-resolution mechanism: both frozen mismatch
     /// and duplicate rows are refused before host inspection begins.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_refuses_identity_freeze_states() {
         let (builder, mismatch_host) = FleetBuilder::new()
             .await
@@ -1375,7 +1375,7 @@ mod tests {
 
     /// UPDATE binds the confirmed mutation to the identity observed during
     /// planning and refuses a different answer in the final preflight.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn confirmed_update_rechecks_identity_before_mutation() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1430,7 +1430,7 @@ mod tests {
 
     /// Confirmation closes the absence race: a supervisor that starts after
     /// planning is registered and used as-is without any plan action.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn confirmed_add_reprobes_and_uses_a_new_supervisor_as_is() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1477,7 +1477,7 @@ mod tests {
 
     /// An SSH/auth failure is an error with the host's diagnostic, never the
     /// absence result that unlocks setup.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn ssh_failure_never_offers_provisioning() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1500,7 +1500,7 @@ mod tests {
 
     /// Confirmation registers the destination before the first plan action,
     /// and a second operation for that host is refused while the first waits.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn registration_precedes_the_run_and_busy_hosts_refuse_a_second_run() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1556,7 +1556,7 @@ mod tests {
 
     /// Failure names the exact action and retains control-escaped host stderr;
     /// completed actions are not rolled back.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failing_step_is_reported_with_escaped_host_stderr() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1640,7 +1640,7 @@ mod tests {
 
     /// Linger success keeps the boot promise; privilege refusal is a
     /// completed degradation with the exact login-only wording.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn conditional_linger_reports_both_outcomes() {
         for refused in [false, true] {
             let harness = harness().await;
@@ -1680,7 +1680,7 @@ mod tests {
 
     /// Probe and confirmed ADD share the host-scoped progress reader:
     /// provision returns 202 with an identity, then GET exposes that run.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rest_surface_starts_and_rereads_a_host_scoped_run() {
         let mut harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1756,7 +1756,7 @@ mod tests {
 
     /// A valid host with no retained operation has a stable, explicit idle
     /// JSON shape rather than masquerading as missing progress.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn progress_route_returns_the_idle_shape_before_any_run() {
         let mut harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1800,7 +1800,7 @@ mod tests {
     /// UPDATE uses the router-level plan/confirm handshake, returns a 202 run
     /// identity only after confirmation, exposes progress, and refuses a
     /// second confirmed plan while the host is busy.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_route_plans_confirms_and_enforces_in_flight_exclusion() {
         let mut harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1896,7 +1896,7 @@ mod tests {
     /// Host removal waits behind an in-flight run's write authority, then
     /// purges retained progress and unconsumed UPDATE confirmations with the
     /// durable row instead of leaving process-local ghosts.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn removal_serializes_with_runs_and_purges_provisioning_memory() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -1962,7 +1962,7 @@ mod tests {
     /// Typed provisioning failures keep their router-level status mapping:
     /// invalid input 400, consumed plans and busy hosts 409, backend failures
     /// 502, and missing hosts 404.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn router_maps_all_provisioning_error_classes() {
         let mut harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2039,7 +2039,7 @@ mod tests {
     /// too-old cases stay literal because the floor is DESIGNED to exclude
     /// exactly these distro packages (Ubuntu 24.04's 3.4, 26.04's 3.6,
     /// Debian 13 and Fedora 42's 3.5a) and a bump can only make that truer.
-    #[test]
+    #[farhelm_testtrace::test]
     fn host_tmux_acceptance_tracks_the_supervisor_floor() {
         let floor = farhelm_supervisor::tmux::TMUX_FLOOR;
         assert!(tmux_meets_floor(&format!("tmux {floor}")));
@@ -2065,7 +2065,7 @@ mod tests {
     /// arm catches it can vary — the script exits without reading stdin, so
     /// the helm's own hello write can EPIPE before the frame is read — and
     /// the assertion is deliberately indifferent: both arms error.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn production_probe_classifier_distinguishes_positive_absence() {
         let root = tempfile::tempdir().unwrap();
         let local_target = ProbeTarget {
@@ -2163,7 +2163,7 @@ mod tests {
     /// script printed before exec — and a remote answer WITHOUT that marker
     /// stays an error even under skew (the classifier test above keeps that
     /// case), since presence alone names no binary to dial.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_skewed_hello_is_a_positive_supervisor_observation() {
         let root = tempfile::tempdir().unwrap();
         let old_hello = || {
@@ -2246,7 +2246,7 @@ mod tests {
     /// say what is wrong. Driven through the public entry point with a real
     /// on-disk script, because this is the path `farhelm-desktop` calls at
     /// startup.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn discover_local_treats_a_skewed_supervisor_as_answering() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
@@ -2274,7 +2274,7 @@ mod tests {
     /// Child capture fails closed on either unbounded peer output or a
     /// deadline, returning only after the offending process has been killed
     /// and reaped.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn child_capture_bounds_output_and_reaps_timeouts() {
         let spawn = |script: &str| {
             let mut command = tokio::process::Command::new("sh");
@@ -2309,7 +2309,7 @@ mod tests {
 
     /// Probe diagnostics stop retaining bytes at the cap but keep draining,
     /// so an oversized producer reaches EOF and a later marker is observed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn oversized_probe_stderr_never_blocks_its_producer() {
         let (mut producer, consumer) = tokio::io::duplex(1024);
         let bytes = vec![b'x'; MAX_CHILD_STREAM_BYTES + 4096];
@@ -2339,7 +2339,7 @@ mod tests {
 
     /// Silent command failures still identify whether the host returned an
     /// exit code or was terminated by a signal.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn required_shell_diagnostics_always_include_termination_status() {
         let root = tempfile::tempdir().unwrap();
         let backend = test_system_backend(root.path());
@@ -2371,7 +2371,7 @@ mod tests {
     /// to be sent to the manual path outright; this test used to assert
     /// that for `debian` and now asserts the opposite, which is the point
     /// of this change (see the workspace's centos-gate task).
-    #[test]
+    #[farhelm_testtrace::test]
     fn reach_output_parser_covers_platform_and_tool_boundaries() {
         let supported = |os: &str, arch: &str, tmux_path: &str, tmux: &str, manager: &str| {
             format!(
@@ -2488,7 +2488,7 @@ mod tests {
 
     /// A host needing private tmux receives that payload before the unit, and
     /// the rendered unit searches the isolated payload directory first.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tmux_payload_plan_is_concrete_and_ordered() {
         let root = tempfile::tempdir().unwrap();
         let plan = layout(root.path())
@@ -2542,7 +2542,7 @@ mod tests {
     /// branch depends on ANY particular distro being present: the whole
     /// point of gating on capabilities is that this line is free to name
     /// whatever it saw.
-    #[test]
+    #[farhelm_testtrace::test]
     fn confirmation_host_line_names_the_distro_or_says_unknown() {
         let root = tempfile::tempdir().unwrap();
         let reach = |distro_id: &str| Reach {
@@ -2583,7 +2583,7 @@ mod tests {
 
     /// Production layout has no test overrides: local and SSH plans use the
     /// documented library, state, unit, and nonce-scoped temporary paths.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_layout_uses_the_exact_deployment_paths() {
         let home = PathBuf::from("/home/provisioned");
         let user_units = PathBuf::from("/xdg/systemd/user");
@@ -2641,7 +2641,7 @@ mod tests {
 
     /// Execution resolves each install action through its own payload kind,
     /// so the private-tmux branch cannot receive the Farhelm executable.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn tmux_install_uses_the_distinct_tmux_fixture() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2703,7 +2703,7 @@ mod tests {
     }
 
     /// Pending plans retain exactly the newest 64 opaque tokens.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn pending_plan_cache_evicts_only_the_oldest_at_65() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2746,7 +2746,7 @@ mod tests {
     ///
     /// Both the ADD path (which reaches this only after discovery finds
     /// nothing answering) and the UPDATE path produce it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_local_supervisor_unit_running_this_farhelm_is_off_limits_to_the_panel() {
         for managed in [true, false] {
             let harness = harness().await;
@@ -2826,7 +2826,7 @@ mod tests {
     /// answer: it is not this helm's supervisor, so there is no owner to
     /// name. A unit whose command cannot be parsed does NOT — see the
     /// unclassifiable case below.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_absent_local_supervisor_is_answered_with_run_setup_here() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2876,7 +2876,7 @@ mod tests {
     /// supervisor unit was absent (or unrecognizable) went straight on to
     /// the ordinary UPDATE planner, which installs the binary and the unit
     /// from nothing. That is precisely what D1 removed from the panel.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_absent_local_supervisor_cannot_be_installed_through_update() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2903,7 +2903,7 @@ mod tests {
     /// "there is nothing here": answering the generic run-setup message
     /// would invite the operator to have setup overwrite a file whose
     /// contents nobody understood.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unclassifiable_local_unit_is_reported_as_somebody_elses() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2937,7 +2937,7 @@ mod tests {
     /// panel INSTALLING here, and must never stop it from adopting what
     /// is already running; a helm machine set up with `farhelm helm setup`
     /// joins its own fleet exactly this way.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_running_local_supervisor_is_still_discovered() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2978,7 +2978,7 @@ mod tests {
     /// is not evidence that the machine is free to provision — treating
     /// it as absence is how a protected unit gets overwritten by a helm
     /// that merely could not read it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unreadable_local_unit_stops_both_panel_paths() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -3010,7 +3010,7 @@ mod tests {
     /// An SSH probe must never consult this machine's unit directory: the
     /// local ownership seam answers a question about the HELM's machine,
     /// and a remote host's supervisor has nothing to do with it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_ssh_probe_never_reads_a_local_unit() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -3038,7 +3038,7 @@ mod tests {
     ///
     /// The escaping and PATH-composition rules themselves are exercised in
     /// `crate::units`, which owns them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_provisioned_unit_carries_policy_and_no_ownership_marker() {
         let unit = supervisor_unit(
             Path::new("/tmp/%h/farhelm"),
@@ -3064,7 +3064,7 @@ mod tests {
 
     /// Remote shell words round-trip hostile but representable paths and
     /// reject bytes that cannot cross the text command boundary unchanged.
-    #[test]
+    #[farhelm_testtrace::test]
     fn remote_shell_path_encoding_round_trips_and_rejects_text_hazards() {
         for path in ["/tmp/a b", "/tmp/it's-here", "-leading-dash"] {
             let encoded = shell_path(Path::new(path)).unwrap();
@@ -3086,7 +3086,7 @@ mod tests {
 
     /// SFTP batch paths use double-quote escaping of their own and reject
     /// record-breaking bytes before a batch is written.
-    #[test]
+    #[farhelm_testtrace::test]
     fn sftp_batch_path_encoding_has_an_independent_grammar() {
         for (path, expected) in [
             ("/tmp/a b", "\"/tmp/a b\""),
@@ -3102,7 +3102,7 @@ mod tests {
 
     /// The locale-stable production linger classifier degrades only known
     /// authorization refusals; unrelated command failures remain fatal.
-    #[test]
+    #[farhelm_testtrace::test]
     fn linger_classifier_separates_refusal_from_failure() {
         assert!(linger_was_refused(Some(1), "Access denied"));
         assert!(linger_was_refused(
@@ -3115,7 +3115,7 @@ mod tests {
 
     /// Remote absence has a dedicated exit while inspection failures retain
     /// stderr instead of being collapsed into `None`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn remote_metadata_distinguishes_absence_from_hash_failure() {
         let root = tempfile::tempdir().unwrap();
         let target = ProvisioningTarget::Ssh {
@@ -3145,7 +3145,7 @@ mod tests {
     /// Local convergence streams hashes, installs one immutable payload
     /// snapshot, refuses unsafe temporary state, and preserves installed
     /// bytes across every pre-rename failure.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn local_atomic_install_converges_binary_and_unit_content() {
         let root = tempfile::tempdir().unwrap();
         let mut backend = test_system_backend(root.path());
@@ -3298,7 +3298,7 @@ mod tests {
 
     /// Step transitions publish feed revisions and retain running/pending,
     /// completed/skipped/degraded, and failed states for rereads.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn per_step_progress_and_feed_transitions_are_observable() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -3849,7 +3849,7 @@ mod tests {
     /// than the window after each change is tolerated indefinitely;
     /// silence of exactly the window fails; the overall bound fails even
     /// while steps keep changing; the failure text carries the snapshot.
-    #[test]
+    #[farhelm_testtrace::test]
     fn run_progress_watch_rearms_only_on_real_change_and_bounds_the_whole_wait() {
         let t0 = tokio::time::Instant::now();
         let at = |secs: u64| t0 + Duration::from_secs(secs);
@@ -4502,7 +4502,7 @@ mod tests {
     /// own, which is the case the removed `ID=ubuntu` gate used to reject
     /// outright. See [`real_provisioning_case`] for how the two shapes
     /// differ.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn provisioning_and_update_over_ssh_preserve_an_operable_session() {
         real_provisioning_case(true, true).await;
     }
@@ -4515,14 +4515,14 @@ mod tests {
     /// only entry point left into the direct-local executor — and it is a
     /// real one, since a local row whose supervisor unit was not written
     /// by `farhelm helm setup` is still the panel's to converge.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn local_provisioning_and_update_preserve_a_running_session() {
         real_provisioning_case(false, true).await;
     }
 
     /// A planted failure is followed by checked teardown of a real active
     /// runtime unit and tmux server, then verified again from the outer scope.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn teardown_guard_runs_on_failure() {
         if !user_manager_available().await {
             eprintln!(
@@ -4716,7 +4716,7 @@ mod tests {
     /// a regression that `chmod 0755`d the operator's own archive or tmux
     /// binary instead of only the extracted/copied output would satisfy
     /// every earlier assertion here and still be a real bug.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_extracts_farhelm_and_copies_tmux_for_both_arches() {
         use std::os::unix::fs::PermissionsExt as _;
 
@@ -4846,7 +4846,7 @@ mod tests {
     /// Spec: an absent source asset names the exact path `DirectoryPayloads`
     /// expected to find it at, so an operator staging the directory gets a
     /// specific, actionable path rather than a generic "not found".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_missing_file_names_the_expected_path() {
         let dir = tempfile::tempdir().unwrap();
         let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
@@ -4868,7 +4868,7 @@ mod tests {
     /// branch is reachable at the published SOURCE path, not only inside a
     /// tar archive (a different code path entirely) — here the expected
     /// archive path is itself a directory.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_reports_a_directory_at_the_source_path_as_non_regular() {
         let dir = tempfile::tempdir().unwrap();
         let archive = farhelm_archive_for(PayloadArch::X86_64);
@@ -4897,7 +4897,7 @@ mod tests {
     /// this, swapping `std::fs::metadata` back for `Path::is_file()` could
     /// collapse this case into "missing asset" and the suite would stay
     /// green.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_reports_a_symlink_loop_as_an_inspection_failure_not_absence() {
         let dir = tempfile::tempdir().unwrap();
         let archive = farhelm_archive_for(PayloadArch::X86_64);
@@ -4930,7 +4930,7 @@ mod tests {
     /// destination is EVER created — checked by listing `.extracted/` for
     /// this asset rather than a single fixed path, per F2's per-call
     /// unique naming.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_refuses_an_archive_with_no_matching_member() {
         let dir = tempfile::tempdir().unwrap();
         let archive = farhelm_archive_for(PayloadArch::X86_64);
@@ -4965,7 +4965,7 @@ mod tests {
     /// entries would mean the release build itself went wrong. F13 (review
     /// round 1) / F11 (review round 2): also proves no destination is
     /// created — see the sibling zero-match test's docstring.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_refuses_an_archive_with_several_matching_members() {
         let dir = tempfile::tempdir().unwrap();
         let archive = farhelm_archive_for(PayloadArch::X86_64);
@@ -5002,7 +5002,7 @@ mod tests {
     /// fixed path with `Path::exists()`, which follows symlinks and would
     /// have reported `false` for a dangling one left behind by a broken
     /// implementation even though a real entry remained.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_refuses_a_non_regular_entry_sharing_the_members_name() {
         for entry_type in [
             tar::EntryType::Directory,
@@ -5043,7 +5043,7 @@ mod tests {
     /// across calls — with sentinel bytes and a distinct mode, then
     /// attempts extraction from a several-members archive and requires the
     /// sentinel untouched and no additional snapshot present.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_preserves_existing_snapshots_when_extraction_fails() {
         use std::os::unix::fs::PermissionsExt as _;
 
@@ -5094,7 +5094,7 @@ mod tests {
     /// first caller's snapshot surviving the second caller's own
     /// materialization is exactly the generation-handoff safety a shared
     /// destination name did not, by itself, provide.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn directory_payloads_snapshots_are_private_and_survive_a_later_refresh() {
         let dir = tempfile::tempdir().unwrap();
         let archive = farhelm_archive_for(PayloadArch::X86_64);
@@ -5254,7 +5254,7 @@ mod tests {
     /// the broader provisioning-flow test below (which only checks a
     /// substring, because its point is proving the failure happens before
     /// host mutation) stays green regardless.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn no_payloads_message_is_exactly_the_settled_recovery_text() {
         let error = NoPayloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
@@ -5293,7 +5293,7 @@ mod tests {
     /// tests call) would be production surface existing solely for this
     /// assertion. Nothing here performs a request: the `Release` arms are
     /// only inspected, never driven.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn production_payloads_selects_by_payload_selection_and_release_build() {
         let state_dir = tempfile::tempdir().unwrap();
         let payloads = production_payloads(
@@ -5405,7 +5405,7 @@ mod tests {
     /// oracle that PRODUCTION still threads through the real crate version.
     /// The version is part of the cache directory's name, so its presence
     /// in the `Debug` rendering is enough to check without a real download.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_wiring_binds_the_cache_to_the_crate_version() {
         let state_dir = tempfile::tempdir().unwrap();
         let payloads = production_payloads(
@@ -5442,7 +5442,7 @@ mod tests {
     /// loudly rather than installing a plausible file. Everything is
     /// injected: a loopback fixture server, a temporary state directory, and
     /// the recording backend — no environment variable is read or written.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_release_url_provisions_a_host_with_verified_downloaded_payloads() {
         let release = FixtureRelease::start(Vec::new()).await;
         let harness = harness().await;
@@ -5532,7 +5532,7 @@ mod tests {
     /// future cleanup that widened its blast radius to the whole state
     /// directory, or damaged an unrelated sibling, would still pass a test
     /// that checked only `embedded-payloads` itself was gone.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_payloads_removes_a_leftover_embedded_payloads_directory() {
         let state_dir = tempfile::tempdir().unwrap();
         let leftover = state_dir.path().join("embedded-payloads");
@@ -5739,7 +5739,7 @@ mod tests {
     /// whatever the link points at (nothing, here) rather than the link
     /// itself. `production_payloads` still succeeds for an UNRELATED
     /// selection; only the legacy cleanup step is skipped.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_payloads_leaves_a_dangling_legacy_symlink_alone() {
         use std::os::unix::fs::symlink;
 
