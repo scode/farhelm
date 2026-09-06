@@ -30,6 +30,7 @@
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 /**
  * The mouse-mode fake-agent script (`crates/farhelm/src/fake_agent.rs`'s
@@ -147,38 +148,6 @@ async function waitForReportCount(
     .toBe(expected);
 }
 
-/**
- * Wait until THIS attachment's replay has fully revealed — the same
- * `replay.revealed` flag the `waitForReplayReveal`/`ReplayRecord` machinery in
- * helpers/terminal-suite.ts synchronizes on (mainly for
- * terminal-replay-rename.spec.ts's reattach tests),
- * read here directly off the primary terminal's singleton test hook
- * (`window.__farhelmTest`, published alongside `__farhelmTermReady`)
- * rather than the per-island registry those tests use, since this file
- * only ever drives the one primary `#terminal`.
- *
- * Waiting for replayed TEXT (e.g. `FAKE-AGENT READY` reappearing) is not
- * equivalent: text already present in scrollback can satisfy a substring
- * check the instant the DOM exists, before the reattach's own catch-up
- * phase — during which terminal.js buffers writes rather than applying
- * them — has actually finished. A click dispatched into that window
- * races the restored DECSET mode itself: `PaneModes`' escape sequences
- * are part of what gets replayed, so a click before they have landed
- * could hit a pane the client-side xterm instance does not yet believe
- * has mouse reporting on, encoding nothing at all.
- */
-async function waitForReplayReveal(page: Page, timeout = 15_000) {
-  await expect
-    .poll(
-      () => page.evaluate(() => !!(window as any).__farhelmTest?.replay?.revealed),
-      {
-        timeout,
-        message: "waiting for the reattach's replay to fully reveal before treating it as settled",
-      },
-    )
-    .toBe(true);
-}
-
 /** Locator for a session row by its exact title. */
 function rowByTitle(page: Page, title: string) {
   return page.locator(".session-row").filter({
@@ -270,6 +239,29 @@ async function clickTerminalCell(page: Page, col: number, row: number) {
   );
 }
 
+/**
+ * Reattach through a different session and prove the original socket is gone.
+ *
+ * A selected title alone can precede terminal reconciliation. Waiting for the
+ * intervening mount and a distinct, revealed return socket makes mode reports
+ * evidence of replay restoration rather than continued use of the old pane.
+ */
+async function reattachWithModes(page: Page, title: string, id: string, sharedId: string) {
+  const priorSocket = await page.evaluateHandle(() => (window as any).__farhelmIslands.terminal.ws);
+  try {
+    await rowByTitle(page, "e2e-session").locator(".session-row-open").click();
+    await waitForSessionMounted(page, sharedId);
+    await rowByTitle(page, title).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, id, { timeout: 15_000 });
+    await expect.poll(() => page.evaluate((prior) => {
+      const current = (window as any).__farhelmIslands?.terminal?.ws;
+      return current !== prior && prior.readyState === WebSocket.CLOSED;
+    }, priorSocket), { timeout: 15_000, message: "reattach must replace and close the original socket" }).toBe(true);
+  } finally {
+    await priorSocket.dispose();
+  }
+}
+
 test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
   // Four settle-to-exact-count polls (up to 15s each) across TWO full
   // detach/reattach cycles push comfortably past the suite's default
@@ -298,12 +290,17 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
     await form.locator('button[type="submit"]').click();
     // Success navigates straight into the new session's terminal, same
     // as every create-dialog flow in terminal.spec.ts.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForIslandMounted(page, "terminal");
     await waitForTermText(page, "FAKE-AGENT READY");
     created = true;
     // Captured ONCE, here, and never re-derived — see `id`'s own
     // `finally` handling below and `findSessionIdByTitle`'s docs.
     id = await findSessionIdByTitle(request, title);
+    if (!id) throw new Error("the created mouse-mode session never appeared in the listing");
+    // Replay can contain an old banner before the current attachment has
+    // restored DECSET modes. Every input leg waits for this session's reveal
+    // so trusted clicks exercise the restored protocol, not a half-replayed pane.
+    await waitForSessionRevealed(page, id);
 
     const clickCol = await chooseClickColumn(page);
     const clickRow = 2;
@@ -348,11 +345,10 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
     // client's attachment cycles — exactly matching what a real user's
     // tab-close-and-reopen does. ---
     // Detach = select another session (the shared row), then reselect.
-    await rowByTitle(page, "e2e-session").locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
-    await rowByTitle(page, title).locator(".session-row-open").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await waitForReplayReveal(page);
+    const sharedRow = rowByTitle(page, "e2e-session");
+    await expect(sharedRow).toHaveAttribute("data-session-id", /.+/, { timeout: 20_000 });
+    const sharedId = (await sharedRow.getAttribute("data-session-id"))!;
+    await reattachWithModes(page, title, id, sharedId);
 
     // The reveal above guarantees the reattach's replay — including any
     // restored DECSET escape sequences — has fully landed, so this read
@@ -394,11 +390,7 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
     // would pass every assertion above. Repeating the cycle for the SGR
     // leg is what actually pins that branch. ---
     // Detach = select another session (the shared row), then reselect.
-    await rowByTitle(page, "e2e-session").locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
-    await rowByTitle(page, title).locator(".session-row-open").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await waitForReplayReveal(page);
+    await reattachWithModes(page, title, id, sharedId);
 
     const sgrBaselineAfterReattach = await countReports(page, SGR_REPORT_PREFIX);
     await clickTerminalCell(page, clickCol, clickRow);
