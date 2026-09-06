@@ -92,7 +92,7 @@
 // window.
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { termText, waitForTermText } from "./helpers/term";
+import { attachSession, termText, waitForTermText } from "./helpers/term";
 
 /**
  * Every hex byte VALUE `od -v -An -tx1 -w1` has printed so far, in order,
@@ -179,11 +179,7 @@ const READ_GROUPED_DUMP_INVOCATION =
  * rather than repeated at each call site.
  */
 async function attachRawDumpSession(page: Page, id: string): Promise<void> {
-  const target = page.locator(`[data-session-id="${id}"]`);
-  await expect(target).toBeVisible({ timeout: 20_000 });
-  await target.locator(".session-row-open").click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-  await page.waitForFunction(() => (window as any).__farhelmWs?.readyState === WebSocket.OPEN);
+  await attachSession(page, id);
   // (per terminal-clipboard.spec.ts's own hard-won lesson) past the RARE
   // backstop path terminal.js falls back to when its pre-mount font
   // settling gives up before the real load lands (its own "## Font
@@ -193,13 +189,6 @@ async function attachRawDumpSession(page: Page, id: string): Promise<void> {
   // middle of a byte-level dump this file is about to start asserting on
   // exactly.
   await page.evaluate(() => (document as any).fonts.ready.then(() => undefined));
-  // Click to FOCUS the terminal (attaching via the row click leaves focus
-  // on the sidebar row) — every keyboard test in this codebase needs this
-  // first, or `page.keyboard.press` never reaches xterm's own handlers at
-  // all (terminal-clipboard.spec.ts's identical note on its own
-  // `attachSession`).
-  await page.locator("#terminal").click();
-
   // Release the gate in the shell's default cooked/echoing mode — any
   // single line does, its content is unimportant — then wait for the
   // marker `stty` itself gates (see `RAW_DUMP_INVOCATION`'s own doc).
