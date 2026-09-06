@@ -355,8 +355,10 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     // relaunches, and nothing gets downgraded to exited-unknown by the
     // attempt. This is SPEC.md's "opening and declining changes nothing"
     // as far as this PR can go; the resume OFFER itself is item 9.
+    // This is intentionally the raw form: the refusal is the premise, so
+    // there can be no stream or replay boundary for the ready helper to own.
     let refusal = client2
-        .attach(&live.id, 80, 24)
+        .attach_at_boundary(&live.id, 80, 24)
         .await
         .expect_err("an interrupted session has no terminal to attach to")
         .to_string();

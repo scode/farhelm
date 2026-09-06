@@ -340,17 +340,19 @@ async fn wait_for_settled_argv(rx: &mut TermStream, seen: &mut Vec<u8>, secs: u6
 /// pane, so reading the marker before calling it would not help).
 ///
 /// Returns the conversation id the fixture reported, like the shared
-/// helper, so a test can assert the supervisor captured THAT id.
+/// helper, so a test can assert the supervisor captured THAT id. The
+/// transcript includes initial replay and the fixture's readiness and record
+/// witnesses; the returned stream has already consumed those setup reads and
+/// the replay marker. Callers must not wait for that marker again.
 async fn provoke_wide_record(
     h: &Harness,
     session: &SessionInfo,
 ) -> (u32, TermStream, Vec<u8>, String) {
-    let (chan, mut rx) = h
+    let (chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach");
-    let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
     h.client.send_input(chan, b"first prompt\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 30).await;
@@ -497,12 +499,11 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
         .await
         .expect("resume the running wrapper session");
 
-    let (_chan, mut rx) = h
+    let (_chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach after the relaunch");
-    let mut seen = Vec::new();
     // Anchored on `--resume `, not on the argv marker: a reattach replays
     // the terminal's history, so the previous generation's `FAKE-AGENT
     // ARGV:` line is already in this buffer before the relaunched fixture
@@ -596,12 +597,11 @@ async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
     // READY is what proves the first launch is actually up, so the restart
     // below exercises a live-session relaunch rather than racing the
     // initial spawn.
-    let (_chan, mut rx) = h
+    let (_chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach");
-    let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
 
     assert_eq!(
@@ -616,12 +616,11 @@ async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
         .await
         .expect("fresh-restart the running wrapper session");
 
-    let (chan, mut rx) = h
+    let (chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach after the relaunch");
-    let mut seen = Vec::new();
     // The first marker this attach sees IS the relaunched run's. Both
     // generations print the identical argv line (a fresh restart reruns
     // the same invocation), but `respawn-pane` reinitializes the visible
@@ -714,12 +713,11 @@ async fn a_generic_wrapper_with_a_template_falls_back_through_the_wrapper() {
          of this test has no meaning if it does not"
     );
 
-    let (_chan, mut rx) = h
+    let (_chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach");
-    let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
     assert_wrapper_got(&session.id, work.path());
 
@@ -732,12 +730,11 @@ async fn a_generic_wrapper_with_a_template_falls_back_through_the_wrapper() {
         .await
         .expect("restart the wrapper session through its fallback template");
 
-    let (_chan, mut rx) = h
+    let (_chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach after the relaunch");
-    let mut seen = Vec::new();
     // Anchored on the template's own flag rather than on the argv marker:
     // a reattach replays the create-time launch's marker, and the flag is
     // the one token that replay cannot produce.
@@ -821,12 +818,11 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
         .await
         .expect("create a wrapper session through a symlinked working directory");
 
-    let (_chan, mut rx) = h
+    let (_chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach");
-    let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
     assert_wrapper_got(&session.id, &link);
 
@@ -840,12 +836,11 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
         .await
         .expect("fresh-restart the wrapper session");
 
-    let (_chan, mut rx) = h
+    let (_chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach after the relaunch");
-    let mut seen = Vec::new();
     // The first marker is the relaunched run's, for the same reason as in
     // the fresh-restart test above: the respawn reinitialized the grid, the
     // first run never scrolled, so no replay can carry the old marker.
@@ -897,8 +892,11 @@ async fn stopping_a_wrapper_session_reaps_the_wrapper_and_the_agent() {
         .await
         .expect("create a wrapper session running the spawner fixture");
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
     let agent_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
