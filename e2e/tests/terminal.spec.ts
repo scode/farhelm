@@ -1076,9 +1076,9 @@ test("second client takes over; first shows the detach banner", async ({
 // entirely takes the "no such session: {id}" arm of `ControlMsg::Attach`'s
 // handler (service.rs), while a genuine restart-gap row (present in the
 // map, `entry.terminal` empty) takes the sibling "session {id} has no
-// terminal: the supervisor (or its tmux server) restarted after the agent
-// ended" arm right below it — distinct branch, distinct wording, not
-// reproduced here. What the two DO share, and what this test actually
+// terminal ..." arm right below it, worded from the session's durable
+// outcome (`missing_terminal_message`) — distinct branch, distinct
+// wording, not reproduced here. What the two DO share, and what this test actually
 // exercises, is everything downstream of that error: `serve_term` in
 // farhelm-helm/src/lib.rs attaches over a REAL WebSocket, gets back
 // whichever error, and relays it as a genuine `detached` control message
