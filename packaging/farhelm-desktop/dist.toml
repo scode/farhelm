@@ -30,7 +30,7 @@
 
 [package]
 name = "farhelm-desktop"
-version = "0.5.0-rc.1"
+version = "0.5.0-rc.2"
 description = "Farhelm desktop window (webview shell around the helm)"
 repository = "https://github.com/scode/farhelm"
 homepage = "https://github.com/scode/farhelm"
