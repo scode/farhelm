@@ -842,7 +842,7 @@ mod tests {
     /// the picture entirely, leaving the entry construction this test is
     /// about. The row still has to exist, because archive reads the durable
     /// tmux name before anything else.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archiving_shares_the_launchs_hook_cells_with_the_entry_it_replaces() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())

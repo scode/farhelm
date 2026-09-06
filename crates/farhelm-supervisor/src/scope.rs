@@ -1018,7 +1018,7 @@ mod tests {
     /// sanitizing of a non-UUID id would be non-injective — two live sessions
     /// could map onto one unit, so stopping one would kill the other's agent.
     /// Refusing is what makes that unconstructible.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unit_names_are_generation_scoped_and_only_ever_derived_from_uuids() {
         assert_eq!(
             unit_name(UUID_A, 0).as_deref(),
@@ -1050,7 +1050,7 @@ mod tests {
     /// marker would aim a `systemctl kill` at whatever unit that marker
     /// spelled. Refusing is what makes that unconstructible, exactly as
     /// for [`unit_name`].
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_unit_names_are_keyed_by_both_ids_and_refuse_anything_else() {
         const UUID_B: &str = "9c3d5a71-0000-4000-8000-0000000000ff";
         assert_eq!(
@@ -1085,7 +1085,7 @@ mod tests {
     /// Real UUIDs from the real minter must always be nameable — the other
     /// direction of the invariant above, and the one whose failure would
     /// silently disable the whole feature rather than announce itself.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_minted_session_id_can_name_a_unit() {
         for _ in 0..64 {
             let id = uuid::Uuid::new_v4().to_string();
@@ -1098,7 +1098,7 @@ mod tests {
     /// than a silent success. This is the shape CI's whole fallback proof
     /// rests on — if `disabled()` ever reported a unit as existing, the
     /// fallback tests would start exercising the scope path without saying so.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_disabled_manager_reports_nothing_and_refuses_to_kill() {
         let scopes = ScopeManager::disabled();
         assert!(!scopes.available().await);
@@ -1111,7 +1111,7 @@ mod tests {
     /// explicitly ("probe once, cache"). Pinned through the fake's sink
     /// because caching is otherwise invisible: a second probe would return the
     /// same answer and look identical.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn availability_is_probed_at_most_once() {
         let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = {
@@ -1135,7 +1135,7 @@ mod tests {
     ///
     /// Skipped loudly without a user manager: there is nothing to probe, and
     /// asserting on a hand-built prefix would only test the test.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_probed_launch_prefix_pins_every_load_bearing_flag() {
         let scopes = ScopeManager::systemd();
         if !scopes.available().await {
@@ -1168,7 +1168,7 @@ mod tests {
     ///
     /// Run against the REAL binary because the whole question is what THIS
     /// systemd does with the flag; skipped loudly where there is none.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_dollar_sign_in_an_argument_survives_the_wrapper() {
         let scopes = ScopeManager::systemd();
         if !scopes.available().await {
@@ -1206,7 +1206,7 @@ mod tests {
     /// spends what is left of `PROBE_TIMEOUT` against a manager that JUST
     /// proved itself slow, for strictly worse odds. Every other failure
     /// shape keeps retrying, unchanged from before this fix.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_a_timeout_shape_skips_the_flag_retry() {
         assert!(
             !should_retry_without_flag(ProbeFailureShape::Timeout),
@@ -1224,7 +1224,7 @@ mod tests {
     /// picks up on the way out (`probe_once`'s "the probe scope never became
     /// visible..." and friends). A chain walk rather than a top-level check
     /// is what makes that survive.
-    #[test]
+    #[farhelm_testtrace::test]
     fn classifies_a_wrapped_timeout_marker_regardless_of_context_depth() {
         let bare = anyhow::Error::new(QueryTimedOut);
         assert_eq!(classify_probe_failure(&bare), ProbeFailureShape::Timeout);
@@ -1248,7 +1248,7 @@ mod tests {
     /// read "timeout" even without a retry ever having been attempted, two
     /// failed attempts must read "retry_failed" (the scenario the flag retry
     /// exists for), and a single non-timeout failure defaults to "error".
-    #[test]
+    #[farhelm_testtrace::test]
     fn describes_each_probe_failure_shape_by_its_own_marker() {
         let lone_timeout =
             anyhow::Error::new(QueryTimedOut).context("the probe scope never became visible");

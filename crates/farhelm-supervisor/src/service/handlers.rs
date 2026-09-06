@@ -3342,7 +3342,7 @@ mod tests {
     /// This pins the authority split: the supervisor validates and stores
     /// launch fields but never consults a profile catalog or invents an
     /// existence verdict.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_resolved_create_records_the_bundle_without_catalog_resolution() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -3408,7 +3408,7 @@ mod tests {
     ///
     /// This is the offline scripting contract: the parent, not ambient host
     /// history, determines invocation, integration, resume, and provenance.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn selectorless_spawn_copies_the_asking_sessions_bundle_offline() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -3463,7 +3463,7 @@ mod tests {
 
     /// A named spawn with no attached helm refuses with both available
     /// remedies instead of falling back to the parent's agent silently.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn named_spawn_without_a_helm_explains_how_to_reuse_the_parent() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -3527,7 +3527,7 @@ mod tests {
     /// `reservation(key)`, not with "the table is empty": a claim that was
     /// wrongly settled is still a claim, and only asking for the key by
     /// name can tell the difference.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_pre_storage_create_refusal_leaves_no_session_or_reservation() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -3678,7 +3678,7 @@ mod tests {
 
     /// Archive is a real lifecycle request: even a missing row is answered
     /// by the archive handler with the ordinary correlated not-found shape.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_of_a_missing_session_is_answered_by_the_real_handler() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -3725,7 +3725,7 @@ mod tests {
 
     /// Repeating archive against the state already requested does no
     /// teardown and returns the current archived row.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_of_an_archived_session_is_an_idempotent_success() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -3780,7 +3780,7 @@ mod tests {
 
     /// Aborting the connection-owned reply waiter cannot cancel archive's
     /// supervisor-owned mutation or release its lifecycle claim early.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_survives_connection_task_cancellation() {
         let state = StateDir::new();
         let entered = Arc::new(tokio::sync::Notify::new());
@@ -3904,7 +3904,7 @@ mod tests {
     /// step. If the handler omitted the claim or released it around the slow
     /// teardown, restart could act on the still-live pre-archive entry and
     /// report a competing mutation while archive was still in flight.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn restart_waits_for_a_blocked_archive_lifecycle_claim() {
         let (_state, sup, entered, release) = blocked_archive_supervisor().await;
         let (mut archive_tasks, mut archive_rx) = dispatch_for_test(
@@ -3969,7 +3969,7 @@ mod tests {
     /// Once the blocked archive finishes, delete sees the archived entry
     /// and removes it normally. Without the shared claim, either handler can
     /// make the other's stale entry authoritative and resurrect a row.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn delete_waits_for_a_blocked_archive_lifecycle_claim() {
         let (_state, sup, entered, release) = blocked_archive_supervisor().await;
         let (mut archive_tasks, mut archive_rx) = dispatch_for_test(
@@ -4149,7 +4149,7 @@ mod tests {
     /// the moment it is finally allowed to run, and a `SessionDeleted`
     /// here would mean the test built a real session by accident and
     /// stopped exercising the fence.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn restricted_delete_waits_for_an_in_flight_agent_request_fence() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -4226,7 +4226,7 @@ mod tests {
     /// The verb is `Rename` rather than `Stop`/`Archive` because the point
     /// is reached before any of the three diverge, and rename is the one
     /// whose name does not invite a reader to wonder what it tore down.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_mutating_agent_request_claims_the_delete_fence_and_a_listing_does_not() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -4332,7 +4332,7 @@ mod tests {
     /// open instead. That seam is only meaningful where it sits — below the
     /// claim, above the check — so a refactor that moves the claim must move
     /// the gate with it or this test stops pinning anything.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_delete_fence_is_claimed_before_the_credential_is_checked() {
         let state = StateDir::new();
         let entered = Arc::new(tokio::sync::Notify::new());
@@ -4456,7 +4456,7 @@ mod tests {
     /// `ControlMsg::Error` instead — a shape the asking CLI decodes on a
     /// different path from every other relay refusal, so half the failures
     /// would render differently from the other half.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn dispatch_refuses_an_invalid_agent_verb_as_an_agent_response() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -4508,7 +4508,7 @@ mod tests {
     /// held by the very upcall waiting for it to finish. Wrapped in an
     /// explicit timeout rather than left to hang, so a regression here
     /// fails this test instead of wedging the run.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn agent_request_fence_does_not_block_the_same_ids_lifecycle_claim() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -4546,7 +4546,7 @@ mod tests {
     /// that way: the target supervisor accepts one (see
     /// `RenameSession::title`), and a doorway check that refused it would
     /// be inventing a rule the far end does not have.
-    #[test]
+    #[farhelm_testtrace::test]
     fn validate_agent_verb_bounds_targets_and_titles() {
         assert!(validate_agent_verb(&AgentVerb::Hosts {}).is_ok());
         assert!(validate_agent_verb(&AgentVerb::Sessions {}).is_ok());
@@ -4665,7 +4665,7 @@ mod tests {
     /// coverage of two fields would have said nothing about the other two.
     /// The host name is pinned separately, on its own allowance, for the
     /// reason [`validate_create_fields`] gives.
-    #[test]
+    #[farhelm_testtrace::test]
     fn validate_agent_verb_bounds_the_creating_verbs() {
         // A builder rather than one base value spread with `..`: struct
         // ENUM variants have no functional-update syntax, so varying one
@@ -4874,7 +4874,7 @@ mod tests {
 
     /// An archived session still exists, so attach names that state as an
     /// invalid request instead of misreporting the row as not found.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn attach_to_an_archived_session_is_refused_by_state() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -4939,7 +4939,7 @@ mod tests {
     /// inside an allowed operation. Adding an operation must not quietly
     /// turn the first half into a tautology about whichever message this
     /// test happens to pick.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn restricted_dispatch_refuses_an_off_list_message_and_a_forged_parent() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5002,7 +5002,7 @@ mod tests {
     /// Hello-time authentication is only admission to the connection; the
     /// lifecycle-serialized check here is what prevents a cached bearer from
     /// creating descendants after its authority row is gone.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn restricted_create_revalidates_after_its_parent_is_deleted() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5175,7 +5175,7 @@ mod tests {
     /// client with no timeout hangs forever. That is why this arm exists
     /// at all, and why the exact message is pinned — it is the only thing
     /// telling the sender which door to use instead.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_helm_may_not_report_a_conversation_identity() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5222,7 +5222,7 @@ mod tests {
     /// stays open. Reporting revalidates for the same reason creating
     /// does, and this is the check that stops a stale or forged credential
     /// from rewriting a live session's resume identity.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_with_an_invalid_credential_is_unauthorized() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5289,7 +5289,7 @@ mod tests {
     /// leaves a request/reply client waiting on one that never comes —
     /// exactly the hang the helm-refusal arm exists to prevent, reached
     /// here by a different route.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_carrying_an_implausible_identity_is_refused() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5347,7 +5347,7 @@ mod tests {
     /// is then precisely what must never be resumed. A handler that
     /// treated the second report as a duplicate would leave farhelm
     /// offering to resume a conversation the user has already thrown away.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_claims_the_resume_identity_and_a_later_one_replaces_it() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5419,7 +5419,7 @@ mod tests {
     /// is simply lost and the scan remains the fallback for that session,
     /// which it still is precisely because this refusal left the state
     /// unsettled.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_is_refused_and_dropped_while_the_supervisor_is_not_recording() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5476,7 +5476,7 @@ mod tests {
     /// response to a failed write, not SQLite's behaviour. `Internal`
     /// rather than `Conflict` is the reply, because unlike a stale
     /// generation something really did malfunction.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_whose_write_fails_changes_nothing_and_answers_internal() {
         let state = StateDir::new();
         let attempts: Arc<std::sync::Mutex<Vec<crate::service::CaptureWrite>>> =
@@ -5555,7 +5555,7 @@ mod tests {
     /// path under test does no I/O beyond one SQLite write, so seconds are
     /// orders of magnitude of headroom, and nothing here is a latency
     /// assertion.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_is_answered_while_the_session_lifecycle_claim_is_held() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5605,7 +5605,7 @@ mod tests {
     /// character boundary, because slicing a `String` mid-UTF-8 panics and
     /// this input is attacker-chosen. A cap enforced with `&s[..N]` would
     /// turn a log-hygiene measure into a remote panic.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_reported_source_is_bounded_and_stripped_of_control_characters() {
         assert_eq!(sanitized_source("startup"), "startup");
         assert_eq!(
@@ -5649,7 +5649,7 @@ mod tests {
     /// enough bytes to blow the cap — because the property is that NONE of
     /// them can reject a report, and separate cases would only make it
     /// easier to fix one and lose the others.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_hostile_report_source_is_sanitized_without_costing_the_report() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5714,7 +5714,7 @@ mod tests {
     /// because the durable ROW is what makes the fallback possible and
     /// `reporting_session` is the one helper that seeds a row a report can
     /// legitimately claim.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_during_the_publication_gap_is_written_from_the_row() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5762,7 +5762,7 @@ mod tests {
     /// the surviving launch's own hook is the one entitled to speak for this
     /// session now. The entry is left at the OLD generation on purpose, which
     /// is exactly the state a stale hook's report is judged against.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_for_a_superseded_launch_is_refused_as_a_conflict() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5814,7 +5814,7 @@ mod tests {
     /// loudly anywhere — the session would simply stop being resumable the
     /// day a vendor's id format grew, and the scan fallback would cover for
     /// it convincingly enough that nobody would look here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_at_exactly_the_byte_cap_is_accepted() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5842,7 +5842,7 @@ mod tests {
     /// An admitted spawn receives bounded idempotency, preserves its direct
     /// parent, replays an identical key, conflicts if only that parent
     /// intent changes, and may reuse the key after its child is deleted.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn restricted_create_is_parented_session_lifetime_and_parent_sensitive() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5943,7 +5943,7 @@ mod tests {
     /// read immediately: this arm is spawned (a restart can run a
     /// multi-second kill sweep), so a `try_recv` straight after the call
     /// would race the task rather than test it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn restart_of_an_unknown_session_replies_not_found() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -5998,7 +5998,7 @@ mod tests {
     /// `handle_control` dispatcher (not just the cap arithmetic in
     /// isolation) against a real `Supervisor`, since the invariant this
     /// protects is about what happens at the call site.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn create_session_over_field_cap_is_rejected_before_any_side_effect() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -6069,7 +6069,7 @@ mod tests {
     /// collapse every create from a client that forgot to fill the field
     /// into a single intent — the second such create would replay the
     /// first's session instead of making its own.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_degenerate_intent_key_is_rejected_before_anything_is_stored() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -6192,7 +6192,7 @@ mod tests {
     /// template of very many tiny ones costs almost no bytes and is caught
     /// by the element cap. Either shape unbounded is a permanent write
     /// sized by the request.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_oversized_resume_template_is_refused_before_anything_is_stored() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -6273,7 +6273,7 @@ mod tests {
     /// also proves the refusal is scoped to its own request: a second,
     /// ordinary request on the same connection (same `tx`) must still get
     /// an honest reply.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn list_sessions_call_site_refuses_a_record_too_large_to_fit_alone() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -6422,7 +6422,7 @@ mod tests {
     /// entry without ever consulting `pane_states`) — `LIST_SESSIONS_CAP +
     /// 1` REAL tmux sessions would be slow and environment-dependent for
     /// no added signal.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn list_sessions_honors_the_session_cap_at_the_handler_level() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -6550,7 +6550,7 @@ mod tests {
     /// independent sort to compare against — the tiebreak direction itself
     /// is exercised, and separately pinned, by
     /// `list_sessions_same_created_at_tiebreaks_ascending_by_id` below.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn list_sessions_replies_in_creation_order_newest_first() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -6583,7 +6583,7 @@ mod tests {
 
     /// The order's tiebreak direction, pinned in isolation: three sessions
     /// sharing one `created_at` must come back ascending by id.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn list_sessions_same_created_at_tiebreaks_ascending_by_id() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -6624,7 +6624,7 @@ mod tests {
     /// just supplying terminal-less fixtures against a healthy one — if
     /// `ListSessions` asked tmux anything here, this test would see an
     /// `Error` reply instead of the expected `SessionList`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn list_sessions_skips_pane_states_when_nothing_has_a_terminal() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())

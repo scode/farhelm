@@ -884,7 +884,7 @@ mod tests {
     /// [`run_exec_failure_child`] under its exact test name. The two modes
     /// cover the real filesystem and the sentinel-write fault seam without
     /// returning either case to libtest cleanup.
-    #[test]
+    #[farhelm_testtrace::test]
     #[ignore = "the child half of the exec-failure isolation tests"]
     fn exec_failure_child() {
         let spec_path = std::env::var_os(EXEC_FAILURE_CHILD_SPEC)
@@ -915,7 +915,7 @@ mod tests {
     /// The ordinary case: no launch has ever failed for this session, so
     /// there is no sentinel file at all, and the reader must say so
     /// plainly rather than treating a missing file as any kind of error.
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_launch_sentinel_is_none_when_nothing_was_ever_written() {
         let tmp = tempfile::tempdir().unwrap();
         let result = read_launch_sentinel(tmp.path(), "never-launched", 0).unwrap();
@@ -928,7 +928,7 @@ mod tests {
     /// independently — proving the two sides of this contract (the
     /// writer inside the shim, the reader inside the supervisor) actually
     /// agree on where a launch's sentinel lives.
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_launch_sentinel_reads_back_what_the_shim_wrote() {
         let tmp = tempfile::tempdir().unwrap();
         let id = "session-1";
@@ -970,7 +970,7 @@ mod tests {
     /// never folded into `Ok(None)`, which would silently convert a real
     /// anomaly (something else has clobbered this launch's sentinel path)
     /// into "no launch failure known".
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_launch_sentinel_reports_a_directory_at_the_status_path_loudly() {
         let tmp = tempfile::tempdir().unwrap();
         let id = "session-dir";
@@ -991,7 +991,7 @@ mod tests {
     /// of anomaly as invalid UTF-8 — and must be refused just as loudly,
     /// not treated as "no sentinel" (`Ok(None)`) nor as an empty-but-valid
     /// detail string.
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_launch_sentinel_rejects_empty_and_whitespace_only_content() {
         let tmp = tempfile::tempdir().unwrap();
         for (id, content) in [("empty", ""), ("blank", "   \n\t  ")] {
@@ -1014,7 +1014,7 @@ mod tests {
     /// it must come back as `Err`, never be folded into `Ok(None)` as if
     /// nothing had ever gone wrong. A silent "no sentinel" here would let
     /// a genuine launch failure read back as a plain, wrong `Exited`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn read_launch_sentinel_refuses_to_treat_invalid_utf8_as_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let id = "session-2";
@@ -1037,7 +1037,7 @@ mod tests {
     /// classifier will read — 0600, containing the errno, at the path the
     /// spec named — via the same code path production uses, not a
     /// synthetic call into `crate::files` directly.
-    #[test]
+    #[farhelm_testtrace::test]
     fn exec_launch_spec_writes_a_durable_sentinel_on_exec_failure() {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
@@ -1085,7 +1085,7 @@ mod tests {
     /// at all makes `exec` fail for a completely different reason
     /// (permissions, not absence), and both must classify identically —
     /// a durable sentinel naming the failure, never a silent "exited".
-    #[test]
+    #[farhelm_testtrace::test]
     fn exec_launch_spec_writes_a_durable_sentinel_on_a_non_executable_file() {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
@@ -1120,7 +1120,7 @@ mod tests {
     /// read failure with NOTHING written anywhere — invisible to any
     /// later classifier, silently converting what should be "error" into
     /// "exited" (there being no evidence of a launch attempt at all).
-    #[test]
+    #[farhelm_testtrace::test]
     fn exec_launch_spec_records_a_sentinel_for_a_missing_spec() {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
@@ -1143,7 +1143,7 @@ mod tests {
     /// parsing, but the destination path is derived from `spec_path`
     /// alone (never from the unparseable content), so it is known
     /// regardless of how badly the JSON is broken.
-    #[test]
+    #[farhelm_testtrace::test]
     fn exec_launch_spec_records_a_sentinel_for_a_malformed_spec() {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
@@ -1163,7 +1163,7 @@ mod tests {
     /// reachable from valid JSON before item 21: it must get the same
     /// durable-sentinel treatment as every other failure branch, not the
     /// bare unrecorded error the pre-fix code returned.
-    #[test]
+    #[farhelm_testtrace::test]
     fn exec_launch_spec_records_a_sentinel_for_empty_argv() {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
@@ -1194,7 +1194,7 @@ mod tests {
     /// before the write's publish step, complete at or after it. This
     /// supersedes the earlier, generic-duplicate version of this test
     /// that bypassed the shim entirely.
-    #[test]
+    #[farhelm_testtrace::test]
     fn exec_launch_spec_with_seam_reports_both_failures_without_a_torn_sentinel() {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
@@ -1228,7 +1228,7 @@ mod tests {
     /// environment section: login + interactive + exec-shim, exactly.
     /// `-i` is the load-bearing flag (bare `-c` skips rc files), so a
     /// regression that drops it must fail here.
-    #[test]
+    #[farhelm_testtrace::test]
     fn window_command_is_login_interactive_exec_shim() {
         let cmd = window_command(
             "/bin/bash",
@@ -1254,7 +1254,7 @@ mod tests {
     /// Exercised with a scope prefix, the one thing that legitimately
     /// splices into the command, to show it lands after the `exec` word
     /// rather than as a command of its own.
-    #[test]
+    #[farhelm_testtrace::test]
     fn window_command_script_runs_nothing_before_the_exec() {
         let cmd = window_command(
             "/bin/bash",
@@ -1278,7 +1278,7 @@ mod tests {
 
     /// The final exec receives the session credential and the exact socket
     /// that minted it; neither may depend on a guessed state-directory path.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_command_injects_the_spawn_contract() {
         let spec = LaunchSpec {
             argv: vec!["agent".to_string()],
@@ -1327,7 +1327,7 @@ mod tests {
     /// contract), the shim still `exec`ing the agent (the sentinel
     /// contract). A prefix that wrapped the shell instead, or that
     /// displaced the `exec`, would break one of the two silently.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_scope_prefix_wraps_only_the_shim_invocation() {
         // A hand-written prefix, not one from `ScopeManager`: what is under
         // test here is the COMPOSITION (where the prefix lands in the chain),
@@ -1375,7 +1375,7 @@ mod tests {
     /// the user their rc-file environment (SPEC.md's environment
     /// contract). Pinned as a complete argv so a future addition to the
     /// chain cannot slip in unnoticed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_window_command_is_a_bare_login_interactive_shell() {
         assert_eq!(
             tab_window_command("/bin/zsh", Vec::new()),
@@ -1389,7 +1389,7 @@ mod tests {
     /// "fixes" into symmetry with `window_command`. A prefix that ended up
     /// inside or after the shell would leave the tab's own shell outside
     /// the cgroup, which is exactly the process close promises to kill.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_tab_scope_prefix_wraps_the_shell_itself() {
         let prefix: Vec<String> = ["systemd-run", "--user", "--scope", "--"]
             .iter()
@@ -1417,7 +1417,7 @@ mod tests {
     /// A state dir under a path with spaces or quotes must still produce
     /// a command the shell parses as one argument — otherwise sessions
     /// fail to launch on perfectly legal home directories.
-    #[test]
+    #[farhelm_testtrace::test]
     fn window_command_quotes_hostile_paths() {
         let cmd = window_command(
             "/bin/zsh",
@@ -1441,7 +1441,7 @@ mod tests {
     /// The shell-resolution chain exists for systemd user services older
     /// than 255, which do not set $SHELL; getting it wrong means agents
     /// launch under /bin/sh without the user's environment.
-    #[test]
+    #[farhelm_testtrace::test]
     fn shell_resolution_prefers_env_then_passwd_then_sh() {
         assert_eq!(
             resolve_shell_from(Some("/bin/fish".into()), Some("/bin/zsh".into())),
@@ -1468,7 +1468,7 @@ mod tests {
     /// Containers and user namespaces can legitimately run under a euid
     /// with no passwd entry at all, which production code already treats
     /// as `None`, so this only asserts shape when a result comes back.
-    #[test]
+    #[farhelm_testtrace::test]
     fn passwd_shell_for_euid_resolves_to_absolute_path() {
         if let Some(shell) = passwd_shell_for_euid() {
             assert!(
@@ -1482,7 +1482,7 @@ mod tests {
     /// shell last; this is the only contract [`parse_getent_passwd_line`]
     /// relies on, so pin it against the documented field order rather
     /// than trusting the `rsplit` call by inspection alone.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_getent_passwd_line_extracts_last_field() {
         assert_eq!(
             parse_getent_passwd_line("root:x:0:0:root:/root:/bin/bash"),
@@ -1494,7 +1494,7 @@ mod tests {
     /// must be treated the same as `getent` producing nothing at all, so
     /// the caller falls through to the `getpwuid_r` rung instead of
     /// "resolving" to an empty string.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_getent_passwd_line_rejects_empty_shell() {
         assert_eq!(parse_getent_passwd_line("root:x:0:0:root:/root:"), None);
     }
@@ -1504,7 +1504,7 @@ mod tests {
     /// an infinite loop against a real too-small hint. The closure
     /// records every buffer length it was handed so the test can verify
     /// growth directly instead of trusting the return value alone.
-    #[test]
+    #[farhelm_testtrace::test]
     fn lookup_with_growing_buffer_grows_on_erange_then_succeeds() {
         let mut seen_lens = Vec::new();
         let shell = lookup_with_growing_buffer(64, 0, |buf| {
@@ -1525,7 +1525,7 @@ mod tests {
     /// of the cap is to bound this exact scenario. The closure records
     /// every length it saw so the assertion checks the cap directly
     /// rather than trusting that the loop merely returned eventually.
-    #[test]
+    #[farhelm_testtrace::test]
     fn lookup_with_growing_buffer_gives_up_past_cap() {
         let mut seen_lens = Vec::new();
         let shell = lookup_with_growing_buffer(1024, 0, |buf| {
@@ -1543,7 +1543,7 @@ mod tests {
     /// A non-`ERANGE` errno is a hard failure the driver must not retry —
     /// distinguishing it from `Erange` is the entire reason `PwAttempt`
     /// has separate variants instead of a bare `Result<_, i32>`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn lookup_with_growing_buffer_errno_returns_none() {
         let shell = lookup_with_growing_buffer(64, 0, |_| PwAttempt::Errno(13));
         assert_eq!(shell, None);
@@ -1552,7 +1552,7 @@ mod tests {
     /// `rc == 0` with a null result pointer means "no such passwd entry",
     /// which must resolve the same way as any other unresolvable lookup
     /// (`None`), not be mistaken for success with an empty shell.
-    #[test]
+    #[farhelm_testtrace::test]
     fn lookup_with_growing_buffer_no_entry_returns_none() {
         let shell = lookup_with_growing_buffer(64, 0, |_| PwAttempt::NoEntry);
         assert_eq!(shell, None);
@@ -1562,7 +1562,7 @@ mod tests {
     /// or non-UTF-8); the closure signals this as `Shell(None)`, and the
     /// driver must pass that through as "no shell" rather than treating
     /// "entry found" as proof a shell was found.
-    #[test]
+    #[farhelm_testtrace::test]
     fn lookup_with_growing_buffer_shell_none_returns_none() {
         let shell = lookup_with_growing_buffer(64, 0, |_| PwAttempt::Shell(None));
         assert_eq!(shell, None);

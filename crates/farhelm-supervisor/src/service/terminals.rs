@@ -2160,7 +2160,7 @@ mod tests {
     /// negative assertion guards the regression this replaced — wording
     /// that stated the restart came "after the agent ended", an ordering
     /// SPEC.md says the supervisor cannot know after a reboot.
-    #[test]
+    #[farhelm_testtrace::test]
     fn missing_terminal_wording_follows_the_durable_outcome() {
         let resumable = missing_terminal_message(
             "s-1",
@@ -2266,7 +2266,7 @@ mod tests {
     /// reaper. This test pins the registry half of that handoff: waiting stays
     /// blocked while the result is absent, then the successful result removes
     /// the barrier instead of leaving a terminal permanently unattached.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_output_reap_barrier_blocks_until_cleanup_succeeds() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2302,7 +2302,7 @@ mod tests {
     /// Treating a failed reaper like success would recreate the overlapping
     /// control-client race on the next attach. The error must therefore reach
     /// the waiter and remain in the registry for every later attempt.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_output_reap_remains_fail_closed() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2336,7 +2336,7 @@ mod tests {
     /// Output-client overlap is per pane, even though both clients attach to
     /// the same tmux session. A session-wide check here would let one stuck tab
     /// make every otherwise-independent terminal unavailable.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn output_reap_barriers_are_scoped_to_one_terminal() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2363,7 +2363,7 @@ mod tests {
     /// Reapers intentionally retry forever when tmux cannot acknowledge the
     /// safe boundary. The connection dispatcher must still regain control, and
     /// the retained registry entry must keep later replacement attempts closed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn output_reap_waits_are_bounded_without_erasing_the_barrier() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe_and_timeouts(
@@ -2400,7 +2400,7 @@ mod tests {
     /// The candidate is unregistered, so the per-session lease barrier cannot
     /// protect this boundary. The runtime-owned competing reaper must still
     /// keep the losing request pending until its task acknowledges teardown.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_competing_sink_reaper_waits_for_shutdown_before_returning() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2450,7 +2450,7 @@ mod tests {
     /// The failure must survive the losing request and be consulted by the
     /// next ensure call; otherwise one caller would see an error while another
     /// immediately created the overlapping client that error warned about.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_competing_reap_poison_is_refused_by_the_next_ensure() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2494,7 +2494,7 @@ mod tests {
     /// committed yet. If the last committed lease disappears and that wait is
     /// then cancelled, the provisional lease must install `Reaping`
     /// synchronously instead of dropping the handle through abort-only cleanup.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn cancelling_provisional_sink_readiness_publishes_a_reaping_barrier() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2567,7 +2567,7 @@ mod tests {
     /// ensure must remain pending until that reaper publishes an outcome.
     /// Returning while the gate is closed would let the wire attach reply
     /// overtake process exit even if cleanup finished moments afterward.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_same_session_ensure_waits_for_the_reaper_outcome() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2622,7 +2622,7 @@ mod tests {
     /// Candidate cleanup is tracked separately from the registered sink, so a
     /// successful ensure cannot return the winner while an abandoned control
     /// client for the same tmux session is still being reaped.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_abandoned_candidate_blocks_ensure_until_its_reap_finishes() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -2691,7 +2691,7 @@ mod tests {
     /// its missing decision but before tmux is touched. A second ensure must
     /// already wait on that reservation instead of making another missing
     /// decision and exposing a competing client.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[farhelm_testtrace::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_missing_sink_reservation_is_visible_before_opening_begins() {
         let state = StateDir::new();
         let lookup_barrier = Arc::new(tokio::sync::Barrier::new(3));
@@ -2798,7 +2798,7 @@ mod tests {
     /// The `@10`-before-`@9` case is the one a plain string sort gets
     /// wrong, and it would not show up until a user opened a tenth window
     /// — at which point the whole strip would silently relabel itself.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tabs_are_rediscovered_in_window_creation_order_and_nothing_else_qualifies() {
         const AGENT_SESSION: &str = "2b1f0e4c-0000-4000-8000-000000000001";
         let tab = |n: u8| format!("9c3d5a71-0000-4000-8000-0000000000{n:02x}");
@@ -2858,7 +2858,7 @@ mod tests {
     /// one id, both of which it would then try to attach. The lowest pane
     /// is chosen so the answer is stable across repeated rediscovery
     /// rather than dependent on hash-map iteration order.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_tab_window_holding_several_panes_is_reported_once_by_its_lowest_pane() {
         let tab_id = "9c3d5a71-0000-4000-8000-0000000000ff".to_string();
         let state = |pane: &str| {
@@ -2887,7 +2887,7 @@ mod tests {
     /// cap, the delay doubles past any useful bound and the "the gap is
     /// bounded" qualification this design puts on its own isolation
     /// guarantee (see `crate::tmux::SessionSink`) stops being true.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_sink_backoff_grows_to_a_cap_and_stays_there() {
         assert_eq!(sink_retry_delay(0), SINK_RETRY_BASE);
         assert_eq!(sink_retry_delay(1), SINK_RETRY_BASE);
@@ -2984,7 +2984,7 @@ mod tests {
     /// would ever have reported that. So this asserts the loop is still
     /// trying well past any plausible bound, rather than asserting some
     /// particular number of attempts.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn the_sink_supervisor_keeps_retrying_indefinitely() {
         let attempts = Arc::new(AtomicU64::new(0));
         let (state, _rx) = watch::channel(Some(1));
@@ -3038,7 +3038,7 @@ mod tests {
     /// `mem::forget`, a clone held somewhere unnoticed) would leave a
     /// supervisor respawning sink clients for sessions nobody is attached
     /// to, forever, and nothing else in the system would object.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn dropping_the_last_sink_handle_stops_its_supervisor() {
         let (state, _rx) = watch::channel(Some(1));
         let (shutdown, shutdown_rx) = oneshot::channel();
@@ -3088,7 +3088,7 @@ mod tests {
     /// for process death. A browser reload sends detach and attach back to
     /// back on one connection, so this stronger boundary is what prevents
     /// the new control client from racing the old one's tmux teardown.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn orderly_sink_shutdown_reaps_the_client_before_returning() {
         let sink = living_fake_sink();
         let pid = sink.pid().expect("the fake sink has a process id");
@@ -3124,7 +3124,7 @@ mod tests {
     /// A control client whose output pipe closes without process exit would
     /// otherwise remain attached and unread while its replacement starts,
     /// reproducing the overlap this lifecycle is designed to exclude.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_live_sink_after_eof_is_reaped_before_replacement_opens() {
         let sink = output_closed_fake_sink();
         let pid = sink.pid().expect("the fake sink has a process id");
@@ -3168,7 +3168,7 @@ mod tests {
     /// out its retry delay. Letting the delay win would keep the handoff
     /// barrier occupied and could create a client after the session no longer
     /// has an owner, so shutdown must end that wait immediately.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn shutdown_during_retry_backoff_does_not_open_a_replacement() {
         let attempts = Arc::new(AtomicU64::new(0));
         let (state, _rx) = watch::channel(Some(1));
@@ -3214,7 +3214,7 @@ mod tests {
     /// spawned process has exited. The exchange is bounded, so orderly
     /// teardown finishes it and then proves the resulting client is gone
     /// before releasing the same-session handoff barrier.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn shutdown_during_replacement_open_reaps_the_returned_client() {
         let (state, _rx) = watch::channel(Some(1));
         let (shutdown, shutdown_rx) = oneshot::channel();
@@ -3295,7 +3295,7 @@ mod tests {
     /// must observe the pending owner shutdown and exit without scheduling a
     /// second open, or a session with no owners can retain its handoff barrier
     /// and retry forever.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn shutdown_during_failed_replacement_open_does_not_retry() {
         let (state, _rx) = watch::channel(Some(1));
         let (shutdown, shutdown_rx) = oneshot::channel();
@@ -3358,7 +3358,7 @@ mod tests {
     /// This is the cancellation-safe core of detach/reattach ordering: a
     /// caller may disappear as soon as it drops the lease, but a same-session
     /// attach must already see `Reaping` before it can attempt a replacement.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_last_sink_lease_publishes_reaping_before_shutdown_finishes() {
         let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
         let (shutdown, shutdown_rx) = oneshot::channel();
@@ -3425,7 +3425,7 @@ mod tests {
     /// replaced by stronger fail-closed evidence before it finishes. Clearing
     /// by key alone would lose that evidence and let a new sink overlap the
     /// client whose newer cleanup remains unconfirmed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stale_successful_reaper_does_not_clear_a_newer_barrier() {
         let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
         let (shutdown, shutdown_rx) = oneshot::channel();
@@ -3483,7 +3483,7 @@ mod tests {
     /// process is unsafe for every newer incarnation of the same session. A
     /// replacement `Live` entry must therefore become `Failed` rather than
     /// silently discarding the stale lease's shutdown error.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stale_lease_failure_poisons_a_newer_live_slot() {
         let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
         let (shutdown, shutdown_rx) = oneshot::channel();
@@ -3539,7 +3539,7 @@ mod tests {
     /// Once process exit cannot be confirmed, reopening the same session
     /// could overlap the lost client. Retaining the failure in the registry
     /// makes subsequent attaches fail closed until the supervisor restarts.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_sink_reap_remains_a_fail_closed_registry_entry() {
         let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
         let (shutdown, shutdown_rx) = oneshot::channel();
@@ -3596,7 +3596,7 @@ mod tests {
     /// Discriminating on the DELAY rather than on any internal counter:
     /// after a run of failures the backoff is seconds, so an attempt
     /// landing inside a 250 ms window can only mean it was reset.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_healthy_sink_run_resets_the_respawn_backoff() {
         let attempts = Arc::new(AtomicU64::new(0));
         // Published by the opener so the test can kill the one client it
@@ -3721,7 +3721,7 @@ mod tests {
     /// story — from being "simplified" into plain string equality, which
     /// would fuse every un-leased client on a session into one client and
     /// silently delete the takeover they depend on.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_empty_lease_groups_with_nothing_while_equal_leases_group() {
         // (incumbent, requester, same client?)
         let cases = [
@@ -3757,7 +3757,7 @@ mod tests {
     /// The unrelated-session case is the other half: a lease is not
     /// cross-session, so a client attaching one session must never
     /// disturb the terminals it holds in another.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_different_lease_displaces_every_terminal_of_that_session_alone() {
         let agent = AttachmentKey::new("session-1", TerminalId::Agent);
         let tab = AttachmentKey::new("session-1", TerminalId::Tab("tab-1".to_string()));

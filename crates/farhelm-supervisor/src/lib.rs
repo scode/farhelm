@@ -159,7 +159,7 @@ mod tests {
     /// assertions cannot observe is the window-free-creation property
     /// (mode at mkdir/open rather than chmod-after); that mechanism is
     /// documented on the functions and reviewed, not tested.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn private_dir_is_created_0700_and_repaired_to_it() {
         let tmp = tempfile::tempdir().unwrap();
 
@@ -180,7 +180,7 @@ mod tests {
     /// Helm and supervisor must never invent cwd-relative state when
     /// service-manager environments omit HOME. The helper also proves
     /// paths stay native OsStrings instead of rejecting non-UTF-8 homes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn default_state_dir_requires_a_real_home_and_accepts_native_paths() {
         use std::os::unix::ffi::OsStringExt;
 
@@ -210,7 +210,7 @@ mod tests {
     /// Both entry points are checked because `farhelm helm setup` computes
     /// the path it PINS through the injected one while the running helm
     /// computes its own through the environment one; they must agree.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_empty_xdg_state_home_falls_back_to_the_home_layout() {
         let expected = std::path::PathBuf::from("/home/u/.local/state/farhelm");
         assert_eq!(

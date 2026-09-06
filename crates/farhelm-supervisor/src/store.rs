@@ -4203,7 +4203,7 @@ mod tests {
 
     /// Credential strength is measured on the decoded random payload, not
     /// the encoded string length that base64 formatting can inflate.
-    #[test]
+    #[farhelm_testtrace::test]
     fn minted_session_credentials_carry_a_32_byte_random_payload() {
         let token = mint_session_token().expect("mint session credential");
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -4595,7 +4595,7 @@ mod tests {
     /// Pure and exhaustive by construction: every transition is tried
     /// against every state, so a new variant on either side fails to
     /// compile rather than silently going unexercised.
-    #[test]
+    #[farhelm_testtrace::test]
     fn transition_policy_covers_every_state_and_transition() {
         let stopped = || Some(farhelm_proto::STOP_ANNOTATION.to_string());
         let exited = |code, annotation| LastOutcome::Exited {
@@ -4838,7 +4838,7 @@ mod tests {
     /// The migrated database must also have NO stored boot id, which is
     /// what makes its first M3 startup take the same-boot path rather
     /// than claiming a reboot it has no evidence for (PLAN_M3.md item 2).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_1_database_migrates_in_place_preserving_every_session() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -4890,7 +4890,7 @@ mod tests {
     /// migrate an already-migrated database, whose `ALTER TABLE` would
     /// fail on the duplicate column — so reopening is what proves the
     /// version was actually committed alongside the columns.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_migrated_database_reopens_at_the_new_version() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -4909,7 +4909,7 @@ mod tests {
 
     /// Upgrading a running pre-spawn installation gives every existing
     /// session a distinct, durable credential inside the migration itself.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_9_migration_mints_stable_credentials_for_every_existing_session() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -4959,7 +4959,7 @@ mod tests {
     /// Every pre-v11 reservation was interactive and therefore permanent.
     /// The 8-to-9 migration must record that fact rather than inventing a
     /// bounded lifetime for a key that was originally promised forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_8_reservations_migrate_to_permanent_dedup_scope() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -5018,7 +5018,7 @@ mod tests {
     /// `a_migrated_database_reopens_at_the_new_version`'s own durability
     /// check, extended to the identity this migration's column exists
     /// for).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn host_identity_v6_to_v7_migration_preserves_boot_id_and_mints_cleanly() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -5076,7 +5076,7 @@ mod tests {
     /// new columns. Without the transaction it would be a hybrid — new
     /// columns, old version — that the next open would try to migrate
     /// again and fail on forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_migration_leaves_the_database_at_its_old_version() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -5115,7 +5115,7 @@ mod tests {
     /// kind of object it is tempting to add outside the transaction. The
     /// conflict is planted on the index name rather than the table so the
     /// rollback has to undo a `CREATE TABLE` that itself succeeded.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_schema_3_migration_leaves_the_database_at_version_2() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -5167,7 +5167,7 @@ mod tests {
     /// refuse to migrate at all — while still opening a database that is
     /// already current, since a supervisor may legitimately read and serve
     /// during a handoff.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn opening_without_the_right_to_migrate_refuses_an_old_database() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -5206,7 +5206,7 @@ mod tests {
     /// not compared: `ALTER TABLE ADD COLUMN` produces differently
     /// punctuated SQL for an identical result.
     ///
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn migrated_and_fresh_schemas_agree() {
         let dir = tempfile::tempdir().expect("tempdir");
         let migrated = dir.path().join("migrated.db");
@@ -5259,7 +5259,7 @@ mod tests {
     /// or a reboot. `Error`'s detail rides along even though nothing
     /// writes that state yet (PLAN_M3.md item 3 does), so the column is
     /// proven before its writer exists rather than after.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn every_outcome_shape_round_trips() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -5290,7 +5290,7 @@ mod tests {
     /// in-memory mirror. A refused transition must therefore return the
     /// UNCHANGED outcome rather than nothing — a caller that treated
     /// "refused" as "no answer" would leave its mirror stale.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn transition_returns_the_committed_outcome_even_when_it_refuses() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -5319,7 +5319,7 @@ mod tests {
     /// in the pane a launching row could not know yet AND move the
     /// outcome, since reload treats a running row without a pane as an
     /// unconfirmed launch to go hunting for.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn confirming_a_launch_fills_in_the_pane_and_moves_the_outcome() {
         let (_dir, store) = fresh_store().await;
         store
@@ -5370,7 +5370,7 @@ mod tests {
     /// only then records: harmless once, but the same window reopens on
     /// every restart, and a reboot landing in it interrupts a session that
     /// had actually exited.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_rediscovered_dead_pane_commits_the_pane_with_its_outcome() {
         let (_dir, store) = fresh_store().await;
         store
@@ -5438,7 +5438,7 @@ mod tests {
     /// it is that the STATE, not the caller, decides: a plain exit
     /// observed from a stop-in-flight row is annotated on the spot, and a
     /// completed stop annotates an exit already recorded.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stop_annotation_survives_a_concurrent_plain_exit_in_either_order() {
         let (_dir, store) = fresh_store().await;
 
@@ -5486,7 +5486,7 @@ mod tests {
     /// pure policy table: a completed stop must not paint over an outcome
     /// it did not cause. Seeded through the store and re-read after, so
     /// what is asserted is what a later process would load.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_completed_stop_leaves_outcomes_it_did_not_cause_alone() {
         let (_dir, store) = fresh_store().await;
         let annotated = LastOutcome::Exited {
@@ -5542,7 +5542,7 @@ mod tests {
     /// purpose: the reboot destroyed the evidence of whether the kill ever
     /// landed, so "stopped by user" would be a claim about a process
     /// nothing observed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_boot_interrupts_live_sessions_and_spares_ended_ones() {
         let (_dir, store) = fresh_store().await;
         for id in ["live", "starting", "stopping", "done", "failed", "already"] {
@@ -5594,7 +5594,7 @@ mod tests {
     /// would already be `Interrupted` — and therefore terminal and immune
     /// to any further reclassification — by the time a normal
     /// `SentinelError` transition could ever reach it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_boot_prefers_a_sentinel_override_over_interrupting_that_row() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "crashed-launch").await;
@@ -5635,7 +5635,7 @@ mod tests {
     /// otherwise sweep into `Interrupted` in one `UPDATE`, so the override
     /// has to beat that same statement from every one of them, not just
     /// the one case the test above happens to pin.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_boot_override_wins_from_every_non_terminal_state() {
         for seed in [
             LastOutcome::Launching,
@@ -5672,7 +5672,7 @@ mod tests {
     /// next startup — seeing the OLD boot id again — would redo the whole
     /// reboot classification from a store that already disagreed with
     /// itself about which sessions were live.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_fault_between_overrides_and_the_blanket_conversion_rolls_back_both() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "sentinel-row").await;
@@ -5734,7 +5734,7 @@ mod tests {
     /// touches SQLite) because `Transition::pane`'s wiring into the actual
     /// `UPDATE` statement is exactly what a pure-function test cannot
     /// exercise.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn sentinel_error_commits_its_pane_with_its_outcome() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "row").await;
@@ -5779,7 +5779,7 @@ mod tests {
     /// supersede them — must still reclassify to `Error` once a later pass
     /// reads the sentinel. Seeded both ways in one test since both are the
     /// same rule.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_sentinel_reclassifies_a_row_already_recorded_as_inferred_exited_or_interrupted() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "already-exited").await;
@@ -5819,7 +5819,7 @@ mod tests {
     /// The one terminal state a sentinel still cannot cross: a GENUINE stop
     /// annotation, because it is retained knowledge (a real run was
     /// observed alive) rather than an inference a sentinel could outrank.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_sentinel_never_overrides_a_genuinely_annotated_exit() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "stopped").await;
@@ -5857,7 +5857,7 @@ mod tests {
     /// database's first M3 startup) must store it and change NOTHING else.
     /// A conversion that ran unconditionally would interrupt every live
     /// session on a host that never rebooted.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_boot_without_a_reboot_leaves_every_outcome_untouched() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "live").await;
@@ -5885,7 +5885,7 @@ mod tests {
     /// nothing ever revisits that decision. Instead the next startup must
     /// still see the OLD id and redo the conversion, which is what the
     /// second half of this test drives.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failure_inside_the_boot_transaction_leaves_the_next_startup_correct() {
         let (_dir, store) = fresh_store().await;
         store
@@ -5932,7 +5932,7 @@ mod tests {
     /// half-written row: the wire type's `detail` is a required string, so
     /// there is no honest value to substitute, and the diagnosis must name
     /// the session so a human can find it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn load_all_refuses_rows_it_cannot_honestly_decode() {
         let (dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -5972,7 +5972,7 @@ mod tests {
     /// `SessionStore` opened on the same path — the on-disk round-trip
     /// `Supervisor::reload_sessions` depends on, both at construction and
     /// again from `serve`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn insert_then_reopen_round_trips_a_session() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -6027,7 +6027,7 @@ mod tests {
     /// A fresh database (`user_version` 0) must come up on `user_version`
     /// [`SCHEMA_VERSION`] after `open` — the invariant every other
     /// `SessionStore` method assumes without re-checking on each call.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn open_stamps_schema_version_on_a_fresh_database() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -6056,7 +6056,7 @@ mod tests {
     /// has a real migration ladder, the refusal is a fall-through at the
     /// END of that ladder rather than a lone `match` arm, and an
     /// off-by-one there would let exactly the adjacent version through.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn open_refuses_an_unrecognized_schema_version() {
         for version in [SCHEMA_VERSION + 1, 99] {
             let dir = tempfile::tempdir().expect("tempdir");
@@ -6080,7 +6080,7 @@ mod tests {
     /// `apply_schema` on their own (a reader who only skimmed the schema
     /// migration could otherwise assume the column is populated the moment
     /// the table exists).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn host_identity_is_null_until_ensure_host_identity_is_called() {
         let (_dir, store) = fresh_store().await;
         let conn = Arc::clone(&store.conn);
@@ -6117,7 +6117,7 @@ mod tests {
     /// minting is `concurrent_first_mint_converges_on_one_identity`'s job,
     /// below — a genuine second code path, unlike a second sequential
     /// call.)
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn host_identity_is_minted_once_and_stable_across_reopen() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -6162,7 +6162,7 @@ mod tests {
     /// ordering. That is what makes this safe to run un-seeded rather than
     /// needing a timing-dependent construction — nothing here would ever
     /// become flaky from scheduling variance.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn concurrent_first_mint_converges_on_one_identity() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -6207,7 +6207,7 @@ mod tests {
     /// exercises "wipe", forcing the durable row itself — not anything
     /// path-keyed — to be the only source of truth for whether minting
     /// already happened (`ensure_host_identity`'s own docs).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_wiped_state_dir_mints_a_different_host_identity() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().to_path_buf();
@@ -6241,7 +6241,7 @@ mod tests {
     /// calling `open` (rather than mutating the process umask, which
     /// this project's tests must not do) is what forces the repair path
     /// to actually run for the assertion below to mean anything.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn open_restricts_the_database_files_mode() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -6262,7 +6262,7 @@ mod tests {
     /// A deleted row must actually be gone on reload, and deleting an id
     /// that was never inserted (or was already deleted) must succeed
     /// rather than error — the idempotence `delete_session`'s docs promise.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn delete_session_removes_the_row_and_tolerates_a_missing_one() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -6299,7 +6299,7 @@ mod tests {
     /// same row — the latter catches a future `read_session_columns`
     /// index drift (see [`SESSION_COLUMNS`]'s own docs on why that would
     /// otherwise fail silently) that the raw-column check alone could not.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn insert_session_persists_created_at_verbatim() {
         let (_dir, store) = fresh_store().await;
 
@@ -6463,7 +6463,7 @@ mod tests {
     /// or not they collide with each other or with an existing word, so a
     /// typo there is invisible until a replayed reservation comes back as
     /// the wrong kind.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn every_reservation_outcome_shape_round_trips() {
         let (_dir, store) = fresh_store().await;
         let mut expected = vec![
@@ -6522,7 +6522,7 @@ mod tests {
     }
 
     /// Both deduplication windows survive SQLite unchanged.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reservation_dedup_scopes_round_trip() {
         let (_dir, store) = fresh_store().await;
         insert_reserved_with_scope(&store, "s1", "permanent", "fp", DedupScope::Permanent).await;
@@ -6548,7 +6548,7 @@ mod tests {
     /// carry the WINNER's reservation, because that is the only honest
     /// reply available to the loser: it is exactly what a replay of that
     /// key returns.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_lost_claim_race_rolls_back_and_reports_the_winner() {
         let (_dir, store) = fresh_store().await;
         insert_reserved(&store, "first", "shared-key", "fp").await;
@@ -6600,7 +6600,7 @@ mod tests {
     /// reload only runs before this process serves anything.) The identity
     /// condition covers the other direction: a settlement computed for one
     /// attempt must not land on a reservation now pointing at another.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn settling_a_reservation_is_monotonic_and_identity_conditioned() {
         let (_dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "key", "fp").await;
@@ -6660,7 +6660,7 @@ mod tests {
     /// startup would have to redo an unknown subset. Forced here with a
     /// trigger that refuses one specific row, which is the only way to make
     /// a mid-batch failure happen on demand.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_settlement_rolls_the_whole_batch_back() {
         let (dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "first-key", "fp").await;
@@ -6696,7 +6696,7 @@ mod tests {
     /// ones, which would grow without bound over a state directory's life.
     /// The non-default scope is part of that work item: losing it here would
     /// turn a bounded spawn key into a permanent tombstone during recovery.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn pending_reservations_lists_only_the_unsettled_ones() {
         let (_dir, store) = fresh_store().await;
         insert_reserved_with_scope(
@@ -6734,7 +6734,7 @@ mod tests {
     /// is what keeps a retry from concluding "the crashed attempt never
     /// launched" about a session that demonstrably existed — nothing can
     /// be deleted without having been created.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn deleting_a_session_settles_and_keeps_its_reservations() {
         let (_dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "pending-key", "fp").await;
@@ -6770,7 +6770,7 @@ mod tests {
 
     /// A spawned child's key and credential have exactly the child's row's
     /// lifetime, while an interactive key remains a durable tombstone.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn deleting_a_spawned_child_prunes_its_bounded_key_and_credential() {
         let (_dir, store) = fresh_store().await;
         insert_reserved_with_scope(
@@ -6824,7 +6824,7 @@ mod tests {
     /// that then survived the delete — a live session whose intent key
     /// reports it as gone, permanently. Forced with a trigger that refuses
     /// the row removal, the only way to fail the second half on demand.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_delete_leaves_both_the_session_and_its_reservation() {
         let (dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "key", "fp").await;
@@ -6862,7 +6862,7 @@ mod tests {
     /// recording `Created` there would claim a session that never existed
     /// and recording `Failed` would close an intent whose agent might be
     /// running.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_rollback_delete_settles_only_what_it_is_given() {
         let (_dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "unsettled", "fp").await;
@@ -6922,7 +6922,7 @@ mod tests {
     /// a create rejected by validation leaves behind. A bounded spawn has
     /// no child lifetime to bind this reservation to, so it must leave no
     /// claim; permanent interactive refusals retain their durable replay.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_refused_intent_records_without_a_session_row() {
         let (_dir, store) = fresh_store().await;
         store
@@ -6997,7 +6997,7 @@ mod tests {
     /// recreate a session the user deliberately threw away, and if the
     /// launch landed late, relaunching would start a second agent beside
     /// the first.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_relaunch_takeover_re_checks_both_of_its_conditions() {
         let (_dir, store) = fresh_store().await;
 
@@ -7116,7 +7116,7 @@ mod tests {
     /// the report landing in the gap between that probe and this call — the
     /// window where the caller's evidence is already stale and its decision
     /// to relaunch is already made.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_relaunch_takeover_refuses_when_a_report_has_landed() {
         let (_dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "reported", "fp").await;
@@ -7168,7 +7168,7 @@ mod tests {
     /// gives them different numbers anyway, so that a takeover which
     /// re-derived one from the other, or crossed the two columns, fails
     /// here instead of passing by arithmetic accident.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn restart_pending_launch_preserves_created_at_across_a_retry() {
         let (_dir, store) = fresh_store().await;
 
@@ -7242,7 +7242,7 @@ mod tests {
     /// one walking a visibly-busy session down a most-recently-active sort
     /// is a user-visible wrong answer, so "never backwards" has to hold
     /// against whatever the caller passes.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_activity_persists_and_never_moves_backwards() {
         let (_dir, store) = fresh_store().await;
 
@@ -7301,7 +7301,7 @@ mod tests {
     /// unknown deduplication scope. Each has a tempting default (`Internal`,
     /// an empty message, or `Permanent`), and every one would fabricate a
     /// policy the row did not state.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_corrupt_reservation_row_is_refused_rather_than_repaired() {
         let cases = [
             (
@@ -7354,7 +7354,7 @@ mod tests {
     /// quote, or a JSON metacharacter) comes back as ONE element. A
     /// delimiter-joined encoding would pass a naive test and silently
     /// fragment exactly the invocation PLAN_M3.md item 7 calls out.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_integration_snapshot_survives_the_round_trip_element_by_element() {
         let (_dir, store) = fresh_store().await;
         let template = vec![
@@ -7416,7 +7416,7 @@ mod tests {
     /// a conversation it never ran, which is the wrong-conversation resume
     /// SPEC.md forbids. Both are enforced by SQL predicate rather than by
     /// caller discipline, so this asserts the predicate.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_capture_columns_are_write_once_and_report_what_is_committed() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7494,7 +7494,7 @@ mod tests {
     /// or `/new` the scan cannot see coming). Unlike the scan's own
     /// write-once rule, this is not a race being arbitrated; it is a
     /// strictly better answer replacing a strictly weaker one.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_overwrites_a_prior_scan_claim() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7529,7 +7529,7 @@ mod tests {
     /// method deliberately does not try to tell the two apart, which is
     /// what makes it a genuine overwrite rather than "write-once, but for
     /// hooks".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_overwrites_a_prior_report() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7565,7 +7565,7 @@ mod tests {
     /// `None` and not the scan's own candidate, which is exactly the
     /// "another writer won" case `commit_capture` already knows how to
     /// handle.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_scan_write_after_a_report_is_a_no_op_and_the_read_back_shows_the_report() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7599,7 +7599,7 @@ mod tests {
     /// row to `Ambiguous` on disk while the in-memory state still
     /// advertised `Resume`, and a supervisor restart would then reload the
     /// contradiction.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_ambiguity_write_after_a_report_changes_nothing() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7628,7 +7628,7 @@ mod tests {
     /// worse verdict, but a report is not scan evidence being compared
     /// against other scan evidence — it is the agent's own answer, and it
     /// dominates everything scan-derived, `Ambiguous` included.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_clears_a_prior_ambiguity() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7664,7 +7664,7 @@ mod tests {
     /// a restart) must not land on the row's CURRENT generation. Unlike
     /// the scan writers this one has no OTHER precondition to check, so
     /// the generation fence is the whole story for this test.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_report_with_a_stale_generation_changes_nothing() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7699,7 +7699,7 @@ mod tests {
     /// can reach: the in-memory entry is removed by the same delete, so
     /// the request never gets this far. Without it a caller could be told
     /// its rename succeeded against a session that no longer exists.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_title_write_overwrites_and_reports_a_missing_row() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7741,7 +7741,7 @@ mod tests {
     /// could never run for it even if it looked integrated. `generic` with
     /// no template is the honest reading — restart can only offer it a
     /// fresh launch.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn migrating_a_pre_snapshot_database_claims_no_integration() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("supervisor.db");
@@ -7786,7 +7786,7 @@ mod tests {
     /// otherwise exec a program literally named `{cwd}` on the next Fresh
     /// restart (the only mode that execs the stored invocation directly),
     /// rather than running a "run in this directory" wrapper.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_semantically_impossible_session_row_is_refused_at_load() {
         let cases = [
             (
@@ -7855,7 +7855,7 @@ mod tests {
     /// than `Fresh` never even splits the stored invocation) must keep
     /// loading; regressing that would turn an unrelated hand-edit into a
     /// session nobody can even list.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unparsable_stored_invocation_still_loads() {
         let (dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7887,7 +7887,7 @@ mod tests {
     /// slot 0, would pass every negative test above while still breaking
     /// every legitimate wrapper profile — this is the test that would catch
     /// that mistake.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_wrapper_shaped_session_row_loads_through_both_readers() {
         let (_dir, store) = fresh_store().await;
         let template = vec![
@@ -7957,7 +7957,7 @@ mod tests {
     /// integration would ALSO orphan whatever conversation identity sits
     /// in the very next column, turning a resumable session into an
     /// unresumable one with no error anywhere.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_corrupt_agent_kind_is_refused_rather_than_defaulted() {
         let (dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -7999,7 +7999,7 @@ mod tests {
     /// Archive keeps the row, records the deliberate stopped outcome, and
     /// is idempotent. Restart clears the flag as part of opening the next
     /// generation, while an aborted restart restores it with the prior run.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_is_durable_idempotent_and_restored_by_an_aborted_restart() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8059,7 +8059,7 @@ mod tests {
 
     /// Once archive commits, a delayed observation from the retired pane
     /// cannot repopulate either its terminal handle or its prior outcome.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn archive_fences_a_stale_outcome_observation() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8112,7 +8112,7 @@ mod tests {
 
     /// The v11-to-v12 migration preserves every preexisting row and gives
     /// each one the only truthful historical value: it was not archived.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_11_rows_migrate_as_unarchived() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -8168,7 +8168,7 @@ mod tests {
     /// reopened afterwards, because a migration that is replayed rather
     /// than recorded would recompute the same values and hide that
     /// `user_version` never moved.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_12_rows_backfill_last_activity_from_created_at() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -8258,7 +8258,7 @@ mod tests {
     /// declaration is `migrated_and_fresh_schemas_agree`'s job — it
     /// compares the two schemas directly, and it is where a divergence
     /// would be caught.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_13_rows_get_a_null_conversation_source() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
@@ -8326,7 +8326,7 @@ mod tests {
     /// between this commit and the launch's confirmation must leave the
     /// exact shape reload already reconciles (a `launching` row with no
     /// pane), not one claiming a pane the new run may never get.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_relaunch_generation_reopens_a_stopped_session_and_clears_its_annotation() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8375,7 +8375,7 @@ mod tests {
     /// restore, opening the generation up front — which the crash-ordering
     /// rule requires — would silently destroy the very metadata SPEC.md
     /// calls durable.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn aborting_a_relaunch_restores_the_outcome_it_replaced() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8413,7 +8413,7 @@ mod tests {
     /// An abort must never step on a LATER restart that has already claimed
     /// the session: by then the newer generation's outcome is the truth,
     /// and this one's prior run is ancient history.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn aborting_a_superseded_relaunch_changes_nothing() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8455,7 +8455,7 @@ mod tests {
     /// records which mechanism the launch SELECTED, and preserving that
     /// recorded selection is what lets a later stop, delete, or restart
     /// reap through the scope the launch actually ran under.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn launch_scoped_true_round_trips_through_insert_and_reload() {
         let (_dir, store) = fresh_store().await;
         insert_running_with_scope(&store, "s1", true).await;
@@ -8488,7 +8488,7 @@ mod tests {
     /// throughout, so a relaunch dropping a TRUE prior claim had only ever
     /// been reachable through the systemd-gated e2e suite, which skips
     /// wherever no user manager exists (including CI).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_relaunch_re_decides_launch_scoped_from_the_current_probe() {
         let (_dir, store) = fresh_store().await;
 
@@ -8530,7 +8530,7 @@ mod tests {
     /// and ends at `launch_scoped = false`, so the restore had never been
     /// asserted for a `true` prior value, nor in either direction of a
     /// flip.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn aborting_a_relaunch_restores_the_prior_scope_selection() {
         let (_dir, store) = fresh_store().await;
 
@@ -8571,7 +8571,7 @@ mod tests {
     /// it is precisely what a `ListSessions` pass does when it clones an
     /// entry, goes to tmux, and comes back after a restart replaced the
     /// pane it was asking about.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stale_generations_observation_is_dropped() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8612,7 +8612,7 @@ mod tests {
     /// run's conversation identity onto a fresh relaunch is how a session
     /// would come to offer a resume for a conversation the new run never
     /// had — the silently-wrong-conversation resume SPEC.md forbids.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stale_generations_capture_is_dropped() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8665,7 +8665,7 @@ mod tests {
     /// are per-LAUNCH state, and carrying them forward would either point
     /// the correlator at a window that closed long ago or deny the new run
     /// any capture at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_fresh_relaunch_clears_the_previous_runs_capture_state() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8717,7 +8717,7 @@ mod tests {
     /// A `Resume` relaunch keeps every scrap of capture state, because the
     /// identity it is resuming is exactly what the capture pass must go on
     /// reverifying across the restart.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_resuming_relaunch_keeps_the_captured_identity() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8759,7 +8759,7 @@ mod tests {
     /// resumed is still exactly what it was, hook-reported or not, and a
     /// hooked kind's agent will simply report again on the resumed launch
     /// rather than needing the column pre-cleared for it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn begin_relaunch_clears_conversation_source_only_when_resetting_capture() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8834,7 +8834,7 @@ mod tests {
     /// commits between the two turns the claim into a refusal instead of
     /// launching the fresh agent the user chose against a session that has
     /// meanwhile become resumable.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_capture_landing_mid_restart_refuses_the_generation() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8866,7 +8866,7 @@ mod tests {
     /// session whose first launch was a typo would keep reporting that
     /// typo's errno forever, even after a restart fixed it (M3 acceptance
     /// 4: "after a successful restart the error is gone").
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_relaunch_generation_clears_a_previous_launch_error() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
@@ -8892,7 +8892,7 @@ mod tests {
     /// row left, the generation cannot be opened at all, and the caller is
     /// expected to abandon the relaunch rather than recreate what the user
     /// threw away.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_relaunch_generation_refuses_a_deleted_session() {
         let (_dir, store) = fresh_store().await;
         assert_eq!(
@@ -8916,7 +8916,7 @@ mod tests {
     /// and would rot silently without this. A row with an id and no name
     /// would render as a session created from a nameless profile; one with
     /// a name and no id could never have its existence derived at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_sessions_source_profile_round_trips_and_a_half_row_is_refused() {
         let (_dir, store) = fresh_store().await;
         store
@@ -9019,7 +9019,7 @@ mod tests {
     /// version-8 catalog shape before version 15 drops it. The session's
     /// newly added source columns must remain null and its other metadata
     /// must survive both transitions.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_full_migration_preserves_v7_sessions_and_drops_the_catalog() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("supervisor.db");
@@ -9065,7 +9065,7 @@ mod tests {
     /// table already occupying the name the migration is about to create.
     /// That is not a contrived situation — it is precisely what a database
     /// touched by a NEWER build and then opened by an older one looks like.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_v7_to_v8_migration_rolls_back_columns_seed_and_version_together() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("supervisor.db");
@@ -9122,7 +9122,7 @@ mod tests {
     ///
     /// The rename is applied through the ordinary writer rather than by
     /// hand, so this exercises the real interleaving of the two paths.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_relaunch_takeover_preserves_a_rename_that_landed_between_the_attempts() {
         let (_dir, store) = fresh_store().await;
         let stranded = |title: &str| StoredSession {

@@ -1973,7 +1973,7 @@ mod tests {
     /// not accidentally acquire it (`env claude` classifies as generic, so
     /// the user is told to override rather than silently getting a
     /// session that looks integrated and never captures).
-    #[test]
+    #[farhelm_testtrace::test]
     fn kind_derivation_is_basename_equality_and_nothing_more() {
         assert_eq!(derive_kind("claude"), AgentKind::Claude);
         assert_eq!(derive_kind("/opt/bin/claude"), AgentKind::Claude);
@@ -1991,7 +1991,7 @@ mod tests {
     /// would depend on a PATH the supervisor's own service environment may
     /// not have. Codex's shape is a subcommand, not a flag — pinned here
     /// because it is audited vendor behavior, not a choice.
-    #[test]
+    #[farhelm_testtrace::test]
     fn default_templates_keep_the_original_first_token() {
         let claude = IntegrationSnapshot::resolve("/opt/bin/claude", None, None).unwrap();
         assert_eq!(claude.kind, AgentKind::Claude);
@@ -2014,7 +2014,7 @@ mod tests {
     /// assertion: the token stays ONE element and no quoting is invented
     /// around it, which is also what makes the filled resume argv safe to
     /// hand to an exec without a shell.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_first_token_with_spaces_survives_as_one_argv_element() {
         let snapshot = IntegrationSnapshot::resolve("/opt/my agents/claude", None, None).unwrap();
         assert_eq!(
@@ -2033,7 +2033,7 @@ mod tests {
     /// template, and a genuinely-claude invocation declared generic loses
     /// it. Without the second direction a user could never opt OUT of an
     /// integration that misbehaves for them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn explicit_overrides_win_over_derivation_in_both_directions() {
         let promoted =
             IntegrationSnapshot::resolve("my-wrapper", Some(AgentKind::Claude), None).unwrap();
@@ -2060,7 +2060,7 @@ mod tests {
     /// becoming false. Generic sessions are the opposite case and must
     /// keep accepting exactly such templates — that is SPEC.md's verbatim
     /// fallback shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_integrated_kind_refuses_a_placeholder_free_template() {
         let refused = IntegrationSnapshot::resolve(
             "claude",
@@ -2113,7 +2113,7 @@ mod tests {
     /// still works, and the filled argv is asserted rather than merely the
     /// acceptance, so a rule that quietly stopped substituting would fail
     /// here too.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_conversation_placeholder_may_not_be_the_program() {
         let refused =
             ensure_resume_template(&[CONVERSATION_PLACEHOLDER.to_string(), "--resume".to_string()])
@@ -2157,7 +2157,7 @@ mod tests {
     /// with a space survives as one element. `has_cwd_placeholder` is
     /// asserted on the same vectors so a substring-matching or always-false
     /// implementation would fail here rather than pass by accident.
-    #[test]
+    #[farhelm_testtrace::test]
     fn cwd_fills_every_matching_slot_and_only_whole_elements() {
         let argv = vec![
             "w".to_string(),
@@ -2190,7 +2190,7 @@ mod tests {
     /// unconditionally as a backstop behind `ensure_no_cwd_program`, so a
     /// vector that reaches the fill with the placeholder first comes out
     /// unchanged rather than with a directory in the program name.
-    #[test]
+    #[farhelm_testtrace::test]
     fn cwd_never_fills_the_program_slot() {
         let argv = vec![CWD_PLACEHOLDER.to_string(), "x".to_string()];
         assert_eq!(fill_cwd(argv.clone(), "/tmp"), argv);
@@ -2201,7 +2201,7 @@ mod tests {
     /// spurious element added, no existing element rewritten. Paired with
     /// `has_cwd_placeholder` returning `false`, since that predicate is
     /// what a caller consults to decide whether a fill is worth logging.
-    #[test]
+    #[farhelm_testtrace::test]
     fn cwd_fill_is_a_no_op_without_a_placeholder() {
         let argv = vec!["claude".to_string(), "--resume".to_string()];
         assert_eq!(fill_cwd(argv.clone(), "/tmp"), argv);
@@ -2217,7 +2217,7 @@ mod tests {
     /// the second call must then find exactly that element left to fill.
     /// The test exercises the two pure substitution passes in that order;
     /// it does not drive `spawn_agent` itself.
-    #[test]
+    #[farhelm_testtrace::test]
     fn conversation_and_cwd_placeholders_coexist_in_one_template() {
         let snapshot = IntegrationSnapshot::resolve(
             "w",
@@ -2272,7 +2272,7 @@ mod tests {
     /// too, for both functions, so a rule that quietly started refusing
     /// `{cwd}` anywhere in the vector — not just slot 0 — would fail here
     /// instead of silently disabling every wrapper resume.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_cwd_placeholder_may_not_be_the_program() {
         ensure_resume_template(&[
             "w".to_string(),
@@ -2318,7 +2318,7 @@ mod tests {
     /// the second pass. Asserted end to end through `filled_resume_argv`,
     /// not only on the shape check, so the property survives a refactor
     /// that moves where plausibility is enforced.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_conversation_id_spelled_like_a_placeholder_is_refused() {
         assert!(!is_plausible_conversation_id(CWD_PLACEHOLDER));
         assert!(!is_plausible_conversation_id(CONVERSATION_PLACEHOLDER));
@@ -2351,7 +2351,7 @@ mod tests {
     /// of one conversation into a resume of another, or into a permission
     /// escalation, without containing a single character the shape check
     /// would otherwise object to.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_option_shaped_conversation_id_is_refused() {
         for hostile in [
             "--last",
@@ -2379,7 +2379,7 @@ mod tests {
     /// it independently, because they are reached independently: a durable
     /// column written by an older build (or edited by hand) never passes
     /// through capture's own validation again.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_option_shaped_identity_neither_fills_a_template_nor_is_offered() {
         let snapshot = IntegrationSnapshot::resolve("claude", None, None).expect("resolve");
         assert_eq!(
@@ -2412,7 +2412,7 @@ mod tests {
     /// produces it. The subtle one is the last: a `{conversation}` template
     /// with nothing captured is FreshOnly, never FallbackTemplate, because
     /// SPEC.md forbids ever running the placeholder unfilled.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_restart_offer_reflects_exactly_what_could_honestly_be_run() {
         let claude = IntegrationSnapshot::resolve("claude", None, None).unwrap();
         assert_eq!(claude.restart_offer(None), RestartOffer::FreshOnly);
@@ -2453,7 +2453,7 @@ mod tests {
     /// prose: `/tmp/a.b` and `/tmp/a-b` genuinely land in one directory,
     /// and any change that made this function injective would silently
     /// stop matching the real agent's own layout.
-    #[test]
+    #[farhelm_testtrace::test]
     fn cwd_munging_is_non_injective_by_construction() {
         assert_eq!(munge_cwd("/tmp/a.b"), "-tmp-a-b");
         assert_eq!(munge_cwd("/tmp/a-b"), "-tmp-a-b");
@@ -2466,7 +2466,7 @@ mod tests {
     /// the obvious-looking implementation that silently captures nothing.
     /// A file with no correlator line at all is an ERROR, not `Ok(None)`:
     /// a 64 KiB prefix cannot establish that a file is not a record.
-    #[test]
+    #[farhelm_testtrace::test]
     fn claude_records_are_parsed_from_the_first_line_carrying_all_correlators() {
         let text = "{\"type\":\"summary\",\"summary\":\"x\"}\n\
                     {\"sessionId\":\"conv-7\",\"cwd\":\"/work\",\
@@ -2495,7 +2495,7 @@ mod tests {
     /// the nested payload and the other from the top level would fabricate
     /// a pair no record ever asserted. Both refusals are pinned here,
     /// along with the flat form this build accepts as forward-tolerance.
-    #[test]
+    #[farhelm_testtrace::test]
     fn codex_requires_a_session_meta_line_with_same_level_correlators() {
         let nested = "{\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"session_meta\",\
                       \"payload\":{\"id\":\"roll-1\",\"cwd\":\"/work\"}}\n";
@@ -2536,7 +2536,7 @@ mod tests {
     /// line whose timestamp lives on a later one, and aborting at the
     /// first would hide the record entirely — a capture that silently
     /// stops happening, with no error anywhere.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_codex_meta_line_without_a_timestamp_does_not_hide_a_later_one() {
         let text = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"early\",\"cwd\":\"/work\"}}\n\
                     {\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"session_meta\",\
@@ -2557,7 +2557,7 @@ mod tests {
     /// and refused LOUDLY (an error, marking the scan incomplete) rather
     /// than dropped, since a dropped candidate is exactly the second one
     /// whose absence would turn an ambiguity into a wrong claim.
-    #[test]
+    #[farhelm_testtrace::test]
     fn implausible_conversation_identifiers_are_refused() {
         assert!(is_plausible_conversation_id("0b0a3d65-a742-4b0e-bda5-c59"));
         assert!(!is_plausible_conversation_id(""));
@@ -2656,7 +2656,7 @@ mod tests {
     /// the session — meaning `Waiting` can only ever arrive by promotion,
     /// never by a sharpener happening to agree with a baseline that was
     /// going to say `Running` anyway.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_kind_recognizes_its_own_pending_question() {
         for tail in [CLAUDE_COMMAND_APPROVAL, CLAUDE_TRUST_DIALOG] {
             assert_eq!(
@@ -2695,7 +2695,7 @@ mod tests {
     /// satisfies every other requirement, including the suffix shape, and
     /// an agent laying out a plan when asked to is about as ordinary as
     /// output gets.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ordinary_output_is_never_mistaken_for_a_pending_question() {
         let numbered_prose = "\
 ⏺ Here is the plan:
@@ -2755,7 +2755,7 @@ mod tests {
     /// green while the rule it names went untested. Realism belongs to
     /// `an_answer_shaped_numbered_explanation_is_not_a_menu`, which is the
     /// pointer rule's own regression.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_numbered_prose_block_with_one_answer_shaped_line_is_not_a_menu() {
         let answer_word_first = "\
 ⏺ Do you want to know why the schema needed no migration?
@@ -2804,7 +2804,7 @@ mod tests {
     ///
     /// Both vendors, since each has its own phrase list and each would be
     /// independently wrong.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_answer_shaped_numbered_explanation_is_not_a_menu() {
         let two_items = "\
 ⏺ Do you want to know why the migration is a no-op?
@@ -2857,7 +2857,7 @@ mod tests {
     /// many. Off by one at either end is invisible in production until the
     /// day a real dialog sits on the boundary, so both are pinned at the
     /// exact value rather than "a few" and "lots".
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_menu_is_recognized_at_its_size_bounds_and_not_past_them() {
         let menu = |count: usize| {
             let mut tail = String::from("Do you want to proceed?\n");
@@ -2901,7 +2901,7 @@ mod tests {
     /// The accepted rows are the shapes the three recorded dialogs actually
     /// use, so a tightening that broke a real prompt fails here rather than
     /// in the field.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_option_must_be_an_answer_word_rather_than_merely_start_like_one() {
         for (first, second, expected) in [
             // The recorded shapes: the bare word, and the word plus comma.
@@ -2956,7 +2956,7 @@ mod tests {
     /// as one, and — alone on a line, which is what an empty composer
     /// prompt renders as — ending the scan, so an ANSWERED dialog above it
     /// does not read as pending.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_selection_marker_prefixes_an_option_and_ends_a_scan_alone() {
         for marker in MENU_SELECTION_MARKERS {
             let selected = format!("Do you want to proceed?\n{marker} 1. Yes\n  2. No");
@@ -2986,7 +2986,7 @@ mod tests {
     /// examined nine lines while declaring eight — the counter was compared
     /// after the line had already been tested — which is the kind of drift
     /// that only a boundary test catches.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_question_lookback_reaches_exactly_as_far_as_it_declares() {
         let dialog = |body_lines: usize| {
             let mut tail = String::from("Do you want to proceed?\n");
@@ -3029,7 +3029,7 @@ mod tests {
     /// The real modal is asserted alongside it, in the same test, because
     /// the two are the halves of one trade: a fix for either that broke the
     /// other would be no fix at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_empty_codex_composer_below_an_answered_modal_ends_the_scan() {
         let answered = format!("{CODEX_COMMAND_APPROVAL}\n▌ ›");
         assert_eq!(
@@ -3060,7 +3060,7 @@ mod tests {
     ///
     /// Both vendors, because each has its own phrase list and its own
     /// fixture, and the shape is the only thing they share.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_answered_dialog_that_is_no_longer_the_bottom_of_the_screen_does_not_count() {
         for (what, dialog, sharpen) in [
             (
@@ -3114,7 +3114,7 @@ mod tests {
     /// Every non-live variant against both vendors, with the tail that
     /// WOULD promote a live baseline, so nothing passes by accident of the
     /// fixture.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_non_live_baseline_is_never_promoted_by_any_screen() {
         for (what, tail, sharpen) in [
             (
@@ -3163,7 +3163,7 @@ mod tests {
     /// Deterministic (a fixed-seed LCG) rather than randomized: a fuzz
     /// test that finds a panic only on some runs is a flake, and the
     /// interesting inputs here are structural rather than rare.
-    #[test]
+    #[farhelm_testtrace::test]
     fn sharpening_tolerates_arbitrary_tail_bytes() {
         // Bytes chosen to land on the boundaries that matter: control
         // characters, ASCII the matcher looks for, lone continuation and
@@ -3215,7 +3215,7 @@ mod tests {
     /// sessions with the generic classification, and the shape that would
     /// have broken that — a required method inviting a stub — is exactly
     /// what this proves unnecessary.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_default_sharpener_leaves_every_baseline_alone() {
         struct Unsharpened;
         impl AgentIntegration for Unsharpened {
@@ -3260,7 +3260,7 @@ mod tests {
     /// file that exercises `hook_argv` does so through a concrete
     /// `ClaudeIntegration`/`CodexIntegration` value and would never notice
     /// if this property broke.
-    #[test]
+    #[farhelm_testtrace::test]
     fn generic_kind_has_no_integration_and_therefore_no_hook() {
         assert!(
             integration_for(AgentKind::Generic).is_none(),
@@ -3283,7 +3283,7 @@ mod tests {
     /// underlying command survives two structurally different renderings
     /// — a property a single-vendor test could not distinguish from "this
     /// vendor's quoting happens to work".
-    #[test]
+    #[farhelm_testtrace::test]
     fn hook_argv_survives_a_path_hostile_to_both_quoting_layers() {
         let hostile_path = r#"/tmp/a b's "q" \dir/farhelm"#;
         // The default (announcing) shape, which is what ships. The `off`
@@ -3419,7 +3419,7 @@ mod tests {
     /// and a four-byte emoji, since the doc comment's surrogate-pair claim
     /// is specifically about characters outside the Basic Multilingual
     /// Plane.
-    #[test]
+    #[farhelm_testtrace::test]
     fn toml_basic_string_round_trips_through_escaping() {
         let original = "a space, a 'quote', a \"quote\", a \\backslash, a\ttab, a\nnewline, \
                          DEL:\u{7f}:, and non-ASCII: é😀";
@@ -3439,7 +3439,7 @@ mod tests {
     /// shape belongs in a test here rather than being re-derived, and
     /// possibly re-diverged, at the one call site that actually reads the
     /// environment variable.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_agent_hooks_covers_the_documented_grammar() {
         assert_eq!(parse_agent_hooks("all"), AgentHooks::All);
         assert_eq!(parse_agent_hooks("none"), AgentHooks::None);
@@ -3513,7 +3513,7 @@ mod tests {
     /// `On`, because the switch's `off` position removes a feature and a
     /// typo must not remove it silently. A test that only checked `on` and
     /// `off` would pass just as happily with the fallback inverted.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_agent_instructions_covers_the_documented_grammar() {
         assert_eq!(parse_agent_instructions("on"), AgentInstructions::On);
         assert_eq!(parse_agent_instructions("off"), AgentInstructions::Off);
@@ -3548,7 +3548,7 @@ mod tests {
     /// `AgentInstructions::announces` is the one question the injection
     /// asks of this value, pinned directly so a future variant cannot
     /// quietly change what `On` means.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_instructions_announces_only_when_on() {
         assert!(AgentInstructions::On.announces());
         assert!(!AgentInstructions::Off.announces());
@@ -3558,7 +3558,7 @@ mod tests {
     /// consults; this pins its three-way behavior directly, independent of
     /// how the value was constructed, plus the unconditional `All` default
     /// that [`AgentHooks`]'s own doc comment promises.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_hooks_allows_reflects_its_variant() {
         assert!(AgentHooks::All.allows(AgentKind::Claude));
         assert!(AgentHooks::All.allows(AgentKind::Codex));
