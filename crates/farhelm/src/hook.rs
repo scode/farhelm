@@ -782,7 +782,7 @@ mod tests {
     /// the whole mechanism's entry point: if the verbatim vendor payload
     /// does not yield an id here, no resume ever gets the right
     /// conversation, and the failure is silent by design.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parses_the_verbatim_claude_payload() {
         let (id, source) = parse_payload(CLAUDE_PAYLOAD.as_bytes()).expect("claude payload parses");
         assert_eq!(id, "6af192d4-0000-4000-8000-000000000000");
@@ -793,7 +793,7 @@ mod tests {
     /// `permission_mode` on top of Claude's fields. Both vendors go
     /// through one parser, so this pins that the extra fields are simply
     /// ignored rather than being a second shape to maintain.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parses_the_verbatim_codex_payload() {
         let (id, source) = parse_payload(CODEX_PAYLOAD.as_bytes()).expect("codex payload parses");
         assert_eq!(id, "0198d3ac-0000-7000-8000-000000000000");
@@ -805,7 +805,7 @@ mod tests {
     /// failure mode of a strict parse would be a hook that silently stops
     /// reporting after a vendor upgrade — the exact bug this mechanism
     /// exists to avoid.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ignores_unknown_payload_fields() {
         let payload = r#"{"session_id":"abc","source":"resume","future_field":{"nested":[1,2]},"another":null}"#;
         let (id, source) = parse_payload(payload.as_bytes()).expect("unknown fields are ignored");
@@ -816,7 +816,7 @@ mod tests {
     /// `source` is diagnostic-only and optional, so its absence must not
     /// cost the run its id. Codex's TUI, for one, reuses `startup` where
     /// Claude sends `clear`; nothing may key on the field's presence.
-    #[test]
+    #[farhelm_testtrace::test]
     fn missing_source_defaults_to_empty() {
         let (id, source) = parse_payload(br#"{"session_id":"abc"}"#).expect("id alone is enough");
         assert_eq!(id, "abc");
@@ -827,7 +827,7 @@ mod tests {
     /// The reason is what a maintainer reads out of the hook log when a
     /// session mysteriously fails to resume, so each case earning a
     /// distinct word is the point, not an implementation detail.
-    #[test]
+    #[farhelm_testtrace::test]
     fn rejects_unusable_session_ids() {
         let oversized = format!(r#"{{"session_id":"{}"}}"#, "x".repeat(129));
         let cases: [(&[u8], &str); 6] = [
@@ -855,7 +855,7 @@ mod tests {
     /// An id of exactly the cap is accepted: the bound is a sanity limit,
     /// not a format claim, and an off-by-one here would reject a
     /// legitimate vendor id for no reason.
-    #[test]
+    #[farhelm_testtrace::test]
     fn accepts_a_session_id_at_the_cap() {
         let payload = format!(r#"{{"session_id":"{}"}}"#, "x".repeat(MAX_SESSION_ID_BYTES));
         let (id, _) = parse_payload(payload.as_bytes()).expect("an id at the cap is fine");
@@ -872,7 +872,7 @@ mod tests {
     /// chars would reject ids a vendor is entitled to mint. `str::len` is
     /// bytes, so bytes is what the code does and what the constant's name
     /// says; this is the test that keeps the two agreeing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_session_id_cap_counts_bytes_not_characters() {
         // Four bytes each, so 32 of them are 32 chars and exactly the cap.
         let at_cap = "😀".repeat(MAX_SESSION_ID_BYTES / 4);
@@ -894,7 +894,7 @@ mod tests {
     /// say so. This is the "agent launched outside farhelm" case: it is
     /// expected, not an error, and the log line is the only way to tell it
     /// apart from a hook that never ran at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_credential_stops_before_any_socket_work() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -939,7 +939,7 @@ mod tests {
     /// the test that would notice. The `no-credential` line proves it:
     /// reading would have produced `bad-payload unreadable` instead, since
     /// the panicking thread drops its sender.
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_credential_never_touches_stdin() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -960,7 +960,7 @@ mod tests {
     /// was never touched. Reporting an id we could not parse is the bug
     /// this guards against; the supervisor would have to refuse it, and
     /// the refusal would look like a supervisor problem.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_bad_payload_is_logged_without_dialing_the_supervisor() {
         let dir = tempfile::tempdir().expect("tempdir");
         let cases: [(&[u8], &str); 4] = [
@@ -1001,7 +1001,7 @@ mod tests {
     /// tidier log. Both shapes a vendor could plausibly produce by
     /// accident are pinned, and the conversation id still rides along —
     /// which is the half that matters.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_non_string_source_renders_as_absent() {
         let dir = tempfile::tempdir().expect("tempdir");
         for (index, payload) in [
@@ -1041,7 +1041,7 @@ mod tests {
     /// is what keeps concurrent hooks from interleaving mid-line). The two
     /// runs are given DIFFERENT outcomes so the assertion can tell which
     /// line landed first.
-    #[test]
+    #[farhelm_testtrace::test]
     fn consecutive_runs_append_whole_lines_in_order() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1078,7 +1078,7 @@ mod tests {
     /// a descriptor the agent can see. A stale or removed socket is a real
     /// situation (a supervisor restart mid-session), so it has to be the
     /// boring path.
-    #[test]
+    #[farhelm_testtrace::test]
     fn missing_socket_reports_connect_failed() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1110,7 +1110,7 @@ mod tests {
     /// more. This is the vendor-holds-the-pipe case that motivates the
     /// detached reader thread: a blocking read cannot be cancelled, so the
     /// only proof the design works is that the call still returns.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_blocking_payload_reader_gives_up_at_the_budget() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1144,7 +1144,7 @@ mod tests {
     /// also cost only the budget. A wedged supervisor is the failure most
     /// likely to push the hook past the vendor's own timeout, which is the
     /// one failure the user would actually see.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unanswering_supervisor_gives_up_at_the_budget() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1152,28 +1152,33 @@ mod tests {
         let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
         listener.set_nonblocking(true).expect("nonblocking");
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        // This server leaves the wrapped test thread, so retain the capture
+        // while its bounded hold and cleanup run on the raw thread.
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
         let server = std::thread::spawn(move || {
-            // Accept and hold the connection open without ever speaking,
-            // then wait to be told the test is done. Both waits are
-            // bounded (see `SERVER_DEADLINE`): this server's whole purpose
-            // is to answer nothing, so an unbounded wait here would be a
-            // thread designed to hang.
-            let deadline = Instant::now() + SERVER_DEADLINE;
-            let mut accepted = None;
-            while Instant::now() < deadline {
-                match listener.accept() {
-                    Ok(connection) => {
-                        accepted = Some(connection);
-                        break;
+            context.enter(|| {
+                // Accept and hold the connection open without ever speaking,
+                // then wait to be told the test is done. Both waits are
+                // bounded (see `SERVER_DEADLINE`): this server's whole purpose
+                // is to answer nothing, so an unbounded wait here would be a
+                // thread designed to hang.
+                let deadline = Instant::now() + SERVER_DEADLINE;
+                let mut accepted = None;
+                while Instant::now() < deadline {
+                    match listener.accept() {
+                        Ok(connection) => {
+                            accepted = Some(connection);
+                            break;
+                        }
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(SERVER_POLL);
+                        }
+                        Err(err) => panic!("accept failed: {err}"),
                     }
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(SERVER_POLL);
-                    }
-                    Err(err) => panic!("accept failed: {err}"),
                 }
-            }
-            let _ = stop_rx.recv_timeout(SERVER_DEADLINE);
-            drop(accepted);
+                let _ = stop_rx.recv_timeout(SERVER_DEADLINE);
+                drop(accepted);
+            });
         });
 
         let started = Instant::now();
@@ -1209,7 +1214,7 @@ mod tests {
     /// handshake and acknowledges gets the reported id and source, and the
     /// hook logs `acked`. Everything else in this module is a failure
     /// path; this is the one that has to work.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_completed_round_trip_reports_and_acks() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1221,60 +1226,79 @@ mod tests {
         // The supervisor's side runs on its own thread with its own
         // current-thread runtime: `run_with` builds and owns the client
         // runtime, so the test cannot host both on this thread.
+        // The raw thread therefore carries the test context for the
+        // runtime's full lifetime, including its teardown.
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
         let server = std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("server runtime");
-            runtime.block_on(async move {
-                // Every milestone carries its own deadline. This server is
-                // driven by the code under test, so a regression there —
-                // a hook that never connects, never sends, or sends
-                // something unreadable — would otherwise park this thread
-                // forever and take the `join` below with it.
-                let listener =
-                    tokio::net::UnixListener::from_std(listener).expect("adopt listener");
-                let (stream, _) = tokio::time::timeout(SERVER_DEADLINE, listener.accept())
-                    .await
-                    .expect("the hook must connect within the deadline")
-                    .expect("accept");
-                let (read, write) = tokio::io::split(stream);
-                let mut reader = FrameReader::new(read);
-                let mut writer = FrameWriter::new(write);
-                let hello = tokio::time::timeout(
-                    SERVER_DEADLINE,
-                    farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor"),
+            context
+                .with_runtime(
+                    farhelm_testtrace::RuntimeConfig {
+                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
+                        worker_threads: None,
+                        start_paused: false,
+                    },
+                    |runtime| {
+                        runtime.block_on(async move {
+                            // Every milestone carries its own deadline. This server is
+                            // driven by the code under test, so a regression there —
+                            // a hook that never connects, never sends, or sends
+                            // something unreadable — would otherwise park this thread
+                            // forever and take the `join` below with it.
+                            let listener = tokio::net::UnixListener::from_std(listener)
+                                .expect("adopt listener");
+                            let (stream, _) =
+                                tokio::time::timeout(SERVER_DEADLINE, listener.accept())
+                                    .await
+                                    .expect("the hook must connect within the deadline")
+                                    .expect("accept");
+                            let (read, write) = tokio::io::split(stream);
+                            let mut reader = FrameReader::new(read);
+                            let mut writer = FrameWriter::new(write);
+                            let hello = tokio::time::timeout(
+                                SERVER_DEADLINE,
+                                farhelm_proto::io::handshake(
+                                    &mut reader,
+                                    &mut writer,
+                                    "supervisor",
+                                ),
+                            )
+                            .await
+                            .expect("the handshake must complete within the deadline")
+                            .expect("handshake");
+                            let auth = match hello {
+                                ControlMsg::Hello { auth, .. } => auth,
+                                other => panic!("expected a hello, got {other:?}"),
+                            };
+                            let frame = tokio::time::timeout(SERVER_DEADLINE, reader.read_frame())
+                                .await
+                                .expect("the report must arrive within the deadline")
+                                .expect("read the report")
+                                .expect("a frame, not EOF");
+                            match parse_control(&frame).expect("decode the report") {
+                                ControlMsg::ReportConversation {
+                                    req_id,
+                                    conversation,
+                                    source,
+                                } => {
+                                    let _ = seen_tx.send((conversation, source, auth));
+                                    tokio::time::timeout(
+                                        SERVER_DEADLINE,
+                                        writer.write_control(&ControlMsg::ConversationReported {
+                                            req_id,
+                                        }),
+                                    )
+                                    .await
+                                    .expect(
+                                        "the acknowledgement must be written within the deadline",
+                                    )
+                                    .expect("acknowledge");
+                                }
+                                other => panic!("expected a report, got {other:?}"),
+                            }
+                        });
+                    },
                 )
-                .await
-                .expect("the handshake must complete within the deadline")
-                .expect("handshake");
-                let auth = match hello {
-                    ControlMsg::Hello { auth, .. } => auth,
-                    other => panic!("expected a hello, got {other:?}"),
-                };
-                let frame = tokio::time::timeout(SERVER_DEADLINE, reader.read_frame())
-                    .await
-                    .expect("the report must arrive within the deadline")
-                    .expect("read the report")
-                    .expect("a frame, not EOF");
-                match parse_control(&frame).expect("decode the report") {
-                    ControlMsg::ReportConversation {
-                        req_id,
-                        conversation,
-                        source,
-                    } => {
-                        let _ = seen_tx.send((conversation, source, auth));
-                        tokio::time::timeout(
-                            SERVER_DEADLINE,
-                            writer.write_control(&ControlMsg::ConversationReported { req_id }),
-                        )
-                        .await
-                        .expect("the acknowledgement must be written within the deadline")
-                        .expect("acknowledge");
-                    }
-                    other => panic!("expected a report, got {other:?}"),
-                }
-            });
+                .expect("server runtime");
         });
 
         run_with(
@@ -1314,7 +1338,7 @@ mod tests {
     /// what this pins: the files inside carry conversation ids and vendor
     /// error text, and they live beside the launch specs, so 0700 is the
     /// same boundary the rest of the state directory already keeps.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_missing_log_directory_is_created_private() {
         use std::os::unix::fs::PermissionsExt as _;
 
@@ -1339,7 +1363,7 @@ mod tests {
     /// a regular file — must not turn a working hook into a failing one.
     /// Logging is a diagnostic, and a diagnostic that can break the thing
     /// it observes is worse than none.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unwritable_log_path_is_ignored() {
         let dir = tempfile::tempdir().expect("tempdir");
         let blocker = dir.path().join("not-a-directory");
@@ -1361,7 +1385,7 @@ mod tests {
     /// the deliberate choice over rotation (see `MAX_LOG_BYTES`); this
     /// test is what would catch a future "improvement" that silently
     /// removed the bound.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_oversized_log_is_truncated_before_appending() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log_dir = dir.path().join("hook-log");
@@ -1398,7 +1422,7 @@ mod tests {
     /// attacker-controlled in the only threat model that matters here; a
     /// newline in either would let it write whatever it liked into the
     /// operator's diagnostic file.
-    #[test]
+    #[farhelm_testtrace::test]
     fn payload_values_cannot_forge_a_log_line() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1431,7 +1455,7 @@ mod tests {
     /// both must come back as `_`. This is a regression case: the
     /// original sanitizer checked `is_control` alone and let every one of
     /// them through.
-    #[test]
+    #[farhelm_testtrace::test]
     fn payload_values_cannot_smuggle_line_or_direction_controls() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1457,7 +1481,7 @@ mod tests {
     /// something that might still parse. Truncated JSON would usually be
     /// unparsable, but "usually" is not a contract, and reporting a
     /// half-read id would be worse than reporting none.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_oversized_payload_is_refused() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
@@ -1484,7 +1508,7 @@ mod tests {
     /// is judged against: a second line is a second thing the model reads
     /// at the top of every session, and a missing newline runs the pointer
     /// into whatever the vendor appends after it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn announce_writes_one_line_and_nothing_else() {
         let mut out = Vec::new();
         announce(&mut out);
@@ -1502,7 +1526,7 @@ mod tests {
     /// This sink fails every call, so reaching the end of this test at all
     /// (rather than unwinding through `announce`'s `?`-free `let _ =`) is
     /// the assertion.
-    #[test]
+    #[farhelm_testtrace::test]
     fn announce_survives_a_sink_that_always_fails() {
         struct AlwaysErrors;
         impl std::io::Write for AlwaysErrors {
@@ -1528,7 +1552,7 @@ mod tests {
     /// would notice. The rest is budget: a pointer every session pays for
     /// has to stay small, and non-ASCII buys nothing when the reader is a
     /// tokenizer.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_pointer_line_is_plain_single_line_ascii() {
         assert!(
             !POINTER_LINE.starts_with('{'),
@@ -1550,7 +1574,7 @@ mod tests {
     /// Log lines are rendered from one value, so this pins the exact
     /// grammar a docs page and any future reader will quote. It is the
     /// only test that asserts the format character for character.
-    #[test]
+    #[farhelm_testtrace::test]
     fn renders_the_documented_line_shape() {
         assert_eq!(
             Outcome::word("no-credential").render(17),

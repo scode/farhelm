@@ -63,48 +63,68 @@ fn mock_supervisor_frames(
     let std_listener = std::os::unix::net::UnixListener::bind(socket).expect("bind socket");
     std_listener.set_nonblocking(true).unwrap();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
+    // The mock leaves libtest's thread, so it must carry the test's capture
+    // through its runtime and back through runtime teardown.
+    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
     let thread = std::thread::spawn(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(async move {
-                    let listener = tokio::net::UnixListener::from_std(std_listener).unwrap();
-                    let (stream, _) =
-                        tokio::time::timeout(Duration::from_secs(5), listener.accept())
-                            .await
-                            .expect("the agent CLI did not connect")
-                            .expect("accept the agent CLI");
-                    let (read, write) = tokio::io::split(stream);
-                    let mut reader = FrameReader::new(read);
-                    let mut writer = FrameWriter::new(write);
-                    let hello = handshake(&mut reader, &mut writer, "supervisor")
-                        .await
-                        .expect("handshake");
-                    let ControlMsg::Hello {
-                        auth: Some(auth), ..
-                    } = hello
-                    else {
-                        panic!("the agent CLI must authenticate in its hello: {hello:?}");
-                    };
-                    assert_eq!(auth.session_id, "session-1");
-                    assert_eq!(auth.token, "secret");
-                    let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
-                        .await
-                        .expect("the agent CLI did not send a request")
-                        .unwrap()
-                        .expect("agent request");
-                    if let Some(reply) = respond(parse_control(&frame).unwrap()) {
-                        writer.write_frame(&reply).await.unwrap();
-                    }
-                });
-        }))
-        .map_err(|panic| {
-            panic.downcast_ref::<&str>().map_or_else(
-                || "mock supervisor panicked".to_string(),
-                |s| (*s).to_string(),
-            )
+        context.enter(|| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                context
+                    .with_runtime(
+                        farhelm_testtrace::RuntimeConfig {
+                            flavor: farhelm_testtrace::RuntimeFlavor::MultiThread,
+                            worker_threads: None,
+                            start_paused: false,
+                        },
+                        |runtime| {
+                            runtime.block_on(async move {
+                                let listener =
+                                    tokio::net::UnixListener::from_std(std_listener).unwrap();
+                                let (stream, _) =
+                                    tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                                        .await
+                                        .expect("the agent CLI did not connect")
+                                        .expect("accept the agent CLI");
+                                let (read, write) = tokio::io::split(stream);
+                                let mut reader = FrameReader::new(read);
+                                let mut writer = FrameWriter::new(write);
+                                let hello = handshake(&mut reader, &mut writer, "supervisor")
+                                    .await
+                                    .expect("handshake");
+                                let ControlMsg::Hello {
+                                    auth: Some(auth), ..
+                                } = hello
+                                else {
+                                    panic!(
+                                        "the agent CLI must authenticate in its hello: {hello:?}"
+                                    );
+                                };
+                                assert_eq!(auth.session_id, "session-1");
+                                assert_eq!(auth.token, "secret");
+                                let frame = tokio::time::timeout(
+                                    Duration::from_secs(5),
+                                    reader.read_frame(),
+                                )
+                                .await
+                                .expect("the agent CLI did not send a request")
+                                .unwrap()
+                                .expect("agent request");
+                                if let Some(reply) = respond(parse_control(&frame).unwrap()) {
+                                    writer.write_frame(&reply).await.unwrap();
+                                }
+                            });
+                        },
+                    )
+                    .unwrap();
+            }))
+            .map_err(|panic| {
+                panic.downcast_ref::<&str>().map_or_else(
+                    || "mock supervisor panicked".to_string(),
+                    |s| (*s).to_string(),
+                )
+            });
+            let _ = done_tx.send(result);
         });
-        let _ = done_tx.send(result);
     });
     (done_rx, thread)
 }
@@ -203,7 +223,7 @@ fn agent_command_with_args(socket: &std::path::Path, args: &[&str]) -> Command {
 /// quoting its own shell output, so column drift is a user-visible
 /// regression, and `current` has no other spelling — it is the one field
 /// neither this process nor the supervisor could have computed.
-#[test]
+#[farhelm_testtrace::test]
 fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -276,7 +296,7 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
 /// there invites an agent to go and interact with it — and a cached row
 /// from an unreachable host is indistinguishable from a live one without
 /// the `(stale)` mark SPEC.md requires.
-#[test]
+#[farhelm_testtrace::test]
 fn sessions_prints_the_marked_table_with_archive_and_staleness() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -362,7 +382,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
 /// complete one, so an agent that cannot see the difference reads "past the
 /// cut" as "does not exist" — but the rows it did get are still the answer,
 /// and a script capturing stdout must not find prose mixed into its table.
-#[test]
+#[farhelm_testtrace::test]
 fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -418,7 +438,7 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
 /// makes the error actionable. Exit status and the empty stdout are the
 /// same contract `farhelm spawn` holds, so a script wrapping either can
 /// treat them alike.
-#[test]
+#[farhelm_testtrace::test]
 fn a_refusal_is_the_supervisors_own_sentence_on_stderr() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -476,7 +496,7 @@ fn a_refusal_is_the_supervisors_own_sentence_on_stderr() {
 /// `validate_agent_verb` answers, which is why the sibling
 /// [`a_stop_confirmation_escapes_control_characters_in_the_target`] cannot
 /// occur end to end and this can.
-#[test]
+#[farhelm_testtrace::test]
 fn a_refused_lifecycle_verb_is_escaped_and_bounded_on_stderr() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -549,7 +569,7 @@ fn a_refused_lifecycle_verb_is_escaped_and_bounded_on_stderr() {
 /// purpose — one definition of what a Farhelm session guarantees — and this
 /// pins that the sharing is real rather than a coincidence of two similar
 /// code paths.
-#[test]
+#[farhelm_testtrace::test]
 fn a_missing_supervisor_socket_is_a_clean_precondition_failure() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
     for name in [
@@ -581,7 +601,7 @@ fn a_missing_supervisor_socket_is_a_clean_precondition_failure() {
 /// used to be hard-coded to spawn's name. A user running `farhelm agent`
 /// then read an error about a feature they had not invoked, and went off to
 /// diagnose the wrong thing.
-#[test]
+#[farhelm_testtrace::test]
 fn a_precondition_failure_names_the_command_that_was_run() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
     for name in [
@@ -669,7 +689,7 @@ fn asked_req_id(request: &ControlMsg) -> u64 {
 /// invisible to the success-path tests above, and weakening any of them
 /// would let the command print the wrong thing, say the wrong thing, or
 /// hang.
-#[test]
+#[farhelm_testtrace::test]
 fn an_untrustworthy_reply_fails_with_nothing_on_stdout() {
     // A response correlated with a request this process never made.
     let mismatched = agent_run_against("hosts", |request| {
@@ -750,7 +770,7 @@ fn an_untrustworthy_reply_fails_with_nothing_on_stdout() {
 /// being appended to every transport failure, where it would be noise no
 /// caller can act on. `stop` is the verb because it is the one whose repeat
 /// is destructive in the plainest way.
-#[test]
+#[farhelm_testtrace::test]
 fn a_supervisor_dying_after_reading_a_mutation_says_the_outcome_is_unknown() {
     // The mock reads the request (`mock_supervisor` always does) and then
     // returns without writing, which closes the connection — the shape of a
@@ -791,7 +811,7 @@ fn a_supervisor_dying_after_reading_a_mutation_says_the_outcome_is_unknown() {
 /// answering a question nobody asked. Both directions are covered because a
 /// check written against one verb is easy to write in a way that passes
 /// everything else.
-#[test]
+#[farhelm_testtrace::test]
 fn a_reply_for_the_other_verb_is_refused() {
     let hosts_got_sessions = agent_run_against("hosts", |request| {
         Some(ControlMsg::AgentResponse {
@@ -850,7 +870,7 @@ fn a_reply_for_the_other_verb_is_refused() {
 /// The listing half is what keeps the remedy meaningful. Appended to every
 /// protocol failure it would be noise no caller can act on, so `sessions`
 /// is driven through the same four peers and must come back without it.
-#[test]
+#[farhelm_testtrace::test]
 fn an_untrustworthy_answer_to_a_mutation_says_the_outcome_is_unknown() {
     /// The four post-write endings that are not the peer's own refusal,
     /// each run against `verb`.
@@ -952,7 +972,7 @@ fn an_untrustworthy_answer_to_a_mutation_says_the_outcome_is_unknown() {
 /// distinction one this test can actually fail on: a reply that echoed the
 /// request's own `session_id`/`title` back would pass just as well whether
 /// the confirmation prints the reply or the argument.
-#[test]
+#[farhelm_testtrace::test]
 fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1012,7 +1032,7 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
 /// target — the substitution the helm resolves to the asking session — and
 /// the confirmation names the ASKING session, since `Stopped` itself
 /// carries no id to read one back from.
-#[test]
+#[farhelm_testtrace::test]
 fn stop_with_no_session_flag_sends_none_and_names_the_asking_session() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1057,7 +1077,7 @@ fn stop_with_no_session_flag_sends_none_and_names_the_asking_session() {
 /// twin [`bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker`]
 /// pins the `None` side; neither is meaningful without the other, since a
 /// CLI that hardcoded either one would pass exactly one of them.
-#[test]
+#[farhelm_testtrace::test]
 fn archive_sends_the_named_target_and_prints_its_id() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1133,7 +1153,7 @@ fn archive_sends_the_named_target_and_prints_its_id() {
 /// is quoted, so the id's escaping runs through a different path in the
 /// same `println!`, and a change that fixed quoting while dropping
 /// `safe_cell` from the id would still pass a title-only test.
-#[test]
+#[farhelm_testtrace::test]
 fn a_rename_confirmation_escapes_and_delimits_both_of_its_fields() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1197,7 +1217,7 @@ fn a_rename_confirmation_escapes_and_delimits_both_of_its_fields() {
 /// currently happens to reject hostile ids. A validation rule that moved,
 /// loosened, or gained an exemption would otherwise silently remove the
 /// only thing keeping a forged second line off stdout.
-#[test]
+#[farhelm_testtrace::test]
 fn a_stop_confirmation_escapes_control_characters_in_the_target() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1245,7 +1265,7 @@ fn a_stop_confirmation_escapes_control_characters_in_the_target() {
 /// coming back is one it could have sent, and this is deliberately not an
 /// argument for adding such a check: escaping every printed field is the
 /// cheaper invariant and does not need to know what a legal id looks like.
-#[test]
+#[farhelm_testtrace::test]
 fn an_archive_confirmation_escapes_control_characters_in_the_id() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1292,7 +1312,7 @@ fn an_archive_confirmation_escapes_control_characters_in_the_id() {
 /// for `Stop`'s own version of this contract), and here for `Rename`,
 /// which previously had no such coverage below the handler-test and e2e
 /// layers.
-#[test]
+#[farhelm_testtrace::test]
 fn bare_rename_sends_no_target_and_lets_the_helm_substitute_the_asker() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1347,7 +1367,7 @@ fn bare_rename_sends_no_target_and_lets_the_helm_substitute_the_asker() {
 /// already pin at this wire-encoding layer, and here for `Archive`, which
 /// previously had no such coverage below the handler-test and e2e layers
 /// (every existing `archive` test here named an explicit `--session`).
-#[test]
+#[farhelm_testtrace::test]
 fn bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1405,7 +1425,7 @@ fn bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker() {
 /// CLI exit before ever opening a socket, and `mock_supervisor`'s
 /// "the agent CLI did not connect" timeout would be the failure, not a
 /// clean assertion on the request actually sent.
-#[test]
+#[farhelm_testtrace::test]
 fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1480,7 +1500,7 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
 /// because it is documented as the same output. Two texts that drifted
 /// apart would mean an agent's answer depended on which spelling it
 /// happened to try.
-#[test]
+#[farhelm_testtrace::test]
 fn instructions_print_every_verb_without_a_session() {
     let run = |verb: &str| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
@@ -1556,7 +1576,7 @@ fn instructions_print_every_verb_without_a_session() {
 /// the only place the full option syntax is spelled out. A regression here
 /// would be invisible to every other test in this file, since they all
 /// drive real verbs.
-#[test]
+#[farhelm_testtrace::test]
 fn the_help_flag_still_prints_clap_usage() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
     command.args(["agent", "--help"]);
@@ -1594,7 +1614,7 @@ fn the_help_flag_still_prints_clap_usage() {
 /// helm resolves that value against the TARGET host's catalog, and sending
 /// it as an id would resolve on the wrong catalog rather than fail (ids
 /// collide across installs by construction).
-#[test]
+#[farhelm_testtrace::test]
 fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1679,7 +1699,7 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
 /// would be answering a question only the helm has the information to
 /// answer, since the source session may not even be this process's own
 /// working directory.
-#[test]
+#[farhelm_testtrace::test]
 fn bare_clone_sends_every_field_absent() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1751,7 +1771,7 @@ fn bare_clone_sends_every_field_absent() {
 /// fleet, and a newline or an ESC in any of them would forge a line or
 /// reach terminal features in the transcript of a model that is about to
 /// quote this output back to a user.
-#[test]
+#[farhelm_testtrace::test]
 fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1841,7 +1861,7 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
 /// regressed into sending the request, there would be no socket to connect
 /// to and the failure would still be an error — so the assertion is
 /// specifically that clap's own conflict message is what came back.
-#[test]
+#[farhelm_testtrace::test]
 fn create_naming_both_selectors_is_refused_before_anything_is_sent() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1874,7 +1894,7 @@ fn create_naming_both_selectors_is_refused_before_anything_is_sent() {
 /// `create` a `clone` wearing another verb's name, and the CLI is not even
 /// the party that knows it: the asking session's directory lives on the
 /// helm's side of the relay.
-#[test]
+#[farhelm_testtrace::test]
 fn create_without_a_cwd_is_refused() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1904,7 +1924,7 @@ fn create_without_a_cwd_is_refused() {
 /// is clap's parse of a hyphen-leading VALUE, and a value that merely
 /// contains flags after a normal program name would never have exercised
 /// it.
-#[test]
+#[farhelm_testtrace::test]
 fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -1989,7 +2009,7 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
 /// line, and a profile name is exactly the kind of value whose legality the
 /// TARGET host's catalog decides — refusing it here would tell an agent its
 /// name is malformed when the truth is that this CLI would not carry it.
-#[test]
+#[farhelm_testtrace::test]
 fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -2055,7 +2075,7 @@ fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
 /// created it — a target an agent might then go on to stop or archive. No
 /// other test in the stack can see this: the relay hands a response back by
 /// `req_id` alone across two hops, and neither hop re-checks the shape.
-#[test]
+#[farhelm_testtrace::test]
 fn a_session_reply_to_a_creating_verb_is_refused() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
