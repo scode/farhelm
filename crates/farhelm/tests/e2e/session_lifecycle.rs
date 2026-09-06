@@ -174,8 +174,12 @@ async fn create_attach_and_roundtrip_input() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     h.client.send_input(chan, b"hello-farhelm\r".to_vec()).await;
@@ -264,8 +268,12 @@ async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
          recency sort degrades to creation order rather than to the epoch"
     );
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -438,8 +446,12 @@ async fn reattach_replays_history_and_modes() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     // The barrier is the fixture's PROMPT, not its ready marker, and the
     // difference is this test's recorded flake.
     //
@@ -484,13 +496,13 @@ async fn reattach_replays_history_and_modes() {
     );
     h.client.detach(chan).await;
 
-    let (chan2, mut rx2) = h
+    let (chan2, rx2_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("reattach");
     let at_reattach = pane_forensics(&h, &session.id).await;
-    let mut replay = Vec::new();
+    let mut replay = rx2_replay;
     wait_for(&mut rx2, &mut replay, "before-reattach", 10).await;
     // Input-mode restoration follows the content prefill, so wait for it
     // explicitly rather than asserting on a prefix of the replay. On a
@@ -553,9 +565,14 @@ async fn reattach_cutover_has_no_missing_or_duplicated_output() {
     let mut target = 100;
     let mut final_channel = None;
     for attempt in 0..8 {
-        let (channel, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+        let (channel, rx_replay, mut rx) = h
+            .client
+            .attach_live(&session.id, 80, 24)
+            .await
+            .expect("attach");
         final_channel = Some(channel);
-        let transcript = collect_counter_through(&mut rx, target).await;
+        let mut transcript = rx_replay;
+        transcript.extend(collect_counter_through(&mut rx, target).await);
         let records = counter_records(&transcript);
         let first = *records.first().expect("snapshot contains counter output");
         let last = *records.last().expect("checked above");
@@ -591,12 +608,18 @@ async fn non_utf8_terminal_output_survives_live_stream() {
         .await
         .expect("create");
 
-    let (channel, mut live) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let (channel, replay, mut live) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    // ReplayComplete says this attachment caught up; it does not say the
+    // fixture has execed far enough to accept input. READY may be replayed,
+    // so use the split replay plus receiver for setup, then start fresh for
+    // the post-input assertion.
+    let mut readiness = replay;
+    wait_for(&mut live, &mut readiness, "FAKE-AGENT READY", 20).await;
     let mut live_bytes = Vec::new();
-    // The on-request fixture already makes the byte live in practice. The
-    // boundary makes that claim exact rather than merely likely.
-    let live_from = wait_for_replay_complete(&mut live, &mut live_bytes, 20).await;
-    wait_for(&mut live, &mut live_bytes, "FAKE-AGENT READY", 20).await;
     h.client.send_input(channel, b"\n".to_vec()).await;
     // `send_input` returning proves only that the frame was queued. The
     // supervisor's tmux `send-keys` exchange behind it is allowed 30 s under
@@ -605,7 +628,7 @@ async fn non_utf8_terminal_output_survives_live_stream() {
     // to remove.
     wait_for(&mut live, &mut live_bytes, "BINARY-MARKER", 40).await;
     assert!(
-        live_bytes[live_from..].contains(&0xff),
+        live_bytes.contains(&0xff),
         "live output replaced or dropped the invalid byte: {live_bytes:?}"
     );
 }
@@ -618,11 +641,19 @@ async fn second_attach_detaches_first() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (_c1, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach1");
-    let mut seen1 = Vec::new();
+    let (_c1, rx1_replay, mut rx1) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach1");
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
-    let (c2, mut rx2) = h.client.attach(&session.id, 80, 24).await.expect("attach2");
+    let (c2, rx2_replay, mut rx2) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach2");
 
     // First attachment must observe its own takeover.
     let deadline = Duration::from_secs(10);
@@ -639,7 +670,7 @@ async fn second_attach_detaches_first() {
     assert!(detached.contains("another client"));
 
     // Second attachment is live.
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 10).await;
     h.client.send_input(c2, b"still-alive\r".to_vec()).await;
     wait_for(&mut rx2, &mut seen2, "still-alive", 10).await;
@@ -661,17 +692,17 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (loser_chan, mut rx1) = h
+    let (loser_chan, rx1_replay, mut rx1) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "lease-one")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "lease-one")
         .await
         .expect("attach1");
-    let mut seen1 = Vec::new();
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
-    let (winner_chan, mut rx2) = h
+    let (winner_chan, rx2_replay, mut rx2) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "lease-two")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "lease-two")
         .await
         .expect("attach2");
     let reason = expect_detached(&mut rx1, 10).await;
@@ -680,7 +711,7 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
         "the loser must be told it was taken over, got: {reason}"
     );
 
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
     // Ghost then marker on the SAME connection, so the supervisor has
     // decided the ghost's fate by the time the marker echoes back (the
@@ -724,17 +755,17 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (owner_chan, mut owner_rx) = h
+    let (owner_chan, owner_rx_replay, mut owner_rx) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "lease-owner")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "lease-owner")
         .await
         .expect("the owner attaches normally");
-    let mut seen = Vec::new();
+    let mut seen = owner_rx_replay;
     wait_for(&mut owner_rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     let refused = h
         .client
-        .attach_terminal_if_unowned(
+        .attach_terminal_if_unowned_at_boundary(
             &session.id,
             80,
             24,
@@ -766,9 +797,9 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
 
     // And the same client CAN still take the session deliberately — the
     // refusal is about unattended attaches, not about this lease.
-    let (_taken, mut taken_rx) = h
+    let (_taken, taken_rx_replay, mut taken_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -782,7 +813,7 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
         reason.contains("another client"),
         "the deliberate takeover still displaces, got: {reason}"
     );
-    let mut seen_taken = Vec::new();
+    let mut seen_taken = taken_rx_replay;
     wait_for(&mut taken_rx, &mut seen_taken, "FAKE-AGENT READY", 15).await;
 }
 
@@ -807,21 +838,21 @@ async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (chan1, mut rx1) = h
+    let (chan1, rx1_replay, mut rx1) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, LEASE)
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, LEASE)
         .await
         .expect("attach");
-    let mut seen1 = Vec::new();
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
     h.client
         .send_input(chan1, b"before-same-lease\r".to_vec())
         .await;
     wait_for(&mut rx1, &mut seen1, "before-same-lease", 15).await;
 
-    let (chan2, mut rx2) = h
+    let (chan2, rx2_replay, mut rx2) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, LEASE)
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, LEASE)
         .await
         .expect("reattach");
     let reason = expect_detached(&mut rx1, 10).await;
@@ -836,7 +867,7 @@ async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
     );
 
     // Replay, then live: exactly what a reconnect promises.
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "before-same-lease", 20).await;
     h.client
         .send_input(chan2, b"after-same-lease\r".to_vec())
@@ -860,27 +891,31 @@ async fn the_empty_lease_takes_over_everything_and_is_taken_over_by_anything() {
     let (session, _work) = basic_session(&h).await;
 
     // Leased incumbent, un-leased newcomer.
-    let (_leased_chan, mut leased_rx) = h
+    let (_leased_chan, leased_rx_replay, mut leased_rx) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "held-lease")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "held-lease")
         .await
         .expect("leased attach");
-    let mut leased_seen = Vec::new();
+    let mut leased_seen = leased_rx_replay;
     wait_for(&mut leased_rx, &mut leased_seen, "FAKE-AGENT READY", 20).await;
 
-    let (_legacy_chan, mut legacy_rx) = h.client.attach(&session.id, 80, 24).await.expect("legacy");
+    let (_legacy_chan, legacy_rx_replay, mut legacy_rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("legacy");
     let reason = expect_detached(&mut leased_rx, 10).await;
     assert!(
         reason.contains("another client"),
         "an un-leased attach must take over a leased holder, got: {reason}"
     );
-    let mut legacy_seen = Vec::new();
+    let mut legacy_seen = legacy_rx_replay;
     wait_for(&mut legacy_rx, &mut legacy_seen, "FAKE-AGENT READY", 15).await;
 
     // Un-leased incumbent, leased newcomer.
-    let (_new_chan, mut new_rx) = h
+    let (_new_chan, new_rx_replay, mut new_rx) = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "fresh-lease")
+        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "fresh-lease")
         .await
         .expect("leased reattach");
     let reason = expect_detached(&mut legacy_rx, 10).await;
@@ -888,7 +923,7 @@ async fn the_empty_lease_takes_over_everything_and_is_taken_over_by_anything() {
         reason.contains("another client"),
         "a leased attach must take over an un-leased holder, got: {reason}"
     );
-    let mut new_seen = Vec::new();
+    let mut new_seen = new_rx_replay;
     wait_for(&mut new_rx, &mut new_seen, "FAKE-AGENT READY", 15).await;
 }
 
@@ -906,9 +941,9 @@ async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (holder_chan, mut holder_rx) = h
+    let (holder_chan, holder_rx_replay, mut holder_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -917,7 +952,7 @@ async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
         )
         .await
         .expect("attach the agent terminal");
-    let mut holder_seen = Vec::new();
+    let mut holder_seen = holder_rx_replay;
     wait_for(&mut holder_rx, &mut holder_seen, "FAKE-AGENT READY", 20).await;
 
     // One byte over: the cap is 128, and a request that is refused must
@@ -925,7 +960,7 @@ async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
     let over_cap = "x".repeat(129);
     let err = h
         .client
-        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, &over_cap)
+        .attach_terminal_at_boundary(&session.id, 80, 24, TerminalSelector::Agent, &over_cap)
         .await
         .expect_err("an over-cap lease must be refused");
     assert!(
@@ -967,9 +1002,9 @@ async fn the_lease_cap_counts_bytes_not_characters() {
     let (session, _work) = basic_session(&h).await;
 
     let exactly_at_cap = "x".repeat(128);
-    let (_chan, mut rx) = h
+    let (_chan, rx_replay, mut rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -978,15 +1013,15 @@ async fn the_lease_cap_counts_bytes_not_characters() {
         )
         .await
         .expect("a lease exactly at the cap must be accepted");
-    let mut seen = Vec::new();
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // 64 two-byte characters: 128 bytes, right on the cap.
     let multibyte_at_cap = "é".repeat(64);
     assert_eq!(multibyte_at_cap.len(), 128, "test fixture is 128 bytes");
-    let (_chan2, mut rx2) = h
+    let (_chan2, rx2_replay, mut rx2) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -995,7 +1030,7 @@ async fn the_lease_cap_counts_bytes_not_characters() {
         )
         .await
         .expect("a multibyte lease at the byte cap must be accepted");
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
 
     // 65 of them: 65 characters — comfortably under any character-count
@@ -1005,7 +1040,7 @@ async fn the_lease_cap_counts_bytes_not_characters() {
     assert_eq!(multibyte_over_cap.len(), 130);
     let err = h
         .client
-        .attach_terminal(
+        .attach_terminal_at_boundary(
             &session.id,
             80,
             24,
@@ -1041,9 +1076,9 @@ async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (holder_chan, mut holder_rx) = h
+    let (holder_chan, holder_rx_replay, mut holder_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -1052,12 +1087,12 @@ async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
         )
         .await
         .expect("attach the agent terminal");
-    let mut holder_seen = Vec::new();
+    let mut holder_seen = holder_rx_replay;
     wait_for(&mut holder_rx, &mut holder_seen, "FAKE-AGENT READY", 20).await;
 
     let err = h
         .client
-        .attach_terminal(
+        .attach_terminal_at_boundary(
             &session.id,
             80,
             24,
@@ -1708,8 +1743,12 @@ async fn reattach_replays_content_scrolled_off_screen() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // 80 lines against a 24-row window: spam-line-1 is far off screen by
@@ -1718,12 +1757,12 @@ async fn reattach_replays_content_scrolled_off_screen() {
     wait_for(&mut rx, &mut seen, "spam-line-80", 15).await;
     h.client.detach(chan).await;
 
-    let (_chan2, mut rx2) = h
+    let (_chan2, rx2_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("reattach");
-    let mut replay = Vec::new();
+    let mut replay = rx2_replay;
     wait_for(&mut rx2, &mut replay, "spam-line-1", 15).await;
 }
 
@@ -1751,17 +1790,21 @@ async fn reattach_to_alt_screen_app_preserves_content() {
         .await
         .expect("create");
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
     h.client.detach(chan).await;
 
-    let (_chan2, mut rx2) = h
+    let (_chan2, rx2_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("reattach");
-    let mut replay = Vec::new();
+    let mut replay = rx2_replay;
     wait_for(&mut rx2, &mut replay, "ALT-SCREEN APP", 15).await;
     let text = String::from_utf8_lossy(&replay);
     let switch = text
@@ -1783,8 +1826,12 @@ async fn reattach_to_alt_screen_app_preserves_content() {
 async fn resize_reaches_tmux() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     h.client.resize(&session.id, chan, 100, 30).await;
@@ -1805,8 +1852,12 @@ async fn attach_replay_uses_the_requested_geometry() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (channel, mut first) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut initial = Vec::new();
+    let (channel, first_replay, mut first) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut initial = first_replay;
     wait_for(&mut first, &mut initial, "FAKE-AGENT READY", 20).await;
     let payload = format!("geometry-{}", "x".repeat(50));
     h.client
@@ -1815,12 +1866,12 @@ async fn attach_replay_uses_the_requested_geometry() {
     wait_for(&mut first, &mut initial, &payload, 10).await;
     h.client.detach(channel).await;
 
-    let (channel, mut second) = h
+    let (channel, second_replay, mut second) = h
         .client
-        .attach(&session.id, 40, 24)
+        .attach_live(&session.id, 40, 24)
         .await
         .expect("reattach");
-    let mut replay = Vec::new();
+    let mut replay = second_replay;
     h.client
         .send_input(channel, b"geometry-barrier\r".to_vec())
         .await;
@@ -1853,16 +1904,23 @@ async fn resize_from_a_kicked_connection_is_ignored() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (loser_chan, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach1");
-    let mut seen1 = Vec::new();
+    let (loser_chan, rx1_replay, mut rx1) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach1");
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
     let winner = h.second_client().await;
-    let (winner_chan, mut rx2) = winner.attach(&session.id, 80, 24).await.expect("attach2");
+    let (winner_chan, rx2_replay, mut rx2) = winner
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach2");
     // The colliding ids are the point: if this ever fails, the test has
     // stopped exercising the case it exists for.
     assert_eq!(loser_chan, winner_chan, "both connections number from 1");
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
 
     // Winner establishes a known geometry first.
@@ -1895,17 +1953,25 @@ async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (stale_chan, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach1");
-    let mut seen1 = Vec::new();
+    let (stale_chan, rx1_replay, mut rx1) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach1");
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
     // Second attach on the SAME connection: new channel, kicks the first.
-    let (live_chan, mut rx2) = h.client.attach(&session.id, 80, 24).await.expect("attach2");
+    let (live_chan, rx2_replay, mut rx2) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach2");
     assert_ne!(
         stale_chan, live_chan,
         "one connection numbers channels uniquely"
     );
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
 
     h.client.resize(&session.id, live_chan, 100, 30).await;
@@ -1934,8 +2000,12 @@ async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
 async fn exited_agent_leaves_a_viewable_terminal() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"quit\r".to_vec()).await;
 
@@ -2009,7 +2079,9 @@ async fn exited_agent_leaves_a_viewable_terminal() {
     // and must not be retried into a slow pass.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let (_chan2, _rx2) = loop {
-        match h.client.attach(&session.id, 80, 24).await {
+        // This retry observes whether a dead pane remains attachable; consuming
+        // catch-up would turn a successful attach into a replay-read test.
+        match h.client.attach_at_boundary(&session.id, 80, 24).await {
             Ok(attached) => break attached,
             Err(e) => {
                 assert!(
@@ -2139,8 +2211,12 @@ async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config()
 async fn exited_agent_lists_as_exited_with_its_exit_code() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"quit\r".to_vec()).await;
 
@@ -2319,12 +2395,20 @@ async fn kicked_client_cannot_still_send_input() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (c1, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach1");
-    let mut seen1 = Vec::new();
+    let (c1, rx1_replay, mut rx1) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach1");
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
-    let (c2, mut rx2) = h.client.attach(&session.id, 80, 24).await.expect("attach2");
-    let mut seen2 = Vec::new();
+    let (c2, rx2_replay, mut rx2) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach2");
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
 
     // Ghost first, marker second, both on the same connection so the
@@ -2355,14 +2439,21 @@ async fn input_from_a_kicked_connection_is_dropped() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (loser_chan, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach1");
-    let mut seen1 = Vec::new();
+    let (loser_chan, rx1_replay, mut rx1) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach1");
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
     let winner = h.second_client().await;
-    let (winner_chan, mut rx2) = winner.attach(&session.id, 80, 24).await.expect("attach2");
+    let (winner_chan, rx2_replay, mut rx2) = winner
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach2");
     assert_eq!(loser_chan, winner_chan, "both connections number from 1");
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
 
     // The two inputs travel on different connections, so the winner's
@@ -2434,8 +2525,11 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
         )
         .await
         .expect("create");
-    let (_chan, mut rx) = client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // Sever the transport.
@@ -2480,12 +2574,12 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
     // replay and then never updates. Asserting on a FRESH echo, not the
     // replay, is what tells those apart — replay alone arrives either
     // way.
-    let (chan, mut rx2) = h
+    let (chan, rx2_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("reattach");
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 20).await;
     h.client
         .send_input(chan, b"alive-after-loss\r".to_vec())
@@ -2708,8 +2802,11 @@ async fn stdio_proxy_carries_a_real_session() {
         )
         .await
         .expect("create over proxy");
-    let (chan, mut rx) = client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 25).await;
     client
         .send_input(chan, b"through-the-proxy\r".to_vec())
@@ -2750,8 +2847,12 @@ async fn large_input_survives_chunking() {
         )
         .await
         .expect("create");
-    let (chan, mut rx) = h.client.attach(&session.id, 200, 50).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 200, 50)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // 3200 numbered lines ≈ 48 KiB in one send_input call. Numbering
@@ -2800,12 +2901,12 @@ async fn large_input_survives_chunking() {
 async fn attach_with_degenerate_size_still_works() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let (_chan, mut rx) = h
+    let (_chan, rx_replay, mut rx) = h
         .client
-        .attach(&session.id, 0, 0)
+        .attach_live(&session.id, 0, 0)
         .await
         .expect("attach with 0x0 must succeed");
-    let mut seen = Vec::new();
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // The attach's resize ran before the replay that carried the marker
@@ -2930,7 +3031,7 @@ async fn attach_to_unknown_session_errors_and_connection_survives() {
 
     let err = h
         .client
-        .attach("definitely-not-a-session", 80, 24)
+        .attach_at_boundary("definitely-not-a-session", 80, 24)
         .await
         .expect_err("attach to an unknown session must fail");
     assert!(
@@ -2979,7 +3080,7 @@ async fn cutover_failure_is_request_local() {
 
     let error = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_at_boundary(&session.id, 80, 24)
         .await
         .expect_err("attach must report the missing tmux session");
     assert!(
@@ -3166,14 +3267,21 @@ async fn detach_from_a_kicked_connection_does_not_kill_the_winner() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (loser_chan, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach1");
-    let mut seen1 = Vec::new();
+    let (loser_chan, rx1_replay, mut rx1) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach1");
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
     let winner = h.second_client().await;
-    let (winner_chan, mut rx2) = winner.attach(&session.id, 80, 24).await.expect("attach2");
+    let (winner_chan, rx2_replay, mut rx2) = winner
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach2");
     assert_eq!(loser_chan, winner_chan, "both connections number from 1");
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
 
     // The kicked helm's routine cleanup: same channel id, wrong
@@ -3288,8 +3396,12 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
         .await
         .expect("create");
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // Exactly the bytes paste-buffer was observed to mangle: DEL, ESC
@@ -3389,11 +3501,11 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
         "and its metadata must round-trip identically from SQLite"
     );
 
-    let (chan, mut rx) = client2
-        .attach(&session.id, 80, 24)
+    let (chan, rx_replay, mut rx) = client2
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("attach must succeed: the tmux session is still alive");
-    let mut seen = Vec::new();
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     client2.send_input(chan, b"still-alive\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
@@ -3444,7 +3556,7 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
     );
 
     let err = client2
-        .attach(&session.id, 80, 24)
+        .attach_at_boundary(&session.id, 80, 24)
         .await
         .expect_err("attach must fail: this entry's terminal did not survive the restart");
     assert!(
@@ -4081,18 +4193,18 @@ async fn restart_gap_is_decided_per_session() {
         "both sessions must remain listed regardless of which one's terminal died"
     );
 
-    let (chan, mut rx) = client2
-        .attach(&alive_session.id, 80, 24)
+    let (chan, rx_replay, mut rx) = client2
+        .attach_live(&alive_session.id, 80, 24)
         .await
         .expect("the untouched session must still attach");
-    let mut seen = Vec::new();
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     client2.send_input(chan, b"still-alive\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
     wait_for(&mut rx, &mut seen, "still-alive", 5).await;
 
     let err = client2
-        .attach(&dead_session.id, 80, 24)
+        .attach_at_boundary(&dead_session.id, 80, 24)
         .await
         .expect_err("the killed session's attach must fail");
     assert!(
@@ -4149,8 +4261,12 @@ async fn stop_kills_the_whole_process_tree() {
         .await
         .expect("create");
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
@@ -4211,12 +4327,12 @@ async fn stop_kills_the_whole_process_tree() {
     );
 
     h.client.detach(chan).await;
-    let (_chan2, mut rx2) = h
+    let (_chan2, rx2_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("a stopped session's terminal must still be attachable");
-    let mut replay = Vec::new();
+    let mut replay = rx2_replay;
     wait_for(&mut rx2, &mut replay, "SELF-PID", 15).await;
 }
 
@@ -4248,8 +4364,12 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
         .await
         .expect("create");
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
@@ -4289,8 +4409,12 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         )
         .await
         .expect("create");
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // Kick off the slow stop without awaiting it yet.
@@ -4317,7 +4441,10 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         "test setup: the slow stop must still be in flight at this point"
     );
 
-    let cheap_result = h.client.attach("definitely-not-a-session", 80, 24).await;
+    let cheap_result = h
+        .client
+        .attach_at_boundary("definitely-not-a-session", 80, 24)
+        .await;
     assert!(
         cheap_result.is_err(),
         "an unknown-session attach must still fail fast"
@@ -4448,8 +4575,12 @@ async fn delete_while_attached_detaches_the_client() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     let deleter = h.second_client().await;
@@ -4522,8 +4653,12 @@ async fn delete_kills_the_whole_process_tree() {
         .await
         .expect("create");
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
@@ -4546,8 +4681,12 @@ async fn stop_does_not_disturb_the_existing_attachment() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let (_chan1, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen1 = Vec::new();
+    let (_chan1, rx1_replay, mut rx1) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
@@ -4574,9 +4713,9 @@ async fn stop_does_not_disturb_the_existing_attachment() {
 
     // The attachment must still be live and kickable: a second attach
     // takes it over exactly like `second_attach_detaches_first`.
-    let (chan2, mut rx2) = h
+    let (chan2, rx2_replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("second attach");
     let detached = tokio::time::timeout(Duration::from_secs(10), async {
@@ -4595,7 +4734,7 @@ async fn stop_does_not_disturb_the_existing_attachment() {
     );
     // The second attachment is otherwise ordinary — same session, same
     // (now-dead) pane, still attachable.
-    let mut seen2 = Vec::new();
+    let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
     h.client.detach(chan2).await;
 }
@@ -4651,39 +4790,27 @@ async fn stop_takes_no_screen_capture_and_replays_none() {
         .expect("create");
 
     // See the frame live first, so its later absence is meaningful.
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
     h.client.detach(chan).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
     wait_for_non_live_status(&h.client, &session.id, 30).await;
 
-    // A fresh attach replays what the terminal itself holds — and only
-    // that. Drain to the replay-complete marker so every byte of the
-    // dead pane's prefill has been seen before asserting on absence.
-    let (_chan2, mut rx2) = h
+    // `attach_live` already drained this attachment's ReplayComplete before
+    // returning. Its replay vector is therefore the whole dead-pane prefill;
+    // keep the receiver alive through the assertions so this remains a real
+    // attachment rather than a copied fixture transcript.
+    let (_chan2, replay, _rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("attach after stop");
-    let mut replay = Vec::new();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        match tokio::time::timeout(remaining, rx2.recv()).await {
-            Ok(Some(TermEvent::Data(bytes))) => replay.extend_from_slice(&bytes),
-            Ok(Some(TermEvent::ReplayComplete)) => break,
-            Ok(Some(TermEvent::Detached(reason))) => {
-                panic!("detached before the replay completed: {reason}")
-            }
-            Ok(None) => panic!("stream closed before the replay completed"),
-            Err(_) => panic!(
-                "no replay-complete marker within 15s; replay so far:\n{}",
-                String::from_utf8_lossy(&replay)
-            ),
-        }
-    }
     let text = String::from_utf8_lossy(&replay);
     assert!(
         !text.contains("ALT-SCREEN APP"),
@@ -4817,8 +4944,12 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
         .await
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // The pane's own process, read from tmux BEFORE the rename: after it,
@@ -4910,8 +5041,12 @@ async fn stop_kills_a_reparented_marked_daemon() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
@@ -4955,8 +5090,12 @@ async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
@@ -5024,8 +5163,12 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
     let unmarked_child_pid = wait_for_pid_file(&work.path().join("unmarked-child.pid"), 10).await;
@@ -5115,8 +5258,12 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let cloaked_pid = wait_for_pid_file(&work.path().join("cloaked.pid"), 10).await;
@@ -5210,8 +5357,12 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let cloaked_pid = wait_for_pid_file(&work.path().join("cloaked.pid"), 10).await;
     let _cloaked_cleanup = PidKillGuard::arm(cloaked_pid);
@@ -5404,8 +5555,12 @@ async fn without_a_user_manager_a_launch_records_the_fallback_and_stops_like_m2(
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
@@ -5664,7 +5819,9 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
             tokio::time::Instant::now() < deadline,
             "attach-during-delete race never reached a consistent outcome"
         );
-        match second.attach(&session.id, 80, 24).await {
+        // The successful side of this race must still be attached when delete
+        // sends its reason; waiting for replay could consume that observation.
+        match second.attach_at_boundary(&session.id, 80, 24).await {
             Ok((_channel, mut rx)) => {
                 // An attach that succeeded must be told WHY it no longer
                 // holds the session, truthfully — a `Detached` naming
@@ -5785,8 +5942,12 @@ async fn stop_quiesce_survives_no_marked_process() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     // Let the storm actually produce a few generations before stopping,

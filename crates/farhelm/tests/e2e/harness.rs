@@ -61,6 +61,140 @@ impl TermSource for TermStream {
     }
 }
 
+/// Test-only attachment operations with an explicit initial-replay boundary.
+///
+/// Production attaches return one stream containing a tmux snapshot, its
+/// `ReplayComplete` marker, and later terminal events. A test that needs to
+/// act on a settled terminal must consume that marker before it starts any
+/// other wait: the ordinary text waiters intentionally swallow marker events.
+/// The `*_live` methods make that ordering part of setup and return
+/// `(channel, replay_bytes, post_marker_stream)`. `replay_bytes` contains
+/// every data byte before the initial marker; `post_marker_stream` has not
+/// been read past it. A forced tmux pause can replay again later without a
+/// second marker, so callers must not treat the returned stream as bytes that
+/// were necessarily produced after the attach.
+///
+/// The `*_at_boundary` methods are deliberately raw. They return the original
+/// production result without reading its receiver, for tests whose premise is
+/// the handoff itself, a refusal, or slow consumption before catch-up.
+pub(crate) trait SupervisorClientAttachExt {
+    /// Attach and return only after this attachment's initial replay ended.
+    async fn attach_live(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<(u32, Vec<u8>, TermStream)>;
+
+    /// Attach without consuming the initial replay boundary.
+    async fn attach_at_boundary(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<(u32, TermStream)>;
+
+    /// Attach a named terminal and return after its initial replay ended.
+    async fn attach_terminal_live(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+    ) -> anyhow::Result<(u32, Vec<u8>, TermStream)>;
+
+    /// Attach a named terminal without consuming its initial replay boundary.
+    async fn attach_terminal_at_boundary(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+    ) -> anyhow::Result<(u32, TermStream)>;
+
+    /// Conditionally attach without consuming its initial replay boundary.
+    async fn attach_terminal_if_unowned_at_boundary(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+    ) -> anyhow::Result<(u32, TermStream)>;
+}
+
+/// The common timeout for a harness attach to receive its initial marker.
+///
+/// This is setup budget rather than an assertion-specific deadline. Keeping it
+/// here prevents a test from accidentally making its readiness boundary more
+/// fragile than its actual behavior under test.
+const ATTACH_LIVE_REPLAY_BUDGET_SECS: u64 = 30;
+
+impl SupervisorClientAttachExt for SupervisorClient {
+    async fn attach_live(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<(u32, Vec<u8>, TermStream)> {
+        let (channel, mut stream) = self.attach(session_id, cols, rows).await?;
+        let mut replay = Vec::new();
+        wait_for_replay_complete(&mut stream, &mut replay, ATTACH_LIVE_REPLAY_BUDGET_SECS).await;
+        Ok((channel, replay, stream))
+    }
+
+    async fn attach_at_boundary(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<(u32, TermStream)> {
+        self.attach(session_id, cols, rows).await
+    }
+
+    async fn attach_terminal_live(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+    ) -> anyhow::Result<(u32, Vec<u8>, TermStream)> {
+        let (channel, mut stream) = self
+            .attach_terminal(session_id, cols, rows, terminal, lease)
+            .await?;
+        let mut replay = Vec::new();
+        wait_for_replay_complete(&mut stream, &mut replay, ATTACH_LIVE_REPLAY_BUDGET_SECS).await;
+        Ok((channel, replay, stream))
+    }
+
+    async fn attach_terminal_at_boundary(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+    ) -> anyhow::Result<(u32, TermStream)> {
+        self.attach_terminal(session_id, cols, rows, terminal, lease)
+            .await
+    }
+
+    async fn attach_terminal_if_unowned_at_boundary(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+    ) -> anyhow::Result<(u32, TermStream)> {
+        self.attach_terminal_if_unowned(session_id, cols, rows, terminal, lease)
+            .await
+    }
+}
+
 /// Pane width used wherever a test reads the fake agent's argv marker.
 ///
 /// Far wider than the suite's usual 80 because the marker carries two
