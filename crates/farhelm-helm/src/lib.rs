@@ -1418,14 +1418,13 @@ mod embedded_ui_tests {
     /// [`UiSource::None`], and stays silent for `Dir`/`Embedded` — the
     /// assertion `run_with_ready`'s previously-inlined `if` made impossible
     /// to drive directly. The message is a unique sentence found nowhere
-    /// else in this crate, so filtering the process-global capture buffer
-    /// (see `crate::test_capture`'s own docs on why it must be global) by
-    /// exact content is as good as filtering by this test's own identity.
-    #[test]
+    /// else in this crate, so exact content is enough to identify the one
+    /// event in this test-owned capture.
+    #[farhelm_testtrace::test]
     fn warn_if_no_ui_warns_only_for_none() {
         const MESSAGE: &str =
             "no web UI: this build embeds none and --ui-dist was not given; the API still serves";
-        let events = crate::test_capture::install();
+        let events = crate::test_capture::current();
 
         warn_if_no_ui(&UiSource::Dir(std::path::PathBuf::from(
             "/some/dev/ui-dist",

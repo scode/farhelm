@@ -4835,15 +4835,14 @@ mod tests {
     // regression that deleted the `tracing::warn!` call from one that
     // never had it. Observing the log line is what closes that gap.
     //
-    // The capture itself lives in `crate::test_capture` rather than here:
-    // it must be installed process-globally to reach the `spawn_blocking`
-    // thread these warnings fire on, a process global can only be claimed
-    // once, and this crate's whole test suite shares one binary — so the
-    // buffer is everyone's, and each test below filters it down to its own
-    // unique session id.
+    // The capture itself lives in `crate::test_capture`. The test attribute
+    // owns the runtime and propagates its dispatcher into `spawn_blocking`,
+    // so these warnings stay attributable to the test that triggered them.
 
-    /// Every "skipped a cached session" warning captured so far.
-    fn skip_warnings() -> Vec<crate::test_capture::CapturedEvent> {
+    /// Every "skipped a cached session" warning in this test's capture.
+    fn skip_warnings(
+        capture: &farhelm_testtrace::CaptureHandle,
+    ) -> Vec<crate::test_capture::CapturedEvent> {
         // The shared PREFIX of every skip warning this module writes, rather
         // than one reader's exact sentence: the per-host read explains the
         // decode failure inline, while the page scan carries the reason in a
@@ -4851,7 +4850,7 @@ mod tests {
         // reports nothing). What both must always do — and what these tests
         // are actually about — is say that a row was skipped, and name the
         // host and session it belonged to.
-        crate::test_capture::matching(&crate::test_capture::install(), "skipping a cached session")
+        crate::test_capture::matching(capture, "skipping a cached session")
     }
 
     /// Whether a host's cached list was cut at the cap is kept WITH the
@@ -8509,14 +8508,13 @@ mod tests {
     /// omitted, and not allowed to fail the whole read the way a corrupt
     /// `hosts.kind` fails `list_hosts`
     /// (`list_hosts_fails_loudly_on_a_corrupt_kind_bypassing_the_check`
-    /// above). The session id embeds this test's own name so a stray
-    /// warning from another test running concurrently in the same process
-    /// (this module's `tracing` capture is necessarily process-global —
-    /// see its own header comment) can never be mistaken for this one's.
-    #[tokio::test]
+    /// above). The sentinel session id identifies this test's malformed row.
+    /// The wrapper attributes the blocking-thread warning to this test even
+    /// while other libtest cases run at the same time.
+    #[farhelm_testtrace::test]
     async fn cached_sessions_skips_a_poisoned_blob_and_serves_the_rest() {
-        // Installed before anything is logged; read back at the end.
-        let _capture = crate::test_capture::install();
+        // Read back after the blocking cache read has emitted its warning.
+        let capture = crate::test_capture::current();
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "poison@host", "poison-identity").await;
         store
@@ -8558,7 +8556,7 @@ mod tests {
             "the poisoned row must be skipped and every other row still served"
         );
 
-        let events = skip_warnings();
+        let events = skip_warnings(&capture);
         let hit = events
             .iter()
             .find(|e| e.field("session_id") == Some("cached-sessions-poisoned"));
@@ -8579,10 +8577,10 @@ mod tests {
     /// through [`HelmStore::cached_rows`]'s multi-host read, with an entirely
     /// healthy second host present to prove one host's corruption cannot
     /// take down another host's rows in the shared merged-list read either.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn cached_rows_skips_a_poisoned_blob_and_serves_the_rest() {
-        // Installed before anything is logged; read back at the end.
-        let _capture = crate::test_capture::install();
+        // Read back after the blocking cache read has emitted its warning.
+        let capture = crate::test_capture::current();
         let (_dir, store) = fresh_store().await;
         let poisoned_host =
             host_with_identity(&store, "poison-all@host", "poison-all-identity").await;
@@ -8633,7 +8631,7 @@ mod tests {
             "the poisoned row must be dropped while the other host's row is still served"
         );
 
-        let events = skip_warnings();
+        let events = skip_warnings(&capture);
         let hit = events
             .iter()
             .find(|e| e.field("session_id") == Some("cached-rows-poisoned"));
@@ -9130,9 +9128,9 @@ mod tests {
     /// counts rest on: `total` and `matching` describe rows a client can
     /// see, and a corrupt row is a warning in the log, not an entry in the
     /// denominator (SPEC.md's Session list section).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_row_that_cannot_be_shown_is_dropped_from_the_read_and_logged() {
-        let _capture = crate::test_capture::install();
+        let capture = crate::test_capture::current();
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "poison@host", "poison-identity").await;
         store
@@ -9196,7 +9194,7 @@ mod tests {
              from the read, not present as holes"
         );
 
-        let events = skip_warnings();
+        let events = skip_warnings(&capture);
         for dropped in ["undecodable", "mislabelled"] {
             let hit = events
                 .iter()

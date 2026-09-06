@@ -7395,9 +7395,9 @@ mod tests {
     /// it until the next refresh), a log flood, and — since a log line
     /// lands in an operator's terminal emulator — a way for a remote party
     /// to emit escape sequences into it.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_hostile_error_message_is_bounded_escaped_and_not_repeated() {
-        let captured = crate::test_capture::install();
+        let captured = crate::test_capture::current();
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
                 .add_ssh_host("shouty.example", None, None)
@@ -7506,12 +7506,11 @@ mod tests {
     /// line per tick would bury the handful that describe what happened to
     /// the host.
     ///
-    /// The capture is process-global and shared with every other test in
-    /// this binary (see [`crate::test_capture`]), so this filters on a
-    /// destination no other test uses.
-    #[tokio::test(start_paused = true)]
+    /// The test-owned capture follows the manager actor through the runtime,
+    /// so this filters the two destination-specific transition lines it owns.
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn the_reconnection_trail_names_the_host_and_its_current_destination() {
-        let captured = crate::test_capture::install();
+        let captured = crate::test_capture::current();
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
                 .add_ssh_host("trail-before.example", None, None)
