@@ -187,25 +187,51 @@ jobs:
       - name: "Run the test suite against the pinned tmux"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
-          PATH="$PWD/.ci-tmux:$PATH" cargo test --workspace --exclude farhelm --exclude farhelm-desktop -- --show-output --test-threads=4
-          PATH="$PWD/.ci-tmux:$PATH" cargo test -p farhelm --bins -- --show-output --test-threads=4
+          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+            --kind release --selection 'workspace except farhelm and farhelm-desktop' \
+            --concurrency '4 libtest threads per binary; binaries sequential' --tmux required \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo test --workspace --exclude farhelm --exclude farhelm-desktop -- --show-output --test-threads=4
+          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+            --kind release --selection 'farhelm binary unit tests' \
+            --concurrency '4 libtest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo test -p farhelm --bins -- --show-output --test-threads=4
       - name: "Regress safe output-client teardown on the pinned tmux"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: "scripts/test-tmux-pinned-shutdown.sh"
+        run: |
+          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+            --kind release --selection 'pinned output-client teardown scenarios' \
+            --concurrency '10 sequential test processes; 1 libtest thread each' --tmux required \
+            --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/test-tmux-pinned-shutdown.sh
       - name: "Run the JS unit harness"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: "cd crates/farhelm-ui/js-tests && node --test"
+        run: |
+          cd crates/farhelm-ui/js-tests
+          python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
+            --kind release --selection 'asset JavaScript unit harness' --concurrency 'node default discovery' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
       - name: "Provision a CentOS Stream 9 host over ssh"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
           sudo apt-get update && sudo apt-get install -y musl-tools python3-venv
-          scripts/test-provision-centos.sh
+          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+            --kind release --selection 'CentOS provisioning fixture' --concurrency 'one selected test' \
+            --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/test-provision-centos.sh
+      - name: "Select Python with non-reaping child observation on macOS"
+        uses: "actions/setup-python@v7"
+        if: "runner.os == 'macOS'"
+        with:
+          "python-version": "3.13"
       - name: "Compile the CLI half of the Mac release"
         if: "runner.os == 'macOS'"
         run: "cargo build -p farhelm --locked"
       - name: "Compile and test the window half of the Mac release"
         if: "runner.os == 'macOS'"
-        run: "cargo test -p farhelm-ui --features desktop"
+        run: |
+          python3 scripts/record-test-run.py \
+            --kind release --selection 'macOS desktop unit tests' --concurrency 'libtest default' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo test -p farhelm-ui --features desktop
       - name: "Install the wasm target for the web bundle"
         run: "rustup target add wasm32-unknown-unknown"
       - name: "Install musl build tools"
@@ -220,11 +246,17 @@ jobs:
           sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
       - name: "Test the native desktop seams"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: "cargo test -p farhelm-ui --features desktop"
+        run: |
+          python3 scripts/record-test-run.py \
+            --kind release --selection 'Linux desktop unit tests' --concurrency 'libtest default' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo test -p farhelm-ui --features desktop
       - name: "Run the native desktop smoke gate"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
-          PATH="$PWD/.ci-tmux:$PATH" scripts/desktop-smoke.sh
+          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+            --kind release --selection 'native desktop smoke legs' --concurrency 'sequential smoke legs' \
+            --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/desktop-smoke.sh
           rm -rf -- "$CARGO_TARGET_DIR"
         env:
           "CARGO_TARGET_DIR": "${{ runner.temp }}/desktop-smoke-target"
@@ -235,7 +267,10 @@ jobs:
         run: |
           evidence_dir="$RUNNER_TEMP/desktop-smoke-evidence"
           mkdir -p "$evidence_dir"
-          for evidence in "$RUNNER_TEMP"/desktop-smoke/*.log "$RUNNER_TEMP"/desktop-smoke/*.png "$RUNNER_TEMP"/desktop-smoke/*.txt; do
+          for evidence in "$RUNNER_TEMP"/desktop-smoke/*.log "$RUNNER_TEMP"/desktop-smoke/*.png "$RUNNER_TEMP"/desktop-smoke/*.txt \
+            "$RUNNER_TEMP"/desktop-smoke/tmux-preflight-missing.stderr \
+            "$RUNNER_TEMP"/desktop-smoke/tmux-preflight-belowfloor.stderr \
+            "$RUNNER_TEMP"/desktop-smoke/pf-bogus-state.stderr; do
             if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
               cp -- "$evidence" "$evidence_dir/"
             fi
@@ -247,6 +282,29 @@ jobs:
           "if-no-files-found": "warn"
           "name": "desktop-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}"
           "path": "${{ runner.temp }}/desktop-smoke-evidence"
+      - name: "Collect test run failure evidence"
+        if: "failure() && (runner.os == 'macOS' || (runner.os == 'Linux' && runner.arch == 'X64'))"
+        run: |
+          evidence_dir="$RUNNER_TEMP/test-run-failure-evidence"
+          mkdir -p "$evidence_dir"
+          for run_dir in "$RUNNER_TEMP"/test-run-evidence/*; do
+            [ -d "$run_dir" ] && [ ! -L "$run_dir" ] || continue
+            run_id="${run_dir##*/}"
+            [[ "$run_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || continue
+            mkdir -p "$evidence_dir/$run_id"
+            for evidence in "$run_dir/manifest.json" "$run_dir/output-head.log" "$run_dir"/output-tail-*.log; do
+              if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
+                cp -- "$evidence" "$evidence_dir/$run_id/"
+              fi
+            done
+          done
+      - name: "Upload test run failure evidence"
+        uses: "actions/upload-artifact@v4"
+        if: "failure() && (runner.os == 'macOS' || (runner.os == 'Linux' && runner.arch == 'X64'))"
+        with:
+          "if-no-files-found": "warn"
+          "name": "test-run-failure-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}"
+          "path": "${{ runner.temp }}/test-run-failure-evidence"
       - name: "Let the toolchain's rust-objcopy find libLLVM on macOS"
         if: "runner.os == 'macOS'"
         run: |
