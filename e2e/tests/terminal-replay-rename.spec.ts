@@ -15,7 +15,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
-import { cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
   addTab,
   createTabSession,
@@ -28,11 +28,11 @@ import {
   selectTerminal,
   sharedSessionRow,
   shellMarker,
-  waitForIslandMounted,
   waitForIslandText,
   waitForReplayReveal,
   installTerminalSuiteHooks,
 } from "./helpers/terminal-suite";
+import { waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 installTerminalSuiteHooks({ tabSweep: true });
 
@@ -327,8 +327,7 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     // Scrollback deeper than one screen: the fake agent's `spam` exists
@@ -346,7 +345,7 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
     await holdCatchUpFromNextLoad(page);
     await page.reload();
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
 
     // Mid-catch-up, asserted against the DOM and the buffer rather than
@@ -418,12 +417,11 @@ test("reattach-lands-at-tail (tab): hidden through catch-up, one write, viewport
     id = session.id;
 
     await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await attachSession(page, id);
 
     const tabId = await addTab(page, 0);
     const element = `terminal-${tabId}`;
-    await waitForIslandMounted(page, element);
+    await waitForSessionMounted(page, id, { tabId });
     // Deeper than one screen, printed by the tab's own shell. The marker
     // only ever appears in the OUTPUT, never in the typed line, for the
     // reason `runInShell` documents.
@@ -437,8 +435,8 @@ test("reattach-lands-at-tail (tab): hidden through catch-up, one write, viewport
     await holdCatchUpFromNextLoad(page);
     await page.reload();
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await waitForIslandMounted(page, element);
+    await waitForSessionMounted(page, id);
+    await waitForSessionMounted(page, id, { tabId });
     await waitForHeldCatchUp(page, element);
 
     // Selection is not persisted, so the reattached view lands on the
@@ -511,7 +509,7 @@ test("replay-degrades-on-size: crossing the byte bound flushes once, keeps every
     await holdCatchUpFromNextLoad(page);
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
 
     // Everything the real attach replayed is already held, so the bound
@@ -591,7 +589,7 @@ test("replay-degrades-on-idle: a progressing replay keeps buffering; a quiet one
     await holdCatchUpFromNextLoad(page);
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
     // The short window is armed only NOW, once the real replay is safely
     // buffered: mounting with it would have let the watchdog expire during
@@ -661,7 +659,7 @@ test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, und
     await holdCatchUpFromNextLoad(page);
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
     const held = await replayRecord(page, "terminal");
     expect(held.bufferedBytes).toBeGreaterThan(0);
@@ -673,7 +671,7 @@ test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, und
     const page2 = await second.newPage();
     await page2.goto("/");
     await page2.locator(`[data-session-id="${id}"]`).click();
-    await page2.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page2, id);
 
     const replay = await waitForReplayReveal(page, "terminal", 30_000);
     expect(replay.revealReason, "the detach is what ended the catch-up").toBe("detached");
@@ -720,7 +718,7 @@ test("replay-degrades-on-close: a socket closing mid-catch-up flushes, reveals, 
     await disableReconnectFromNextLoad(page);
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
     await expect(page.locator("#terminal")).toBeHidden();
 
@@ -892,7 +890,7 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
 
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     await openRowMenu(page.locator(`[data-session-id="${id}"]`));
@@ -945,7 +943,7 @@ test("replay-degrades-on-chunks: crossing the frame bound flushes once, keeping 
     await holdCatchUpFromNextLoad(page);
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
 
     // Relative to what the real replay already holds, which is not a
@@ -1015,7 +1013,7 @@ test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as
     await holdCatchUpFromNextLoad(page);
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
 
     // The short window is armed by the one real frame below, not by this
@@ -1071,7 +1069,7 @@ test("replay-unconnected: a socket stuck connecting reports it instead of reveal
     await holdCatchUpFromNextLoad(page, { idleMs: 1_500 });
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
 
     await expect(page.locator("#term-banner")).toContainText("Not connected", {
       timeout: 20_000,
@@ -1125,7 +1123,7 @@ test("replay-stale-mount: a torn-down island's deferred ending cannot touch its 
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
     await row.click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
     // Captured before the teardown: after it, the registry points at the
     // replacement, and this reference is the only way back to the mount
@@ -1136,11 +1134,21 @@ test("replay-stale-mount: a torn-down island's deferred ending cannot touch its 
 
     // Bounce to the shared session and back: a full unmount, then a fresh mount
     // into the same element, whose own catch-up is held too.
-    await sharedSessionRow(page).click();
+    const sharedRow = sharedSessionRow(page);
+    await expect(sharedRow).toHaveAttribute("data-session-id", /.+/, { timeout: 20_000 });
+    const sharedId = (await sharedRow.getAttribute("data-session-id"))!;
+    await sharedRow.click();
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await waitForSessionMounted(page, sharedId);
     await row.click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
+
+    // A list selection can commit before terminal reconciliation. Prove this
+    // is a replacement before releasing a callback saved from the old mount.
+    await expect.poll(() => page.evaluate(() =>
+      (window as any).__farhelmIslands?.["terminal"]?.test !== (window as any).__staleIsland
+    ), { timeout: 20_000 }).toBe(true);
 
     await page.evaluate(() => (window as any).__staleIsland.releaseCatchUp());
 
@@ -1271,7 +1279,7 @@ test("reveal-does-not-steal-focus: a rename field being typed into keeps focus a
     await holdCatchUpFromNextLoad(page);
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
 
     // The user turns to the row menu's rename field (the one rename

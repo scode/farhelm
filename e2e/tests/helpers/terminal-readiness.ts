@@ -97,7 +97,7 @@ interface SessionObservation {
   focused: boolean;
 }
 
-type SessionWaitKind = "socket-open" | "revealed" | "ready";
+type SessionWaitKind = "mounted" | "socket-open" | "revealed" | "ready";
 
 /** Options for a requested agent terminal or one of its terminal tabs. */
 export interface SessionReadinessOptions {
@@ -226,6 +226,28 @@ async function waitForSession(
       { cause },
     );
   }
+}
+
+/**
+ * Wait for the requested attachment's mount without requiring its socket to open.
+ *
+ * Held-replay and never-connected tests need an independently identified island
+ * before inspecting their own boundary. A reused DOM id alone can still name
+ * the previous session while reconciliation is pending. This wait checks the
+ * socket URL but leaves connection, replay and focus state to the caller.
+ */
+export async function waitForSessionMounted(
+  page: Page,
+  id: string,
+  { tabId, timeout = 20_000 }: SessionReadinessOptions = {},
+): Promise<void> {
+  await waitForSession(
+    page,
+    { id, tabId },
+    timeout,
+    "mounted",
+    (observation) => observation.islandMounted && observation.socketMatches,
+  );
 }
 
 /**
