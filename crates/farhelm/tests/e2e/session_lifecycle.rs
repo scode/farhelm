@@ -3006,17 +3006,16 @@ async fn created_sessions_are_listed_with_a_derived_title() {
             listed.sessions
         );
     };
-    assert!(
-        row.status.is_live(),
-        "a session that has never been touched must list as live once ListSessions computes \
-         the real answer from tmux — even though the create-time reply itself said Unknown"
-    );
     assert_eq!(
         *row,
         with_status(session.clone(), row.status.clone()),
         "and every other field must match what the create reply reported"
     );
     assert_eq!(listed.sessions[0].invocation, invocation);
+    // This first reply proves the create's metadata reached the list intact.
+    // Liveness is sampled from tmux and may lag that reply, so it has its own
+    // bounded observation rather than weakening the metadata assertion.
+    wait_for_live_status(&h.client, &session.id, 30).await;
 }
 
 /// Attaching to a session id the supervisor does not know must fail with
