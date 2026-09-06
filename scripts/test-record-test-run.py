@@ -15,6 +15,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -926,6 +927,181 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual(names["retained_names"], ["FARHELM_KEEP"])
         self.assertEqual(names["removed_names"], ["FARHELM_SECRET"])
         self.assertEqual(names["requested_but_absent_names"], ["FARHELM_ABSENT"])
+
+    def test_trace_root_overrides_ambient_and_retains_failed_child_evidence(self) -> None:
+        """Every command gets its own private capture root, even if ambient retention requests another."""
+
+        secret = "ambient-trace-location-must-stay-private"
+        code = (
+            "import os, pathlib, stat; "
+            "root = pathlib.Path(os.environ['FARHELM_TEST_TRACE_DIR']); "
+            "assert root.is_absolute(); assert stat.S_IMODE(root.stat().st_mode) == 0o700; "
+            "slot = root / 'slot-000'; slot.mkdir(mode=0o700); "
+            "[(slot / name).write_bytes(b'partial event') for name in "
+            "('metadata.json', 'head.jsonl', 'tail-0.jsonl', 'tail-1.jsonl', 'tail-2.jsonl')]; "
+            "raise SystemExit(7)"
+        )
+        result = self.invoke([PYTHON, "-c", code], "--keep-farhelm-env", "FARHELM_TEST_TRACE_DIR",
+                             env=self.environment(FARHELM_TEST_TRACE_DIR=secret))
+        self.assertEqual(result.returncode, 7, result.stderr)
+        run_dir, manifest = self.latest_manifest()
+        self.assertNotIn(secret, json.dumps(manifest))
+        names = manifest["environment"]["farhelm"]
+        self.assertEqual(names["overridden_names"], ["FARHELM_TEST_TRACE_DIR"])
+        self.assertEqual(names["recorder_owned_names"], ["FARHELM_TEST_TRACE_DIR"])
+        self.assertEqual(names["retained_names"], [])
+        self.assertEqual(manifest["child_status"]["exit_code"], 7)
+        self.assertEqual(manifest["test_traces"]["root"], "test-traces")
+        collection = manifest["test_traces"]["collection"]
+        self.assertTrue(collection["collection_complete"])
+        self.assertEqual(len(collection["files"]), 5)
+        with tarfile.open(run_dir / collection["archive"]) as archive:
+            self.assertEqual(archive.extractfile("slot-000/head.jsonl").read(), b"partial event")
+
+    def test_local_helper_import_leaves_committed_source_unchanged(self) -> None:
+        """The observer must not fingerprint bytecode that its own import just created.
+
+        Put both production scripts inside the measured checkout: running the
+        original script with a different cwd would miss this contamination.
+        Ordinary bytecode settings and an empty excludes file prevent ambient
+        operator configuration from hiding a regression.
+        """
+
+        scripts = self.repo / "scripts"
+        scripts.mkdir()
+        for name in ("record-test-run.py", "test_run_traces.py"):
+            shutil.copyfile(SCRIPT.with_name(name), scripts / name)
+        run_checked(["git", "config", "core.excludesFile", os.devnull], self.repo)
+        run_checked(["git", "add", "scripts"], self.repo)
+        run_checked(["git", "commit", "--quiet", "-m", "recorder fixture"], self.repo)
+        environment = self.environment()
+        for name in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH"):
+            environment.pop(name, None)
+        argv = self.cli([PYTHON, "-c", "pass"])
+        argv[1] = str(scripts / SCRIPT.name)
+        result = subprocess.run(argv, cwd=self.repo, env=environment, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((scripts / "__pycache__").exists())
+        source = self.latest_manifest()[1]["source"]
+        self.assertTrue(source["complete"])
+        self.assertEqual(source["porcelain"]["bytes"], 0)
+        self.assertEqual(source["untracked_tree"]["entry_count"], 0)
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=self.repo, env=environment, capture_output=True, check=True,
+        )
+        self.assertEqual(status.stdout, b"")
+
+    def test_child_observes_published_trace_identity_before_it_exits(self) -> None:
+        """Recovery provenance must already exist while the recorded command is running.
+
+        The child checks the manifest before it can exit, so finalization cannot
+        accidentally supply the record this contract needs after recorder death.
+        """
+
+        code = (
+            "import json, os, pathlib; "
+            "root = pathlib.Path(os.environ['FARHELM_TEST_TRACE_DIR']); "
+            "manifest = json.loads((root.parent / 'manifest.json').read_text()); "
+            "assert manifest['outcome'] == 'running', manifest['outcome']; "
+            "trace = manifest['test_traces']; identity = root.stat(); "
+            "assert trace['root'] == root.name; "
+            "assert trace['device'] == identity.st_dev and trace['inode'] == identity.st_ino; "
+            "assert trace['collection']['status'] == 'uncollected'; "
+            "slot = root / 'slot-000'; slot.mkdir(mode=0o700); "
+            "(slot / 'head.jsonl').write_bytes(b'event after provenance check')"
+        )
+        result = self.invoke([PYTHON, "-c", code])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_dir, manifest = self.latest_manifest()
+        with tarfile.open(run_dir / manifest["test_traces"]["collection"]["archive"]) as archive:
+            self.assertEqual(archive.extractfile("slot-000/head.jsonl").read(),
+                             b"event after provenance check")
+
+    def test_collection_failure_preserves_actual_command_status(self) -> None:
+        """A diagnostic collector fault cannot turn the command's exit7 into a recorder exit125."""
+
+        wrapper = (
+            "import runpy, sys; "
+            f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
+            f"recorder = runpy.run_path({str(SCRIPT)!r}); "
+            "defect = lambda *args: (_ for _ in ()).throw(OSError('fixture collection failure')); "
+            "recorder['test_run_traces'].collect = defect; "
+            "raise SystemExit(recorder['run'](sys.argv[1:]))"
+        )
+        result = subprocess.run(
+            [PYTHON, "-c", wrapper, *self.cli([PYTHON, "-c", "raise SystemExit(7)"])[2:]],
+            cwd=self.repo, env=self.environment(), capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 7, result.stderr)
+        _run_dir, manifest = self.latest_manifest()
+        self.assertEqual(manifest["child_status"]["exit_code"], 7)
+        self.assertFalse(manifest["test_traces"]["collection"]["collection_complete"])
+
+    def test_collection_storage_failure_keeps_the_published_command_result(self) -> None:
+        """Storage exhausted by optional collection must not erase the already-recorded exit7."""
+
+        wrapper = (
+            "import errno, runpy, sys; "
+            f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
+            f"recorder = runpy.run_path({str(SCRIPT)!r}); "
+            "publish = recorder['Manifest'].write; after = {'value': False}; "
+            "recorder['Manifest'].write = lambda self: "
+            "(_ for _ in ()).throw(OSError(errno.ENOSPC, 'fixture full after collection')) "
+            "if after['value'] else publish(self); "
+            "recorder['test_run_traces'].collect = lambda *args: after.update(value=True) or "
+            "{'status': 'incomplete', 'collection_complete': False}; "
+            "raise SystemExit(recorder['run'](sys.argv[1:]))"
+        )
+        result = subprocess.run(
+            [PYTHON, "-c", wrapper, *self.cli([PYTHON, "-c", "raise SystemExit(7)"])[2:]],
+            cwd=self.repo, env=self.environment(), capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertIn(b"collection publication failed", result.stderr)
+        _run_dir, manifest = self.latest_manifest()
+        self.assertEqual(manifest["outcome"], "completed")
+        self.assertEqual(manifest["child_status"]["exit_code"], 7)
+        self.assertEqual(manifest["recorder"]["exit_code"], 7)
+        self.assertEqual(manifest["test_traces"]["collection"]["status"], "uncollected")
+
+    def test_killed_recorder_leaves_raw_traces_for_manual_export(self) -> None:
+        """Death after command publication leaves its terminal result and raw recoverable bytes."""
+
+        wrapper = (
+            "import os, runpy, signal, sys; "
+            f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
+            f"recorder = runpy.run_path({str(SCRIPT)!r}); "
+            "recorder['test_run_traces'].collect = lambda *args: os.kill(os.getpid(), signal.SIGKILL); "
+            "raise SystemExit(recorder['run'](sys.argv[1:]))"
+        )
+        code = (
+            "import os, pathlib; root = pathlib.Path(os.environ['FARHELM_TEST_TRACE_DIR']); "
+            "slot = root / 'slot-000'; slot.mkdir(mode=0o700); "
+            "(slot / 'head.jsonl').write_bytes(b'last observed event')"
+        )
+        result = subprocess.run(
+            [PYTHON, "-c", wrapper, *self.cli([PYTHON, "-c", code])[2:]],
+            cwd=self.repo, env=self.environment(), capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, -signal.SIGKILL, result.stderr)
+        run_dir, manifest = self.latest_manifest()
+        self.assertEqual(manifest["outcome"], "completed")
+        self.assertEqual(manifest["child_status"]["exit_code"], 0)
+        self.assertEqual(manifest["test_traces"]["collection"]["status"], "uncollected")
+        exported = subprocess.run(
+            [PYTHON, str(SCRIPT.with_name("test_run_traces.py")), str(run_dir / "test-traces"),
+             str(run_dir / "recovered.tar")],
+            env=self.environment(), capture_output=True, timeout=15, check=True,
+        )
+        self.assertFalse(json.loads(exported.stdout)["collection_complete"])
+        provenance = json.loads(exported.stdout)["provenance"]
+        self.assertEqual(provenance["root_identity"], {
+            "device": manifest["test_traces"]["device"], "inode": manifest["test_traces"]["inode"],
+        })
+        self.assertFalse(provenance["earlier_archive_exported"])
+        with tarfile.open(run_dir / "recovered.tar") as archive:
+            self.assertEqual(archive.extractfile("slot-000/head.jsonl").read(), b"last observed event")
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks are required")
     def test_source_identity_covers_whole_checkout_and_byte_paths(self) -> None:
