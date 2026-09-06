@@ -2084,7 +2084,7 @@ mod tests {
     /// retention state unconditionally; `menu_order_follows_the_retention_
     /// state_rather_than_a_fixed_numbering` below is what actually proves
     /// it survives archiving, through `session_menu_order` instead.
-    #[test]
+    #[farhelm_testtrace::test]
     fn archived_rows_keep_metadata_controls_without_lifecycle_controls() {
         assert_eq!(
             row_control_visibility(true, false),
@@ -2118,7 +2118,7 @@ mod tests {
     /// last item is Delete at the END of the SHORTER four-item archived
     /// list (Rename, Clone, Replace, Delete), not wherever it would sit in
     /// the six-item active one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_order_follows_the_retention_state_rather_than_a_fixed_numbering() {
         // `mark_seen: false` throughout — this test is about the archive
         // dimension specifically; `mark_seen_sits_right_after_rename_when_offered`
@@ -2164,7 +2164,7 @@ mod tests {
     /// plan's stated position — in EVERY retention state, and withdrawn
     /// entirely reads exactly like Stop/Archive being withdrawn (no
     /// position at all, not a disabled one).
-    #[test]
+    #[farhelm_testtrace::test]
     fn mark_seen_sits_right_after_rename_when_offered() {
         let offered = session_menu_order(row_control_visibility(false, true));
         assert_eq!(offered.len(), 7);
@@ -2202,7 +2202,7 @@ mod tests {
     /// contract here would fail for the same helper regression and tell a
     /// reader nothing `menu_panel`'s own test does not already say; this
     /// test's only job is the composition around it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_label_wraps_the_clamped_title_in_session_wording() {
         assert_eq!(menu_label("short"), "session actions for short");
     }
@@ -2215,7 +2215,7 @@ mod tests {
     /// that path: every fleet refresh then retains another callback set and
     /// rerenders every row. This drives the real `SessionRow` through many
     /// parent renders, so either regression changes the count from one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_row() {
         fn app() -> Element {
             let rename_draft = use_signal(String::new);
@@ -2301,7 +2301,7 @@ mod tests {
     /// is two row renders, not a fleet-wide repaint. If selection ever
     /// stops being part of what memoization compares — or starts invalidating
     /// rows it does not describe — this count drifts from 2 and catches it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_selection_change_rerenders_only_the_affected_rows() {
         // The selection lives OUTSIDE the virtual DOM (the test flips it
         // between renders, the way `AppBody`'s signal changes between
@@ -2407,7 +2407,7 @@ mod tests {
     /// open menu (see `row_class`). It must not displace either of the
     /// other two — a stale, selected row with its menu up is still stale
     /// and still the selection.
-    #[test]
+    #[farhelm_testtrace::test]
     fn row_class_composes_stale_selected_and_menu_open_independently() {
         assert_eq!(row_class(false, false, false), "session-row");
         assert_eq!(row_class(true, false, false), "session-row stale");
@@ -2435,7 +2435,7 @@ mod tests {
     /// `/home/` and `/home//x` are exactly the shapes a looser prefix
     /// check would eat. `/home/alice` bare is here too, not among the
     /// folded cases — see the exclusions test below for why.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_home_prefix_folds_only_when_it_names_an_account() {
         assert_eq!(abbreviate_home("/home/alice/src/api"), "~/src/api");
         assert_eq!(abbreviate_home("/Users/alice/src/api"), "~/src/api");
@@ -2469,7 +2469,7 @@ mod tests {
     /// personal home no matter whose account is reading the row, and a
     /// bare account with nothing after it has nothing for `~` to stand in
     /// for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_home_prefix_declines_three_shapes_that_look_right_but_are_not() {
         for dotted in [
             "/home/../etc/passwd",
@@ -2507,7 +2507,7 @@ mod tests {
     /// line the user may have spent real thought on: a regression that
     /// dropped the marker would make an agent running with every
     /// permission prompt skipped look identical to one that asks.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_invocation_badge_is_a_basename_plus_at_most_one_marker() {
         assert_eq!(compact_invocation("sleep 300"), badge("sleep", None));
         assert_eq!(
@@ -2535,7 +2535,7 @@ mod tests {
     /// above only ever exercises `--yolo` directly, and a regression that
     /// broke either of these while leaving `--yolo` intact would pass every
     /// other test in this file.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_no_sandbox_flag_earns_its_own_marker() {
         assert_eq!(
             compact_invocation("codex --dangerously-bypass-approvals-and-sandbox"),
@@ -2543,7 +2543,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_full_auto_flag_earns_its_own_marker() {
         assert_eq!(
             compact_invocation("codex --full-auto"),
@@ -2555,7 +2555,7 @@ mod tests {
     /// bare `--` — the table is a claim about specific recognized
     /// programs' own flags, not a scan of every argv for a string that
     /// happens to match one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn markers_are_tied_to_the_recognized_programs_own_flags() {
         // An unrecognized program earns no marker even though the flag
         // text is right there in its argv.
@@ -2586,7 +2586,7 @@ mod tests {
     /// not an escaping trick alone: there is no path by which an overridden
     /// basename could smuggle a false marker onto the row for the isolation
     /// to then have to defend against.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_bidi_override_in_the_basename_survives_unmangled_and_earns_no_false_marker() {
         assert_eq!(
             compact_invocation("/opt/bin/\u{202E}codex --yolo"),
@@ -2602,7 +2602,7 @@ mod tests {
     /// Real shell-word splitting (`shell_words::split`, the same parser
     /// `farhelm-supervisor` uses on a profile's invocation), pinned against
     /// the specific quoting shapes a hand-rolled partial parser gets wrong.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_basename_survives_every_shell_quoting_shape() {
         // A backslash-escaped space in an otherwise unquoted path.
         assert_eq!(
@@ -2665,7 +2665,7 @@ mod tests {
     /// the browser suite and from whatever a future wire change allows.
     /// The contract is that the element still renders and says only what
     /// it was given, with no marker.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_degenerate_invocation_falls_back_to_what_it_was_given() {
         assert_eq!(compact_invocation(""), badge("", None));
         assert_eq!(compact_invocation("   "), badge("", None));

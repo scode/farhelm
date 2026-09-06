@@ -521,7 +521,7 @@ mod tests {
     /// refactor that collapsed the two conditions into one boolean would
     /// pass every other test in this crate and quietly reintroduce a stale
     /// bundle hammering a helm it cannot read.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_fallback_polls_only_for_a_dead_feed_on_a_matching_build() {
         assert!(
             fallback_polls(false, false),
@@ -555,7 +555,7 @@ mod tests {
     /// Note what is NOT claimed: that the re-read landed. This module never
     /// learns how a read ended (`reader` owns that half), so the guarantee
     /// stated here is exactly the guarantee the code can keep.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_handshake_re_read_is_always_triggered_before_the_feed_is_trusted() {
         let mut state = FeedState::default();
         state.note_feed_down();
@@ -576,7 +576,7 @@ mod tests {
 
     /// A dropped socket puts the page back on its fallback, and a
     /// re-handshake takes it off again — the ordinary feed-death cycle.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_dropped_socket_hands_over_to_the_fallback_and_back() {
         let mut state = FeedState::default();
         apply(&mut state, FeedReport::Revision { revision: 7 });
@@ -604,7 +604,7 @@ mod tests {
     /// a decode failure. A decode failure is indistinguishable from the
     /// bridge dying, which retires the feed PERMANENTLY — a disproportionate
     /// answer to a message that merely was not understood.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unrecognized_report_changes_nothing() {
         let mut state = FeedState::default();
         apply(&mut state, FeedReport::Revision { revision: 3 });
@@ -626,7 +626,7 @@ mod tests {
     /// a field on either side would otherwise fail silently, and silently
     /// here means a page that polls forever while a perfectly good socket
     /// delivers notifications nobody reads.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_reports_the_island_sends_decode_as_written() {
         assert_eq!(
             serde_json::from_value::<FeedReport>(
@@ -650,7 +650,7 @@ mod tests {
     /// this state machine can be told afterwards makes the feed healthy
     /// again, because the task that would have told it has returned. The
     /// permanence is the task's, not a flag's.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_subscription_that_ends_leaves_the_page_polling_for_good() {
         let mut state = FeedState::default();
         apply(&mut state, FeedReport::Revision { revision: 1 });
@@ -667,7 +667,7 @@ mod tests {
     /// leave the island running whatever defaults it invented — most likely
     /// a tight reconnect loop against a helm that is down, or (for the
     /// deadline) a socket that parks forever on a helm that stopped talking.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_policy_carries_every_key_the_island_reads() {
         let policy = feed_policy();
         assert_eq!(policy["path"], serde_json::json!(EVENTS_PATH));

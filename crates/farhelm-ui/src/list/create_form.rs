@@ -1670,7 +1670,7 @@ mod tests {
     /// typed by hand are two different intended creates, and the supervisor
     /// folds the mode into its own idempotency fingerprint precisely so a
     /// retry cannot flip between them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_intent_binding_changes_with_the_host_incarnation_and_with_the_fields() {
         let hosts = vec![option(1, "this machine", true)];
         let command = || LaunchIntent::Command("agent".to_string());
@@ -1756,7 +1756,7 @@ mod tests {
     /// handler mid-lag) is not stageable in this harness — the handler lives
     /// inside the dioxus closure — so the comparison is extracted and pinned
     /// here instead.
-    #[test]
+    #[farhelm_testtrace::test]
     fn submission_requires_the_target_to_match_the_selected_install() {
         let hosts = vec![option(1, "this machine", true)];
         let current = CreateTarget::new(1, "incarnation-1".to_string());
@@ -1792,7 +1792,7 @@ mod tests {
     /// a precondition the host's very first connection then fails — a create
     /// racing that first connect would be refused as stale with nothing
     /// actually wrong.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_never_connected_host_makes_no_connection_claim() {
         let mut connected = option(1, "connected", true);
         connected.connection = 7;
@@ -1808,7 +1808,7 @@ mod tests {
         assert_eq!(connection_claim(&hosts, 3), None);
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_selected_host_yields_no_binding() {
         let hosts = vec![option(1, "this machine", true)];
         let nothing = || LaunchIntent::Command(String::new());
@@ -1826,7 +1826,7 @@ mod tests {
     /// The middle case is why this is a function rather than two expressions:
     /// a chosen host leaving the registry moves the create target, and every
     /// field that binds the request must agree about that move.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_effective_create_target_follows_a_choice_until_it_is_gone() {
         let hosts = vec![
             option(1, "this machine", true),
@@ -1859,7 +1859,7 @@ mod tests {
     /// so a dead explicit choice lands there, and skipping to the local
     /// row would silently move the create off the machine whose session
     /// the user is looking at.
-    #[test]
+    #[farhelm_testtrace::test]
     fn precedence_holds_with_all_three_candidates_present() {
         let hosts = vec![
             option(1, "this machine", true),
@@ -1905,7 +1905,7 @@ mod tests {
     /// can be arbitrarily old, so an id merely still existing is not enough
     /// evidence that recreating it is what the current catalog would still
     /// offer under that name.
-    #[test]
+    #[farhelm_testtrace::test]
     fn prefill_from_clones_the_profile_only_when_it_is_present() {
         let present = Session {
             source_profile: Some(source(ProfileExistence::Present)),
@@ -1950,7 +1950,7 @@ mod tests {
     /// use for it until the user switches the mounted form to "custom
     /// command" (see `CreatePrefill::invocation`'s own doc for why leaving
     /// it unset there would let a stale, unrelated command surface then).
-    #[test]
+    #[farhelm_testtrace::test]
     fn prefill_from_carries_the_raw_invocation_even_for_a_profile_backed_clone() {
         let session = Session {
             invocation: "claude --resume abc".to_string(),
@@ -1965,7 +1965,7 @@ mod tests {
     /// host and install identity together — and the generation is exactly
     /// what the caller passed in (`ListView` is the one that decides what
     /// counts as a new clone).
-    #[test]
+    #[farhelm_testtrace::test]
     fn prefill_from_carries_title_cwd_host_and_identity_verbatim() {
         let session = Session {
             cwd: "/work/api".to_string(),
@@ -1992,7 +1992,7 @@ mod tests {
     /// latch in the reseed effect) means the ordinary reseed branch never
     /// revisits this generation, so this function is the only thing left
     /// that can still apply its host once the registry does load.
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_clone_host_keeps_waiting_until_the_registry_loads_then_binds_a_matching_row() {
         let hosts = vec![option(1, "remote", false)];
         let identity = Some(Some("install-1".to_string()));
@@ -2028,7 +2028,7 @@ mod tests {
     /// F1's other half: once the registry HAS answered and the row's
     /// install cannot be confirmed, the clone gives up permanently for this
     /// generation rather than sitting in `Waiting` forever.
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_clone_host_gives_up_once_the_registry_answers_without_a_match() {
         let hosts = vec![option(1, "remote", false)];
         let stale_identity = Some(Some("install-superseded".to_string()));
@@ -2049,7 +2049,7 @@ mod tests {
     /// `Unconfirmable` (see the reseed effect's generation-transition
     /// branch), and this pins the same guarantee at the function level too:
     /// `Waiting` with no host to check never produces a `Bind`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_clone_host_never_binds_a_hostless_clone() {
         let hosts = vec![option(1, "remote", false)];
         let (state, action) =
@@ -2062,7 +2062,7 @@ mod tests {
     /// instant the row's install stops matching — a retarget or an adopt
     /// landing while the form stays open must not leave the selector
     /// silently naming a machine the clone was never actually taken from.
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_clone_host_withdraws_a_bound_clone_once_its_installation_changes() {
         let identity = Some(Some("install-1".to_string()));
         let retargeted = vec![HostOption {
@@ -2084,7 +2084,7 @@ mod tests {
     /// The negative case beside it: while the installation still matches, a
     /// `Bound` clone holds — nothing is touched just because the effect
     /// happened to fire again (a feed notice, an unrelated host's refresh).
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_clone_host_stays_bound_while_its_installation_still_matches() {
         let hosts = vec![option(1, "remote", false)];
         let identity = Some(Some("install-1".to_string()));
@@ -2106,7 +2106,7 @@ mod tests {
     /// function's own side, covering any other path that might move
     /// `chosen_host`) yields without forcing anything — no `Withdraw`,
     /// since there is nothing left of the clone's OWN pick in play to undo.
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_clone_host_yields_once_the_selector_moves_away_from_its_own_pick() {
         let hosts = vec![option(1, "remote", false)];
         let identity = Some(Some("install-1".to_string()));
@@ -2126,7 +2126,7 @@ mod tests {
     /// failed or been taken over, nothing about a LATER pass — even one
     /// where the row's install would once again match — reopens it. Only a
     /// fresh clone (a new generation, a fresh `Waiting`) tries again.
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_clone_host_never_reopens_a_terminal_state() {
         let hosts = vec![option(1, "remote", false)];
         let identity = Some(Some("install-1".to_string()));
@@ -2141,7 +2141,7 @@ mod tests {
     /// A live helm catalog confirms a clone's profile even while the host
     /// registry is still delayed. This matters because a later host bind must
     /// not own or overwrite the agent choice anymore.
-    #[test]
+    #[farhelm_testtrace::test]
     fn clone_agent_seeds_while_host_reconciliation_is_waiting() {
         let hosts = vec![option(1, "remote", false)];
         let identity = Some(Some("install-1".to_string()));
@@ -2180,7 +2180,7 @@ mod tests {
     /// An unconfirmable source host changes only the host result. A profile
     /// confirmed by the helm catalog still seeds because it is valid across
     /// every host that helm manages.
-    #[test]
+    #[farhelm_testtrace::test]
     fn clone_agent_seeds_when_the_source_host_is_unconfirmable() {
         let hosts = vec![option(1, "remote", false)];
         let stale_identity = Some(Some("superseded-install".to_string()));
@@ -2218,7 +2218,7 @@ mod tests {
     /// Once a person overrides the seeded agent, later host reconciliation
     /// cannot produce any agent action. This pins the post-bind race that used
     /// to replace an explicit command when a delayed host answer landed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn explicit_agent_override_survives_later_host_reconciliation() {
         let catalog = ProfileCatalog {
             profiles: Vec::new(),
@@ -2253,7 +2253,7 @@ mod tests {
     /// file's own field handling is wired to it correctly, with a value a
     /// clone could plausibly carry: a right-to-left override inside an
     /// otherwise ordinary invocation.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_cloned_fields_untouched_submission_sends_the_original_bytes_not_the_escaped_display() {
         let raw = "claude --resume \u{202E}reversed-arg";
         let display = display_peer(raw);

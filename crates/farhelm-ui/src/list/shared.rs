@@ -476,7 +476,7 @@ pub(super) mod tests {
 
     /// With nothing selected, the default is the LOCAL row — SPEC.md's
     /// second clause, the one that fires whenever the first cannot.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_create_default_is_the_local_row() {
         let hosts = vec![
             option(1, "this machine", true),
@@ -490,7 +490,7 @@ pub(super) mod tests {
     /// create-default clause, live again now that the sidebar layout lets
     /// the create form and an open session coexist (BUGS_BURNDOWN.md
     /// issue 5).
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_open_sessions_host_wins_while_it_exists() {
         let hosts = vec![
             option(1, "this machine", true),
@@ -520,7 +520,7 @@ pub(super) mod tests {
     /// session from a helm that predates `host_identity` (outer `None`)
     /// degrades to the row-id-only behavior rather than losing the
     /// default.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_open_sessions_host_wins_only_while_it_is_the_same_install() {
         let hosts = vec![
             option(1, "this machine", true),
@@ -590,7 +590,7 @@ pub(super) mod tests {
     /// another identity-less install goes unnoticed (documented on
     /// [`default_create_host`] and in SPEC_impl.md's creation-default
     /// note).
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_identityless_row_matching_an_identityless_registry_keeps_the_default() {
         let identityless = HostOption {
             identity: None,
@@ -614,7 +614,7 @@ pub(super) mod tests {
     /// create and its first refresh. Both halves are pinned: the submitted
     /// host and identity land on a bare reply, and a reply that somehow
     /// carried its own values keeps them (`or`, not overwrite).
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_created_session_is_stamped_with_the_submitted_host_and_identity() {
         let bare = row_specimen("made");
         let enriched = enrich_created_session(bare, 7, Some(Some("install-7".to_string())));
@@ -643,7 +643,7 @@ pub(super) mod tests {
     /// catalog through. Each is asserted on the fields the comparison
     /// reads: id + identity (+ the identity-mismatch disqualifier on the
     /// catalog side).
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_identity_survives_both_adapters_into_the_comparison() {
         let mut session = row_specimen("sess");
         session.host = Some(7);
@@ -698,7 +698,7 @@ pub(super) mod tests {
     /// one shape of "same identity, different machine" the comparison
     /// cannot see. SPEC.md's default must fall back locally rather than
     /// aim a create at a row the helm would refuse anyway.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_identity_mismatched_host_loses_the_default_despite_matching_identity() {
         let hosts = vec![
             option(1, "this machine", true),
@@ -724,7 +724,7 @@ pub(super) mod tests {
     /// machine, so a create the user thought was landing here would launch
     /// an agent somewhere else. Offering it and letting the helm refuse in
     /// its own words is the honest behavior.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_local_row_is_the_default_even_when_it_is_not_connected() {
         let hosts = vec![
             option_in(1, "this machine", true, "unreachable-reprobing"),
@@ -746,7 +746,7 @@ pub(super) mod tests {
     /// meant. `None` leaves the selector empty, which the form refuses to
     /// submit with a reason. In practice this state exists only before the
     /// first hosts read lands, since a live helm always has its local row.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_fleet_with_no_local_row_defaults_to_nothing_rather_than_guessing() {
         assert_eq!(default_create_host(&[], None), None);
 
@@ -764,7 +764,7 @@ pub(super) mod tests {
     /// Every host is selectable now, so the label is what keeps that from
     /// being a trap. The option uses humanized wording while the host row's
     /// data attribute keeps the stable wire token used by selectors.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_option_label_names_the_phase_only_when_there_is_one_to_warn_about() {
         assert_eq!(option(1, "this machine", true).label(), "this machine");
         assert_eq!(
@@ -816,7 +816,7 @@ pub(super) mod tests {
     /// name is prose the helm writes for humans, so either shortcut would
     /// hand the session rows the wrong id — and the row that got it would
     /// then hide the host line for every session on some other machine.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_local_option_is_identified_by_kind_not_position_or_name() {
         let registry = vec![
             registry_row(4, HostKind::Ssh),
@@ -861,7 +861,7 @@ pub(super) mod tests {
     /// A session is `Local` only when its host id IS the registry's local
     /// row, and `Remote` when both ids are known and differ — the two cases
     /// with actual evidence behind them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn locality_is_local_or_remote_only_when_both_ids_are_known() {
         assert_eq!(session_locality(Some(9), Some(9)), HostLocality::Local);
         assert_eq!(session_locality(Some(4), Some(9)), HostLocality::Remote);
@@ -877,7 +877,7 @@ pub(super) mod tests {
     /// boolean's "never suppress a host label" rule: an `Unknown` verdict
     /// must draw no locality glyph at all, LOCAL or REMOTE, because either
     /// one would assert a fact this function does not have.
-    #[test]
+    #[farhelm_testtrace::test]
     fn locality_needs_both_ids_and_never_guesses() {
         assert_eq!(
             session_locality(None, Some(9)),
