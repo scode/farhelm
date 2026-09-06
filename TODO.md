@@ -46,11 +46,6 @@ sorted, which carries no implication either way. Within a bucket, no order.
     Rust reboot coverage in `crates/farhelm/tests/e2e/boot_id_durable_outcome.rs` already expects attachment to an
     interrupted session to fail; that refusal must become an ordinary recovery state in the UI.
 
-- Hide the sidebar scrollbar completely, including its track and thumb, in the desktop app and web UI. On 0.5.0-rc.1 the
-  Mac scrollbar overlays the right edge and covers controls and row menus. Keep it hidden even when the OS is configured
-  to always show scrollbars, without reserving an empty scrollbar gutter. Preserve wheel, trackpad, touch, and keyboard
-  scrolling and focus-driven scrolling that keeps controls reachable.
-
 - Align the non-compact session row's hostname/directory line with the session name above it, rather than the far-left
   status indicator. Render it as one continuous string, using the hostname alias when set and an ordinary colon in the
   same font with no surrounding spaces: `myhost.com:~/path/to/project`. Preserve the existing full-value tooltip and
