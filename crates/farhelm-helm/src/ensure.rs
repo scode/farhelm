@@ -156,7 +156,7 @@ mod tests {
     /// The feature's basic promise, plus the two JSON5 affordances the
     /// format was chosen for: a file with comments and a trailing comma
     /// must register its hosts with their optional fields intact.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_fresh_file_registers_its_hosts_with_their_remote_fields() {
         let (store, dir) = fresh_store().await;
         let path = write_file(
@@ -197,7 +197,7 @@ mod tests {
     /// module docs record: an entry whose `remote_farhelm` CHANGED leaves
     /// the registered row alone, because helm.db is the authority for a
     /// host that already exists.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn re_running_the_same_file_neither_duplicates_nor_overwrites() {
         let (store, dir) = fresh_store().await;
         let path = write_file(
@@ -233,7 +233,7 @@ mod tests {
     /// absent from the ensure file must survive, because "guaranteed
     /// present" is not "exclusively present" — treating the file as the
     /// complete fleet would make one forgotten line silently forget a host.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_host_absent_from_the_file_is_never_removed() {
         let (store, dir) = fresh_store().await;
         store
@@ -265,7 +265,7 @@ mod tests {
     /// on "an error happened": every one of these fails for a different
     /// reason a user has to act on differently, and a shared assertion
     /// would pass just as happily if they all collapsed into one message.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_bad_file_fails_loudly_and_registers_nothing() {
         for (label, body, fragment) in [
             ("not json5 at all", "{ hosts: [", "parsing"),
@@ -322,7 +322,7 @@ mod tests {
     /// its identity, which cascades its cache away — so every boot would
     /// wipe the stale list the cache exists to serve, and a host that was
     /// down at startup would show nothing at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn re_ingesting_preserves_a_hosts_learned_identity_and_cache() {
         let (store, dir) = fresh_store().await;
         let path = write_file(&dir, r#"{ hosts: [{ ssh: "user@known" }] }"#).await;
@@ -397,7 +397,7 @@ mod tests {
     /// An empty `hosts` list is a legal file, not an error: it is what a
     /// generated file looks like before anything has been added to it, and
     /// refusing it would make the generator's job harder for no benefit.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_empty_host_list_is_accepted() {
         let (store, dir) = fresh_store().await;
         let path = write_file(&dir, r#"{ hosts: [] }"#).await;
@@ -408,7 +408,7 @@ mod tests {
     /// A missing file is a startup failure naming the path. The flag is an
     /// explicit request for a guarantee, so silently proceeding without it
     /// would deliver the opposite of what was asked for.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_missing_file_fails_with_its_path() {
         let (store, dir) = fresh_store().await;
         let missing = dir.path().join("nope.json5");

@@ -388,7 +388,7 @@ mod tests {
     /// sockets. Exercising the Unix protocol matters because a direct call to
     /// `AuthState::rotate` would not prove a separate CLI invocation reaches
     /// the process that owns those sockets.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn live_rotation_reaches_the_serving_helm_and_revokes_sockets() {
         let dir = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
@@ -409,7 +409,7 @@ mod tests {
     /// Starting a second helm against the same state directory must not
     /// unlink the first helm's control path and silently steal future
     /// rotations from its live WebSockets.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_live_token_control_socket_is_never_replaced() {
         let dir = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
@@ -425,7 +425,7 @@ mod tests {
 
     /// Both ordinary offline shapes—no path and an abandoned socket—rotate
     /// under the ownership lock and invalidate every retained device.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn offline_rotation_handles_absent_and_orphaned_sockets() {
         for orphaned in [false, true] {
             let dir = tempfile::tempdir().unwrap();
@@ -448,7 +448,7 @@ mod tests {
     /// The ownership lock is claimed before the serving socket is bound. A
     /// CLI landing in that startup window re-probes the socket instead of
     /// waiting forever behind the lock the helm retains for its lifetime.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rotation_reprobes_while_a_serving_helm_finishes_startup() {
         let dir = tempfile::tempdir().unwrap();
         farhelm_supervisor::ensure_private_dir(dir.path())
@@ -478,7 +478,7 @@ mod tests {
 
     /// The real listener refuses unknown vocabulary without treating it as a
     /// rotation or mutating either durable credential table.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn unknown_control_command_returns_err_without_rotation() {
         let dir = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
@@ -504,7 +504,7 @@ mod tests {
 
     /// A live rotation failure tells the local operator which safe subsystem
     /// failed without copying raw SQLite text onto the control protocol.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rotation_failure_reply_is_actionable_and_sanitized() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -540,7 +540,7 @@ mod tests {
 
     /// A stale Unix socket is recoverable, but regular files and symlinks are
     /// never displaced merely because they occupy the conventional path.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn startup_rebinds_only_an_abandoned_socket() {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join(SOCKET_NAME);
@@ -575,7 +575,7 @@ mod tests {
 
     /// Guard teardown compares inode ownership, so an externally installed
     /// replacement at the same pathname survives the old guard's drop.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn guard_drop_does_not_unlink_a_replacement_socket() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SOCKET_NAME);
@@ -590,7 +590,7 @@ mod tests {
 
     /// A compromised or mismatched server cannot make the CLI buffer an
     /// unlimited reply or accept EOF as a complete control response.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn client_rejects_oversized_and_unterminated_replies() {
         for reply in [vec![b'x'; 129], b"OK short-without-newline".to_vec()] {
             let (client, mut server) = tokio::net::UnixStream::pair().unwrap();
@@ -611,7 +611,7 @@ mod tests {
 
     /// Once connected, a silent serving peer is a failed live rotation—not
     /// evidence that the CLI may bypass it with an offline transaction.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn established_control_exchange_has_one_whole_operation_deadline() {
         let (client, mut server) = tokio::net::UnixStream::pair().unwrap();
         let peer = tokio::spawn(async move {

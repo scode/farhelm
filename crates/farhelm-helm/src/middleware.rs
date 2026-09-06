@@ -321,7 +321,7 @@ mod tests {
     /// branch is pinned individually: each of these would pass with some
     /// plausible-but-wrong implementation (suffix matching, `null`
     /// treated as absent, Host ignored).
-    #[test]
+    #[farhelm_testtrace::test]
     fn loopback_hosts_with_no_or_loopback_origin_are_allowed() {
         // curl and non-browser clients: Host only, no Origin.
         assert!(origin_is_allowed(
@@ -344,7 +344,7 @@ mod tests {
     /// cannot forge; those origins are allowed. `null` (sandboxed iframe,
     /// data: document) is deliberately NOT — loosening `None => true`
     /// into "unparseable/null is fine" would reopen the rebinding hole.
-    #[test]
+    #[farhelm_testtrace::test]
     fn custom_scheme_origins_are_allowed_but_null_is_not() {
         let host = Some("127.0.0.1:7433");
         assert!(origin_is_allowed(
@@ -361,7 +361,7 @@ mod tests {
     /// A rebinding attack presents a foreign Host (the attacker's domain
     /// resolving to 127.0.0.1) or a foreign Origin; both directions must
     /// refuse, as must a missing Host and the wrong loopback port.
-    #[test]
+    #[farhelm_testtrace::test]
     fn foreign_or_missing_authorities_are_refused() {
         assert!(!origin_is_allowed(&headers(None, None), PORT));
         assert!(!origin_is_allowed(
@@ -387,7 +387,7 @@ mod tests {
     /// exact-`:80` forms never arrive, and requiring them locks every
     /// browser out of a legal flag value. The bare forms stay refused on
     /// any other port (fail-closed).
-    #[test]
+    #[farhelm_testtrace::test]
     fn default_port_80_accepts_portless_loopback_authorities() {
         assert!(origin_is_allowed(&headers(Some("127.0.0.1"), None), 80));
         assert!(origin_is_allowed(&headers(Some("localhost"), None), 80));
@@ -407,7 +407,7 @@ mod tests {
     /// merely ENDS in a loopback authority ("evil.example/127.0.0.1:7433")
     /// has to be refused. No browser sends such a value — the point is
     /// that this gate must not depend on that.
-    #[test]
+    #[farhelm_testtrace::test]
     fn embedded_loopback_suffixes_are_refused() {
         assert!(!origin_is_allowed(
             &headers(Some("evil.example/127.0.0.1:7433"), None),
@@ -439,7 +439,7 @@ mod tests {
     /// app's own requests), an absent header (non-browser clients), and the
     /// desktop webview's custom-scheme Origin, whose fetches are cross-site
     /// by construction and are vouched for by the origin arm instead.
-    #[test]
+    #[farhelm_testtrace::test]
     fn cross_site_navigations_are_refused_without_a_vouching_origin() {
         let base = || headers(Some("127.0.0.1:7433"), None);
         assert!(!origin_is_allowed(

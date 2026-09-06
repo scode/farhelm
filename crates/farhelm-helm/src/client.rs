@@ -3617,7 +3617,7 @@ mod tests {
     /// A healthy connection must close when its final external client
     /// handle is dropped. Capturing a strong Arc in either background
     /// task creates a cycle that keeps the peer open forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn dropping_the_last_client_handle_closes_the_transport() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -3647,7 +3647,7 @@ mod tests {
     ///
     /// The ordinary no-progress timeout protects a live client's writes. It
     /// must not keep a retired connection open after ownership has ended.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn dropping_the_last_client_interrupts_an_in_progress_write() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -3778,7 +3778,7 @@ mod tests {
 
     /// Request correlation is keyed by req_id, not arrival order. Two
     /// reversed replies must still complete the matching futures.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn concurrent_requests_accept_replies_in_reverse_order() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -3833,7 +3833,7 @@ mod tests {
     /// supervisor reports is neither dropped nor invented on the way to
     /// the REST body that tells the user the list could not be read to the
     /// end.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn list_sessions_passes_the_supervisors_truncated_flag_through() {
         for sent in [true, false] {
             let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -3873,7 +3873,7 @@ mod tests {
     /// A broken write half must fail pending requests and detach
     /// terminals even while the peer deliberately keeps its write half
     /// open. Read-side EOF cannot rescue this path.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn writer_failure_fails_waiters_on_a_half_broken_transport() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -3931,7 +3931,7 @@ mod tests {
     ///
     /// The peer READING the frame is what makes the phase provable: the
     /// enqueue happened, observably, before the connection went.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_peer_that_reads_a_request_and_dies_reports_it_as_sent() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4000,7 +4000,7 @@ mod tests {
     /// than "delayed": nothing about the retirement stops the host being
     /// served again immediately, which is why nothing else would ever have
     /// noticed the hung waiter.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn retiring_a_connection_drains_a_request_the_queue_already_took() {
         /// One live client plus the peer's frame reader, with the hello
         /// already exchanged and the peer's writer parked in a task the
@@ -4104,7 +4104,7 @@ mod tests {
     /// split exists to prevent; collapsed the other way, every request that
     /// never left the process starts telling its caller to go and inspect
     /// the fleet before trying again.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_request_on_an_already_dead_connection_reports_that_nothing_was_sent() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4160,7 +4160,7 @@ mod tests {
     ///
     /// `stop` is the verb because it is the one whose repeat is destructive
     /// in the plainest way; the three lifecycle wrappers share the shape.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_lifecycle_reply_of_the_wrong_variant_is_reported_as_sent() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4231,7 +4231,7 @@ mod tests {
     /// because that is the legal shape a real supervisor can produce — a
     /// listing answering a `StopSession` — and because a bound that holds
     /// for a kilobyte and not for a megabyte is not a bound.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_near_frame_limit_wrong_reply_still_reports_a_small_error() {
         // ~7 MiB of encoded sessions: comfortably under `MAX_FRAME_LEN` (so
         // the peer can actually send it) and comfortably over it once
@@ -4320,7 +4320,7 @@ mod tests {
     ///
     /// All three create wrappers send `ControlMsg::CreateSession` and share
     /// this arm, so the raw-invocation one stands in for the profile ones.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_create_reply_of_the_wrong_variant_is_reported_as_sent() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4394,7 +4394,7 @@ mod tests {
     /// an id behind. Its evidence is that the second request still reaches
     /// the peer at all — a connection retired by the duplicate would have
     /// failed it as `NotSent` instead.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_reply_under_a_never_issued_req_id_ends_the_connection() {
         /// The next `StopSession`'s `req_id`, since this fixture reads two.
         async fn next_stop<R: tokio::io::AsyncRead + Unpin>(reader: &mut FrameReader<R>) -> u64 {
@@ -4485,7 +4485,7 @@ mod tests {
     /// oversized answer that was NOT outcome-unknown must still collapse to
     /// `Internal`, which is the honest reading when nothing durable is at
     /// stake and no retry changes anything.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_oversized_answer_backstop_preserves_an_unknown_outcome() {
         let huge = "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize + 1);
         let decode = |frame: Frame| match parse_control(&frame).expect("decode the response") {
@@ -4547,7 +4547,7 @@ mod tests {
     /// client handle keeps its sender alive. Otherwise a half-closed
     /// supervisor leaves the write task and transport descriptor parked
     /// for the lifetime of AppState.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reader_eof_cancels_the_writer_transport() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4576,7 +4576,7 @@ mod tests {
 
     /// Malformed control JSON is a fatal protocol violation. Ignoring it
     /// loses the req_id and leaves the matching request parked forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn malformed_control_frame_fails_pending_requests() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4629,7 +4629,7 @@ mod tests {
     /// where production discovers it — inside the shared reader — and a
     /// refactor that moved the send off that path could not pass this
     /// while reintroducing the block.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_full_terminal_queue_detaches_that_terminal_without_blocking_the_others() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4726,7 +4726,7 @@ mod tests {
     /// dropping it silently outside the detach rule, or bypassing the
     /// bound entirely — would still pass every OTHER marker test in this
     /// file (none of them fill the queue) and would only be caught here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_replay_complete_marker_against_a_full_queue_gets_the_same_stall_detach_as_data() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4820,7 +4820,7 @@ mod tests {
     /// `Detached` shape — could race ahead of queued data and land before
     /// the replay it is supposed to follow; only sharing the queue rules
     /// that out structurally.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn replay_complete_marker_is_ordered_between_replay_and_live_data_in_the_queue() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4878,7 +4878,7 @@ mod tests {
     /// for `ReplayComplete` specifically, since it shares the helper with
     /// `Data` but is reached through a different `dispatch` arm
     /// (`ControlMsg::ReplayComplete`, not `FrameKind::Data`).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn replay_complete_for_an_unknown_channel_is_discarded_without_disturbing_others() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -4937,7 +4937,7 @@ mod tests {
     /// kept as its own low-level `.request()`-driven check: a missing arm
     /// hangs THIS public-method call exactly as it would a bare
     /// `.request()`, so a separate test pinned nothing this one does not.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rename_session_forwards_the_title_verbatim() {
         const TITLE: &str = "  weird \u{7}title\twith\ncontrol chars  ";
 
@@ -5019,7 +5019,7 @@ mod tests {
     /// nothing else can observe the difference until memory runs out.
     /// Order matters as much as the bound: a fix that dropped or reordered
     /// under pressure would still "not block".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_outbound_queue_blocks_at_capacity_and_drains_in_order() {
         // A small transport so the writer task parks quickly instead of
         // absorbing the whole burst into a socket buffer.
@@ -5074,7 +5074,7 @@ mod tests {
     /// race — orphans it in a map nothing sweeps, for the life of the
     /// process. Reserving capacity first is what closes that, and this is
     /// the only test that can tell the two orderings apart.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_request_cancelled_on_a_full_queue_leaks_no_pending_entry() {
         let (client_side, peer_side) = tokio::io::duplex(1024);
         let peer = tokio::spawn(async move {
@@ -5115,7 +5115,7 @@ mod tests {
     /// Nothing else in this file covers the closed (as opposed to full)
     /// case, and the two need different handling: there is no local notice
     /// to deliver here, because nobody is listening.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_terminal_whose_receiver_was_dropped_is_released_upstream() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5160,7 +5160,7 @@ mod tests {
     /// The common case: allocation is a plain monotonic counter starting at
     /// 1 (0 is the control channel). This pins the never-recycle contract's
     /// happy half — each call hands out a new id and advances.
-    #[test]
+    #[farhelm_testtrace::test]
     fn allocate_channel_hands_out_sequential_ids() {
         let next_channel = AtomicU64::new(1);
 
@@ -5173,7 +5173,7 @@ mod tests {
     /// into ids that may still be referenced by detached-but-uncleaned
     /// callers or in-flight frames. Wrapping here is exactly the
     /// cross-attachment corruption bug this allocator exists to prevent.
-    #[test]
+    #[farhelm_testtrace::test]
     fn allocate_channel_fails_instead_of_recycling() {
         let next_channel = AtomicU64::new(u64::from(u32::MAX));
 
@@ -5196,7 +5196,7 @@ mod tests {
     /// nothing was WRITTEN requires closing the connection first, because
     /// only then does the peer's read resolve — to `None` if the attach
     /// was truly silent, or to the stray frame if it was not.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn attach_fails_cleanly_when_channel_ids_exhausted() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5249,7 +5249,7 @@ mod tests {
     /// even now that [`SupervisorClient::restart_session`] exists: what it
     /// pins is the reply CLASSIFICATION, which a refactor could break for
     /// this message alone while the public method's own tests stay green.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn session_restarted_reply_resolves_the_pending_request() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5301,7 +5301,7 @@ mod tests {
     /// reply-classification match, so a scripted peer sending it fell
     /// into the `other => warn!(...)` arm — the pending caller's oneshot
     /// would never resolve, hanging `request()` forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn tab_opened_reply_resolves_the_pending_request() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5348,7 +5348,7 @@ mod tests {
     /// `TabClosed`'s sibling case for `CloseTab` — see
     /// `tab_opened_reply_resolves_the_pending_request`'s doc comment for
     /// why this specific miss mattered.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn tab_closed_reply_resolves_the_pending_request() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5388,7 +5388,7 @@ mod tests {
     /// `UploadStarted`'s sibling case for `BeginUpload` — see
     /// `tab_opened_reply_resolves_the_pending_request`'s doc comment for
     /// why this specific miss mattered.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_started_reply_resolves_the_pending_request() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5439,7 +5439,7 @@ mod tests {
     /// `UploadCommitted`'s sibling case for `CommitUpload` — see
     /// `tab_opened_reply_resolves_the_pending_request`'s doc comment for
     /// why this specific miss mattered.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_committed_reply_resolves_the_pending_request() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5495,7 +5495,7 @@ mod tests {
     /// unused, in the joined result) until after the assertion is what
     /// makes the test observe begin_upload's OWN postcondition rather than
     /// an unrelated connection-teardown race.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn begin_upload_sends_the_declared_fields_and_registers_the_channel() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5548,7 +5548,7 @@ mod tests {
     /// (a byte pattern derived from position) is checked too, not just the
     /// lengths, so a rechunking bug that reordered or duplicated bytes
     /// would also fail this.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn send_upload_chunk_rechunks_a_single_buffer_at_upload_chunk_bytes() {
         let (client_side, peer_side) = tokio::io::duplex(4 * 1024 * 1024);
         let peer = tokio::spawn(async move {
@@ -5607,7 +5607,7 @@ mod tests {
     /// upload direction. A sender offered more than the window must stall
     /// after putting exactly the window's worth on the wire, and resume
     /// only once an `UploadAck` extends the credit baseline.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn send_upload_chunk_stalls_at_the_credit_window_then_progresses_after_an_ack() {
         let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
         let peer = tokio::spawn(async move {
@@ -5688,7 +5688,7 @@ mod tests {
     /// An `UploadAborted` arriving while a sender is parked waiting for
     /// credit must wake it immediately with the reason, rather than
     /// leaving it waiting for an ack that will now never come.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn send_upload_chunk_reports_the_reason_when_aborted_while_waiting_for_credit() {
         let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
         let peer = tokio::spawn(async move {
@@ -5740,7 +5740,7 @@ mod tests {
     /// wake it — `fail_all`'s upload half, mirroring how it already wakes
     /// a parked terminal detach. Without this an upload whose supervisor
     /// vanished mid-transfer would hang its HTTP handler forever.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_dead_connection_wakes_a_sender_parked_on_credit() {
         let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
         let peer = tokio::spawn(async move {
@@ -5800,7 +5800,7 @@ mod tests {
     /// assertions. Dropping them would close the connection, and
     /// `fail_all` clearing everything would make a leaked entry look
     /// cleaned up — the failure this test exists to catch.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn commit_upload_passes_the_outcome_through_and_clears_bookkeeping_either_way() {
         const SENTINEL: &str = "SENTINEL-commit-mismatch-4f1b: declared 10 bytes, received 7";
         // (channel, what the peer answers, what the caller must see)
@@ -5864,7 +5864,7 @@ mod tests {
 
     /// `UploadGuard::abort` is fire-and-forget like `detach`: the local
     /// entry goes away and an `AbortUpload` reaches the supervisor.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn abort_upload_sends_the_control_message_and_clears_local_bookkeeping() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5908,7 +5908,7 @@ mod tests {
     /// No `AbortUpload` may follow either. `UploadStarted`'s docs say a
     /// refused begin created nothing on disk, so aborting would name a
     /// transfer that never existed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn begin_upload_refusal_leaves_no_bookkeeping_and_sends_no_abort() {
         const SENTINEL: &str = "SENTINEL-begin-refused-91cd: no such session";
 
@@ -5969,7 +5969,7 @@ mod tests {
     /// sat idle. The begin must fail, send no data, and leave no local
     /// bookkeeping — with an `AbortUpload` released for the channel this
     /// side asked for, since the supervisor did accept SOMETHING.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn begin_upload_rejects_an_upload_started_for_another_channel() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -6034,7 +6034,7 @@ mod tests {
     /// closed, and both halves of the contract are asserted: EXACTLY one
     /// `AbortUpload` (a second would mean two teardown paths fired), and
     /// no local bookkeeping left behind.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn dropping_an_upload_parked_on_credit_aborts_it_exactly_once() {
         let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
         let peer = tokio::spawn(async move {
@@ -6093,7 +6093,7 @@ mod tests {
     /// behaves — the guard dies with the future, so the supervisor still
     /// hears about it and the local entry is still retired, instead of
     /// both sides waiting on a caller that no longer exists.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn dropping_an_upload_awaiting_its_commit_reply_aborts_and_retires_it() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -6151,7 +6151,7 @@ mod tests {
     /// indefinitely. The injected timeout is short so the give-up is
     /// observable, while the writer's own stall bound stays at its
     /// production value so it cannot be what fires.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_supervisor_that_stops_acking_stalls_the_upload_and_aborts_it() {
         let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
         let peer = tokio::spawn(async move {
@@ -6244,7 +6244,7 @@ mod tests {
     /// comparison must not be reachable with a value that would overflow
     /// it, which is why the check is subtractive rather than
     /// `received + UPLOAD_WINDOW_BYTES`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_invalid_upload_ack_aborts_the_transfer() {
         // (label, declared size, the ack the peer sends after 1 KiB was sent)
         let cases: [(&str, u64, u64); 4] = [
@@ -6333,7 +6333,7 @@ mod tests {
     /// entry when the abort landed would answer the next send with a
     /// generic "no longer active" and lose the supervisor's actual reason
     /// — the one thing the user needed to see.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_abort_arriving_between_sends_is_retained_for_the_next_one() {
         const SENTINEL: &str = "SENTINEL-abort-between-sends: disk full";
 
@@ -6386,7 +6386,7 @@ mod tests {
     /// as whatever correlated error the commit would collect for a channel
     /// the supervisor has already torn down. The user needs the cause
     /// ("disk full"), not the symptom ("commit failed").
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_abort_just_before_commit_surfaces_its_reason() {
         const SENTINEL: &str = "SENTINEL-abort-before-commit: session deleted mid-transfer";
 
@@ -6443,7 +6443,7 @@ mod tests {
     /// first proves the burst is genuinely underway before the control
     /// frame is sent, so the measured position is contention and not a
     /// race with a transfer that had not started.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_control_frame_does_not_queue_behind_a_whole_upload_burst() {
         let (client_side, peer_side) = tokio::io::duplex(16 * 1024);
         let peer = tokio::spawn(async move {
@@ -6664,7 +6664,7 @@ mod tests {
     /// Unlike a busy terminal connection, this peer sends no later frames that
     /// could incidentally make the demultiplexer notice the client is gone.
     /// Closing must therefore follow ownership, not depend on more traffic.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn dropping_the_last_client_with_a_pending_upcall_closes_the_transport() {
         let (handler, mut entered, _gate) = GatedHandler::parked();
         let handler_lifetime = Arc::downgrade(&handler);
@@ -6707,7 +6707,7 @@ mod tests {
     /// the empty state once would answer "not ready" for the rest of that
     /// connection's life, and every existing test that fills the slot first
     /// would still pass.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_empty_handler_slot_refuses_and_then_answers_once_filled() {
         let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::new());
         let (_client, mut peer) = agent_connection(Arc::clone(&slot)).await;
@@ -6791,7 +6791,7 @@ mod tests {
     /// that reorders those two must move the seam with it or this test stops
     /// pinning anything. `Stop` is the verb because a mutation escaping the
     /// boundary is the consequential half — a listing merely wastes work.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_answer_spawned_into_a_retirement_never_runs() {
         let entered = Arc::new(AtomicBool::new(false));
         let slot: crate::agent_requests::AgentRequestSlot =
@@ -6881,7 +6881,7 @@ mod tests {
     /// [`a_stale_origin_does_not_downgrade_a_completed_mutation`]: without
     /// it, a mutating verb skipping the check would be indistinguishable
     /// from BOTH verb classes never being checked at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stale_origin_downgrades_a_completed_listing_to_unavailable() {
         let handler = Arc::new(StaleExitHandler {
             reply: farhelm_proto::AgentReply::Hosts { hosts: Vec::new() },
@@ -6932,7 +6932,7 @@ mod tests {
     /// session was made while one is already running on some host, and the
     /// id it would have needed to find it was in the answer that was
     /// thrown away.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_stale_origin_does_not_downgrade_a_completed_mutation() {
         let renamed = |id: &str| farhelm_proto::AgentSession {
             id: id.to_string(),
@@ -7054,7 +7054,7 @@ mod tests {
     /// leaked, the run past [`AGENT_ANSWER_SLOTS`] would come back as "too
     /// many agent requests" instead of as the fallback — a connection
     /// permanently unable to answer any agent at all after four panics.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_panicking_handler_still_answers_and_leaves_the_connection_alive() {
         let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
             Arc::new(PanickingHandler) as Arc<dyn crate::agent_requests::AgentRequestHandler>,
@@ -7133,7 +7133,7 @@ mod tests {
     /// terminal, upload and reply on the connection and still pass. Here
     /// the ordinary request must complete BEFORE the handler is released,
     /// which is only possible if the two are on different tasks.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_parked_agent_handler_does_not_stall_the_connection() {
         let (handler, mut calls, gate) = GatedHandler::parked();
         let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
@@ -7193,7 +7193,7 @@ mod tests {
     /// allowance (that allowance is on the other side of a trait object,
     /// which is precisely why a backstop exists), and this pins both
     /// halves: the request fails, and the next one still succeeds.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_oversized_agent_reply_fails_its_request_and_spares_the_connection() {
         let huge = farhelm_proto::AgentReply::Sessions {
             sessions: vec![farhelm_proto::AgentSession {
@@ -7260,7 +7260,7 @@ mod tests {
     /// requests for every session it runs must not be able to conscript the
     /// helm's runtime and memory on the fleet's behalf, and a queue would
     /// only convert that pressure into upcall timeouts for everyone.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn concurrent_agent_answers_are_capped_per_connection() {
         let (handler, mut calls, gate) = GatedHandler::parked();
         let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
@@ -7320,7 +7320,7 @@ mod tests {
     /// `agent_relay::tests::a_mutations_fence_outlives_the_answer_budget`).
     /// The fence itself lives in another crate and cannot be observed from
     /// here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_undeliverable_refusal_retires_the_connection() {
         let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::new());
         let (client, _peer) = agent_connection(slot).await;
@@ -7390,7 +7390,7 @@ mod tests {
     /// four admitted answers can get no further than the queue, and the
     /// fifth request must therefore still be refused. Release-at-enqueue
     /// answers it instead, which is exactly the regression.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_answers_slot_is_held_until_the_writer_sends_it() {
         // Several times the transport buffer below, so the writer blocks
         // partway through the first answer it writes and every later one

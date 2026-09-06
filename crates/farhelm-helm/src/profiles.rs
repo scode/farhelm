@@ -325,7 +325,7 @@ mod tests {
     /// keep the catalog bound observable at the HTTP boundary. This test
     /// matters because store-only coverage cannot catch a wrong route, status
     /// code, request shape, or fleet-revision invalidation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn helm_profile_catalog_routes_cover_crud_errors_and_bound() {
         let harness = rest_harness::idle_helm().await;
         let before = harness.manager.events().revision();
@@ -468,7 +468,7 @@ mod tests {
     /// spelling of helm state. This matters because accepting them would keep
     /// teaching clients that a host selects a catalog even though no such
     /// distinction exists.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn host_scoped_profile_routes_are_not_found() {
         let harness = rest_harness::idle_helm().await;
         for (method, path) in [
@@ -490,7 +490,7 @@ mod tests {
     /// would turn a client bug into a round trip whose failure mode depends
     /// on which supervisor answered it. `silent_supervisor` is what proves
     /// nothing was forwarded.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_create_naming_both_modes_or_neither_is_refused_locally() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(rest_harness::silent_supervisor(peer_side));
@@ -522,7 +522,7 @@ mod tests {
     /// a session under settings the caller believes it chose. Both fields
     /// are staged, because either alone is enough to make the request
     /// ambiguous, and neither reaches a supervisor.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_profile_create_carrying_a_snapshot_override_is_refused_locally() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(rest_harness::silent_supervisor(peer_side));

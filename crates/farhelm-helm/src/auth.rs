@@ -424,7 +424,7 @@ mod tests {
     /// Both explicit transports require their complete scheme/protocol names;
     /// lookalike prefixes must not turn attacker-controlled headers into a
     /// device credential.
-    #[test]
+    #[farhelm_testtrace::test]
     fn device_headers_require_the_complete_transport_shape() {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, "Bearer secret".parse().unwrap());
@@ -447,7 +447,7 @@ mod tests {
     /// The middleware boundary is structural: an ordinary REST route is
     /// refused before its handler, and the outer build-stamp layer still
     /// decorates that refusal so skew wins over login in the browser.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn unauthenticated_rest_is_structured_401_with_a_build_stamp() {
         let harness = rest_harness::idle_helm().await;
         let request = Request::builder()
@@ -475,7 +475,7 @@ mod tests {
     /// WebSockets are HTTP until the upgrade completes, so every protected
     /// socket route must answer a missing device secret with 401 rather than
     /// opening and then emitting a close code the browser has to reinterpret.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn unauthenticated_websocket_is_refused_before_upgrade() {
         let mut harness = rest_harness::idle_helm().await;
         let addr = harness.serve_unauthenticated().await;
@@ -496,7 +496,7 @@ mod tests {
 
     /// The bootstrap path is public, returns a device secret in its body, and
     /// that secret alone authenticates later reads through Authorization.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn token_exchange_mints_an_explicit_device_session() {
         let harness = rest_harness::idle_helm().await;
         let token = harness.state.auth.rotate().await.unwrap();
@@ -589,7 +589,7 @@ mod tests {
 
     /// A browser must be able to load the application before it has a credential;
     /// otherwise there is nowhere to present the in-page token form.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn static_bundle_is_public() {
         let harness = rest_harness::idle_helm().await;
         let dist = tempfile::tempdir().unwrap();
@@ -616,7 +616,7 @@ mod tests {
 
     /// The recoverable token is durable rather than process-local: `show`
     /// after a helm restart must print the same value until rotation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn token_show_survives_a_helm_restart() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -631,7 +631,7 @@ mod tests {
     /// The exchange accepts the token only in its JSON body. A wrong body
     /// remains wrong even if the correct token is smuggled into the query,
     /// and neither refusal may leave a device row behind.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn refused_exchanges_never_mint_a_device_session() {
         let harness = rest_harness::idle_helm().await;
         let token = harness.state.auth.token().await.unwrap();
@@ -665,7 +665,7 @@ mod tests {
     /// Invalid, well-shaped tokens are rejected from the in-memory authority
     /// even while another connection holds SQLite's write lock. Reaching the
     /// exchange transaction would make this call wait behind that lock.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn invalid_exchange_never_touches_sqlite() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -694,7 +694,7 @@ mod tests {
 
     /// Storage failures return a fixed actionable category and never expose
     /// SQLite trigger text supplied by the database.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn exchange_storage_failure_is_actionable_and_sanitized() {
         let harness = rest_harness::idle_helm().await;
         let token = harness.state.auth.token().await.unwrap();
@@ -721,7 +721,7 @@ mod tests {
 
     /// A failed rotation preserves all three old-authority facts: token,
     /// device admission, and the absence of a live-socket revocation event.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn failed_rotation_keeps_old_credentials_and_sockets() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -753,7 +753,7 @@ mod tests {
 
     /// Reusing one valid bootstrap token yields independent device authority,
     /// never a deterministic derivative of the token or prior exchange.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn repeated_exchanges_mint_distinct_independently_usable_devices() {
         let harness = rest_harness::idle_helm().await;
         let token = harness.state.auth.token().await.unwrap();
@@ -787,7 +787,7 @@ mod tests {
 
     /// Device sessions have no server-side age cutoff: rotation, not a wall
     /// clock comparison, is the sole expiry mechanism specified for v1.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn arbitrarily_old_device_session_authenticates_until_rotation() {
         let dir = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
@@ -825,7 +825,7 @@ mod tests {
 
     /// Both bootstrap and device credentials carry the promised 128 bits,
     /// rather than merely looking random as encoded strings.
-    #[test]
+    #[farhelm_testtrace::test]
     fn minted_credentials_decode_to_exactly_128_bits() {
         for _ in 0..32 {
             let secret = mint_secret().unwrap();
@@ -838,7 +838,7 @@ mod tests {
 
     /// Two first-use readers on separate SQLite connections converge on the
     /// same committed singleton instead of each reporting its own candidate.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn concurrent_first_mint_returns_one_committed_token() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -851,7 +851,7 @@ mod tests {
     /// Rotation and exchange serialize at one immediate transaction. If
     /// validation pauses while holding that transaction, the later rotation
     /// deletes the admitted row rather than letting an old token mint after it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rotation_cannot_be_overtaken_by_a_validated_exchange() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -895,7 +895,7 @@ mod tests {
 
     /// Device rows stop at the documented cap and evict the oldest exact row
     /// when the next profile authenticates.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn device_session_cap_is_exact_and_evicts_the_oldest() {
         let dir = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();

@@ -144,7 +144,7 @@ mod tests {
     /// Compact may be the first preference a fresh client changes. Exercise
     /// insertion into an absent singleton row, not only the update path after
     /// sort or selection created it, and leave those unrelated choices unset.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn compact_alone_creates_the_shared_preference_row() {
         let harness = rest_harness::idle_helm().await;
         assert_eq!(read_raw(&harness).await, b"{}");
@@ -174,7 +174,7 @@ mod tests {
     /// One test rather than five because the assertions build on one
     /// another's state, and the sequence IS the specification: it is what a
     /// browser tab and the desktop app do to the same row in turn.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_preference_routes_read_and_merge_one_shared_row() {
         let harness = rest_harness::idle_helm().await;
         // The raw bytes, not just the decoded value: `{"list_sort":null}`
