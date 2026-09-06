@@ -293,7 +293,7 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
     // Attach succeeds: the dead pane genuinely exists, so this is exactly
     // like attaching to any other exited session, not a `NotFound`.
     client2
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("an error-classified session with a real dead pane must still be attachable");
 
