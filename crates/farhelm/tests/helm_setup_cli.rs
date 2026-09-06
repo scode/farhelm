@@ -22,7 +22,7 @@ use std::process::{Command, Stdio};
 /// keeps the test honest about side effects even if the refusal regressed:
 /// nothing would be written either way.
 #[cfg(target_os = "linux")]
-#[test]
+#[farhelm_testtrace::test]
 fn setup_refuses_to_run_without_home() {
     let output = Command::new(env!("CARGO_BIN_EXE_farhelm"))
         .args(["helm", "setup", "--dry-run"])
@@ -50,7 +50,7 @@ fn setup_refuses_to_run_without_home() {
 /// empty string as a directory would resolve every unit path against the
 /// filesystem root.
 #[cfg(target_os = "linux")]
-#[test]
+#[farhelm_testtrace::test]
 fn setup_treats_an_empty_home_as_missing() {
     let output = Command::new(env!("CARGO_BIN_EXE_farhelm"))
         .args(["helm", "setup", "--dry-run"])

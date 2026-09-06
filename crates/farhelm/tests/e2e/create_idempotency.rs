@@ -181,7 +181,7 @@ pub(crate) async fn handoff_to_new_supervisor_with_seams(
 /// exactly the shape of a real ambiguous failure (the supervisor being
 /// restarted or crashing is one of the reasons a reply goes missing in the
 /// first place).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -250,7 +250,7 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
 /// identity — and answering with the first intent's session would hand the
 /// caller a session it never asked for while silently discarding the one it
 /// did. `Conflict` is the classification the helm renders as a 409.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_key_reused_for_a_different_request_is_refused() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -297,7 +297,7 @@ async fn a_key_reused_for_a_different_request_is_refused() {
 /// control messages in a single serial read loop, so two creates on one
 /// connection would serialize before ever reaching the idempotency
 /// machinery.
-#[tokio::test(flavor = "multi_thread")]
+#[farhelm_testtrace::test(flavor = "multi_thread")]
 async fn concurrent_creates_under_one_intent_key_yield_one_session() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -381,7 +381,7 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
 /// resurrect work the user explicitly threw away, under a key they have no
 /// reason to think is still live. The honest answer is that the key is
 /// spent, and the message says which session it was spent on.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_replay_for_a_deleted_session_reports_that_it_is_gone() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -544,7 +544,7 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
 /// real branch and not an optimization. The reservation must therefore
 /// still be PENDING after reload: settling it as created would mean
 /// claiming a session that never existed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_crash_after_the_reservation_lets_the_retry_perform_the_create() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let scene = retry_after_a_crash_at(CreateStage::AfterRecord).await;
@@ -578,7 +578,7 @@ async fn a_crash_after_the_reservation_lets_the_retry_perform_the_create() {
 /// probing tmux a second time and risking a different answer. Settled by
 /// RELOAD, before any retry arrives, which is what the reservation
 /// assertion pins.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_crash_during_the_launch_reconciles_to_the_session_that_started() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let scene = retry_after_a_crash_at(CreateStage::DuringLaunch).await;
@@ -609,7 +609,7 @@ async fn a_crash_during_the_launch_reconciles_to_the_session_that_started() {
 /// is complete and only the intent table does not know it, which is
 /// exactly why the lifecycle is a state machine with a reconciling PENDING
 /// state rather than one durable "this key is spent" flag.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let scene = retry_after_a_crash_at(CreateStage::BeforeOutcome).await;
@@ -641,7 +641,7 @@ async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
 ///
 /// The retry must therefore still perform the create, under the same
 /// identity, exactly as it would have without the reboot.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -727,7 +727,7 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
 /// expansion refuses outright — so the fresh-create refusal beside the
 /// successful replay is what proves the replay path never consulted the
 /// new home at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -807,7 +807,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
 /// This is the branch `record_refused_create` grows with expansion: a
 /// refusal that were NOT recorded would let the same key succeed later,
 /// silently turning one intent into different outcomes across retries.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -918,7 +918,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
 /// `~/ws` would refuse (and, per `record_refused_create`'s retry branch,
 /// permanently delete the pending session), so the retry SUCCEEDING in
 /// home A's directory is the whole proof.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");

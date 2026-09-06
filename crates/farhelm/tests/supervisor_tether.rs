@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 /// This pins the reason the tether reader lives on a detached OS thread. A
 /// Tokio blocking-pool reader would keep runtime shutdown waiting for EOF and
 /// turn the real supervisor error into a permanently wedged child.
-#[test]
+#[farhelm_testtrace::test]
 fn supervisor_startup_failure_is_not_held_open_by_the_stdin_tether() {
     let root = farhelm_teststate::tempdir().unwrap();
     let blocking_file = root.path().join("not-a-directory");

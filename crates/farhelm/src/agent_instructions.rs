@@ -240,7 +240,7 @@ mod tests {
     /// anyone who already knew its name. Enumerating through clap rather
     /// than through a literal list is what makes the assertion survive a
     /// new variant.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_agent_verb_appears_in_the_instructions() {
         let text = text();
         let agent = AgentCmd::augment_subcommands(Command::new("agent"));
@@ -265,7 +265,7 @@ mod tests {
     /// The bound is a context budget, not tidiness — see [`MAX_LINES`].
     /// Both halves are checked because either one alone is trivially
     /// satisfiable while the text balloons in the other dimension.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_instructions_stay_within_their_size_bound() {
         let text = text();
         let lines = text.lines().count();
@@ -287,7 +287,7 @@ mod tests {
     /// header, and "no helm is attached" reads like a broken install until
     /// someone explains that it is not. Losing any of them in an edit is
     /// exactly the sort of thing a prose rewrite does without noticing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_instructions_carry_the_conventions_nothing_else_teaches() {
         let text = text();
         for needle in ["$farhelm", "\"*\"", "no helm is attached to this session"] {
@@ -304,7 +304,7 @@ mod tests {
     /// The command prints this with `print!`, not `println!`: a text that
     /// owns its own trailing newline is one that cannot grow a blank line
     /// at the bottom when someone switches the two.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_text_ends_in_a_single_newline() {
         let text = text();
         assert!(text.ends_with('\n'));
@@ -328,7 +328,7 @@ mod tests {
     /// plausible future verb's: the last version of this test borrowed
     /// `clone`, which then landed for real and left two unrelated things
     /// with the same name in one file.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_verb_with_arguments_renders_its_command_line() {
         // Built, and with clap's own help subcommand disabled, for the
         // reasons [`agent_command`] gives: an unbuilt command reports no
@@ -375,7 +375,7 @@ mod tests {
     /// reader can see — it quietly spends a chunk of the size bound
     /// [`the_instructions_stay_within_their_size_bound`] enforces on
     /// whitespace, which is exactly the kind of thing that goes unnoticed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn one_long_verb_does_not_widen_the_column_for_the_short_ones() {
         let mut agent = Command::new("agent")
             .disable_help_subcommand(true)
@@ -420,7 +420,7 @@ mod tests {
     /// string here is what a careless edit to `AgentCmd`'s derive
     /// attributes or doc comments would break, where the synthetic test
     /// above cannot see it at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_lifecycle_verb_with_arguments_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
@@ -457,7 +457,7 @@ mod tests {
     /// over-wide verb looks like in the REAL text rather than only in
     /// [`one_long_verb_does_not_widen_the_column_for_the_short_ones`]'s
     /// synthetic fixture: exactly two spaces before the description.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_creating_verb_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
@@ -495,7 +495,7 @@ mod tests {
     /// exists to catch — spelled out rather than linked, because the name
     /// does not fit on one line and a wrapped intra-doc link resolves to
     /// nothing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_instructions_explain_what_the_creating_verbs_print_and_name() {
         let text = text();
         for needle in [

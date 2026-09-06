@@ -35,7 +35,7 @@ use crate::restart_with_resume::pane_capture;
 /// `spawner-stubborn`'s SIGTERM-ignoring child is what makes the window
 /// wide enough to aim at: it forces the first restart's sweep through the
 /// full grace/quiesce/SIGKILL escalation rather than finishing instantly.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -104,7 +104,7 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
 /// the relaunch is about to respawn into. Whichever order the claim
 /// imposes, the invariants below hold: the session is gone afterwards, and
 /// nothing carrying its marker is still running.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -181,7 +181,7 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
 /// simulated one: with the launch directory read-only, the spec write fails
 /// and nothing external has happened, which is exactly the class of failure
 /// the restore is defined for.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -237,7 +237,7 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
 /// agent into a directory an attacker chose is not a decision the user
 /// made, and `ensure_cwd_usable`'s existence check cannot see it — the
 /// directory is perfectly usable, it is simply a different one.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_repointed_working_directory_refuses_the_restart() {
     let h = harness().await;
     let real = farhelm_teststate::tempdir().expect("real cwd");
@@ -296,7 +296,7 @@ async fn a_repointed_working_directory_refuses_the_restart() {
 /// depends on. Restarting one of them fresh must then let it capture its
 /// OWN conversation on the new run, which is only possible if the verdict
 /// and the anchor were both cleared.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -382,7 +382,7 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
 /// This drives the reuse path itself rather than the pairing in isolation:
 /// two sessions whose pane ids come from the same counter, one restarted,
 /// and the other's agent must be entirely undisturbed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_restart_respawns_only_its_own_pane() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
@@ -469,7 +469,7 @@ async fn a_restart_respawns_only_its_own_pane() {
 /// one most likely to re-surface a generation mismatch if the scoping
 /// were ever accidentally loosened to "the session's latest sentinel"
 /// instead of "this generation's".
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -604,7 +604,7 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
 /// Generation 0 is stopped while the marker provably does not exist yet,
 /// so it cannot have exited on its own; generation 1 is left looping until
 /// the test creates the marker, at which point it exits 0 naturally.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");

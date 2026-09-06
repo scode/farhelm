@@ -299,7 +299,7 @@ async fn await_local_host(client: &reqwest::Client, base: &str) {
 /// first row, the local row unconditionally, or none at all would satisfy
 /// every serialized-shape assertion in the suite while telling an agent it
 /// is sitting on a machine it is not.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     // A supervisor with its own tmux server, plus a session's agent: one
     // harness slot, held for the whole test.
@@ -429,7 +429,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 /// connected host (never the cache) — see `sessions::get_session`'s own
 /// docs — so the assertion after `stop` cannot be racing the helm's
 /// periodic refresh the way reading the cached list could.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
@@ -624,7 +624,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 /// mock matters because the id on stdout is the only thing that makes
 /// these verbs composable — an agent captures it and passes it back as
 /// `--session`.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 

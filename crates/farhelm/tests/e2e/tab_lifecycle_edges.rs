@@ -21,7 +21,7 @@ use crate::terminal_tabs::{
 /// all, which is the branch that answers before tmux is consulted. Both
 /// must produce the same advice, because they are the same fact for a
 /// user.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -92,7 +92,7 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
 /// agent terminal keeps its exited-with-scrollback behavior. The close
 /// half matters because the manual close and the ticker's reap are the
 /// same flow, and both must tolerate a pane that is already dead.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -215,7 +215,7 @@ async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
 /// The shape matters: a valid-looking id exercises the lookup rather than
 /// the syntax check, which is the path a client holding a selector from
 /// before a reboot actually takes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn closing_an_unknown_but_well_formed_tab_id_is_not_found_and_harms_nothing() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -259,7 +259,7 @@ async fn closing_an_unknown_but_well_formed_tab_id_is_not_found_and_harms_nothin
 /// go quiet forever. `detach_closed_tab` is the only thing that turns
 /// that into a visible event, which is why it is asserted directly rather
 /// than through "the terminal stopped updating".
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_closed_tabs_channel_receives_its_detached_notice() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -300,7 +300,7 @@ async fn a_closed_tabs_channel_receives_its_detached_notice() {
 /// construction, not a tab), so the unwind is worth proving rather than
 /// reasoning about. The seam is the only way to reach that state: the
 /// tmux call before it either works or leaves nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_tab_open_that_cannot_mark_its_window_leaves_nothing_behind() {
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
@@ -352,7 +352,7 @@ async fn a_tab_open_that_cannot_mark_its_window_leaves_nothing_behind() {
 /// unrelated session is the other half — a lease is never cross-session,
 /// so one client may hold terminals in several sessions and taking one
 /// over must not disturb the rest.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -460,7 +460,7 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
 /// tab. Loudly skipped where no user manager exists — the cloaked daemons
 /// are unreachable by any marker scan by construction, which is the whole
 /// point of the fixture.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons() {
     let Some((h, _scopes)) = scope_gated_harness(
         "deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons",
@@ -552,7 +552,7 @@ async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemon
 /// distinguishes "rediscovered the same shell" from "quietly started a
 /// new one", and replaying content written before the restart is what
 /// distinguishes a live reattachment from a fresh, empty terminal.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -656,7 +656,7 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
 /// second branch used to make the surrounding terminals collateral damage
 /// until this detach fired; the session sink closes that, so what is left
 /// here is genuinely about the detach being scoped to one terminal.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
     let stall = Duration::from_secs(3);
     let h = harness_with_timeouts(SupervisorTimeouts {
@@ -806,7 +806,7 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
 /// `a_stall_teardown_racing_a_takeover_never_detaches_the_winner` uses:
 /// the interesting interleavings are near the boundary and no single
 /// delay reliably lands on them.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_open_tab_racing_a_delete_leaves_one_coherent_winner() {
     for offset_ms in [0, 5, 20, 60] {
         let h = harness().await;
@@ -871,7 +871,7 @@ async fn an_open_tab_racing_a_delete_leaves_one_coherent_winner() {
 /// delete that finds one fewer tab, and a close that loses finds no
 /// session — so this asserts the delete succeeds, the close's own answer
 /// is one of those two shapes, and nothing survives.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_close_tab_racing_a_delete_leaves_one_coherent_winner() {
     for offset_ms in [0, 10, 40] {
         let h = harness().await;

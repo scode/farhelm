@@ -337,7 +337,7 @@ pub(crate) fn write_daemon_script(
 /// inspecting tmux: what SPEC.md promises is that a command typed in the
 /// tab shows the session's cwd, and only running one proves the `-c` was
 /// applied to the process rather than merely to the window's metadata.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_tab_runs_a_shell_in_the_sessions_working_directory() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
@@ -401,7 +401,7 @@ async fn a_tab_runs_a_shell_in_the_sessions_working_directory() {
 /// The same precondition — and deliberately the same error shape — restart
 /// makes, reused unchanged rather than reworded: a user who has seen one
 /// of these refusals should recognize the other.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn opening_a_tab_after_the_working_directory_vanished_names_it() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -457,7 +457,7 @@ async fn opening_a_tab_after_the_working_directory_vanished_names_it() {
 /// SPEC.md already puts re-adding tabs after the user's own restart. The
 /// refusal has to SAY that, because "no such terminal" alone leaves the
 /// user with no next step.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn opening_a_tab_without_a_tmux_session_says_to_restart_first() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -516,7 +516,7 @@ async fn opening_a_tab_without_a_tmux_session_says_to_restart_first() {
 /// the settle allowed to look. The bounded settle's own timing is left
 /// entirely alone — widening it would have hidden the race rather than
 /// removed it, and is production behavior besides.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words() {
     let dying = farhelm_teststate::tempdir().unwrap();
     let shell = dying.path().join("dying-shell");
@@ -599,7 +599,7 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
 /// scan can. The second tab and the agent are the other half — a close
 /// that reaped by the SESSION's marker instead of the tab's would end all
 /// three and still look like a pass without them.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
@@ -719,7 +719,7 @@ async fn closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else() {
 /// tab is missing. The first request must therefore send `Detached` before it
 /// returns the pending-cleanup error, and the removed tab must stay absent
 /// while the runtime-owned barrier completes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn close_notifies_and_removes_a_tab_while_output_cleanup_is_pending() {
     let (cleanup_gate, cleanup_entered, cleanup_release) = notifying_gate();
     let h = harness_with_seams(
@@ -804,7 +804,7 @@ async fn pane_pid_of(h: &Harness, pane: &str) -> u32 {
 /// A tab's scope is not recorded anywhere — tabs have no durable row — so
 /// this also pins that `close_tab` re-derives the same unit name the open
 /// created, from the session id and the tab id alone.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_scope() {
     let Some((h, _scopes)) = scope_gated_harness(
         "closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_scope",
@@ -873,7 +873,7 @@ async fn closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_sco
 /// `SessionInfo::tabs` promises beyond identity — and a rediscovery that
 /// rebuilt the list from a hash map would pass an identity-only assertion
 /// while shuffling the user's tab strip on every poll.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_are_ignored() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -982,7 +982,7 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
 ///
 /// The agent's own daemonized child is asserted dead in the same run, so a
 /// stop that had simply stopped sweeping at all could not pass.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -1077,7 +1077,7 @@ async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running
 /// user-visible complaint: the detach sweep is scoped to the agent's
 /// attachment key, and the restart's pre-relaunch reap subtracts tab
 /// processes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -1185,7 +1185,7 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
 /// must take the normal rollback path: the viewer hears why it detached, the
 /// row returns with its stopped outcome, and it is not stranded as an unknown
 /// launch until the supervisor itself restarts.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
     let (cleanup_gate, cleanup_entered, cleanup_release) = notifying_gate();
     let h = harness_with_seams(
@@ -1247,7 +1247,7 @@ async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
 /// leak into this path. A daemonized child of the tab is what proves it
 /// reached past the tmux teardown, which would have killed the shell
 /// regardless.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn deleting_a_session_takes_its_tabs_and_their_daemonized_descendants() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
@@ -1421,7 +1421,7 @@ async fn bounded_tmux_diagnostic(label: &str, socket: &std::path::Path, args: &[
 /// scoping are the two conformance properties that are only meaningful
 /// BETWEEN terminals rather than within one, and they have tests of their
 /// own for that reason.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
     let h = harness_with_shell("/bin/sh").await;
     let (session, _work) = shell_session(&h).await;
@@ -1599,7 +1599,7 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
 /// one window and silently wrong with two. This is the test that would
 /// have caught that: it resizes each terminal in turn and requires the
 /// other's geometry to stay put.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_resize_reflows_only_the_named_terminals_window() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1677,7 +1677,7 @@ async fn wait_for_pane_geometry(h: &Harness, pane: &str, expected: &str) {
 /// regression here would collapse. Each terminal's transcript is checked
 /// for the OTHER's marker as well as for its own, because "it arrived"
 /// and "it arrived only here" are different claims.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn input_reaches_only_the_terminal_it_was_sent_to() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1770,7 +1770,7 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
 /// `the_session_sink_*` lifecycle tests below), not this one. This test's
 /// own claim stays what it always was: the supervisor's per-terminal
 /// machinery keeps the agent flowing while a tab's viewer is wedged.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1850,7 +1850,7 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
 /// and the replacement must wait until the old control client is confirmed
 /// gone. A registry that merely forgot the old handle would pass the lifetime
 /// assertions while still allowing two tmux clients to overlap.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2044,7 +2044,7 @@ async fn wait_for_pane_text(h: &Harness, pane: &str, needle: &str, timeout_secs:
 /// output forwarder. With output paused under a busy pane, that shortcut can
 /// hit tmux 3.7b's queued-pane teardown abort; the cooperative path must report
 /// the failure, keep the server alive, and let a fresh attachment work.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
     let h = harness_with_shell("/bin/sh").await;
     let (session, _work) = shell_session(&h).await;
@@ -2145,7 +2145,7 @@ async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
 /// 3.7b's queued-pane abort. The session sink may be handed directly to the
 /// replacement because it never carries output. A successful replacement
 /// reply is the observable boundary for every output-bearing client.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn connection_loss_safely_reaps_queued_output_before_reattach() {
     let h = harness_with_shell("/bin/sh").await;
     let (session, _work) = shell_session(&h).await;
@@ -2248,7 +2248,7 @@ async fn connection_loss_safely_reaps_queued_output_before_reattach() {
 /// takeover removes its attachment. The later arbiter must identity-check the
 /// map instead of sending that stale verdict: the old client should receive
 /// only the takeover reason that actually ended its ownership.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn takeover_reason_wins_over_a_gated_natural_detach() {
     let natural_entered = Arc::new(tokio::sync::Notify::new());
     let natural_release = Arc::new(tokio::sync::Notify::new());
@@ -2353,7 +2353,7 @@ async fn takeover_reason_wins_over_a_gated_natural_detach() {
 /// the sink is keeping readable, so if a respawn left the session without
 /// one for good, this is the shape that would show it — as a tab that
 /// went quiet and never came back.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2484,7 +2484,7 @@ async fn kill_verified_tmux_client(pid: u32, h: &Harness) {
 /// terminal the supervisor runs exactly two (output and input), plus one
 /// sink for the session — so the total is the arithmetic below, and an
 /// orphaned loser shows up as one more.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn concurrent_first_attaches_share_one_sink_and_orphan_nothing() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2555,7 +2555,7 @@ async fn concurrent_first_attaches_share_one_sink_and_orphan_nothing() {
 ///
 /// Runs the supervisor as a real child process, because an in-process one
 /// cannot be `SIGKILL`ed without taking the test with it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -3188,7 +3188,7 @@ fn stdin_pipe_holder_scan_at(proc_root: &std::path::Path, pid: u32) -> String {
 /// second writer is the scan's actual quarry in production: an unexpected
 /// extra process keeping EOF from ever arriving. All three holders must
 /// appear with exact modes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_pipe_holder_scan_names_every_holder_of_a_live_pipe() {
     use std::os::fd::AsFd as _;
     if !std::path::Path::new("/proc/self/fd").exists() {
@@ -3250,7 +3250,7 @@ async fn the_pipe_holder_scan_names_every_holder_of_a_live_pipe() {
 /// UTF-8. Pins the INCOMPLETE marker, the holder still being reported
 /// with its mode, and the lossy cmdline decode preserving the rest of the
 /// command line.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_pipe_holder_scan_reports_blind_spots_instead_of_swallowing_them() {
     use std::os::unix::fs::PermissionsExt as _;
     if !std::path::Path::new("/proc/self/fd").exists() {
@@ -3341,7 +3341,7 @@ async fn the_pipe_holder_scan_reports_blind_spots_instead_of_swallowing_them() {
 /// which — the report would silently regress to anonymous clients, and
 /// nobody would notice until the next CI failure arrived undecipherable.
 /// Also pins [`roster_pids`] against the roster's real output shape.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_client_roster_identifies_all_three_roles_by_flags() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -3419,7 +3419,7 @@ async fn the_client_roster_identifies_all_three_roles_by_flags() {
 /// to every other test — which is exactly what makes an unbounded map here
 /// the kind of leak that ships. A supervisor serving short-lived sessions
 /// all day would accumulate one dead key per session id, forever.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_sink_registry_does_not_grow_with_dead_sessions() {
     let h = harness().await;
     for _ in 0..4 {
@@ -3475,7 +3475,7 @@ async fn the_sink_registry_does_not_grow_with_dead_sessions() {
 /// running harness would share anyway. A host whose login shell reads
 /// none of the files [`write_rc_files`] knows how to write is an honest,
 /// loud skip rather than a silent pass.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
     let home = farhelm_teststate::tempdir().expect("fixture home");
     write_rc_files(home.path(), "first");
@@ -3592,7 +3592,7 @@ async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
 /// nothing — the tab would inherit it through the session default with no
 /// pre-sizing at all, which is exactly the vacuous first version of this
 /// test.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();

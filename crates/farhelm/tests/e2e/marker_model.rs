@@ -24,7 +24,7 @@ use crate::terminal_tabs::{run_in_shell, wait_for_shell, window_rows};
 /// Both halves are asserted in one run on purpose: a stop that reaped the
 /// agent by simply ignoring tab markers altogether would pass the first
 /// assertion and fail the second.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab_survives() {
     // A plausible outer-tab id: minted-shaped, so it is the value a real
     // ambient marker would carry rather than something the parse would
@@ -103,7 +103,7 @@ async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab
 /// silently stop reaching such processes on every host that upgraded.
 /// `MarkedDecoy` is exactly that shape: the session marker, no kind
 /// marker, and outside every cgroup this session owns.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_marked_process_with_no_kind_marker_is_still_reaped_by_stop() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -134,7 +134,7 @@ async fn a_session_marked_process_with_no_kind_marker_is_still_reaped_by_stop() 
 /// on clean CI even with the scrub deleted. Asserting the CONFIGURED
 /// operations on the builder (`Command::get_envs`, where an `env_remove`
 /// appears as a `None` value) makes a dropped scrub visible everywhere.
-#[test]
+#[farhelm_testtrace::test]
 fn the_marked_decoy_scrubs_inherited_kind_markers_from_its_child() {
     let command = MarkedDecoy::command("some-session");
     let envs: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> = command
@@ -171,7 +171,7 @@ fn the_marked_decoy_scrubs_inherited_kind_markers_from_its_child() {
 /// and asserted again after a restart — `respawn-pane` keeps the window
 /// and its options, and this is what would notice if a future change
 /// swapped it for a fresh window instead.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_agent_window_keeps_its_marker_across_a_restart_in_place() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;

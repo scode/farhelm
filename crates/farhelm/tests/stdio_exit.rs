@@ -17,7 +17,7 @@ fn run_stdio(state_dir: &std::path::Path) -> std::process::ExitStatus {
 
 /// Missing and refused sockets are positive absence; a different connection
 /// error must not grant the helm permission to offer provisioning.
-#[test]
+#[farhelm_testtrace::test]
 fn stdio_exit_75_is_reserved_for_positive_absence() {
     let root = farhelm_teststate::tempdir().expect("isolated stdio state roots");
     assert_eq!(run_stdio(&root.path().join("missing")).code(), Some(75));

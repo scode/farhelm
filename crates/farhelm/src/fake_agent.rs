@@ -2242,7 +2242,7 @@ mod tests {
     /// tabs are the load-bearing cases: both are legal in a POSIX path,
     /// both are illegal raw inside a JSON string, and a raw newline would
     /// additionally split one record across two JSONL lines.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_hostile_working_directory_still_produces_one_valid_jsonl_line() {
         let cwd = "/tmp/we\"ird\\path\nwith\tcontrol/chars";
         for shape in [RecordShape::Claude, RecordShape::Codex] {
@@ -2271,7 +2271,7 @@ mod tests {
 
     /// The ordinary case: a plain typed word terminated by a bare CR (what
     /// a real terminal sends for Enter in raw mode) is recognized whole.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_plain_cue_word_is_recognized_on_bare_cr() {
         assert_eq!(scan(b"legacy\r"), vec!["legacy"]);
         assert_eq!(scan(b"sgr\r"), vec!["sgr"]);
@@ -2297,7 +2297,7 @@ mod tests {
     /// whether or not the bug existed. With a leaked LETTER, that byte
     /// would glue itself onto the very next cue word instead, changing
     /// the final assertion's result and actually catching the bug.
-    #[test]
+    #[farhelm_testtrace::test]
     fn legacy_mouse_report_bytes_never_pollute_the_next_cue_word() {
         // `ESC [ M` + three lowercase-letter "data bytes" standing in for
         // button/column/row — see this test's own docs for why letters,
@@ -2325,7 +2325,7 @@ mod tests {
     /// could ever leak into a cue word undetected — this test's existing
     /// digit/semicolon bytes are already as sensitive as this shape can be
     /// made.
-    #[test]
+    #[farhelm_testtrace::test]
     fn sgr_mouse_report_bytes_never_pollute_the_next_cue_word() {
         let press = b"\x1b[<0;3;3M";
         let release = b"\x1b[<0;3;3m";
@@ -2341,7 +2341,7 @@ mod tests {
     /// shifted back into range (`CueScanState::Invalid`'s own docs cover
     /// why this bound exists at all), and normal service must resume
     /// cleanly once a real delimiter is seen.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_over_length_word_never_matches_even_when_a_cue_is_its_suffix() {
         assert_eq!(scan(b"xlegacy\r"), Vec::<String>::new());
         // No delimiter between the overflow and the trailing `sgr` at
@@ -2361,7 +2361,7 @@ mod tests {
     /// 1006 prefix is pinned here too: see `mouse_escape`'s own docs for
     /// why cueing `legacy` must actively turn SGR back off, not merely
     /// re-assert 1000.
-    #[test]
+    #[farhelm_testtrace::test]
     fn mouse_escape_selects_the_exact_decset_sequence() {
         assert_eq!(mouse_escape("legacy"), Some("\x1b[?1006l\x1b[?1000h"));
         assert_eq!(mouse_escape("sgr"), Some("\x1b[?1000h\x1b[?1006h"));
@@ -2377,7 +2377,7 @@ mod tests {
     /// already-latched 1006, so every report after the "corrective" cue
     /// kept arriving in SGR shape regardless of what the user had just
     /// asked for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn legacy_after_sgr_resets_sgr_encoding() {
         let mut scanner = CueScanner::default();
         let mut escapes = Vec::new();
@@ -2405,7 +2405,7 @@ mod tests {
     /// exactly how the first hand-run of this fixture failed. And a fleet
     /// holding `builder` beside `builder-2` would, under a prefix test,
     /// have one row answer for the other and clone onto the wrong machine.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_hosts_listing_check_matches_a_whole_name_column() {
         // Byte-for-byte what `farhelm agent hosts` prints (main.rs's
         // `aligned`): a two-character marker column, then each non-final
@@ -2453,7 +2453,7 @@ mod tests {
     /// all (ssh destinations have no spaces; the local row is
     /// `this machine`). Splitting from the right, as this did, put the
     /// boundary inside such a path and reported a host nobody named.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_agent_relay_grammar_takes_the_host_after_onto_and_a_directory_after_it() {
         assert_eq!(
             clone_request("$farhelm clone this session onto this machine"),
