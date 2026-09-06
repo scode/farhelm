@@ -57,7 +57,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ### Difficult deflake
 
 These entries remain unresolved after targeted investigation; clean repetitions are non-reproduction evidence, not
-fixes. The 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs, 8 GiB RAM, and pinned tmux 3.7c.
+fixes. The 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs and 8 GiB RAM. Those workers
+reported pinned tmux 3.7c, but no resolved executable hash was retained; exact substrate identity remains unverified.
 Unless stated otherwise, Rust batches ran twenty fresh invocations of the built `farhelm` e2e binary with the exact
 named test and `--exact --show-output`, stopping at the first failure. The ignored binary-output case also used
 `--include-ignored`. Browser batches used the named project/test with `--workers=1 --repeat-each=20
@@ -65,11 +66,11 @@ named test and `--exact --show-output`, stopping at the first failure. The ignor
 `.agents/narrow-tests.md` gives the corresponding Cargo and Playwright commands. Extra load, changed fixtures, and
 historical evidence are called out per entry.
 
-The combined native run at `aa333815` used four test threads and the same pinned tmux, with a real systemd user manager
-and no extra CPU-load process. The stalled-viewer RSS, degenerate-size READY, replacement-claim, and malformed sentinel
-cases all passed in that run. The whole e2e binary was 336 passed, four failed in the shared forced-pause helper
-described below, and five ignored (four credentialed real-agent cases plus binary output). That wider non-reproduction
-does not resolve the four historical cases.
+The combined native run at `aa333815` used four test threads and the same reported tmux pin, with a real systemd user
+manager and no extra CPU-load process. The stalled-viewer RSS, degenerate-size READY, replacement-claim, and malformed
+sentinel cases all passed in that run. The whole e2e binary was 336 passed, four failed in the shared forced-pause
+helper described below, and five ignored (four credentialed real-agent cases plus binary output). That wider
+non-reproduction does not resolve the four historical cases.
 
 An earlier corrected combined browser run passed 467 Chromium tests with two credential skips. WebKit passed 457,
 skipped eleven (two credential cases and nine unsupported clipboard-permission cases), and failed the large-message case
@@ -183,10 +184,12 @@ is a clean gate.
   `terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state`. The listing visibly contained the output
   client's `pause-after=5` flag, but an underscore separated its name from the flags where the helper expects a tab. The
   exact replay-marker case also failed on untouched `d71a87fb` with one test thread in 0.47 seconds, on a second worker
-  with the same pinned 3.7c and no extra load. Both the helper and these test bodies are unchanged across the
-  comparison; this is a newly observed pre-existing test/substrate compatibility failure, not evidence that catch-up
-  itself broke. Retain the listing, check the formatter's delimiter bytes, and use an unambiguous supported separator
-  while keeping the positive `pause-after` discriminator. Then validate all four callers against the pinned substrate.
+  with the same reported 3.7c pin and no extra load. Both the helper and these test bodies are unchanged across the
+  comparison, but the worker's executable identity is unverified. CI run 34006471792 at `2069e0c8` passed all four cases
+  on its built pin with four threads. The 2026-09-06 FLAKES.md caveat records that counterevidence; the observed
+  delimiter failure remains open, without a claim of deterministic failure on the exact pin. Retain a recorder run,
+  check the formatter's delimiter bytes, and use an unambiguous supported separator if the mismatch is reproduced while
+  keeping the positive `pause-after` discriminator. Then validate all four callers against the pinned substrate.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
   above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
   viewer RSS, degenerate-size READY, replacement claim, malformed-sentinel, and forced-pause helper cases still block
@@ -209,11 +212,6 @@ problems before turning out to be invalid premises. That is why the scale factor
 deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
 than behind it.
 
-- Ledger and execution evidence, effort low. Preserve every local, worker, and applicable release failure rather than
-  clearing it with a later green run: retain the command, tested commit and tree state, run identity, selection,
-  concurrency, redacted environment identity, resolved tmux path/version/hash, locale, and bounded failure output.
-  Controlled release and hunt runs assert the pin; differing local substrates warn clearly. Re-verify the 2026-09-05
-  baseline substrate before citing it, and preserve release failure artifacts without adding hosted test runs.
 - Readiness oracles by naming, effort medium. The oracles exist and are unused: `wait_for_replay_complete` at 3 of 161
   attach sites, `basic_session_ready` at 11 of 159 session creations, `waitForReplayReveal` in three specs while
   `__farhelmTermReady` is read raw 106 times. Rename so every call site chooses and the exclusion set is a grep, never a

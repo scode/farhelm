@@ -31,12 +31,20 @@ The workspace holds roughly 2,100 Rust tests. Most are per-crate unit tests (`fa
 smaller process-level binaries (`agent_cli`, `spawn_cli`, and friends). Everything is selectable with cargo's ordinary
 test filters — there is no bespoke runner.
 
-Always put the pinned tmux first on PATH, exactly as the full suite does; the build is cached under `.ci-tmux/` after
-the first call (about a minute of zig cross-compilation on 4 vCPUs), so this costs one subshell:
+Use the run recorder around the selected command so each attempt retains its own output, source state, and substrate
+identity. The shapes below are child commands after `--`, not substitutes for the recorder. For a controlled Rust
+reproduction, put the pinned tmux first on PATH; its build is cached under `.ci-tmux/` after the first call:
 
 ```sh
-PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" cargo test ...
+PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" python3 scripts/record-test-run.py \
+  --kind repetition --selection 'terminal_tabs module' --concurrency '4 libtest threads' --tmux required \
+  -- cargo test -p farhelm --test e2e terminal_tabs:: -- --show-output --test-threads=4
 ```
+
+For checks without tmux, use `--tmux none`; a deliberate comparison with another local binary uses `warn`. Record the
+real thread count or runner default in `--concurrency`. Do not label a one-test run as a four-test load merely because
+its thread budget is four. `docs/test-run-evidence.md` describes private retention and incomplete runs. Failed attempts
+stay in the working log and on disk before a retry; only latent flakes belong in FLAKES.md.
 
 The shapes, narrowest first:
 
@@ -46,10 +54,11 @@ The shapes, narrowest first:
 - One filter (substring match): `cargo test -p farhelm-supervisor shutdown_acks -- --show-output`.
 - A whole e2e module: `cargo test -p farhelm --test e2e terminal_tabs:: -- --show-output`.
 - A crate's unit tests only: `cargo test -p farhelm-helm --lib provisioning:: -- --show-output`.
-- Repetition for a flake: `for i in $(seq 20); do cargo test ... || break; done` — each invocation is a fresh test
-  process, which matters for tmux-teardown flakes (`scripts/test-tmux-pinned-shutdown.sh` exists precisely because a
-  surviving client or server can contaminate the next scenario inside one shared process; any of its ten single-test
-  invocations can be run directly, copied verbatim from the script).
+- Repetition for a flake: loop the complete recorder invocation, stopping at the first failure and preserving its run
+  directory. Choose the count explicitly; twenty attempts are a focused option, not a default gate. Each invocation is a
+  fresh test process, which matters for tmux-teardown flakes (`scripts/test-tmux-pinned-shutdown.sh` exists precisely
+  because a surviving client or server can contaminate the next scenario inside one shared process; any of its ten
+  single-test invocations can be run directly, copied verbatim from the script).
 - Desktop-feature seams: `cargo test -p farhelm-ui --features desktop <filter>` — same mechanics, needs the
   webkit2gtk/gtk dev packages.
 
@@ -66,12 +75,13 @@ Two caveats before trusting a narrow non-reproduction:
   `cargo test -p farhelm --test e2e -- --test-threads=4 --show-output`.
 - Ambient environment. A shell inside a farhelm session carries `FARHELM_AGENT_ID`, and the supervisor's sweep tests
   inspect live `/proc` environs. Four `service::sweep::tests` cases in `farhelm-supervisor` have failed under an ambient
-  marker on machines with a systemd user manager (they skip themselves elsewhere). Scrub it
-  (`env -u FARHELM_AGENT_ID cargo test ...`) or run from a shell outside any farhelm session before blaming your change.
-  The separate `farhelm-teststate` sweep does not inspect process environments. Its earlier 2/10 versus 0/10 marker
-  comparison did not establish causation: a later parallel crate run proved that its fixture's flock could remain held
-  after the parent closed its descriptor, because another thread's child inherited it before exec. That fixture now
-  explicitly unlocks before asserting reaping; `FLAKES.md` records the evidence.
+  marker on machines with a systemd user manager (they skip themselves elsewhere). The recorder removes every ambient
+  `FARHELM_*` variable from its child, not just that marker. An intentional fixture input can be retained by name with
+  `--keep-farhelm-env`; the manifest records names only. Do not put values into argv or alter the test process
+  environment. The separate `farhelm-teststate` sweep does not inspect process environments. Its earlier 2/10 versus
+  0/10 marker comparison did not establish causation: a later parallel crate run proved that its fixture's flock could
+  remain held after the parent closed its descriptor, because another thread's child inherited it before exec. That
+  fixture now explicitly unlocks before asserting reaping; `FLAKES.md` records the evidence.
 
 The first cargo invocation in a fresh checkout still pays the dependency build whatever filter you pass; narrowing the
 target (`-p`, `--test`, `--lib`) trims that too, since cargo only builds what the selected targets need. After that,
