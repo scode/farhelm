@@ -239,7 +239,7 @@ mod tests {
     /// what makes the active window a window — long enough to cover a wifi
     /// handover or a helm restart, short enough that a user staring at a
     /// dead terminal is told the truth about it quickly.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_active_ladder_is_the_planned_six_rungs_totalling_about_thirty_seconds() {
         assert_eq!(RETRY_LADDER_MS, [500, 1_000, 2_000, 4_000, 8_000, 15_000]);
         let total: u32 = RETRY_LADDER_MS.iter().sum();
@@ -250,7 +250,7 @@ mod tests {
     /// place that decides them, and leaves the manual wording present —
     /// the surface still has to explain itself, and still has to offer the
     /// control that works regardless.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_incapable_helm_withholds_every_unattended_behavior() {
         let policy = reconnect_policy(false);
         assert_eq!(policy["auto"], json!(false));
@@ -269,7 +269,7 @@ mod tests {
     /// asserted by name: a renamed field would not fail to compile, it
     /// would silently leave the page running its own fallbacks — or, for
     /// the text keys, painting a literal `undefined` over a dead terminal.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_policy_carries_every_key_the_page_reads() {
         let policy = reconnect_policy(true);
         assert_eq!(
@@ -303,7 +303,7 @@ mod tests {
     /// says "this may be a while, and you still do not have to do
     /// anything". A shared sentence would collapse the phase distinction
     /// SPEC.md's Errors section requires be visible.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_two_regimes_are_worded_apart() {
         for active in [ATTEMPTING_TEXT, WAITING_TEXT] {
             assert!(

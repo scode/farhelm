@@ -320,7 +320,7 @@ mod tests {
     /// disappears immediately even while a poll in flight still lists it.
     /// Getting either edge wrong is directly visible to the user as a
     /// click that does nothing or a tab that vanishes and comes back.
-    #[test]
+    #[farhelm_testtrace::test]
     fn visible_tabs_applies_the_optimistic_corrections_over_the_server_list() {
         let server = vec![tab("a"), tab("b")];
 
@@ -350,7 +350,7 @@ mod tests {
     /// end. `SessionView`'s poll prunes the optimistic entry, but this
     /// deduplication is what keeps the render correct in the window before
     /// that prune runs.
-    #[test]
+    #[farhelm_testtrace::test]
     fn visible_tabs_never_duplicates_an_optimistic_tab_the_server_now_lists() {
         let server = vec![tab("a"), tab("b"), tab("c")];
         assert_eq!(
@@ -363,7 +363,7 @@ mod tests {
     /// rather than from anything the tab itself carries — SPEC.md gives
     /// tabs no names, so this IS the naming rule, not a placeholder for
     /// one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_labels_are_one_based_positions() {
         assert_eq!(tab_label(0), "Terminal 1");
         assert_eq!(tab_label(1), "Terminal 2");
@@ -375,7 +375,7 @@ mod tests {
     /// browser suite keys off both names throughout. The per-tab ids must
     /// be distinct from the agent's and from each other, since terminal.js
     /// uses them as the identity of an island.
-    #[test]
+    #[farhelm_testtrace::test]
     fn terminal_element_ids_are_distinct_per_terminal() {
         assert_eq!(AGENT_TERMINAL_ELEMENT_ID, "terminal");
         assert_eq!(AGENT_BANNER_ELEMENT_ID, "term-banner");
@@ -392,7 +392,7 @@ mod tests {
     /// attaches concurrently, so the ids are the only thing separating
     /// them. The agent's is asserted as a literal because terminal.js and
     /// the browser suite both name it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn connecting_placeholder_ids_are_distinct_per_terminal() {
         assert_eq!(AGENT_CONNECTING_ELEMENT_ID, "term-connecting");
         assert_eq!(tab_connecting_element_id("t1"), "term-connecting-t1");
@@ -413,7 +413,7 @@ mod tests {
     /// that leased only its tabs would have its own terminals take each
     /// other over (PLAN_M4.md item 3). The agent's URL carries no `?tab=`
     /// at all, which is the pre-M4 reading the helm still honors.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_terminal_path_carries_the_lease_and_only_tabs_carry_a_selector() {
         assert_eq!(
             terminal_ws_path("s1", None, "lease-1"),
@@ -435,7 +435,7 @@ mod tests {
     /// Everything else about the two must stay identical: same session,
     /// same selector, same lease, same escaping — a recovery that attached
     /// a different TERMINAL would be a bug the safety property would hide.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_unattended_path_differs_only_in_its_route() {
         assert_eq!(
             terminal_ws_unowned_path("s1", None, "lease-1"),
@@ -457,7 +457,7 @@ mod tests {
     /// id in particular comes from a supervisor that, under `--ssh`, is a
     /// different machine. Percent-encoding is what makes that structural
     /// rather than a matter of trusting the id's shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn query_values_are_percent_encoded() {
         assert_eq!(encode_query_value("plain-id_1.0~"), "plain-id_1.0~");
         assert_eq!(encode_query_value("a&b=c"), "a%26b%3Dc");
@@ -478,7 +478,7 @@ mod tests {
     /// processes"). The consequence line is what tells the user that
     /// before they confirm, so it must promise the kill and mention what
     /// else goes with it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn close_tab_consequence_states_the_kill_and_its_reach() {
         assert_eq!(
             CLOSE_TAB_CONSEQUENCE,
@@ -494,7 +494,7 @@ mod tests {
     /// could reshuffle them, which reads as messages being replaced rather
     /// than accumulating. What is pinned is STABILITY (the same set always
     /// renders the same way), not the particular order.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_errors_render_in_a_stable_order() {
         let errors: HashMap<String, String> = [
             ("tab-b".to_string(), "close tab: boom".to_string()),

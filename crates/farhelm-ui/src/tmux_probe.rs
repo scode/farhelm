@@ -63,7 +63,7 @@ mod tests {
     /// Homebrew, Intel Homebrew, MacPorts — and its first entry is examined
     /// first. Pinned against the constant itself rather than a copy so a
     /// reordering or a dropped prefix fails here and not on a user's Mac.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_production_prefixes_are_the_documented_ones_and_the_first_is_tried() {
         assert_eq!(
             MACOS_TMUX_PREFIXES,
@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(found, Some(PathBuf::from("/opt/homebrew/bin/tmux")));
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn first_matching_prefix_wins_even_when_a_later_one_also_matches() {
         let prefixes = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
         let found = find_tmux_in_prefixes(&prefixes, |candidate| {
@@ -87,7 +87,7 @@ mod tests {
 
     /// A prefix earlier in the list that does not have tmux must not stop the
     /// search — later prefixes still get checked.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_non_matching_prefix_does_not_stop_the_search() {
         let prefixes = ["/opt/homebrew/bin", "/usr/local/bin"];
         let found = find_tmux_in_prefixes(&prefixes, |candidate| {
@@ -98,7 +98,7 @@ mod tests {
 
     /// No prefix has tmux: the caller must get a plain `None` so it can fall
     /// back to PATH, not a wrong guess.
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_hit_returns_none() {
         let prefixes = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
         let found = find_tmux_in_prefixes(&prefixes, |_| false);
@@ -109,7 +109,7 @@ mod tests {
     /// of probing: it must return `None` unconditionally, even if the
     /// predicate would say yes to everything (proving the empty list itself
     /// is what short-circuits the search, not a predicate side effect).
-    #[test]
+    #[farhelm_testtrace::test]
     fn empty_prefix_list_never_probes_anything() {
         let found = find_tmux_in_prefixes(&[], |candidate| {
             panic!("nothing may be probed with no prefixes; asked about {candidate:?}")

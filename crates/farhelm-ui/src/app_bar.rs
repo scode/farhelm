@@ -661,21 +661,21 @@ mod tests {
     /// `None` is both the pre-reply state and the healthy steady state after
     /// agreeing replies; either way the client build is the exact answer, so
     /// there must be no loading placeholder and no wait for the network.
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_skew_shows_the_client_build() {
         assert_eq!(displayed_version(None), skew::CLIENT_BUILD);
     }
 
     /// A silent helm is already represented by the skew system; the app bar
     /// keeps the client build visible because there is no remote stamp to show.
-    #[test]
+    #[farhelm_testtrace::test]
     fn silent_skew_shows_the_client_build() {
         assert_eq!(displayed_version(Some(&Skew::Silent)), skew::CLIENT_BUILD);
     }
 
     /// Once the helm reports a different build, the readout must expose that
     /// exact stamp so the user can identify the remote process behind the skew.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reported_skew_shows_the_helm_build() {
         let skew = Skew::Reported("0.9.0-rc.1".to_string());
         assert_eq!(displayed_version(Some(&skew)), "0.9.0-rc.1");
@@ -685,7 +685,7 @@ mod tests {
     /// measured, then retain a viewport-bounded fallback if measurement is
     /// unavailable. This prevents the fixed panel flashing at the document
     /// origin or becoming unreachable on renderers that cannot report a rect.
-    #[test]
+    #[farhelm_testtrace::test]
     fn profile_popup_placement_is_hidden_until_measured_and_has_a_safe_fallback() {
         assert_eq!(
             profiles_popover_placement_style(PanelPlacement::Unmeasured),

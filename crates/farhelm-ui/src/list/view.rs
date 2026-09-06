@@ -2915,7 +2915,7 @@ mod tests {
     /// Each case below flips exactly one guard so a future edit that
     /// dropped any single one of them would fail here rather than only
     /// under a real browser.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_clone_is_refused_by_any_one_of_its_five_guards() {
         let id = "session-1";
         let empty = HashSet::new();
@@ -2969,7 +2969,7 @@ mod tests {
     /// then shows rows matching A under controls describing B. The failure
     /// is not transient either: if B's own read fails, nothing further is
     /// owed and the mismatch stands until the user acts again.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_reply_for_a_filter_that_is_no_longer_applied_is_refused() {
         let mut reads = ReadGate::default();
         // ORDER MATTERS in this test, and it is the half that was wrong
@@ -3000,7 +3000,7 @@ mod tests {
     /// to get BOTH admissions right at once — a refactor that folded the
     /// filter check into the success arm alone would leave failures
     /// reporting a read nobody asked for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn listing_replies_are_ordered_by_generation_within_the_applied_filter() {
         let mut reads = ReadGate::default();
         let older = reads.start();
@@ -3035,7 +3035,7 @@ mod tests {
     /// with a 400, so a value passed through unchecked would not sort the
     /// list differently, it would leave the sidebar reading "failed to load
     /// sessions" until someone fixed the row by hand.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unrecognized_stored_sort_falls_back_to_the_default() {
         assert_eq!(decoded_sort(Some("title")), ListSort::Title);
         assert_eq!(decoded_sort(Some("created")), ListSort::Created);
@@ -3081,7 +3081,7 @@ mod tests {
     /// a render that lost the binding shows the head of the list, and the
     /// head being the default is what makes that degrade to a control
     /// agreeing with the rows instead of one contradicting them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_offered_orders_are_the_wire_vocabulary_with_the_default_first() {
         assert_eq!(
             SORT_OPTIONS.map(|(sort, _)| sort.key()),
@@ -3116,7 +3116,7 @@ mod tests {
     /// open. MISSING `created_at` is an older helm (`Session::created_at`),
     /// where the honest answer is the one this fallback gave before the field
     /// was decoded at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_fallback_picks_the_newest_created_row_not_the_first_one() {
         // Ids are spelled as words rather than as UUIDs so each assertion
         // reads as "which session won" — the row's position and its stamp
@@ -3195,7 +3195,7 @@ mod tests {
     /// The filter's measurement states keep a current open hidden only while
     /// it lacks a rect, then expose either a clamped placement or the usable
     /// fallback. This pins the race contract independently of a renderer.
-    #[test]
+    #[farhelm_testtrace::test]
     fn filter_popover_placement_keeps_unmeasured_and_fallback_states_distinct() {
         assert_eq!(
             filter_popover_placement_style(PanelPlacement::Unmeasured),

@@ -2295,7 +2295,7 @@ mod tests {
     /// the other side (SPEC.md: an exited pane is normally still there
     /// with its scrollback, and an exited status alone never means the
     /// terminal is gone).
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_interrupted_session_mounts_no_terminal_but_an_exited_one_does() {
         assert_eq!(terminal_absence(&live_session(), false), None);
         let interrupted = Session {
@@ -2341,7 +2341,7 @@ mod tests {
     /// interrupted surface existed) rather than keep offering a restart
     /// that would now hit a running agent. Stale and archived stay put
     /// under the same flag, because a restart from here resolves neither.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_relaunched_session_is_not_interrupted_but_stays_stale_or_archived() {
         let interrupted = Session {
             status: crate::SessionStatus::Interrupted,
@@ -2375,7 +2375,7 @@ mod tests {
     /// band whose explanation contradicts the notice above it. The
     /// archived-only case guards the other direction: an archive stands on
     /// its own, not only when it coincides with a reboot.
-    #[test]
+    #[farhelm_testtrace::test]
     fn stale_outranks_archived_outranks_interrupted() {
         let everything = Session {
             status: crate::SessionStatus::Interrupted,
@@ -2423,7 +2423,7 @@ mod tests {
     /// tooltip that said "launches a fresh agent" would be the exact
     /// silently-wrong-resume claim SPEC.md forbids, for the session whose
     /// capture never landed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_interrupted_surface_matches_the_restart_offer() {
         for offer in [
             RestartOffer::Resume,
@@ -2457,7 +2457,7 @@ mod tests {
     /// check for the whole refresh-in-flight window (the regression this
     /// pins, found in the item-2 review). All four labels are asserted so
     /// no single one can fall out of the set unnoticed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_mutation_reply_keeps_the_rows_routing_labels_and_install_binding() {
         // A bare session as a mutation reply decodes: no helm-owned host
         // fields on it. `Session` has no Default on purpose (the decoder
@@ -2517,7 +2517,7 @@ mod tests {
     /// and the next notification only arrives if the fleet changes again —
     /// so an accepted stale reply is a view that describes the past until
     /// the user navigates away.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_detail_reply_older_than_what_is_shown_is_refused() {
         let mut reads = ReadGate::default();
         let older = reads.start();
@@ -2548,7 +2548,7 @@ mod tests {
     /// accident of the signature: the bug it fixes was a 404 taking a
     /// different route through the commit path from a session, and any
     /// future outcome the helm learns to send inherits both guards for free.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_stale_404_cannot_reopen_the_staleness_notice() {
         let mut reads = ReadGate::default();
         let older_404 = reads.start();
@@ -2584,7 +2584,7 @@ mod tests {
     /// must report the read as unanswered — otherwise the notification that
     /// prompted it is spent on nothing and the view keeps the restart's
     /// placeholder until the fleet next changes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_404_held_across_a_restart_is_discarded_rather_than_applied() {
         let mut reads = ReadGate::default();
         let held = reads.start();
@@ -2608,7 +2608,7 @@ mod tests {
     /// it — and letting an older one through afterwards would put a
     /// pre-restart view on screen through the very path the epoch exists to
     /// close.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_discarded_reply_still_settles_the_ordering() {
         let mut reads = ReadGate::default();
         let older = reads.start();
@@ -2632,7 +2632,7 @@ mod tests {
     /// that is the state where the user is being asked to act on something
     /// they did not do (SPEC.md: opening an interrupted session offers
     /// restart-with-resume).
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_offer_text_states_what_would_happen_to_the_conversation() {
         let resumable = restart_offer_text(&SessionStatus::Interrupted, RestartOffer::Resume);
         assert!(
@@ -2678,7 +2678,7 @@ mod tests {
     /// is simultaneously `Some` — a regression that dropped both would
     /// lose a SPEC-required clause while still passing a test that only
     /// ever looked at one side.
-    #[test]
+    #[farhelm_testtrace::test]
     fn status_badge_destination_never_targets_both_surfaces_at_once() {
         fn session(status: SessionStatus, stale: bool) -> Session {
             Session {
@@ -2752,7 +2752,7 @@ mod tests {
     /// rather than alone, because "independent" is a statement about the
     /// PAIR of decisions: only reading both at once shows the age surviving
     /// a `None` badge.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_activity_age_follows_the_badges_surface_but_not_its_presence() {
         let stamp = ActivityStamp::new(Some(1_700_000_000), 1_700_000_000 - 120)
             .expect("a positive stamp always renders");
@@ -2815,7 +2815,7 @@ mod tests {
     /// archived) and stale after it (a refresh has since said otherwise) —
     /// pinning that the truth value alone, not any change to the error
     /// text, is what flips the outcome.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_archive_refusal_is_hidden_once_a_refresh_reports_the_session_archived() {
         let refusal =
             Some("archive refused: a lifecycle operation is already in flight".to_string());
@@ -2836,7 +2836,7 @@ mod tests {
     /// The button names the OFFER, not the action: "restart" alone leaves
     /// the user guessing whether their conversation survives, which is the
     /// exact question SPEC.md requires answered before they click.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_restart_button_label_names_the_offer() {
         assert_eq!(
             restart_button_label(RestartOffer::Resume),
@@ -2858,7 +2858,7 @@ mod tests {
     /// independently make a session ineligible for the automatic mark, and
     /// clearing any ONE of them alone (with the other two left clean)
     /// restores eligibility.
-    #[test]
+    #[farhelm_testtrace::test]
     fn seen_effect_eligibility_gates_on_staleness_ended_and_capability() {
         fn base() -> Session {
             Session {
@@ -2914,7 +2914,7 @@ mod tests {
     /// has_unseen_output() == Some(true)` together decide the effect
     /// actually acts, and this pins the SECOND half, which
     /// `seen_effect_eligible`'s own test does not cover.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_eligible_but_already_seen_session_has_nothing_to_write() {
         let already_seen = Session {
             id: "sess".to_string(),

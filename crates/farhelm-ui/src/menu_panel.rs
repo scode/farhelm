@@ -1337,7 +1337,7 @@ mod tests {
     /// numbers: a regression that dropped a clamp, swapped `100vw`/`100vh`,
     /// or let `max-width` go unfloored or uncapped would still pass a test
     /// that merely checked the offsets some other way.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_panel_style_hangs_below_and_left_of_the_toggle() {
         let toggle_rect = PixelsRect::new(
             dioxus::html::geometry::euclid::point2(250.0, 50.0),
@@ -1361,7 +1361,7 @@ mod tests {
     /// CSS that silently drops the whole declaration, reverting to the
     /// class's unclamped `288px` and defeating the very clamp meant to
     /// prevent left-edge overflow in this exact scenario.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_panel_style_floors_max_width_instead_of_going_negative() {
         // right_edge = min_x - 4 = -3; (right_edge - 8) = -11, which the
         // floor must replace with `MENU_PANEL_MIN_WIDTH_PX` (96) rather
@@ -1399,7 +1399,7 @@ mod tests {
     /// `Measured` render would pin BOTH insets and stretch the panel
     /// across the sidebar (the class-level-fallback regression this
     /// mapping's per-state coordinates exist to prevent).
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_panel_placement_style_renders_each_variant_distinctly() {
         assert_eq!(
             menu_panel_placement_style(PanelPlacement::Unmeasured),
@@ -1438,7 +1438,7 @@ mod tests {
     /// horizontally scrolled shell, where the emitted `right` is floored
     /// to `8px` and the panel is painted somewhere the arithmetic did not
     /// predict — is left to the engine to resolve at paint time.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_panel_style_max_width_tracks_available_room_up_to_the_cap() {
         // right_edge = min_x - 4 = 230; available = 230 - 8 = 222,
         // between floor and cap, so it must appear verbatim.
@@ -1477,7 +1477,7 @@ mod tests {
     /// first place, so the ASYNC "measure and heal" half of this fix is
     /// not something this test harness can exercise; that is what the
     /// browser suite is for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn should_measure_on_mount_only_when_open_and_unmeasured() {
         assert!(should_measure_on_mount(true, PanelPlacement::Unmeasured));
         assert!(!should_measure_on_mount(false, PanelPlacement::Unmeasured));
@@ -1513,7 +1513,7 @@ mod tests {
     /// isolates, at no extra production cost: no new trait, no new type
     /// threaded through either row's state, just this closure's own two
     /// lines given a name and a return value instead of a direct write.
-    #[test]
+    #[farhelm_testtrace::test]
     fn measurement_outcome_discards_a_superseded_measurement() {
         let toggle_rect = PixelsRect::new(
             dioxus::html::geometry::euclid::point2(0.0, 0.0),
@@ -1548,7 +1548,7 @@ mod tests {
     /// how the native `<button>`s underneath these items get activated at
     /// all, so a mapping that grew an entry for either would make the
     /// menu's own commands unreachable from the keyboard.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_menu_claims_its_navigation_keys_and_leaves_activation_native() {
         assert_eq!(menu_key_action(&Key::Escape), Some(MenuKeyAction::Close));
         assert_eq!(menu_key_action(&Key::Tab), Some(MenuKeyAction::Exit));
@@ -1591,7 +1591,7 @@ mod tests {
     /// Enter/Space are absent because the native button activation
     /// already routes them through the toggle's `onclick`, which records
     /// the same `First` intent.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_closed_toggle_opens_at_the_end_the_arrow_names() {
         assert_eq!(
             closed_toggle_key_intent(&Key::ArrowDown),
@@ -1629,7 +1629,7 @@ mod tests {
     /// `next_menu_focus`), and the out-of-range case pins that a stale
     /// index re-enters at a defined end rather than resolving to whatever
     /// modular arithmetic on it would produce.
-    #[test]
+    #[farhelm_testtrace::test]
     fn arrow_navigation_wraps_and_enters_from_the_toggle() {
         use MenuFocusMove::{Next, Previous};
 
@@ -1671,7 +1671,7 @@ mod tests {
     /// conflicting `focused`; `focused` is the fallback once `requested` is
     /// `None`; and only a menu with neither wins falls back to the position
     /// the key event itself arrived on.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_step_origin_prefers_requested_then_focused_then_event_origin() {
         assert_eq!(menu_step_origin(Some(3), Some(1), Some(0)), Some(3));
         assert_eq!(menu_step_origin(None, Some(2), Some(0)), Some(2));
@@ -1700,7 +1700,7 @@ mod tests {
     /// as they are while no stray `onfocusin` interleaves — see
     /// `menu_step_origin_prefers_requested_over_a_stale_focus_event_mid_burst`
     /// for the fixture where they diverge.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_step_origin_advances_through_a_burst_before_focus_lands() {
         use MenuFocusMove::Next;
 
@@ -1762,7 +1762,7 @@ mod tests {
     /// statement of what the toggle's `onfocusin` clear is for: nothing
     /// about the arithmetic changed, only whether the signals are honest
     /// when it runs.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_toggle_arrow_enters_the_menu_only_while_the_focus_signals_are_empty() {
         use MenuFocusMove::Next;
 
@@ -1796,7 +1796,7 @@ mod tests {
     /// `next_menu_focus(_, Some(1), Next) == Some(2)`, re-covering ground
     /// already visited instead of continuing on from where keyboard
     /// navigation actually left off.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_step_origin_prefers_requested_over_a_stale_focus_event_mid_burst() {
         use MenuFocusMove::Next;
 
@@ -1827,7 +1827,7 @@ mod tests {
     /// and visibility rule against this; this test pins the packing
     /// itself with a small enum local to the test, independent of either
     /// row's real one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn menu_order_pack_keeps_declared_order_with_no_gaps() {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         enum Toy {
@@ -1864,7 +1864,7 @@ mod tests {
     /// and say so with an ellipsis — shared by both rows' menu labels
     /// (`list::row::menu_label`, `hosts::host_menu_label`) and pinned here
     /// once rather than per caller.
-    #[test]
+    #[farhelm_testtrace::test]
     fn clamp_title_cuts_long_values_with_an_ellipsis() {
         assert_eq!(clamp_title("short"), "short");
         let long = "x".repeat(200);
@@ -1895,7 +1895,7 @@ mod tests {
     /// regression back to plain `char_indices().nth(64)` truncation would
     /// fail this exact case while still passing the plain-ASCII and
     /// multibyte cases above.
-    #[test]
+    #[farhelm_testtrace::test]
     fn clamp_title_never_bisects_an_escape_token() {
         let token = "<U+2066>";
         let long = format!("AB{}", token.repeat(9));
@@ -1921,7 +1921,7 @@ mod tests {
     /// this row's menu genuinely is the open one and reconciliation must
     /// behave exactly as it did before that parameter existed. The
     /// `menu_open: false` gate has its own test just below.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reconcile_menu_focus_tracks_the_action_not_the_slot() {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum Toy {
@@ -1979,7 +1979,7 @@ mod tests {
     /// closed — the value is either harmless bookkeeping (it gets reset the
     /// next time the menu actually opens, see `HostRow`'s and
     /// `SessionRow`'s own `begin_open`) or already moot.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reconcile_menu_focus_withdrawn_is_gated_on_menu_open() {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum Toy {

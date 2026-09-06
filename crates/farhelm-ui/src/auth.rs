@@ -488,7 +488,7 @@ mod arm_script_tests {
     /// interpolation. Covers the marker field alongside base/secret because
     /// it is built the same way (`serde_json::Value::from`) and deserves
     /// the identical proof, not a weaker one just because it is optional.
-    #[test]
+    #[farhelm_testtrace::test]
     fn hostile_punctuation_stays_json_data_in_the_arming_script() {
         let script = arm_client_log_script(
             r#"http://127.0.0.1:7433/"; window.pwned = 1; ""#,
@@ -527,7 +527,7 @@ with `newline` and ${interpolation}"#,
     /// punctuation in the base or secret stays JSON data, never script
     /// syntax. A separate pin rather than trusting the sibling test because
     /// the two builders are separate functions that can regress separately.
-    #[test]
+    #[farhelm_testtrace::test]
     fn hostile_punctuation_stays_json_data_in_the_clipboard_arming_script() {
         let script = super::arm_native_clipboard_script(
             r#"http://127.0.0.1:7433/"; window.pwned = 1; ""#,

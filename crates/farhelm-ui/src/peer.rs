@@ -250,7 +250,7 @@ mod tests {
     /// can be made to read as its own opposite while the values are
     /// untouched. Zero-width characters are the quieter one: two identities
     /// that differ only by a zero-width joiner render identically.
-    #[test]
+    #[farhelm_testtrace::test]
     fn directional_and_invisible_characters_are_escaped_rather_than_rendered() {
         for hostile in [
             "\u{202E}reversed",
@@ -290,7 +290,7 @@ mod tests {
     /// The failure this prevents is an adopt button reading `adopt ` and a
     /// mismatch whose two sides are a gap and a gap: the user is asked to
     /// approve something invisible, which is worse than an ugly label.
-    #[test]
+    #[farhelm_testtrace::test]
     fn empty_and_blank_identities_get_an_unambiguous_display_form() {
         assert_eq!(display_peer(""), "(empty)");
         assert_eq!(display_peer("   "), "(whitespace only: 3 characters)");
@@ -313,7 +313,7 @@ mod tests {
     /// braces are ordinary visible text to it, so a renderer that somehow
     /// mangled them would make the refusal the wrapper-profile docs promise
     /// unreadable, and this pins that it does not.
-    #[test]
+    #[farhelm_testtrace::test]
     fn placeholder_braces_in_a_supervisor_error_render_unchanged() {
         let refusal = "profile invocation's first element is {cwd}, so \
              substituting the working directory would make it the PROGRAM \
@@ -335,7 +335,7 @@ mod tests {
 
     /// A confirmation keeps trusted newlines while every hostile character
     /// inside those lines becomes visible rather than controlling layout.
-    #[test]
+    #[farhelm_testtrace::test]
     fn multiline_peer_text_preserves_lines_and_escapes_each_value() {
         let raw = "write /home/alice\u{202E}/unit\nrestart service\u{200B}";
         let shown = raw.lines().map(display_peer).collect::<Vec<_>>();
