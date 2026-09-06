@@ -38,7 +38,7 @@
 // Registration happens as soon as the object EXISTS server-side, before any
 // assertion about the page — a repaint that never happens must not leak a
 // profile or a session into a stack every later run shares.
-import { APIRequestContext, expect, Page, Route, test } from "@playwright/test";
+import { APIRequestContext, expect, Locator, Page, Route, test } from "@playwright/test";
 import {
   cleanupProfile,
   cleanupSession,
@@ -158,18 +158,59 @@ async function listWithStubbedFeed(page: Page): Promise<FeedStub> {
   return feed;
 }
 
-/** Open the helm-wide popup from the app bar and wait for its catalog. */
-async function openProfiles(page: Page) {
+/**
+ * Open the helm-wide popup only through its visible boundary.
+ *
+ * Focus-budget and placement tests use this deliberately narrower helper
+ * after installing a hook that observes opening work. Ordinary setup belongs
+ * in `openProfiles`, which waits for the product's focus contract instead.
+ *
+ * `toBeVisible` observes DOM visibility only. During placement the popup can
+ * still be transparent and pointer-inert, so placement tests retain their own
+ * measurement barriers rather than treating this helper as accepted geometry.
+ */
+async function openProfilesAtBoundary(page: Page): Promise<void> {
   await page.locator(".profiles-toggle").click();
   await expect(section(page)).toBeVisible({ timeout: 20_000 });
 }
 
-/** A focus-out scenario starts only after opening has placed focus inside.
- * Visibility precedes that asynchronous handoff. Moving straight from the
- * toggle to an outside control emits no popup focus-out event at all. */
-async function openFocusedProfiles(page: Page) {
-  await openProfiles(page);
+/**
+ * Open the helm-wide popup once its initial focus handoff is ready.
+ *
+ * New profile is present while the catalog read is pending, so this fixture
+ * observes the product's declared opening destination rather than making
+ * ordinary setup wait for catalog completion.
+ */
+async function openProfiles(page: Page): Promise<void> {
+  await openProfilesAtBoundary(page);
   await expect(section(page).locator(".new-profile-button")).toBeFocused();
+}
+
+/**
+ * Open the profile-creation form and wait for its name field to own focus.
+ *
+ * A save or cancel test must start after this independent handoff has settled;
+ * otherwise a subsequent fill can race the product's asynchronous autofocus.
+ */
+async function openNewProfile(page: Page): Promise<Locator> {
+  await section(page).locator(".new-profile-button").click();
+  const form = section(page).locator(".profile-form");
+  await expect(form.locator(".profile-name-input")).toBeFocused();
+  return form;
+}
+
+/**
+ * Open one profile editor and wait for its name field to own focus.
+ *
+ * Completion focus is intentionally outside this helper: returning focus to
+ * the row is a later save or cancel contract, not evidence that opening was
+ * ready for ordinary form input.
+ */
+async function openProfileEditor(row: Locator): Promise<Locator> {
+  await row.locator(".profile-edit").click();
+  const form = row.locator(".profile-form");
+  await expect(form.locator(".profile-name-input")).toBeFocused();
+  return form;
 }
 
 /** Close the popup with the same app-bar toggle that opened it. */
@@ -200,8 +241,8 @@ async function beginHeldProfileSave(page: Page, profile: ProfileRow) {
     },
   );
   const profileRowLocator = profileRow(page, profile.id);
-  await profileRowLocator.locator(".profile-edit").click();
-  await profileRowLocator.locator(".profile-name-input").fill(`${profile.name}-saved`);
+  const form = await openProfileEditor(profileRowLocator);
+  await form.locator(".profile-name-input").fill(`${profile.name}-saved`);
   await profileRowLocator.locator(".profile-save").click();
   await expect(profileRowLocator.locator(".profile-save")).toBeDisabled();
   return {
@@ -539,13 +580,13 @@ test.describe("agent profiles", () => {
   test("the profiles popup follows its focus and Escape dismissal contract", async ({ page }) => {
     await listWithStubbedFeed(page);
     const toggle = page.locator(".profiles-toggle");
-    await openFocusedProfiles(page);
+    await openProfiles(page);
 
     await page.keyboard.press("Escape");
     await expect(section(page)).toHaveCount(0);
     await expect(toggle).toBeFocused();
 
-    await openFocusedProfiles(page);
+    await openProfiles(page);
     const destination = page.locator(".host-details-toggle");
     await destination.focus();
     await expect(section(page)).toHaveCount(0);
@@ -598,7 +639,7 @@ test.describe("agent profiles", () => {
         focusAttempts: 0,
       };
     });
-    await page.locator(".profiles-toggle").click();
+    await openProfilesAtBoundary(page);
     const target = section(page).locator(".new-profile-button");
     await expect(target).toBeAttached();
     const original = await target.elementHandle();
@@ -630,7 +671,7 @@ test.describe("agent profiles", () => {
         focusAttempts: 0,
       };
     });
-    await page.locator(".profiles-toggle").click();
+    await openProfilesAtBoundary(page);
     const target = section(page).locator(".new-profile-button");
     await expect(target).toBeAttached();
     await expect.poll(() =>
@@ -656,7 +697,7 @@ test.describe("agent profiles", () => {
         focusCommitAttempts: 0,
       };
     });
-    await page.locator(".profiles-toggle").click();
+    await openProfilesAtBoundary(page);
     const target = section(page).locator(".new-profile-button");
     await expect(target).toBeAttached();
     await expect.poll(() =>
@@ -685,7 +726,7 @@ test.describe("agent profiles", () => {
         focusEvalErrorAttempts: [2],
       };
     });
-    await page.locator(".profiles-toggle").click();
+    await openProfilesAtBoundary(page);
     const target = section(page).locator(".new-profile-button");
     await expect(target).toBeAttached();
     const original = await target.elementHandle();
@@ -733,7 +774,7 @@ test.describe("agent profiles", () => {
    */
   test("unknown then transit waits for the pending focus request", async ({ page }) => {
     await listWithStubbedFeed(page);
-    await openFocusedProfiles(page);
+    await openProfiles(page);
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = {
         hideFocusTarget: true,
@@ -769,7 +810,7 @@ test.describe("agent profiles", () => {
    */
   test("stale focus-out classifiers cannot clear newer obligations", async ({ page }) => {
     await listWithStubbedFeed(page);
-    await openFocusedProfiles(page);
+    await openProfiles(page);
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = {
         classification: { holds: 2, started: 0, releases: [] },
@@ -790,7 +831,7 @@ test.describe("agent profiles", () => {
     await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
     await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
 
-    await openFocusedProfiles(page);
+    await openProfiles(page);
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles.classification = { holds: 2, started: 0, releases: [] };
     });
@@ -799,7 +840,7 @@ test.describe("agent profiles", () => {
       page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
     ).toBe(1);
     await page.locator(".profiles-toggle").click();
-    await openFocusedProfiles(page);
+    await openProfiles(page);
     await outside.focus();
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
@@ -905,13 +946,12 @@ test.describe("agent profiles", () => {
     await openProfiles(page);
     const firstRow = profileRow(page, first.id);
 
-    await firstRow.locator(".profile-edit").click();
-    await expect(firstRow.locator(".profile-name-input")).toBeFocused();
+    await openProfileEditor(firstRow);
     await firstRow.locator(".profile-cancel").click();
     await expect(firstRow.locator(".profile-edit")).toBeFocused();
 
-    await firstRow.locator(".profile-edit").click();
-    await firstRow.locator(".profile-name-input").fill(`${first.name}-saved`);
+    const form = await openProfileEditor(firstRow);
+    await form.locator(".profile-name-input").fill(`${first.name}-saved`);
     await firstRow.locator(".profile-save").click();
     await expect(firstRow.locator(".profile-edit")).toBeFocused({ timeout: 20_000 });
 
@@ -983,7 +1023,7 @@ test.describe("agent profiles", () => {
         measurement: { holds: 2, started: 0 },
       };
     });
-    await page.locator(".profiles-toggle").click();
+    await openProfilesAtBoundary(page);
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.measurement.started)
     ).toBe(1);
@@ -1023,9 +1063,8 @@ test.describe("agent profiles", () => {
 
     await listWithStubbedFeed(page);
     await openProfiles(page);
-    await section(page).locator(".new-profile-button").click();
     const name = `pending-create-${Date.now()}`;
-    const form = section(page).locator(".profile-form");
+    const form = await openNewProfile(page);
     await form.locator(".profile-name-input").fill(name);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     await form.locator(".profile-save").click();
@@ -1076,8 +1115,8 @@ test.describe("agent profiles", () => {
     await listWithStubbedFeed(page);
     await openProfiles(page);
     const targetRow = profileRow(page, target.id);
-    await targetRow.locator(".profile-edit").click();
-    await targetRow.locator(".profile-name-input").fill(`${target.name}-saved`);
+    const form = await openProfileEditor(targetRow);
+    await form.locator(".profile-name-input").fill(`${target.name}-saved`);
     holdNextRead = true;
     await targetRow.locator(".profile-save").click();
     await expect.poll(() => readHeld).toBe(true);
@@ -1113,8 +1152,7 @@ test.describe("agent profiles", () => {
     await listWithStubbedFeed(page);
     await openProfiles(page);
 
-    await section(page).locator(".new-profile-button").click();
-    const form = section(page).locator(".profile-form");
+    const form = await openNewProfile(page);
     await form.locator(".profile-name-input").fill(name);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     await form.locator(".profile-save").click();
@@ -1126,9 +1164,10 @@ test.describe("agent profiles", () => {
 
     // Editing replaces the definition; the row is the same row (same id) with
     // a new name, which is what a rename IS here.
-    await profileRow(page, stored.id).locator(".profile-edit").click();
-    await profileRow(page, stored.id).locator(".profile-name-input").fill(renamed);
-    await profileRow(page, stored.id).locator(".profile-save").click();
+    const storedRow = profileRow(page, stored.id);
+    const editor = await openProfileEditor(storedRow);
+    await editor.locator(".profile-name-input").fill(renamed);
+    await storedRow.locator(".profile-save").click();
     await expect(profileRow(page, stored.id).locator(".profile-name")).toHaveText(renamed, {
       timeout: 20_000,
     });
@@ -1186,7 +1225,7 @@ test.describe("agent profiles", () => {
     await openProfiles(page);
     const editing = profileRow(page, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
-    await editing.locator(".profile-edit").click();
+    await openProfileEditor(editing);
 
     // The editor must OPEN on what is stored, not on a default: a kind select
     // showing `generic` here would save `generic`.
@@ -1264,11 +1303,9 @@ test.describe("agent profiles", () => {
     // From here on the authoritative read cannot answer, so everything below
     // is what the SAVE's own reply produced.
     held = true;
-    await editing.locator(".profile-edit").click();
-    // Opening places focus asynchronously on the name field. Let that
-    // handoff finish before fill focuses the invocation field; otherwise
-    // WebKit can deliver its text into the name after focus moves mid-fill.
-    await expect(editing.locator(".profile-name-input")).toBeFocused();
+    await openProfileEditor(editing);
+    // The ready helper settles the product's name-field handoff before fill
+    // moves focus to invocation; without that WebKit can type into the name.
     await editing.locator(".profile-invocation-input").fill("edited-invocation");
     await editing.locator(".profile-save").click();
     // The form closes on success; the row now has to show the accepted
@@ -1278,7 +1315,7 @@ test.describe("agent profiles", () => {
 
     // And reopening seeds the editor from it rather than from what the last
     // successful read said.
-    await editing.locator(".profile-edit").click();
+    await openProfileEditor(editing);
     await expect(
       editing.locator(".profile-invocation-input"),
       "an editor seeded from the pre-edit definition would save it back and undo the update",
@@ -1714,8 +1751,7 @@ test.describe("agent profiles", () => {
 
     await listWithStubbedFeed(page);
     await openProfiles(page);
-    await section(page).locator(".new-profile-button").click();
-    const form = section(page).locator(".profile-form");
+    const form = await openNewProfile(page);
     await form.locator(".profile-name-input").fill(name);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     await form.locator(".profile-save").click();
@@ -1943,8 +1979,7 @@ test.describe("agent profiles", () => {
     await openProfiles(page);
 
     // An open EDITOR on a profile that then goes away.
-    await profileRow(page, edited.id).locator(".profile-edit").click();
-    await expect(profileRow(page, edited.id).locator(".profile-form")).toBeVisible();
+    await openProfileEditor(profileRow(page, edited.id));
     await cleanupProfile(request, edited.id);
     feed.notify(2);
     await expect(profileRow(page, edited.id)).toHaveCount(0, { timeout: 20_000 });
@@ -1985,8 +2020,7 @@ test.describe("agent profiles", () => {
 
     await listWithStubbedFeed(page);
     await openProfiles(page);
-    await section(page).locator(".new-profile-button").click();
-    const form = section(page).locator(".profile-form");
+    const form = await openNewProfile(page);
     await form.locator(".profile-name-input").fill(oversized);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     await form.locator(".profile-kind-select").selectOption("codex");
@@ -2057,8 +2091,7 @@ test.describe("agent profiles", () => {
     await openProfiles(page);
     const before = section(page).locator(".profile-row");
     await expect(before.first()).toBeVisible({ timeout: 20_000 });
-    await section(page).locator(".new-profile-button").click();
-    const form = section(page).locator(".profile-form");
+    const form = await openNewProfile(page);
     await form.locator(".profile-name-input").fill(name);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
     held = true;
@@ -2379,7 +2412,7 @@ test.describe("agent profiles", () => {
     await openProfiles(page);
     const editing = profileRow(page, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
-    await editing.locator(".profile-edit").click();
+    await openProfileEditor(editing);
 
     await expect(
       editing.locator(".profile-name-input"),
@@ -2437,8 +2470,8 @@ test.describe("agent profiles", () => {
     await listWithStubbedFeed(page);
     await openProfiles(page);
     const editing = profileRow(page, profile.id);
-    await editing.locator(".profile-edit").click();
-    await editing.locator(".profile-name-input").fill(`${profile.name}-saved`);
+    const form = await openProfileEditor(editing);
+    await form.locator(".profile-name-input").fill(`${profile.name}-saved`);
     await editing.locator(".profile-save").click();
     await expect(editing.locator(".profile-save")).toBeDisabled();
 
@@ -2491,7 +2524,7 @@ test.describe("agent profiles", () => {
         measurement: { holds: 2, started: 0 },
       };
     });
-    await page.locator(".profiles-toggle").click();
+    await openProfilesAtBoundary(page);
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.measurement.started)
     ).toBe(1);
@@ -2548,8 +2581,8 @@ test.describe("agent profiles", () => {
     await listWithStubbedFeed(page);
     await openProfiles(page);
     const row = profileRow(page, profile.id);
-    await row.locator(".profile-edit").click();
-    await row.locator(".profile-name-input").fill(`${profile.name}-saved`);
+    const form = await openProfileEditor(row);
+    await form.locator(".profile-name-input").fill(`${profile.name}-saved`);
     await row.locator(".profile-save").click();
     await expect(row.locator(".profile-save")).toBeDisabled();
 
@@ -2724,8 +2757,8 @@ test.describe("agent profiles", () => {
     await listWithStubbedFeed(page);
     await openProfiles(page);
     const row = profileRow(page, profile.id);
-    await row.locator(".profile-edit").click();
-    await row.locator(".profile-name-input").fill(`${profile.name}-saved`);
+    const form = await openProfileEditor(row);
+    await form.locator(".profile-name-input").fill(`${profile.name}-saved`);
     // Opening the editor replaced the focused edit button, and that transit
     // starts a classifier of its own. Let it finish before arming the hold,
     // or on a slow machine it consumes the hold instead of the inert click's
@@ -2884,7 +2917,7 @@ test.describe("agent profiles", () => {
     await openProfiles(page);
     const editing = profileRow(page, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
-    await editing.locator(".profile-edit").click();
+    await openProfileEditor(editing);
     const draft = `refused-${Date.now()}-edited`;
     await editing.locator(".profile-name-input").fill(draft);
     await editing.locator(".profile-save").click();
@@ -2986,8 +3019,8 @@ test.describe("agent profiles", () => {
       await openProfiles(editor);
       const editing = profileRow(editor, profile.id);
       await expect(editing).toBeVisible({ timeout: 20_000 });
-      await editing.locator(".profile-edit").click();
-      await editing.locator(".profile-name-input").fill(after);
+      const form = await openProfileEditor(editing);
+      await form.locator(".profile-name-input").fill(after);
       await editing.locator(".profile-save").click();
       await expect(editing.locator(".profile-name")).toHaveText(after, { timeout: 20_000 });
 
