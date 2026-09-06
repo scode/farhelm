@@ -47,6 +47,7 @@ import fs from "node:fs";
 import { ChildProcess, spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import { cleanupSession, fillCreateForm, waitForTermText } from "./helpers/term";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   cleanUpSessionsTitled,
   FAKE_AGENT_INVOCATION,
@@ -58,6 +59,19 @@ import {
   rowByTitle,
   sharedSessionRow,
 } from "./helpers/terminal-suite";
+
+/**
+ * Read a visible fixture row's session id for a readiness oracle.
+ *
+ * The bounded locator observation ties the id to the row this test chose;
+ * cleanup's best-effort title lookup is deliberately not a setup oracle.
+ * Give row publication its attachment allowance rather than the shorter
+ * default assertion timeout; attachment readiness is observed afterward.
+ */
+async function sessionIdFor(row: Locator, timeout = 20_000): Promise<string> {
+  await expect(row).toHaveAttribute("data-session-id", /.+/, { timeout });
+  return (await row.getAttribute("data-session-id"))!;
+}
 
 installTerminalSuiteHooks();
 
@@ -2391,10 +2405,10 @@ test.describe("multi-host", () => {
       test.setTimeout(240_000);
 
       await page.goto("/");
-      await rowByTitle(page, openTitle).locator(".session-row-open").click();
-      await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
-        timeout: 20_000,
-      });
+      const row = rowByTitle(page, openTitle);
+      const id = await sessionIdFor(row);
+      await row.locator(".session-row-open").click();
+      await waitForSessionRevealed(page, id);
       await waitForTermText(page, "FAKE-AGENT READY");
 
       await rebootRemoteHost(request);
@@ -2460,7 +2474,7 @@ test.describe("multi-host", () => {
       await expect(restart).toBeVisible();
       await restart.click();
       await expect(page.locator(".interrupted-notice")).toHaveCount(0, { timeout: 60_000 });
-      await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+      await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, closedTitle), 60_000), {
         timeout: 60_000,
       });
       await waitForTermText(page, "FAKE-AGENT READY");
@@ -2914,9 +2928,7 @@ test.describe("multi-host", () => {
       await expect(form.locator(".create-session-host")).toBeDisabled();
       await expect(form.locator('input[type="text"]').nth(0)).toBeDisabled();
       release?.();
-      await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
-        timeout: 20_000,
-      });
+      await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     } finally {
       release?.();
       await cleanUpSessionsTitled(request, title);

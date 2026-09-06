@@ -7,13 +7,28 @@
 // can show is that the retry a USER performs actually carries the same key
 // the first attempt did.
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { fillCreateForm } from "./helpers/term";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   cleanUpSessionsTitled,
   FAKE_AGENT_INVOCATION,
   installTerminalSuiteHooks,
+  rowByTitle,
 } from "./helpers/terminal-suite";
+
+/**
+ * Read a visible fixture row's session id for a readiness oracle.
+ *
+ * The bounded locator observation ties the id to the row this test chose;
+ * cleanup's best-effort title lookup is deliberately not a setup oracle.
+ * Give row publication its attachment allowance rather than the shorter
+ * default assertion timeout; attachment readiness is observed afterward.
+ */
+async function sessionIdFor(row: Locator, timeout = 20_000): Promise<string> {
+  await expect(row).toHaveAttribute("data-session-id", /.+/, { timeout });
+  return (await row.getAttribute("data-session-id"))!;
+}
 
 installTerminalSuiteHooks();
 
@@ -65,9 +80,8 @@ test("a create whose reply is lost is retried with the same key and yields one s
     expect(firstStatus).toBe(200);
 
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
-      timeout: 15_000,
-    });
+    const id = await sessionIdFor(rowByTitle(page, title));
+    await waitForSessionRevealed(page, id);
     await expect(page.locator(".titlebar .title")).toHaveText(title);
 
     expect(keys).toHaveLength(2);
@@ -186,9 +200,8 @@ test("editing the title after a failed create mints a new intent key", async ({
     await form.locator('input[type="text"]').nth(2).fill(`${title}-renamed`);
     await form.locator('input[type="text"]').nth(0).fill("/tmp");
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
-      timeout: 15_000,
-    });
+    const id = await sessionIdFor(rowByTitle(page, `${title}-renamed`));
+    await waitForSessionRevealed(page, id);
 
     expect(keys).toHaveLength(2);
     expect(keys[1]).not.toBe(keys[0]);
@@ -228,9 +241,8 @@ test("the create form's inputs are disabled while a create is in flight", async 
     for (const index of [0, 1, 2]) {
       await expect(form.locator('input[type="text"]').nth(index)).toBeDisabled();
     }
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
-      timeout: 15_000,
-    });
+    const id = await sessionIdFor(rowByTitle(page, title));
+    await waitForSessionRevealed(page, id);
   } finally {
     await cleanUpSessionsTitled(request, title);
   }
