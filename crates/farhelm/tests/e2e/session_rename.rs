@@ -222,8 +222,12 @@ async fn the_rename_reply_rediscovers_tabs_from_tmux() {
 async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"quit\r".to_vec()).await;
     // The sentinel path is only consulted for a pane that is dead or gone,
@@ -367,8 +371,12 @@ async fn a_rename_before_first_input_still_captures_the_conversation() {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     renamed(rename(&h.sup, &session.id, "renamed-before-typing").await);
@@ -640,8 +648,12 @@ async fn two_concurrent_renames_both_succeed_and_agree_on_one_winner() {
 async fn a_rename_leaves_an_active_attachment_alone() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     renamed(rename(&h.sup, &session.id, "renamed-mid-attach").await);
@@ -901,8 +913,12 @@ async fn a_rename_whose_client_vanishes_still_lands() {
 async fn a_rename_whose_reply_cannot_be_built_reports_that_it_landed_anyway() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"quit\r".to_vec()).await;
     wait_for_non_live_status(&h.client, &session.id, 30).await;

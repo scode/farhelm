@@ -52,8 +52,12 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     wait_for_file(&work.path().join("stubborn-ready"), 10).await;
 
@@ -117,8 +121,12 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     wait_for_file(&work.path().join("stubborn-ready"), 10).await;
 
@@ -327,8 +335,12 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
 
     // The new run captures its own conversation, which an inherited
     // ambiguity would have made impossible forever.
-    let (chan, mut rx) = h.client.attach(&first.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_live(&first.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     // Waited for by the ECHO of a prompt only this run has seen, and read
     // as the LAST marker: this attachment replays the reused terminal's
@@ -377,12 +389,12 @@ async fn a_restart_respawns_only_its_own_pane() {
     let (restarted, _work_a) = basic_session(&h).await;
     let (bystander, _work_b) = basic_session(&h).await;
 
-    let (chan, mut rx) = h
+    let (chan, initial_replay, mut rx) = h
         .client
-        .attach(&bystander.id, 80, 24)
+        .attach_live(&bystander.id, 80, 24)
         .await
         .expect("attach");
-    let mut seen = Vec::new();
+    let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client
         .send_input(chan, b"BYSTANDER-MARKER\r".to_vec())
