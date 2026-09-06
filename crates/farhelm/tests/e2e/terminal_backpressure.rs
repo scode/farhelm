@@ -167,15 +167,20 @@ async fn gated_flood_session(h: &Harness, cols: u16) -> (SessionInfo, farhelm_te
     (session, work)
 }
 
-/// Cross a fresh attachment's replay boundary, then start its gated flood.
+/// Start a gated flood from an attachment already past its initial replay boundary.
 ///
-/// `ReplayComplete` must be the first wait because the harness's ordinary
-/// text waits consume it. `FAKE-AGENT READY` may have landed on either side
-/// of that boundary: finding it afterwards proves raw mode and the input gate
-/// are ready without making fixture startup win the attach race. Only then is
-/// the burst released and required to deliver one of its first 100 records.
-async fn start_gated_flood(h: &Harness, channel: u32, rx: &mut TermStream, seen: &mut Vec<u8>) {
-    wait_for_replay_complete(rx, seen, 30).await;
+/// `attach_live` owns the one initial `ReplayComplete` wait. `FAKE-AGENT
+/// READY` may therefore already be in `seen` when this starts, because
+/// fixture startup may win the attach race. Finding it still proves the
+/// fixture's raw input mode and input gate are ready without turning initial
+/// replay into a post-attach witness. Only then is the burst released and
+/// required to deliver one of its first 100 records.
+async fn start_gated_flood_on_live_attachment(
+    h: &Harness,
+    channel: u32,
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+) {
     wait_for(rx, seen, "FAKE-AGENT READY", 30).await;
     // Any single byte releases the gate; the raw-mode fixture echoes nothing,
     // so the byte cannot be mistaken for the FLOOD markers these tests use
@@ -595,8 +600,11 @@ async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
     )
     .await;
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     // Enough history accumulated that the replay below is unmistakably a
     // history replay rather than a screenful.
     wait_for_bytes(&mut rx, &mut seen, b"CUTOVER-00001200", 60).await;
@@ -666,8 +674,11 @@ async fn a_forced_tmux_pause_recovers_an_alternate_screen_pane() {
     )
     .await;
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for_bytes(&mut rx, &mut seen, b"FAKE-AGENT READY", 30).await;
     let before_pause = seen.len();
 
@@ -717,8 +728,11 @@ async fn a_forced_tmux_pause_restores_modes_and_cursor_state() {
     )
     .await;
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for_bytes(&mut rx, &mut seen, b"FAKE-AGENT READY", 30).await;
     let before_pause = seen.len();
 
@@ -813,8 +827,10 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
         // hand out 1, 2, 3... and the id collision this test depends on
         // would only happen on the first pass.
         let loser = h.second_client().await;
-        let (loser_chan, mut loser_rx) = loser.attach(&session.id, 80, 24).await.expect("attach");
-        let mut loser_seen = Vec::new();
+        let (loser_chan, mut loser_seen, mut loser_rx) = loser
+            .attach_live(&session.id, 80, 24)
+            .await
+            .expect("attach");
         wait_for_bytes(&mut loser_rx, &mut loser_seen, b"CUTOVER-", 30).await;
         loser.pause_output(loser_chan).await;
 
@@ -823,8 +839,8 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
         tokio::time::sleep(aim).await;
 
         let winner = h.second_client().await;
-        let (winner_chan, mut winner_rx) = winner
-            .attach(&session.id, 80, 24)
+        let (winner_chan, mut winner_seen, mut winner_rx) = winner
+            .attach_live(&session.id, 80, 24)
             .await
             .expect("takeover attach");
         assert_eq!(
@@ -836,7 +852,6 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
         // The winner must survive and keep receiving. A stale teardown
         // detaching it would show up as either a Detached event or a
         // terminal that has gone silent.
-        let mut winner_seen = Vec::new();
         wait_for_bytes(&mut winner_rx, &mut winner_seen, b"CUTOVER-", 30).await;
         let before = winner_seen.len();
         let detached = drain_for(&mut winner_rx, &mut winner_seen, Duration::from_secs(2)).await;
@@ -916,8 +931,11 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
     };
     let own_pid = std::process::id();
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for_bytes(&mut rx, &mut seen, b"FAKE-AGENT READY", 30).await;
     h.client.send_input(chan, vec![b'w']).await;
     wait_for_flood_marker_with_progress(&mut rx, &mut seen, b"FLOOD-WARMED").await;
@@ -1043,8 +1061,11 @@ async fn a_paused_attachment_stops_receiving_until_it_resumes() {
         .await
         .expect("create");
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for_bytes(&mut rx, &mut seen, b"CUTOVER-", 30).await;
 
     h.client.pause_output(chan).await;
@@ -1106,8 +1127,11 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
         .await
         .expect("create");
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for_bytes(&mut rx, &mut seen, b"CUTOVER-", 30).await;
 
     // Five pauses of 1.2s each: every one comfortably inside the 2s
@@ -1226,18 +1250,16 @@ async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam(
         ..SupervisorTimeouts::default()
     })
     .await;
-    // At the ordinary 80 columns, the 12,000 retained rows are small enough
-    // to fit downstream before PauseOutput is processed. Gate `r` fills each
-    // 1,024-column row with nonblank content, keeping the product's real
-    // history-line limit while making its capture exceed the writer,
-    // transport, and helm queues combined.
     let (session, _work) = gated_flood_session(&h, 80).await;
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     // The flood is in full flight from here on, and is far larger than the
     // stall interval lets through, so the pause below lands on a live
     // producer rather than on an idle attachment.
-    start_gated_flood(&h, chan, &mut rx, &mut seen).await;
+    start_gated_flood_on_live_attachment(&h, chan, &mut rx, &mut seen).await;
 
     // Taken BEFORE the first pause is sent, so the supervisor's stall timer
     // (which starts when it processes that pause) can only fire later than
@@ -1296,14 +1318,10 @@ async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam(
 /// genuinely wedged client converges on a whole-client detach anyway, one
 /// stall bound at a time.
 ///
-/// The two attachments are two SESSIONS rather than two terminals of one
-/// session, because tabs do not exist yet — so this is a
-/// connection-scoped over-detach guard, not a tab-isolation test. Their
-/// leases are deliberately DISTINCT and deliberately irrelevant: takeover
-/// is session-scoped, so two sessions never displace each other whatever
-/// their leases say, and distinct leases keep this test from implying
-/// otherwise. The same-session variant PLAN_M4.md acceptance item 5
-/// describes lands with the tabs PR.
+/// The attachments belong to two independent sessions on one connection.
+/// This pins connection-scoped over-detach: their distinct leases cannot
+/// make either session displace the other, so losing the survivor would
+/// implicate the stall teardown rather than a legitimate takeover.
 ///
 /// Both sessions run the QUIET fixture on purpose. The survivor sits
 /// undrained for as long as the stall takes to fire, and a chatty fixture
@@ -1326,9 +1344,9 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
     // Two sessions on one connection, under two different leases: no
     // takeover is possible between them in either direction, so anything
     // that detaches the survivor came from the stall teardown.
-    let (stalling_chan, mut stalling_rx) = h
+    let (stalling_chan, mut stalling_seen, mut stalling_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &stalling_session.id,
             80,
             24,
@@ -1337,9 +1355,9 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
         )
         .await
         .expect("attach the terminal that will stall");
-    let (live_chan, mut live_rx) = h
+    let (live_chan, mut live_seen, mut live_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &live_session.id,
             80,
             24,
@@ -1348,8 +1366,6 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
         )
         .await
         .expect("attach the terminal that must survive");
-    let mut stalling_seen = Vec::new();
-    let mut live_seen = Vec::new();
     wait_for(&mut stalling_rx, &mut stalling_seen, "FAKE-AGENT READY", 20).await;
     wait_for(&mut live_rx, &mut live_seen, "FAKE-AGENT READY", 20).await;
 
@@ -1385,33 +1401,27 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
 /// channel), a losing client's pause would silence a terminal it no
 /// longer holds, which is a denial of service one tab can inflict on
 /// another. This is the same trust boundary the input and resize arms
-/// enforce, and it had no test.
+/// enforce. A fresh echo after the losing pause has been handled proves
+/// the winner still receives output; a chatty fixture's queued bytes could
+/// otherwise make a wrongly paused attachment look alive.
 #[tokio::test]
 async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() {
     let h = harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let (session, _work) = basic_session(&h).await;
 
     // The loser attaches first, on its own connection.
-    let (loser_chan, mut loser_rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut loser_seen = Vec::new();
-    wait_for_bytes(&mut loser_rx, &mut loser_seen, b"CUTOVER-", 30).await;
+    let (loser_chan, mut loser_seen, mut loser_rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    wait_for_bytes(&mut loser_rx, &mut loser_seen, b"FAKE-AGENT READY", 30).await;
 
     // A second connection takes over. Its channel ids number from 1 too,
     // which is exactly the collision this test needs.
     let winner = h.second_client().await;
-    let (winner_chan, mut winner_rx) = winner
-        .attach(&session.id, 80, 24)
+    let (winner_chan, mut winner_seen, mut winner_rx) = winner
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("takeover attach");
     assert_eq!(
@@ -1419,23 +1429,22 @@ async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() 
         "test premise: both clients must use the same channel id, or the connection half of \
          the ownership check is not being exercised"
     );
-    let mut winner_seen = Vec::new();
-    wait_for_bytes(&mut winner_rx, &mut winner_seen, b"CUTOVER-", 30).await;
+    wait_for_bytes(&mut winner_rx, &mut winner_seen, b"FAKE-AGENT READY", 30).await;
 
     // The loser, which has been detached, pauses "its" channel.
     h.client.pause_output(loser_chan).await;
 
-    let before = winner_seen.len();
-    let detached = drain_for(&mut winner_rx, &mut winner_seen, Duration::from_secs(3)).await;
-    assert_eq!(
-        detached, None,
-        "the winner must not be detached by the loser's pause"
-    );
-    assert!(
-        winner_seen.len() > before,
-        "the loser's pause silenced the winner's terminal — the ownership check on \
-         PauseOutput is not enforcing both channel and owning connection"
-    );
+    // PauseOutput has no reply. The connection handles it inline before
+    // dispatching the following list request, so that reply is the barrier
+    // before input on the winner's separate connection can be meaningful.
+    h.client
+        .list_sessions()
+        .await
+        .expect("barrier after losing pause");
+    winner
+        .send_input(winner_chan, b"AFTER-LOSER-PAUSE\r".to_vec())
+        .await;
+    wait_for_bytes(&mut winner_rx, &mut winner_seen, b"AFTER-LOSER-PAUSE", 15).await;
 }
 
 /// The DEEP-pause contract: a client pause held well past tmux's
@@ -1482,9 +1491,12 @@ async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
     let h = harness().await;
     let (session, _work) = gated_flood_session(&h, 80).await;
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
-    start_gated_flood(&h, chan, &mut rx, &mut seen).await;
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    start_gated_flood_on_live_attachment(&h, chan, &mut rx, &mut seen).await;
 
     let paused_at = seen.len();
     let last_before_pause = flood_records(&seen)
@@ -1651,9 +1663,12 @@ async fn shallow_pause_resumes_without_reset_or_replay() {
     let h = harness().await;
     let (session, _work) = gated_flood_session(&h, 80).await;
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
-    start_gated_flood(&h, chan, &mut rx, &mut seen).await;
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    start_gated_flood_on_live_attachment(&h, chan, &mut rx, &mut seen).await;
 
     let paused_at = seen.len();
     let pause_started = tokio::time::Instant::now();
@@ -1746,8 +1761,11 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
         .await
         .expect("create");
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for_bytes(&mut rx, &mut seen, b"CUTOVER-", 30).await;
 
     h.client.pause_output(chan).await;
@@ -1788,12 +1806,11 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
         .last()
         .copied()
         .expect("records must have been delivered before the stall");
-    let (_chan2, mut rx2) = h
+    let (_chan2, mut replay, mut rx2) = h
         .client
-        .attach(&session.id, 80, 24)
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("reattach after a stall detach");
-    let mut replay = Vec::new();
     let target = format!("CUTOVER-{:08}", last_before_detach + 50);
     wait_for_bytes(&mut rx2, &mut replay, target.as_bytes(), 60).await;
 }
