@@ -279,6 +279,16 @@
   --radius-md: 4px; /* panels and cards */
   --radius-lg: 8px; /* pill-ish badges */
 
+  /* The session row's two fixed leading tracks (status dot, locality glyph)
+     and the gap between tracks. The identity line builds its grid columns
+     from them and the host/directory line indents by them, so the second
+     line lands its text under the title; one place to change both, because
+     a literal repeated in two rules is how the lines drift apart. Here in
+     :root rather than on the row, because every token is (the js-tests
+     invariant that keeps var() references resolvable). */
+  --row-slot: 12px;
+  --row-slot-gap: 6px;
+
   /* Font stacks. --font-ui carries the vendored JetBrains Mono Nerd Font
      (the `@font-face` blocks above) into the chrome, the same face
      terminal.js hands xterm.js — one download, one typeface, chrome and
@@ -1081,6 +1091,20 @@ samp {
   min-width: 0;
 }
 
+/* The host/directory line reads as ONE string, `host:~/path`, and starts
+   under the title rather than under the status dot: the dot and the
+   locality glyph are marks on the row, not the start of its text, so a
+   second line that began at the dot's x looked like a third column of
+   marks. The indent is the identity line's two fixed tracks plus their two
+   gaps, in the same variables that grid uses. Zero gap because the colon is
+   punctuation inside the string, not a separator between fields; the host,
+   the colon, and the path are still three spans so the path can keep its
+   own left-truncating rtl clipper (see `.session-cwd`). */
+.session-row-meta {
+  gap: 0;
+  padding-left: calc(2 * var(--row-slot) + 2 * var(--row-slot-gap));
+}
+
 /* Either row's actions-menu toggle (built on the same generic mechanics —
    see `menu_panel.rs`'s own doc): deliberately small — the row IS the open
    affordance, and this is the one square that is not. Its top margin
@@ -1762,9 +1786,10 @@ samp {
    agent badge. */
 .session-row-identity {
   display: grid;
-  grid-template-columns: 12px 12px minmax(0, 1fr) minmax(0, min(8em, 35%)) minmax(4ch, max-content);
+  grid-template-columns:
+    var(--row-slot) var(--row-slot) minmax(0, 1fr) minmax(0, min(8em, 35%)) minmax(4ch, max-content);
   align-items: baseline;
-  column-gap: 6px;
+  column-gap: var(--row-slot-gap);
 }
 
 .session-status-slot {
@@ -1861,6 +1886,17 @@ samp {
   flex: 0 1 auto;
   max-width: 40%;
   min-width: 40px;
+}
+
+/* The colon between host and path is set in the same face and size as the
+   two runs it joins, so `host:~/path` reads as one string; without this it
+   inherited the button's 16px and sat as a visibly larger mark between two
+   smaller ones. Never shrinks: a colon that ellipsized would leave the
+   host and path fused with nothing to say where one ends. */
+.session-host-separator {
+  color: var(--fg-1);
+  font-size: 12px;
+  flex: 0 0 auto;
 }
 
 .session-cwd,
