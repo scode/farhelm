@@ -47,50 +47,68 @@ fn mock_supervisor(
     let std_listener = std::os::unix::net::UnixListener::bind(socket).expect("bind socket");
     std_listener.set_nonblocking(true).unwrap();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
+    // The mock leaves libtest's thread, so it must carry the test's capture
+    // through its runtime and back through runtime teardown.
+    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
     let thread = std::thread::spawn(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(async move {
-                    let listener = tokio::net::UnixListener::from_std(std_listener).unwrap();
-                    let (stream, _) =
-                        tokio::time::timeout(Duration::from_secs(5), listener.accept())
-                            .await
-                            .expect("spawn did not connect")
-                            .expect("accept spawn");
-                    let (read, write) = tokio::io::split(stream);
-                    let mut reader = FrameReader::new(read);
-                    let mut writer = FrameWriter::new(write);
-                    let hello = handshake(&mut reader, &mut writer, "supervisor")
-                        .await
-                        .expect("handshake");
-                    let ControlMsg::Hello {
-                        role,
-                        auth: Some(auth),
-                        ..
-                    } = hello
-                    else {
-                        panic!("spawn must authenticate in its hello: {hello:?}");
-                    };
-                    assert_eq!(role, "spawn");
-                    assert_eq!(auth.session_id, "parent-123");
-                    assert_eq!(auth.token, "secret");
-                    let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
-                        .await
-                        .expect("spawn did not send create")
-                        .unwrap()
-                        .expect("create request");
-                    let reply = respond(parse_control(&frame).unwrap());
-                    writer.write_control(&reply).await.unwrap();
-                });
-        }))
-        .map_err(|panic| {
-            panic.downcast_ref::<&str>().map_or_else(
-                || "mock supervisor panicked".to_string(),
-                |s| (*s).to_string(),
-            )
+        context.enter(|| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                context
+                    .with_runtime(
+                        farhelm_testtrace::RuntimeConfig {
+                            flavor: farhelm_testtrace::RuntimeFlavor::MultiThread,
+                            worker_threads: None,
+                            start_paused: false,
+                        },
+                        |runtime| {
+                            runtime.block_on(async move {
+                                let listener =
+                                    tokio::net::UnixListener::from_std(std_listener).unwrap();
+                                let (stream, _) =
+                                    tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                                        .await
+                                        .expect("spawn did not connect")
+                                        .expect("accept spawn");
+                                let (read, write) = tokio::io::split(stream);
+                                let mut reader = FrameReader::new(read);
+                                let mut writer = FrameWriter::new(write);
+                                let hello = handshake(&mut reader, &mut writer, "supervisor")
+                                    .await
+                                    .expect("handshake");
+                                let ControlMsg::Hello {
+                                    role,
+                                    auth: Some(auth),
+                                    ..
+                                } = hello
+                                else {
+                                    panic!("spawn must authenticate in its hello: {hello:?}");
+                                };
+                                assert_eq!(role, "spawn");
+                                assert_eq!(auth.session_id, "parent-123");
+                                assert_eq!(auth.token, "secret");
+                                let frame = tokio::time::timeout(
+                                    Duration::from_secs(5),
+                                    reader.read_frame(),
+                                )
+                                .await
+                                .expect("spawn did not send create")
+                                .unwrap()
+                                .expect("create request");
+                                let reply = respond(parse_control(&frame).unwrap());
+                                writer.write_control(&reply).await.unwrap();
+                            });
+                        },
+                    )
+                    .unwrap();
+            }))
+            .map_err(|panic| {
+                panic.downcast_ref::<&str>().map_or_else(
+                    || "mock supervisor panicked".to_string(),
+                    |s| (*s).to_string(),
+                )
+            });
+            let _ = done_tx.send(result);
         });
-        let _ = done_tx.send(result);
     });
     (done_rx, thread)
 }
@@ -159,7 +177,7 @@ fn child_session(cwd: String) -> SessionInfo {
 
 /// Runtime preconditions use one ordinary failure status, write no stdout,
 /// and name the exact missing socket contract without dialing a fallback.
-#[test]
+#[farhelm_testtrace::test]
 fn a_missing_supervisor_socket_is_a_clean_precondition_failure() {
     let output = spawn_command()
         .args(["--cwd", "."])
@@ -176,7 +194,7 @@ fn a_missing_supervisor_socket_is_a_clean_precondition_failure() {
 
 /// A session launched by the pre-credential build has one actionable
 /// remedy, and validation reaches it before any attempt to open the socket.
-#[test]
+#[farhelm_testtrace::test]
 fn a_preupgrade_session_is_told_to_restart_before_spawning() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -197,7 +215,7 @@ fn a_preupgrade_session_is_told_to_restart_before_spawning() {
 
 /// A token and socket without an owning session id are not authority, and
 /// the failure is detected before the socket can observe a connection.
-#[test]
+#[farhelm_testtrace::test]
 fn a_missing_session_id_is_a_clean_precondition_failure() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -223,7 +241,7 @@ fn a_missing_session_id_is_a_clean_precondition_failure() {
 ///
 /// Refusing each malformed value before the dial prevents replacement-byte
 /// laundering from changing credentials or selecting a different endpoint.
-#[test]
+#[farhelm_testtrace::test]
 fn non_utf8_spawn_environment_values_are_refused_before_dialing() {
     for malformed_name in [
         "FARHELM_SESSION_ID",
@@ -260,7 +278,7 @@ fn non_utf8_spawn_environment_values_are_refused_before_dialing() {
 
 /// The working directory is a required scripting input, not a value inferred
 /// from the parent session or a default silently selected by clap.
-#[test]
+#[farhelm_testtrace::test]
 fn cwd_is_required_by_the_cli_surface() {
     let output = spawn_command().output().expect("run spawn");
     assert!(!output.status.success());
@@ -270,7 +288,7 @@ fn cwd_is_required_by_the_cli_surface() {
 
 /// A successful command emits exactly one id line and maps every scripting
 /// flag onto the authenticated CreateSession request.
-#[test]
+#[farhelm_testtrace::test]
 fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
     let temp = farhelm_teststate::tempdir().expect("tempdir");
     let real = temp.path().join("real-work");
@@ -353,7 +371,7 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
 /// `SessionCreated`. The session and terminal still exist, so both an
 /// ordinary exit and a launch error must produce the child id and exit zero
 /// rather than reinterpret a successful create as a failed command.
-#[test]
+#[farhelm_testtrace::test]
 fn a_created_child_id_succeeds_even_when_its_status_is_already_terminal() {
     for status in [
         SessionStatus::Exited { exit_code: Some(7) },
@@ -387,7 +405,7 @@ fn a_created_child_id_succeeds_even_when_its_status_is_already_terminal() {
 
 /// Both handshake-adjacent and request-correlated refusals terminate the
 /// CLI cleanly without writing a phantom child id.
-#[test]
+#[farhelm_testtrace::test]
 fn supervisor_error_replies_exit_nonzero_with_empty_stdout() {
     for (req_id, kind, message) in [
         (
@@ -424,7 +442,7 @@ fn supervisor_error_replies_exit_nonzero_with_empty_stdout() {
 
 /// A syntactically valid reply for another request is a protocol error, not
 /// an event to discard while waiting forever for a reply that may never come.
-#[test]
+#[farhelm_testtrace::test]
 fn an_unexpected_reply_fails_instead_of_hanging() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
@@ -459,7 +477,7 @@ fn an_unexpected_reply_fails_instead_of_hanging() {
 /// future "simplification" back to unconditional absolutizing would make
 /// `~/x` a nonexistent local path at best, and at worst a real directory
 /// literally named `~user` that dodges the supervisor's refusal.
-#[test]
+#[farhelm_testtrace::test]
 fn tilde_cwds_cross_the_wire_verbatim() {
     let temp = farhelm_teststate::tempdir().expect("tempdir");
     let socket = temp.path().join("supervisor.sock");
