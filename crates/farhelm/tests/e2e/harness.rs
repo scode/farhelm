@@ -986,23 +986,21 @@ pub(crate) async fn wait_for_non_live_status(
     session_id: &str,
     secs: u64,
 ) -> SessionInfo {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    loop {
-        let listed = client
-            .list_sessions()
-            .await
-            .expect("list while polling for a status transition");
-        if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id)
-            && !found.status.is_live()
-        {
-            return found.clone();
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {session_id} never left a live status within {secs}s"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let settled = |sessions: &[SessionInfo]| {
+        sessions
+            .iter()
+            .any(|session| session.id == session_id && !session.status.is_live())
+    };
+    wait_for_listing(
+        client,
+        secs,
+        &format!("session {session_id} left a live status"),
+        settled,
+    )
+    .await
+    .into_iter()
+    .find(|session| session.id == session_id && !session.status.is_live())
+    .expect("the predicate above matched this id")
 }
 
 /// Poll `list_sessions` until one whole reply satisfies `settled`, and
@@ -1043,21 +1041,58 @@ pub(crate) async fn wait_for_listing(
     what: &str,
     settled: impl Fn(&[SessionInfo]) -> bool,
 ) -> Vec<SessionInfo> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    loop {
-        let listed = client
-            .list_sessions()
-            .await
-            .expect("list while polling for a status");
-        if settled(&listed.sessions) {
-            return listed.sessions;
+    wait_for_listing_with(
+        || async { client.list_sessions().await.map(|listing| listing.sessions) },
+        secs,
+        what,
+        settled,
+    )
+    .await
+}
+
+/// Poll an injectable whole-list request until its reply satisfies `settled`.
+///
+/// The injected request keeps the timing contract testable without a real
+/// supervisor connection. One timeout covers both a request that never
+/// replies and the sleeps between completed replies; when it expires Tokio
+/// cancels a pending request future. This is a test-helper budget, not a new
+/// production RPC timeout.
+async fn wait_for_listing_with<Request, RequestFuture, Settled>(
+    mut request: Request,
+    secs: u64,
+    what: &str,
+    settled: Settled,
+) -> Vec<SessionInfo>
+where
+    Request: FnMut() -> RequestFuture,
+    RequestFuture: std::future::Future<Output = anyhow::Result<Vec<SessionInfo>>>,
+    Settled: Fn(&[SessionInfo]) -> bool,
+{
+    // This remains outside the timed future so a timeout can say whether a
+    // request never completed or completed with rows that did not settle.
+    let mut last_listing = None;
+    let result = tokio::time::timeout(Duration::from_secs(secs), async {
+        loop {
+            let sessions = request().await.unwrap_or_else(|error| {
+                panic!("{what} list request failed while polling: {error:#}")
+            });
+            if settled(&sessions) {
+                return sessions;
+            }
+            last_listing = Some(sessions);
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "{what} did not hold within {secs}s (last listing: {:?})",
-            listed.sessions
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    })
+    .await;
+
+    match result {
+        Ok(sessions) => sessions,
+        Err(_) => match last_listing {
+            Some(sessions) => {
+                panic!("{what} did not hold within {secs}s (last listing: {sessions:?})")
+            }
+            None => panic!("{what} did not hold within {secs}s (no completed listing)"),
+        },
     }
 }
 
@@ -2133,6 +2168,210 @@ pub(crate) fn marked_pids(session_id: &str) -> Vec<u32> {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    /// One scripted answer from the injectable listing seam.
+    ///
+    /// A pending answer models an RPC that accepted its request but never
+    /// replied, which is the failure shape the outer polling budget exists to
+    /// bound. Completed answers keep empty and non-empty observations
+    /// distinct in the timeout assertions below.
+    enum ScriptedListingReply {
+        Completed(anyhow::Result<Vec<SessionInfo>>),
+        Pending,
+    }
+
+    /// Build an otherwise unremarkable row whose id and title make timeout
+    /// diagnostics useful to these tests.
+    fn scripted_session(id: &str, title: &str) -> SessionInfo {
+        SessionInfo {
+            parent: None,
+            archived: false,
+            id: id.to_string(),
+            title: title.to_string(),
+            created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
+            creation_seq: None,
+            cwd: format!("/{id}"),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Running,
+            annotation: None,
+            restart_offer: Default::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        }
+    }
+
+    /// Turn a finite response script into the request closure the polling
+    /// core accepts, without involving a tmux-backed `SupervisorClient`.
+    fn scripted_listing_request(
+        mut script: VecDeque<ScriptedListingReply>,
+    ) -> impl FnMut() -> Pin<
+        Box<dyn std::future::Future<Output = anyhow::Result<Vec<SessionInfo>>> + Send>,
+    > {
+        move || {
+            let reply = script
+                .pop_front()
+                .expect("the listing helper made an unexpected request");
+            Box::pin(async move {
+                match reply {
+                    ScriptedListingReply::Completed(reply) => reply,
+                    ScriptedListingReply::Pending => std::future::pending().await,
+                }
+            })
+        }
+    }
+
+    /// Await a helper task under a larger virtual-time budget and recover its
+    /// panic text. If the helper loses its own deadline, this guard advances
+    /// paused Tokio time and aborts the stuck task instead of hanging the
+    /// test process.
+    async fn expect_listing_panic(
+        mut task: tokio::task::JoinHandle<Vec<SessionInfo>>,
+        expected: &str,
+    ) -> String {
+        match tokio::time::timeout(Duration::from_secs(2), &mut task).await {
+            Ok(Err(error)) if error.is_panic() => {
+                let panic = error.into_panic();
+                let message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                    .unwrap_or("non-string panic payload");
+                assert!(
+                    message.contains(expected),
+                    "panic must mention {expected:?}, got {message:?}"
+                );
+                message.to_string()
+            }
+            Ok(Err(error)) => panic!("listing helper task was cancelled: {error}"),
+            Ok(Ok(_)) => panic!("listing helper unexpectedly returned successfully"),
+            Err(_) => {
+                task.abort();
+                let _ = task.await;
+                panic!("listing helper exceeded the outer virtual-time guard")
+            }
+        }
+    }
+
+    /// A request that never replies has no completed listing to show, and the
+    /// helper's budget must cancel that pending wait rather than waiting for a
+    /// transport-level timeout that this test does not control.
+    #[tokio::test(start_paused = true)]
+    async fn listing_wait_times_out_when_the_first_request_never_completes() {
+        let script = VecDeque::from([ScriptedListingReply::Pending]);
+        let task = tokio::spawn(wait_for_listing_with(
+            scripted_listing_request(script),
+            1,
+            "first request pending",
+            |_| false,
+        ));
+        expect_listing_panic(task, "no completed listing").await;
+    }
+
+    /// An empty reply is an observation, unlike a request that never
+    /// completed. A later stuck request must retain that distinction in its
+    /// timeout diagnostic instead of reporting the empty list as no result.
+    #[tokio::test(start_paused = true)]
+    async fn listing_wait_retains_an_empty_reply_before_a_later_request_stalls() {
+        let script = VecDeque::from([
+            ScriptedListingReply::Completed(Ok(Vec::new())),
+            ScriptedListingReply::Pending,
+        ]);
+        let task = tokio::spawn(wait_for_listing_with(
+            scripted_listing_request(script),
+            1,
+            "later request pending",
+            |_| false,
+        ));
+        expect_listing_panic(task, "last listing: []").await;
+    }
+
+    /// One deadline covers the whole polling loop, not each request in
+    /// isolation. The first complete listing starts neither a replacement
+    /// budget nor a fresh diagnostic baseline before the next request stalls.
+    #[tokio::test(start_paused = true)]
+    async fn listing_wait_keeps_one_budget_across_a_completed_listing_and_stall() {
+        let script = VecDeque::from([
+            ScriptedListingReply::Completed(Ok(vec![scripted_session(
+                "observed-session",
+                "still-not-ready",
+            )])),
+            ScriptedListingReply::Pending,
+        ]);
+        let started = tokio::time::Instant::now();
+        let task = tokio::spawn(wait_for_listing_with(
+            scripted_listing_request(script),
+            1,
+            "one budget across requests",
+            |_| false,
+        ));
+        let message = expect_listing_panic(task, "last listing").await;
+        assert!(message.contains("observed-session"));
+        assert!(message.contains("still-not-ready"));
+        assert_eq!(
+            tokio::time::Instant::now().duration_since(started),
+            Duration::from_secs(1),
+            "an unsatisfied reply must not renew the helper's whole polling budget"
+        );
+    }
+
+    /// A later completed reply returns every row from that one observation,
+    /// rather than only the matching row the predicate used to settle.
+    #[tokio::test(start_paused = true)]
+    async fn listing_wait_returns_the_complete_reply_that_eventually_matches() {
+        let initial = vec![scripted_session("first", "still-not-ready")];
+        let matching = vec![
+            scripted_session("first", "still-not-ready"),
+            scripted_session("target", "ready"),
+        ];
+        let script = VecDeque::from([
+            ScriptedListingReply::Completed(Ok(initial)),
+            ScriptedListingReply::Completed(Ok(matching.clone())),
+        ]);
+
+        let listed = wait_for_listing_with(
+            scripted_listing_request(script),
+            1,
+            "target appeared",
+            |sessions| sessions.iter().any(|session| session.id == "target"),
+        )
+        .await;
+        assert_eq!(listed, matching);
+    }
+
+    /// Request errors are terminal evidence for this helper. Retrying them
+    /// would delay the useful error and hide a broken list connection behind a
+    /// timeout that says nothing about its cause.
+    #[tokio::test(start_paused = true)]
+    async fn listing_wait_reports_an_rpc_error_without_retrying() {
+        let script = VecDeque::from([ScriptedListingReply::Completed(Err(anyhow::anyhow!(
+            "scripted RPC failure"
+        )))]);
+        let task = tokio::spawn(wait_for_listing_with(
+            scripted_listing_request(script),
+            1,
+            "rpc error",
+            |_| false,
+        ));
+        expect_listing_panic(task, "scripted RPC failure").await;
+    }
+
+    /// The first request remains immediate, including at a zero-second
+    /// budget. This preserves a useful one-shot assertion when its reply is
+    /// already ready while still bounding every request that has to wait.
+    #[tokio::test(start_paused = true)]
+    async fn listing_wait_allows_an_immediately_ready_zero_second_reply() {
+        let expected = vec![scripted_session("ready", "immediate")];
+        let script = VecDeque::from([ScriptedListingReply::Completed(Ok(expected.clone()))]);
+        let listed = wait_for_listing_with(
+            scripted_listing_request(script),
+            0,
+            "immediately ready listing",
+            |_| true,
+        )
+        .await;
+        assert_eq!(listed, expected);
+    }
 
     /// A deterministic event source for testing wait behavior without a
     /// production `TermStream`, which has no public constructor.
