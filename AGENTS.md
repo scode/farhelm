@@ -221,7 +221,9 @@ for ordinary validation or `--kind repetition` for a focused attempt, and an app
 `--tmux required` with the built `.ci-tmux` first on PATH for controlled comparisons; `warn` records a different
 developer substrate visibly, and `none` is for checks that do not use tmux. The wrapper scrubs ambient `FARHELM_*`
 before test-process startup. Retain a variable only by naming an intentional test input with `--keep-farhelm-env`;
-values stay out of metadata. Never fix this by changing the test process's own environment.
+values stay out of metadata. The recorder reserves `FARHELM_TEST_TRACE_DIR` for a fresh private directory per command,
+overriding any ambient value even when retention requests it. Never fix this by changing the test process's own
+environment.
 
 Keep the failed UUID run directory before retrying, and record its path and disposition in the session's working log. A
 later pass is another observation, not a replacement for the failure. Preserve failure evidence until a fix PR or
@@ -234,8 +236,11 @@ from this retention rule. Storage, schema, interruption limits, and examples are
 The existing release gates use the same recorder. Collection follows those gates and uploads selected bounded records
 when a failure has occurred by that point; later packaging failures cannot trigger it. Download useful failure artifacts
 before hosted retention expires. Successful jobs do not upload run records, so those artifacts alone cannot establish a
-release pass/fail denominator. To validate changes to the recorder itself, run `python3 scripts/test-record-test-run.py`
-locally; this adds no ordinary CI test job.
+release pass/fail denominator. Collection also exports the fixed, bounded persistent trace layout, including after a
+recorder death; keep its collection summary and raw traces when recovery is incomplete. The recovery command and limits
+are in `docs/test-run-evidence.md`. To validate changes to the recorder itself, use
+`python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`, choosing affected contracts as
+usual; this adds no ordinary CI test job.
 
 The finishing-work list above is a gate, not a debugging tool. When investigating a failing, flaky, or suspicious test —
 including one first seen in a full-battery run — reproduce it with the narrowest run that could show it, and widen only

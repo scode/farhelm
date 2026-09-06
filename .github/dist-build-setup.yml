@@ -403,6 +403,12 @@
           cp -- "$evidence" "$evidence_dir/$run_id/"
         fi
       done
+      # Export through the fixed-layout collector even if the recorder died
+      # before building its own archive. Never recursively upload raw state.
+      if [ -d "$run_dir/test-traces" ] && [ ! -L "$run_dir/test-traces" ]; then
+        python3 scripts/test_run_traces.py "$run_dir/test-traces" \
+          "$evidence_dir/$run_id/recovered-traces.tar" > "$evidence_dir/$run_id/trace-collection.json"
+      fi
     done
 
 - name: Upload test run failure evidence
