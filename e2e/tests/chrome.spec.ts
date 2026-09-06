@@ -19,7 +19,8 @@
  * else would catch.
  */
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
+import { cleanupSession, createSession, openRowMenu, pinAutoSelect } from "./helpers/fleet";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -110,19 +111,18 @@ test("keyboard focus paints the accent outline; a mouse click does not", async (
     invocation: "sleep 300",
   });
   try {
+    await pinAutoSelect(page, session.id);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    // The sole session auto-selects and auto-attaches on load, and the
-    // terminal's mount takes focus for itself when it lands. Probing the
-    // ring before that mount has happened is a race: `.focus()` below
+    // The pinned session auto-selects and auto-attaches on load, and the
+    // terminal's replay reveal takes focus for itself when it lands. Probing the
+    // ring before that reveal has happened is a race: `.focus()` below
     // lands on the button, the terminal then steals focus, and the style
     // read sees an unfocused button (`outline-style: none`) — exactly the
-    // failure one loaded CI run produced. Waiting for the mount first
-    // makes the focus moves below the LAST focus changes on the page.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    // failure one loaded CI run produced. Waiting for replay reveal first
+    // places the focus moves after the initial focus handoff.
+    await waitForSessionRevealed(page, session.id);
 
     const accentRgb = await resolveToken(page, "--accent");
     // A native checkbox with no contextual focus override of its own —
@@ -134,9 +134,8 @@ test("keyboard focus paints the accent outline; a mouse click does not", async (
     const openButton = target.locator(".session-row-open");
 
     // `.focus()` rather than a real `page.keyboard.press("Tab")` crawl:
-    // the sole session on this page auto-selects and auto-attaches on
-    // load (the same "recently active, falls back to newest" behavior
-    // sidebar.spec.ts's own auto-select test pins), and a `sleep 300`
+    // the pinned session on this page auto-selects and auto-attaches on
+    // load, and a `sleep 300`
     // invocation is not a real agent, so its terminal cycles through
     // reconnect attempts every second — real DOM churn that raced a
     // blind multi-press Tab crawl and made it land on the wrong element.

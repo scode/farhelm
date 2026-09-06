@@ -55,6 +55,7 @@ import {
   SESSION_LISTING,
   stubFeed,
 } from "./helpers/fleet";
+import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -1205,20 +1206,20 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     // Fixed item positions, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
+    await pinAutoSelect(page, session.id);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsListSettled(page);
-    // The lone session auto-attaches, and its terminal takes focus for
-    // itself when the mount lands — which can be after the row is already
+    // The pinned session auto-attaches, and replay hands focus to its terminal
+    // when the reveal lands — which can be after the row is already
     // visible. Every step below is a focus move followed by a keystroke,
-    // so a mount landing mid-sequence steals the focus the keystroke was
+    // so a replay reveal landing mid-sequence steals the focus the keystroke was
     // aimed at (ArrowDown reaching the terminal instead of the toggle; the
     // post-Escape refocus overridden — both observed on loaded CI runs).
-    // Waiting for the mount makes this test's own moves the last ones.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    // Waiting for that requested session to reveal makes this test's own
+    // moves the last ones after the initial focus handoff.
+    await waitForSessionRevealed(page, session.id);
 
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
@@ -1228,7 +1229,7 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
 
     // ArrowDown on a CLOSED toggle: opens and lands on the first command.
     //
-    // The mount-ready wait above only rules out the FIRST steal. This
+    // The reveal wait above only rules out the FIRST steal. This
     // session's `sleep 300` invocation is not a real agent — nothing ever
     // proves the attach — so the reconnect ladder in terminal.js keeps
     // unmounting and remounting the island (see that file's "Auto-reconnect"
@@ -1478,21 +1479,20 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
     // Fixed item positions, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
+    await pinAutoSelect(page, session.id);
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsListSettled(page);
     // Same precaution, for the same reason, as "opening the actions menu
     // enters it" above: this test asserts where focus IS at several points,
-    // and the lone session's terminal takes focus for itself when its mount
-    // lands — which can be after the row is visible. Without this wait a
-    // mount landing between the open and the first focus assertion steals
+    // and the pinned session's terminal takes focus for itself when its replay
+    // reveal lands — which can be after the row is visible. Without this wait,
+    // a reveal between the open and the first focus assertion steals
     // the focus the panel just placed, and the failure reads as a menu that
     // did not enter itself (the item holding the roving `tabindex` while
     // something else holds DOM focus) rather than as the race it is.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    await waitForSessionRevealed(page, session.id);
 
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
@@ -2905,8 +2905,8 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     await expect(page.locator(".titlebar .title")).toContainText("policy-older-", {
       timeout: 20_000,
     });
-    // The auto-selection is a real attachment, not just a mounted view.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    // The auto-selection is a real requested-session attachment, not just a view.
+    await waitForSessionRevealed(page, older.id);
 
     // A stale remembered id — a session that no longer exists — falls
     // back to the newest-created non-archived session.
@@ -2944,7 +2944,7 @@ test("a second client's launch alone takes the terminal over", async ({
     await page.goto("/");
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await row(page, session.id).locator(".session-row-open").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, session.id);
 
     // Client one's click is the ONLY preference write in this test: the
     // second client must inherit the selection from the helm's shared row.
@@ -2962,9 +2962,7 @@ test("a second client's launch alone takes the terminal over", async ({
     });
     const page2 = await second.newPage();
     await page2.goto("/");
-    await page2.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    await waitForSessionReady(page2, session.id);
 
     // Client one shows its displaced banner; client two owns the live
     // terminal — with no click anywhere in client two.
@@ -4185,9 +4183,7 @@ test("an idle session that was never opened reads unseen, and opening it clears 
     // the next listing read back — within a feed round trip, not the
     // fallback poll's much longer cadence.
     await target.locator(".session-row-open").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    await waitForSessionRevealed(page, session.id);
     await expect(target).toHaveAttribute("data-session-selected", "true");
     await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
     await expect(target.locator(".status-badge.idle.unseen")).toHaveCount(0);
@@ -4221,9 +4217,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     });
 
     await target.locator(".session-row-open").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    await waitForSessionRevealed(page, session.id);
     await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
 
     // The label must already read "mark unread" — the row is currently
@@ -4362,9 +4356,7 @@ test("a dot with no seen-state toggle still opens the row on click", async ({ pa
     await expect(target.locator(".status-dot-toggle")).toHaveCount(0);
 
     await target.locator(".status-dot").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    await waitForSessionRevealed(page, session.id);
     await expect(target).toHaveAttribute("data-session-selected", "true");
   } finally {
     await cleanupSession(request, session.id);
@@ -4402,9 +4394,7 @@ test("the dot click marks a different row read without moving the selection", as
     const rowA = row(page, a.id);
     await expect(rowA).toBeVisible({ timeout: 20_000 });
     await rowA.locator(".session-row-open").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    await waitForSessionRevealed(page, a.id);
     await expect(rowA).toHaveAttribute("data-session-selected", "true");
 
     const b = await createSession(request, { title: `seen-state-dot-b-${stamp}` });
@@ -4469,9 +4459,7 @@ test("a manual mark-unread is visible to a second client that never touched the 
     // two writes, so the second client's answer cannot be explained by
     // having merely inherited the FIRST client's own never-marked default.
     await target.locator(".session-row-open").click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
-      timeout: 20_000,
-    });
+    await waitForSessionRevealed(page, session.id);
     await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
     await openRowMenu(target);
     await target.locator(".session-row-mark-seen").click();

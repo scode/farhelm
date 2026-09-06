@@ -55,6 +55,7 @@ import {
   waitForIslandMounted,
   installTerminalSuiteHooks,
 } from "./helpers/terminal-suite";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 installTerminalSuiteHooks({ tabSweep: true });
 
@@ -439,7 +440,7 @@ async function openAttachmentSession(
   const session = await createTabSession(request, title);
   await page.goto("/");
   await page.locator(`[data-session-id="${session.id}"]`).click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await waitForSessionRevealed(page, session.id);
   await waitForTermText(page, "FAKE-AGENT READY");
   return session;
 }
@@ -1537,7 +1538,7 @@ test("leaving mid-upload and reopening leaves exactly one set of hooks", async (
     await sharedSessionRow(page).click();
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     uploads.reset();
