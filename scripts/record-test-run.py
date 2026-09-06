@@ -31,6 +31,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import BinaryIO, Callable, Iterable
 
+# Importing a repository-local helper must not create bytecode before source
+# fingerprinting. Restore the caller's setting after this one import so loading
+# the recorder as a module does not change unrelated import behavior.
+_previous_bytecode_setting = sys.dont_write_bytecode
+try:
+    sys.dont_write_bytecode = True
+    import test_run_traces
+finally:
+    sys.dont_write_bytecode = _previous_bytecode_setting
+    del _previous_bytecode_setting
+
 
 SCHEMA_VERSION = 1
 PROBE_TIMEOUT_SECONDS = 5.0
@@ -1135,19 +1146,23 @@ def capture_tmux(
 
 
 def environment_evidence(
-    ambient: dict[str, str], child: dict[str, str], requested: Iterable[str]
+    ambient: dict[str, str], child: dict[str, str], requested: Iterable[str],
+    *, recorder_owned: Iterable[str] = (),
 ) -> dict[str, object]:
     """Describe FARHELM_ scrubbing by variable name without exposing values."""
 
     ambient_names = sorted(name for name in ambient if name.startswith("FARHELM_"))
     requested_names = sorted(set(requested))
-    retained = sorted(name for name in requested_names if name in ambient)
+    owned = set(recorder_owned)
+    retained = sorted(name for name in requested_names if name in ambient and name not in owned)
     return {
         "farhelm": {
             "ambient_names": ambient_names,
             "requested_names": requested_names,
             "retained_names": retained,
-            "removed_names": sorted(set(ambient_names) - set(retained)),
+            "removed_names": sorted(set(ambient_names) - set(retained) - owned),
+            "overridden_names": sorted(set(ambient_names) & owned),
+            "recorder_owned_names": sorted(owned),
             "requested_but_absent_names": sorted(set(requested_names) - set(ambient_names)),
             "child_names": sorted(name for name in child if name.startswith("FARHELM_")),
         },
@@ -1481,6 +1496,7 @@ def initial_manifest(
         "tmux": None,
         "output": None,
         "console": None,
+        "test_traces": None,
         "child_status": child_status(None),
         "recorder": {
             "exit_code": None,
@@ -1535,6 +1551,7 @@ def run(argv: list[str]) -> int:
     manifest: Manifest | None = None
     output: OutputStore | None = None
     console: ConsoleForwarder | None = None
+    trace_fd: int | None = None
     try:
         args = parse_args(argv)
         require_wait_ownership()
@@ -1611,12 +1628,32 @@ def run(argv: list[str]) -> int:
                 )
                 return 125
 
+        trace_root, trace_fd = test_run_traces.create_run_root(run_dir)
+        child_env[test_run_traces.TRACE_ENV] = os.fspath(trace_root)
+        manifest.data["environment"] = environment_evidence(
+            ambient, child_env, args.keep_farhelm_env, recorder_owned=(test_run_traces.TRACE_ENV,)
+        )
+        trace_identity = os.fstat(trace_fd)
+        manifest.data["test_traces"] = {
+            "root": trace_root.name,
+            "device": trace_identity.st_dev,
+            "inode": trace_identity.st_ino,
+            "environment_name": test_run_traces.TRACE_ENV,
+            "collection": {"status": "uncollected", "collection_complete": False},
+        }
+        # Publish the recovery location before the command can create traces.
+        # A killed recorder leaves this running record and its raw fixed files;
+        # the standalone collector can export them without rerunning the test.
+        manifest.write()
         output = OutputStore(run_dir)
         console = ConsoleForwarder()
         result = run_command(args.command, cwd, child_env, args.timeout, intent, output, console)
         output.close()
         manifest.data["output"] = output.evidence()
         manifest.data["console"] = console.finish()
+        # Commit the command result while storage is still available. Optional
+        # archive output can consume the remaining space; neither that failure
+        # nor a later manifest-write failure may replace this observed result.
         finalize(
             manifest,
             outcome=result.outcome,
@@ -1628,6 +1665,21 @@ def run(argv: list[str]) -> int:
             error=result.error,
             cleanup_limit=result.cleanup_limit,
         )
+        try:
+            collected = test_run_traces.collect(trace_fd, run_dir / "traces.tar")
+        except Exception as error:
+            collected = {"status": "incomplete", "collection_complete": False,
+                         "errors": [{"kind": type(error).__name__}]}
+        manifest.data["test_traces"]["collection"] = collected
+        manifest.data["duration_seconds"] = time.monotonic() - total_started
+        manifest.data["finished_at"] = utc_now()
+        try:
+            manifest.write()
+        except Exception as error:
+            best_effort_write(
+                2, f"test trace collection publication failed ({type(error).__name__}); "
+                "earlier command result retained\n".encode(),
+            )
         return result.recorder_exit
     except UsageRefusal as error:
         best_effort_write(2, f"record-test-run: refused: {error}\n".encode("utf-8", "replace"))
@@ -1676,6 +1728,11 @@ def run(argv: list[str]) -> int:
                 pass
         return 125
     finally:
+        if trace_fd is not None:
+            try:
+                os.close(trace_fd)
+            except OSError:
+                pass
         for signum, handler in prior_handlers.items():
             signal.signal(signum, handler)
 

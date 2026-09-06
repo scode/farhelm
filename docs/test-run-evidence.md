@@ -103,6 +103,7 @@ The top-level fields are:
 - `tmux`: expected and actual substrate evidence, or an explicit `none` record.
 - `output`: retention policy, byte counters, and ordered files. It is null before command output storage starts.
 - `console`: observed, forwarded, rejected, and pending/dropped byte counters for best-effort console streaming.
+- `test_traces`: private trace-root identity and fixed-layout collection evidence, or null before command setup.
 - `child_status`: Python's raw return code plus normalized `exit_code` or `signal`.
 - `recorder`: recorder exit code, forced-cleanup flag, cleanup limitation, and error text.
 
@@ -158,11 +159,58 @@ environment, platform, console, and repetitive probe fields are omitted from thi
 
 The child environment is copied from the recorder, then every `FARHELM_*` variable is removed except names supplied with
 `--keep-farhelm-env`. An absent requested name remains absent. The same controlled environment is used to resolve and
-run tmux.
+run tmux. Before the command starts, the recorder sets `FARHELM_TEST_TRACE_DIR` to its new private `test-traces`
+directory. This name is reserved: even an explicit `--keep-farhelm-env FARHELM_TEST_TRACE_DIR` cannot redirect capture
+to an ambient location. Metadata probes run before this override.
 
 The manifest records only FARHELM variable names: `ambient_names`, `requested_names`, `retained_names`, `removed_names`,
-`requested_but_absent_names`, and the resulting `child_names`. It never records these values or hashes of them. Locale
-evidence records `LANG`, `LC_ALL`, `LC_CTYPE`, Python's preferred encoding, and filesystem encoding.
+`requested_but_absent_names`, `overridden_names`, `recorder_owned_names`, and the resulting `child_names`. It never
+records ambient FARHELM values or hashes of them. The recorder-owned trace location is recorded relative to the run.
+Locale evidence records `LANG`, `LC_ALL`, `LC_CTYPE`, Python's preferred encoding, and filesystem encoding.
+
+## Persistent test traces
+
+Tests using `farhelm_testtrace::test` write bounded incremental evidence under the private trace root. Complete
+successful captures clean up their own slots after runtime teardown. Failures, incomplete captures and abnormal exits
+retain raw files. This covers participating tests; an empty root says nothing about whether an unwrapped test emitted
+events.
+
+After the command's process cleanup, the recorder exports only `slot-000` through `slot-127`, and only `metadata.json`,
+`head.jsonl`, and `tail-0.jsonl` through `tail-2.jsonl` in each slot. Metadata is capped at 4 KiB and each event file at
+256 KiB. The collector opens private effective-user-owned slot directories through a held root descriptor and accepts
+only regular files without following final symlinks. Unknown names are never inspected or uploaded. Partial JSON is
+retained as bytes rather than discarded as a parse error.
+
+`traces.tar` is an uncompressed, mode 0600 USTAR archive created only when at least one file is retained. The fixed
+layout bounds payloads to 128.5 MiB plus tar headers/padding; each member's byte count, SHA256 and truncation flag is
+recorded. Collection checks a 10-second deadline between filesystem operations and keeps at most 32 error details.
+Kernel-blocked filesystem calls remain outside that deadline guarantee. A read fault retains the prefix already
+observed; an archive write fault stops export and marks the partial archive incomplete. A prefix is archived only while
+output remains possible within the shared deadline; expiry can leave bytes available only in the raw files. Raw files
+remain available locally. The recorder publishes the command result before exporting traces. If collection or
+publication of its summary fails, the earlier command result and exit status stand; the durable manifest may still
+describe traces as uncollected.
+
+`test_traces.collection.collection_complete` describes only collection of those fixed names. Consult each capture's own
+metadata for event loss and completion; neither collection success nor syntactically valid JSON proves that a test
+finished. Collection observes files over time, not an atomic filesystem snapshot. Use it after the test processes are
+quiescent; a descendant that escaped process cleanup may still be changing its files.
+
+The recorder writes the root's relative path and held device/inode before spawning the command. If the recorder itself
+dies, the manifest can remain `running`, or retain a completed command result with an `uncollected` trace component.
+Recover those raw files without rerunning:
+
+```sh
+python3 scripts/test_run_traces.py /path/to/run/test-traces /path/to/recovered-traces.tar > /path/to/trace-collection.json
+```
+
+The destination must be new; an earlier archive is never overwritten. Review the JSON collection status even when the
+export command exits successfully. The standalone summary identifies the device/inode it opened, so it can be compared
+with the recorder's original root identity. It describes a new observation of raw files and does not export an earlier
+recorder archive. Existing release failure collection uses `recovered-traces.tar` with that independent summary beside
+the original run manifest and output. The manifest's original `traces.tar` is not included in that hosted export; its
+hashes and completeness must never be applied to the recovery archive. Preserve the original archive locally when
+needed. No additional tests are scheduled by collection.
 
 ## Source identity
 
