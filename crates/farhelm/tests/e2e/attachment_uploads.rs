@@ -2372,12 +2372,14 @@ async fn the_staging_file_is_gone_before_the_abort_is_announced() {
 ///
 /// Diagnostics are the only way an operator can follow a paste that went
 /// wrong across the two hops it takes, so the FIELDS are the contract,
-/// not the prose. Captured through a tracing layer rather than asserted
-/// by eye, because a field silently dropped in a refactor is exactly the
-/// kind of regression nobody notices until they need the log.
-#[tokio::test]
+/// not the prose. The test-owned tracing capture follows the supervisor
+/// work on this runtime, rather than relying on a process-global subscriber,
+/// because a field silently dropped in a refactor is exactly the kind of
+/// regression nobody notices until they need the log.
+#[farhelm_testtrace::test]
 async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
-    let events = install_diagnostic_capture();
+    let capture = farhelm_testtrace::current_capture()
+        .expect("test log assertions require #[farhelm_testtrace::test]");
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     let mut peer = RawPeer::connect(&h.sup).await;
@@ -2399,20 +2401,35 @@ async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
     let mismatch = peer.next_outcome(20).await;
     assert!(matches!(mismatch, ControlMsg::Error { req_id: 8, .. }));
 
-    let captured = events.lock().expect("diagnostics mutex").clone();
-    let mine: Vec<&CapturedEvent> = captured
+    let snapshot = capture
+        .snapshot()
+        .expect("test trace evidence must be complete before assertions");
+    let attachment_events: Vec<_> = snapshot
+        .events()
         .iter()
         .filter(|event| {
             event
                 .fields
+                .get("message")
+                .is_some_and(|message| message.starts_with("attachment upload"))
+        })
+        .collect();
+    let mine: Vec<_> = attachment_events
+        .iter()
+        .copied()
+        .filter(|event| {
+            event
+                .fields
                 .get("session")
-                .is_some_and(|s| *s == session.id)
+                .is_some_and(|value| value == &session.id)
         })
         .collect();
 
     let started_event = mine
         .iter()
-        .find(|event| event.message == "attachment upload started")
+        .find(|event| {
+            event.fields.get("message").map(String::as_str) == Some("attachment upload started")
+        })
         .expect("a begin must be recorded");
     assert!(started_event.fields.contains_key("transfer"));
     assert!(started_event.fields.contains_key("channel"));
@@ -2426,7 +2443,9 @@ async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
 
     let published = mine
         .iter()
-        .find(|event| event.message == "attachment upload published")
+        .find(|event| {
+            event.fields.get("message").map(String::as_str) == Some("attachment upload published")
+        })
         .expect("a publish must be recorded");
     assert_eq!(
         published.fields.get("bytes").map(String::as_str),
@@ -2437,7 +2456,10 @@ async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
 
     let failed = mine
         .iter()
-        .find(|event| event.message == "attachment upload failed at commit")
+        .find(|event| {
+            event.fields.get("message").map(String::as_str)
+                == Some("attachment upload failed at commit")
+        })
         .expect("a commit failure must be recorded");
     assert_eq!(
         failed.fields.get("received_bytes").map(String::as_str),
@@ -2448,93 +2470,15 @@ async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
     // Never contents: the bytes themselves must appear in no field of
     // any event.
     let content = String::from_utf8_lossy(&secret).into_owned();
-    for event in &captured {
+    for event in &attachment_events {
         for (field, value) in &event.fields {
             assert!(
                 !value.contains(&content),
                 "event {:?} leaked upload content in field {field}",
-                event.message
+                event.fields.get("message")
             );
         }
     }
-}
-
-/// One captured `tracing` event: its message and its structured fields.
-#[derive(Clone, Debug)]
-struct CapturedEvent {
-    message: String,
-    fields: std::collections::HashMap<String, String>,
-}
-
-/// Install (once per test process) a layer that records the attachment
-/// transfer trail, and hand back the shared buffer it writes into.
-///
-/// Global because `tracing`'s dispatcher is, and because the supervisor
-/// under test runs on the shared runtime rather than on the calling
-/// thread — a thread-local subscriber would capture nothing. Only
-/// attachment-upload events are retained, so the buffer stays small even
-/// though every test in this file shares it, and each test filters by its
-/// own session id.
-fn install_diagnostic_capture() -> Arc<std::sync::Mutex<Vec<CapturedEvent>>> {
-    use tracing_subscriber::layer::SubscriberExt;
-
-    static CAPTURED: std::sync::OnceLock<Arc<std::sync::Mutex<Vec<CapturedEvent>>>> =
-        std::sync::OnceLock::new();
-
-    struct Capture(Arc<std::sync::Mutex<Vec<CapturedEvent>>>);
-
-    #[derive(Default)]
-    struct Fields(std::collections::HashMap<String, String>);
-
-    impl tracing::field::Visit for Fields {
-        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-            self.0
-                .insert(field.name().to_string(), format!("{value:?}"));
-        }
-        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-            self.0.insert(field.name().to_string(), value.to_string());
-        }
-        fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
-            self.0.insert(field.name().to_string(), value.to_string());
-        }
-        fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
-            self.0.insert(field.name().to_string(), value.to_string());
-        }
-    }
-
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Capture {
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-            let mut fields = Fields::default();
-            event.record(&mut fields);
-            let Some(message) = fields.0.remove("message") else {
-                return;
-            };
-            if !message.starts_with("attachment upload") {
-                return;
-            }
-            self.0
-                .lock()
-                .expect("diagnostics mutex")
-                .push(CapturedEvent {
-                    message,
-                    fields: fields.0,
-                });
-        }
-    }
-
-    let events = CAPTURED
-        .get_or_init(|| Arc::new(std::sync::Mutex::new(Vec::new())))
-        .clone();
-    // `try_init` rather than `init`: another test may have installed this
-    // already, and a second attempt is a no-op rather than a panic.
-    let _ = tracing_subscriber::util::SubscriberInitExt::try_init(
-        tracing_subscriber::registry().with(Capture(events.clone())),
-    );
-    events
 }
 
 /// A state directory whose path is not valid UTF-8 is refused where it
