@@ -1573,7 +1573,7 @@ fn a_hook_with_no_supervisor_is_silent_and_leaves_a_trace() {
 /// or of the handshake — because those are the phases a wedged supervisor
 /// can strand a hook in; any other outcome means this test stopped
 /// reproducing the case it is named for.
-#[test]
+#[farhelm_testtrace::test]
 fn a_hook_talking_to_a_silent_supervisor_still_finishes_in_budget() {
     let state = farhelm_teststate::tempdir().expect("state dir");
     let socket = state.path().join("supervisor.sock");
@@ -1586,28 +1586,33 @@ fn a_hook_talking_to_a_silent_supervisor_still_finishes_in_budget() {
         .expect("a bounded accept loop needs a non-blocking listener");
     let (dialled_tx, dialled_rx) = std::sync::mpsc::channel();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    // The holder is a raw thread, so the wrapped test explicitly gives it
+    // ownership of this test's trace while it keeps the peer alive.
+    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
     let holder = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        let mut held = None;
-        while std::time::Instant::now() < deadline {
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    let _ = dialled_tx.send(());
-                    held = Some(stream);
-                    break;
+        context.enter(|| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            let mut held = None;
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let _ = dialled_tx.send(());
+                        held = Some(stream);
+                        break;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return,
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(_) => return,
             }
-        }
-        // Held, not dropped: the peer must see an established connection
-        // that simply never speaks. Dropping it would close the socket and
-        // turn this into the ordinary connect-failure case, which the
-        // sibling test above already covers.
-        let _ = stop_rx.recv_timeout(Duration::from_secs(30));
-        drop(held);
+            // Held, not dropped: the peer must see an established connection
+            // that simply never speaks. Dropping it would close the socket and
+            // turn this into the ordinary connect-failure case, which the
+            // sibling test above already covers.
+            let _ = stop_rx.recv_timeout(Duration::from_secs(30));
+            drop(held);
+        });
     });
 
     let payload =
