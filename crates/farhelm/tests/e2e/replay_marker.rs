@@ -1,13 +1,11 @@
 //! The attach replay-complete marker, pinned against real tmux.
 //!
-//! Driven at the raw protocol level, and it has to be: the marker is an
-//! unsolicited `ControlMsg::ReplayComplete` correlated by channel, and
-//! `SupervisorClient` has no place to surface one until the helm's own
-//! pass-through lands (PLAN_M5.md item 4). Reading frames directly is also
-//! what makes the ORDER assertable at all — the whole contract is a
-//! statement about where the marker sits between data frames, and any
-//! client API that turned frames into events would have to preserve that
-//! order to be worth testing through anyway.
+//! The raw driver preserves the `Attached` reply, channel correlation,
+//! individual data frames and marker placement in one arrival sequence.
+//! `SupervisorClient` surfaces replay completion too, but its attachment
+//! API separates the reply from the event stream. These tests need to
+//! assert the ordering across that boundary without trusting the client's
+//! demultiplexing to have preserved it.
 
 use crate::harness::*;
 
@@ -110,16 +108,22 @@ impl MarkerPeer {
         peer
     }
 
-    /// Attach `selector`, returning once the `Attached` reply has arrived.
+    /// Attach `selector` at the raw `Attached` reply boundary.
     ///
     /// Asserts on the way that NOTHING for this channel preceded that
     /// reply. That ordering is not incidental: the supervisor enqueues the
     /// reply before the forwarder exists precisely so a client can start
     /// draining before the replay lands on it, and a marker test that let
     /// replay bytes arrive first would be measuring a different sequence
-    /// than the one clients see. It is also what makes "everything after
-    /// this call is live" true for the input the tests send next.
-    async fn attach(&mut self, session_id: &str, selector: TerminalSelector, lease: &str) {
+    /// than the one clients see. Output read after this call can still be
+    /// initial replay; an input sent afterwards is post-attach input, not
+    /// evidence that every received byte is live.
+    async fn attach_at_boundary(
+        &mut self,
+        session_id: &str,
+        selector: TerminalSelector,
+        lease: &str,
+    ) {
         self.writer
             .write_control(&ControlMsg::Attach {
                 req_id: 1,
@@ -468,7 +472,7 @@ fn agent_echo_of(line: &str) -> String {
 async fn seed_deep_scrollback(sup: &Arc<Supervisor>, session_id: &str, lines: usize) {
     let mut seeder = MarkerPeer::connect(sup, 1).await;
     seeder
-        .attach(session_id, TerminalSelector::Agent, "seeder")
+        .attach_at_boundary(session_id, TerminalSelector::Agent, "seeder")
         .await;
     seeder.wait_for_text("FAKE-AGENT READY", 30).await;
     seeder.input(b"OLDEST-RETAINED-ROW\r").await;
@@ -525,9 +529,9 @@ async fn an_agent_reattach_marks_the_boundary_before_output_made_during_the_catc
 
     const TRANSPORT_BUFFER: usize = 4 * 1024;
     let mut peer = MarkerPeer::connect_with_buffer(&h.sup, 1, TRANSPORT_BUFFER).await;
-    peer.attach(&session.id, TerminalSelector::Agent, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Agent, "viewer")
         .await;
-    // `attach` has already asserted that no replay frame was RECORDED
+    // `attach_at_boundary` has already asserted that no replay frame was RECORDED
     // before the `Attached` reply. At most about two transport buffers
     // could have been handed over anyway — one sitting unparsed in the
     // reader, one back in the refilled pipe — and the replay is larger
@@ -571,7 +575,7 @@ async fn a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk() {
     seed_deep_scrollback(&h.sup, &session.id, 4000).await;
 
     let mut peer = MarkerPeer::connect(&h.sup, 1).await;
-    peer.attach(&session.id, TerminalSelector::Agent, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Agent, "viewer")
         .await;
     peer.wait_for_marker(60).await;
     peer.input(b"AFTER-DEEP-REPLAY\r").await;
@@ -617,7 +621,7 @@ async fn a_tab_attach_is_marked_on_the_channel_it_attached() {
     // replayed line and the live one here.
     let mut seeder = MarkerPeer::connect(&h.sup, 1).await;
     seeder
-        .attach(
+        .attach_at_boundary(
             &session.id,
             TerminalSelector::Tab { id: tab.id.clone() },
             "seeder",
@@ -628,7 +632,7 @@ async fn a_tab_attach_is_marked_on_the_channel_it_attached() {
     seeder.detach().await;
 
     let mut peer = MarkerPeer::connect(&h.sup, 7).await;
-    peer.attach(&session.id, TerminalSelector::Tab { id: tab.id }, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Tab { id: tab.id }, "viewer")
         .await;
     peer.wait_for_marker(30).await;
     peer.input(b"echo TAB-LIVE\r").await;
@@ -662,13 +666,13 @@ async fn an_alternate_screen_attach_marks_after_its_visible_snapshot() {
 
     let mut seeder = MarkerPeer::connect(&h.sup, 1).await;
     seeder
-        .attach(&session.id, TerminalSelector::Agent, "seeder")
+        .attach_at_boundary(&session.id, TerminalSelector::Agent, "seeder")
         .await;
     seeder.wait_for_text("ALT-SCREEN APP", 30).await;
     seeder.detach().await;
 
     let mut peer = MarkerPeer::connect(&h.sup, 1).await;
-    peer.attach(&session.id, TerminalSelector::Agent, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Agent, "viewer")
         .await;
     peer.wait_for_marker(30).await;
     // Keystrokes WITHOUT a newline: the pty echoes them straight back as
@@ -707,7 +711,7 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
 
     let mut seeder = MarkerPeer::connect(&h.sup, 1).await;
     seeder
-        .attach(&session.id, TerminalSelector::Agent, "seeder")
+        .attach_at_boundary(&session.id, TerminalSelector::Agent, "seeder")
         .await;
     seeder.wait_for_text("FAKE-AGENT READY", 30).await;
     seeder.input(b"BEFORE-THE-AGENT-EXITED\r").await;
@@ -734,7 +738,7 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
     }
 
     let mut peer = MarkerPeer::connect(&h.sup, 1).await;
-    peer.attach(&session.id, TerminalSelector::Agent, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Agent, "viewer")
         .await;
     peer.wait_for_marker(30).await;
     peer.drain_for(Duration::from_secs(2)).await;
@@ -787,13 +791,13 @@ async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
 
     let mut seeder = MarkerPeer::connect(&h.sup, 1).await;
     seeder
-        .attach(&session.id, TerminalSelector::Agent, "seeder")
+        .attach_at_boundary(&session.id, TerminalSelector::Agent, "seeder")
         .await;
     seeder.wait_for_text("FAKE-AGENT READY", 30).await;
     seeder.detach().await;
 
     let mut peer = MarkerPeer::connect(&h.sup, 1).await;
-    peer.attach(&session.id, TerminalSelector::Agent, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Agent, "viewer")
         .await;
     peer.wait_for_marker(30).await;
     // Settle before counting: stopping at the first marker would leave a
@@ -830,7 +834,7 @@ async fn a_fresh_terminal_attach_is_marked_once() {
     let (session, _work) = basic_session_mid_launch(&h).await;
 
     let mut peer = MarkerPeer::connect(&h.sup, 1).await;
-    peer.attach(&session.id, TerminalSelector::Agent, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Agent, "viewer")
         .await;
     peer.wait_for_marker(30).await;
     peer.wait_for_text("FAKE-AGENT READY", 30).await;
@@ -863,14 +867,14 @@ async fn a_takeover_marks_the_replacement_and_never_the_incumbent() {
 
     let mut incumbent = MarkerPeer::connect(&h.sup, 1).await;
     incumbent
-        .attach(&session.id, TerminalSelector::Agent, "first-client")
+        .attach_at_boundary(&session.id, TerminalSelector::Agent, "first-client")
         .await;
     incumbent.wait_for_marker(30).await;
     incumbent.wait_for_text("FAKE-AGENT READY", 30).await;
 
     let mut replacement = MarkerPeer::connect(&h.sup, 1).await;
     replacement
-        .attach(&session.id, TerminalSelector::Agent, "second-client")
+        .attach_at_boundary(&session.id, TerminalSelector::Agent, "second-client")
         .await;
     replacement.wait_for_marker(30).await;
     replacement.input(b"AFTER-TAKEOVER\r").await;
@@ -931,7 +935,7 @@ async fn a_takeover_during_the_catch_up_ends_it_with_or_without_a_marker() {
 
     let mut incumbent = MarkerPeer::connect(&h.sup, 1).await;
     incumbent
-        .attach(&session.id, TerminalSelector::Agent, "first-client")
+        .attach_at_boundary(&session.id, TerminalSelector::Agent, "first-client")
         .await;
     // No wait for the incumbent's marker: the takeover is issued the
     // instant its attach is acknowledged, which is the earliest a client
@@ -940,7 +944,7 @@ async fn a_takeover_during_the_catch_up_ends_it_with_or_without_a_marker() {
     // be, and what is asserted instead.
     let mut replacement = MarkerPeer::connect(&h.sup, 1).await;
     replacement
-        .attach(&session.id, TerminalSelector::Agent, "second-client")
+        .attach_at_boundary(&session.id, TerminalSelector::Agent, "second-client")
         .await;
     replacement.wait_for_marker(60).await;
 
@@ -1009,7 +1013,7 @@ async fn a_tmux_pause_catch_up_replays_without_a_marker() {
     .await;
 
     let mut peer = MarkerPeer::connect(&h.sup, 1).await;
-    peer.attach(&session.id, TerminalSelector::Agent, "viewer")
+    peer.attach_at_boundary(&session.id, TerminalSelector::Agent, "viewer")
         .await;
     peer.wait_for_marker(30).await;
     // Enough history that the catch-up has something real to replay.
