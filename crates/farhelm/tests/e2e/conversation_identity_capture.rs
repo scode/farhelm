@@ -144,13 +144,20 @@ pub(crate) async fn record_session(
 /// prompt", which is the only moment a record can appear.
 ///
 /// Returns the conversation id the fixture reported, so a test can assert
-/// the supervisor captured THAT id rather than merely some id.
+/// the supervisor captured THAT id rather than merely some id. Its transcript
+/// includes initial replay and the fixture's readiness and record witnesses;
+/// its stream has already consumed those setup reads and the replay marker.
+/// Callers can retain the complete setup evidence without waiting for that
+/// marker again.
 pub(crate) async fn provoke_record(
     h: &Harness,
     session: &SessionInfo,
 ) -> (u32, TermStream, Vec<u8>, String) {
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"first prompt\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
@@ -993,8 +1000,11 @@ async fn an_empty_input_frame_never_starts_the_correlator() {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
 
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, Vec::new()).await;
     for _ in 0..5 {
@@ -1352,8 +1362,11 @@ async fn a_session_resuming_an_old_conversation_is_not_captured() {
         .create_session(&work.path().to_string_lossy(), &invocation, None, 80, 24)
         .await
         .expect("create");
-    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"hello\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "echo:", 20).await;

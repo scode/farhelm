@@ -356,8 +356,8 @@ async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
     // The attachment is what makes this connection the one asked. Held for
     // the rest of the test: dropping the stream would tear it down and
     // change which link the relay finds.
-    let (_channel, _stream) = helm
-        .attach(&session.id, 80, 24)
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("the second client attaches");
 
@@ -445,8 +445,8 @@ async fn a_helm_that_never_answers_times_the_request_out() {
     let token = credential_for(&h, &session.id).await;
 
     let helm = connect_helm(&h.sup, ScriptedHandler::silent()).await;
-    let (_channel, _stream) = helm
-        .attach(&session.id, 80, 24)
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("the silent client attaches");
 
@@ -483,8 +483,8 @@ async fn a_peer_may_not_ask_as_another_session() {
         ScriptedHandler::answering(AgentReply::Hosts { hosts: Vec::new() }),
     )
     .await;
-    let (_channel, _stream) = helm
-        .attach(&other.id, 80, 24)
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&other.id, 80, 24)
         .await
         .expect("the helm attaches to the OTHER session");
 
@@ -538,12 +538,12 @@ async fn two_peers_using_the_same_request_id_are_relayed_and_answered_apart() {
     let (helm, upstream_ids) = connect_helm_tapping_request_ids(&h.sup, handler.clone()).await;
     // ONE helm connection holding BOTH attachments, which is what puts the
     // two upcalls on one link and one pending table.
-    let (_c1, _s1) = helm
-        .attach(&first.id, 80, 24)
+    let (_c1, _r1, _s1) = helm
+        .attach_live(&first.id, 80, 24)
         .await
         .expect("attach the first session");
-    let (_c2, _s2) = helm
-        .attach(&second.id, 80, 24)
+    let (_c2, _r2, _s2) = helm
+        .attach_live(&second.id, 80, 24)
         .await
         .expect("attach the second session");
 
@@ -617,8 +617,8 @@ async fn a_helm_that_dies_mid_upcall_ends_the_request_at_once() {
 
     let (handler, mut calls) = ScriptedHandler::gated();
     let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, stream) = helm
-        .attach(&session.id, 80, 24)
+    let (_channel, _replay, stream) = helm
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("the helm attaches");
 
@@ -678,8 +678,8 @@ async fn a_deleted_session_cannot_ask_on_a_connection_it_already_opened() {
 
     let handler = ScriptedHandler::answering(AgentReply::Hosts { hosts: Vec::new() });
     let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _stream) = helm
-        .attach(&session.id, 80, 24)
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("the helm attaches");
 
@@ -733,8 +733,8 @@ async fn a_session_cannot_call_the_internal_profile_resolver_directly() {
         },
     });
     let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _stream) = helm
-        .attach(&session.id, 80, 24)
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("the helm attaches");
 
@@ -789,8 +789,8 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
         source_profile: snapshot.clone(),
     });
     let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _stream) = helm
-        .attach(&session.id, 80, 24)
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&session.id, 80, 24)
         .await
         .expect("the helm attaches");
 

@@ -161,13 +161,17 @@ async fn hook_session(
 }
 
 /// Attach to a session and wait until its fixture is listening.
+///
+/// The returned transcript includes initial replay and the fixture's readiness
+/// witness. Its stream has already consumed those setup reads and the replay
+/// marker, so callers retain startup evidence without waiting for that marker
+/// again.
 async fn attach_ready(h: &Harness, session: &SessionInfo) -> (u32, TermStream, Vec<u8>) {
-    let (chan, mut rx) = h
+    let (chan, mut seen, mut rx) = h
         .client
-        .attach(&session.id, WIDE_COLS, ROWS)
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach");
-    let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     (chan, rx, seen)
 }
@@ -1864,11 +1868,10 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
         )
         .await
         .expect("create a claude-kind session against the real supervisor");
-    let (_chan, mut rx) = client
-        .attach(&session.id, WIDE_COLS, ROWS)
+    let (_chan, mut seen, mut rx) = client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach");
-    let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, ARGV_MARKER, 20).await;
     let argv = argv_marker(&seen);
     injected_settings(&argv)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
