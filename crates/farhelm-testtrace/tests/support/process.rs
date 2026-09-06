@@ -167,6 +167,20 @@ impl ChildGroup {
             libc::kill(-(self.pid as i32), libc::SIGKILL);
         }
     }
+
+    /// Delivers the fixture's requested abnormal exit while the direct PID remains owned.
+    ///
+    /// This shared module is also compiled into a macro contract binary that uses only bounded
+    /// completion, so this method is intentionally dormant in that consumer.
+    #[allow(dead_code)]
+    fn signal_group(&self, signal: libc::c_int) -> io::Result<()> {
+        // SAFETY: the unreaped group leader reserves this process-group identity for the guard.
+        if unsafe { libc::kill(-(self.pid as i32), signal) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
 }
 
 impl Drop for ChildGroup {
@@ -278,6 +292,141 @@ pub fn run_bounded(
                     child_pid: Some(pid),
                     output,
                     detail: format!("poll: {error}"),
+                });
+            }
+        }
+    }
+}
+
+/// Waits for an exact append-readiness marker, then signals and reaps the owned child group.
+///
+/// The marker is evidence from the child after its append call returned. Poll timing establishes
+/// only the supervision deadline; it is never accepted as evidence that persistence completed.
+/// This shared module's macro contract consumer does not run abnormal-exit fixtures.
+#[allow(dead_code)]
+pub fn run_until_stdout_then_signal(
+    mut command: Command,
+    ready_marker: &[u8],
+    signal: libc::c_int,
+    timeout: Duration,
+    stream_limit: usize,
+) -> Result<CommandResult, RunFailure> {
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let child = command.spawn().map_err(|error| RunFailure {
+        kind: FailureKind::Supervision,
+        child_pid: None,
+        output: CapturedOutput::default(),
+        detail: format!("spawn: {error}"),
+    })?;
+    let pid = child.id();
+    let mut group = ChildGroup {
+        child: Some(child),
+        pid,
+    };
+    let (mut stdout, mut stderr) = group.take_pipes().map_err(|error| RunFailure {
+        kind: FailureKind::Supervision,
+        child_pid: Some(pid),
+        output: CapturedOutput::default(),
+        detail: format!("take pipes: {error}"),
+    })?;
+    if let Err(error) =
+        set_nonblocking(stdout.as_raw_fd()).and_then(|()| set_nonblocking(stderr.as_raw_fd()))
+    {
+        return Err(RunFailure {
+            kind: FailureKind::Supervision,
+            child_pid: Some(pid),
+            output: CapturedOutput::default(),
+            detail: format!("configure nonblocking pipes: {error}"),
+        });
+    }
+
+    let mut output = CapturedOutput::default();
+    let deadline = Instant::now() + timeout;
+    let mut signaled = false;
+    loop {
+        if let Err(failure) =
+            drain_available(&mut stdout, &mut output.stdout, stream_limit, "stdout").and_then(
+                |()| drain_available(&mut stderr, &mut output.stderr, stream_limit, "stderr"),
+            )
+        {
+            return Err(RunFailure {
+                kind: failure.kind(),
+                child_pid: Some(pid),
+                output,
+                detail: failure.to_string(),
+            });
+        }
+        if !signaled
+            && output
+                .stdout
+                .windows(ready_marker.len())
+                .any(|window| window == ready_marker)
+        {
+            if let Err(error) = group.signal_group(signal) {
+                return Err(RunFailure {
+                    kind: FailureKind::Supervision,
+                    child_pid: Some(pid),
+                    output,
+                    detail: format!("signal ready child: {error}"),
+                });
+            }
+            signaled = true;
+        }
+        match group.has_exited() {
+            Ok(true) if signaled => {
+                group.terminate_group();
+                if let Err(failure) =
+                    drain_available(&mut stdout, &mut output.stdout, stream_limit, "stdout")
+                        .and_then(|()| {
+                            drain_available(&mut stderr, &mut output.stderr, stream_limit, "stderr")
+                        })
+                {
+                    return Err(RunFailure {
+                        kind: failure.kind(),
+                        child_pid: Some(pid),
+                        output,
+                        detail: failure.to_string(),
+                    });
+                }
+                let status = match group.reap() {
+                    Ok(status) => status,
+                    Err(error) => {
+                        return Err(RunFailure {
+                            kind: FailureKind::Supervision,
+                            child_pid: Some(pid),
+                            output,
+                            detail: format!("reap signaled child: {error}"),
+                        });
+                    }
+                };
+                return Ok(CommandResult { status, output });
+            }
+            Ok(true) => {
+                return Err(RunFailure {
+                    kind: FailureKind::Supervision,
+                    child_pid: Some(pid),
+                    output,
+                    detail: "child exited before append readiness".to_owned(),
+                });
+            }
+            Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(false) => {
+                return Err(RunFailure {
+                    kind: FailureKind::Timeout,
+                    child_pid: Some(pid),
+                    output,
+                    detail: format!("append readiness deadline of {timeout:?} expired"),
+                });
+            }
+            Err(error) => {
+                return Err(RunFailure {
+                    kind: FailureKind::Supervision,
+                    child_pid: Some(pid),
+                    output,
+                    detail: format!("poll ready child: {error}"),
                 });
             }
         }
