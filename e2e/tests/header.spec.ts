@@ -10,6 +10,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createSession, cleanupSession } from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
 
 function row(page: Page, id: string) {
@@ -43,7 +44,7 @@ test(
       await page.setViewportSize({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT });
       await page.goto("/");
       await row(page, session.id).locator(".session-row-open").click();
-      await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+      await waitForSessionRevealed(page, session.id);
       await waitForTermText(page, "FAKE-AGENT READY");
 
       const restartButton = page.locator(".restart-primary");
