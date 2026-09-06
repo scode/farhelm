@@ -1341,7 +1341,7 @@ mod tests {
     /// `is-active` answers 4 rather than 3. Treating that as an error
     /// stopped setup before it published its first file — a command that
     /// worked on every machine except the ones it was written for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_first_install_writes_both_units_reloads_and_enables() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1408,7 +1408,7 @@ mod tests {
     /// something" would skip forever the step its predecessor never
     /// finished. Both are cheap and systemd ignores them when there is
     /// nothing to do.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unchanged_rerun_writes_nothing_but_still_reloads_and_enables() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1433,7 +1433,7 @@ mod tests {
     /// until something else stops it. A unit that was not running must
     /// not be restarted — `enable --now` already started it, and a
     /// restart on top of that would be a second, pointless bounce.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_a_changed_unit_that_was_active_is_restarted() {
         for active in [true, false] {
             let fixture = Fixture::new();
@@ -1475,7 +1475,7 @@ mod tests {
     /// refuse to touch it; `--no-supervisor` must leave it byte-for-byte
     /// alone AND still install the helm, rather than tripping over an
     /// ownership check on a file it was told not to manage.
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_supervisor_leaves_a_foreign_supervisor_unit_untouched() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[]);
@@ -1511,7 +1511,7 @@ mod tests {
     /// The pinned flags are what make the units reproducible: one
     /// resolved state directory in BOTH units, and `--port` in the helm
     /// unit when it was given.
-    #[test]
+    #[farhelm_testtrace::test]
     fn pinned_flags_reach_the_units_they_belong_to() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1540,7 +1540,7 @@ mod tests {
     /// reboot clears the directory, and then fails at boot with nothing
     /// to explain it. `--dry-run` still renders, because seeing the unit
     /// is exactly what a developer is trying the flag for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_binary_in_a_build_tree_is_refused_but_still_renders_under_dry_run() {
         let fixture = Fixture::new();
         let build_tree = fixture.root.path().join("target/debug");
@@ -1576,7 +1576,7 @@ mod tests {
     /// directory (an extracted archive nobody installed yet). `/tmp` is a
     /// symlink on some systems, so the check has to compare resolved
     /// paths.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_binary_under_the_temporary_directory_is_refused() {
         let fixture = Fixture::new();
         let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1594,7 +1594,7 @@ mod tests {
     /// candidate actually printed — because "could not be run" without it
     /// leaves the operator guessing between a typo, a permission problem,
     /// and a missing interpreter.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_unusable_tmux_is_named_in_the_refusal() {
         let fixture = Fixture::new();
         let empty = fixture.root.path().join("empty");
@@ -1642,7 +1642,7 @@ mod tests {
 
     /// A refused tmux must not stop `--dry-run` from showing the unit:
     /// the stand-in names the one field the operator still has to supply.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_dry_run_renders_a_placeholder_for_a_tmux_it_would_refuse() {
         let fixture = Fixture::new();
         let empty = fixture.root.path().join("empty");
@@ -1665,7 +1665,7 @@ mod tests {
     /// A tmux above the pin is accepted — refusing it would strand people
     /// on Homebrew's current release — but the operator is told, so a
     /// later bug report starts from the right place.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_tmux_newer_than_the_pin_is_accepted_with_a_warning() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 9.9")]);
@@ -1681,7 +1681,7 @@ mod tests {
     /// never overwrite a unit somebody else wrote. Checked before any
     /// write, so a refusal on the second unit does not leave the first
     /// one replaced.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unmarked_unit_file_is_refused_rather_than_overwritten() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1711,7 +1711,7 @@ mod tests {
     /// leaves the operator's own drop-in directory alone while saying so
     /// — a stale override would otherwise apply silently to whatever a
     /// later setup writes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn uninstall_removes_only_marked_units_and_reports_drop_ins() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1772,7 +1772,7 @@ mod tests {
 
     /// Uninstall refuses a hand-written unit for the same reason install
     /// does, and the refusal has to come before anything is disabled.
-    #[test]
+    #[farhelm_testtrace::test]
     fn uninstall_refuses_a_unit_it_does_not_own() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[]);
@@ -1795,7 +1795,7 @@ mod tests {
 
     /// `--dry-run --uninstall` reports what it would remove and touches
     /// neither systemd nor the disk.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_dry_run_uninstall_changes_nothing() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1819,7 +1819,7 @@ mod tests {
     /// than assume `~/.config` — and, since the variable it can see is
     /// the CALLER's, only when the manager agrees it is the same
     /// directory.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_unit_directory_follows_xdg_config_home() {
         let fixture = Fixture::new();
         let xdg = fixture.root.path().join("xdg");
@@ -1843,7 +1843,7 @@ mod tests {
     ///
     /// The refusal is asserted whole: it has to name both directories and
     /// the way out, because nothing else in the failure does.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_unit_directory_the_manager_does_not_read_is_refused_before_any_write() {
         let fixture = Fixture::new();
         let elsewhere = fixture.root.path().join("srv-config");
@@ -1875,7 +1875,7 @@ mod tests {
     ///
     /// The dry run reports the same mismatch as a note and still removes
     /// nothing, since that is what a dry run promises either way.
-    #[test]
+    #[farhelm_testtrace::test]
     fn uninstall_refuses_a_unit_directory_the_manager_does_not_read() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -1938,7 +1938,7 @@ mod tests {
     /// Install published units nothing loaded, uninstall reported both
     /// absent while the real services kept running, and dry-run said
     /// nothing at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_callers_home_never_stands_in_for_the_managers() {
         let fixture = Fixture::new();
         // The manager's home, and the units that really exist there.
@@ -1992,7 +1992,7 @@ mod tests {
     /// locate units for. Guessing there — with the caller's home, or with
     /// anything else — is exactly the confident wrong answer this guard
     /// exists to prevent, so it fails closed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_manager_with_no_usable_environment_is_refused() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2015,7 +2015,7 @@ mod tests {
     /// The lock is taken before the ownership preflight and held through
     /// every write and every systemctl call. This test holds it the same
     /// way a second setup would, on its own descriptor.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_second_setup_holding_the_lock_is_refused_before_anything_is_written() {
         use std::os::fd::AsRawFd as _;
 
@@ -2080,7 +2080,7 @@ mod tests {
     /// issues this one read-only query and reports a mismatch as a note
     /// rather than a refusal — then goes on to render the units, which is
     /// what they ran the flag for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_dry_run_notes_a_unit_directory_the_manager_does_not_read() {
         let fixture = Fixture::new();
         let elsewhere = fixture.root.path().join("srv-config");
@@ -2109,7 +2109,7 @@ mod tests {
     /// to do and nothing safe to guess. The refusal carries systemctl's
     /// own stderr, which is the only thing that distinguishes "no manager
     /// on this machine" from "not the session you think you are in".
-    #[test]
+    #[farhelm_testtrace::test]
     fn setup_refuses_when_no_user_manager_answers() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2137,7 +2137,7 @@ mod tests {
     /// compute `/srv/other/.config/systemd/user` on BOTH sides of a
     /// comparison whose only job is to notice that the manager reads
     /// somewhere else.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_managers_directory_comes_only_from_the_managers_own_environment() {
         let expected = PathBuf::from("/srv/c/systemd/user");
         for block in [
@@ -2200,7 +2200,7 @@ mod tests {
     /// the supervisor `/srv/state/farhelm` and the helm
     /// `~/.local/state/farhelm`: both start, and the helm then looks for
     /// the supervisor's socket in a directory nothing listens in.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_default_state_directory_follows_xdg_state_home() {
         let fixture = Fixture::new();
         let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2244,7 +2244,7 @@ mod tests {
     /// `FARHELM_TMUX` is how the desktop app and a systemd unit name a
     /// tmux that is not on the shell's `PATH`; setup honours the same
     /// variable, and `--tmux` still wins over it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_tmux_environment_capture_is_honoured_and_the_flag_beats_it() {
         let fixture = Fixture::new();
         let empty = fixture.root.path().join("empty");
@@ -2281,7 +2281,7 @@ mod tests {
     /// a unit or profile line with nothing after the `=`. Reading it as a
     /// program name could only ever fail, so discovery must fall through
     /// to PATH, which is what the supervisor's own resolver does.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_empty_tmux_environment_capture_falls_through_to_path() {
         let fixture = Fixture::new();
         let on_path = fixture.tmux_dir("tmux 3.7c");
@@ -2305,7 +2305,7 @@ mod tests {
     ///
     /// The working directory is INJECTED: this repository's tests never
     /// change the test runner's own.
-    #[test]
+    #[farhelm_testtrace::test]
     fn relative_paths_are_resolved_against_the_directory_setup_ran_in() {
         let fixture = Fixture::new();
         let tmux_dir = fixture.tmux_dir("tmux 3.7c");
@@ -2354,7 +2354,7 @@ mod tests {
     /// `/` and the helm's own parser reads it as the value — checked here
     /// against the REAL parser, since "the renderer is fine but the child
     /// rejects it" is the failure this guards.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_hyphen_leading_state_directory_survives_the_child_parser() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2402,7 +2402,7 @@ mod tests {
     /// resolution agree exactly as they do in production. Reading the test
     /// process's working directory is fine; changing it is what this
     /// repository forbids.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_relative_path_entry_is_pinned_as_an_absolute_program() {
         /// The spelling of `target` relative to an absolute `base`.
         fn relative_from(base: &Path, target: &Path) -> PathBuf {
@@ -2448,7 +2448,7 @@ mod tests {
     /// strand an operator whose PATH happens to carry a broken `tmux`
     /// ahead of a working one — a `noexec` mount or a wrong-group execute
     /// bit produces exactly that shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unrunnable_path_entry_does_not_hide_a_usable_tmux() {
         let fixture = Fixture::new();
         let shadow = fixture.root.path().join("shadow");
@@ -2476,7 +2476,7 @@ mod tests {
     /// replace a running unit's file and then skip the restart, leaving
     /// the old process on the old configuration while setup claims
     /// success. So it stops, before the file is touched.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unclassifiable_is_active_result_stops_before_the_unit_is_replaced() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2513,7 +2513,7 @@ mod tests {
     /// has never heard of. They differ only in whether the file existed
     /// before, which the ownership preflight has already settled; neither
     /// is a reason to restart anything, and neither is an error.
-    #[test]
+    #[farhelm_testtrace::test]
     fn both_of_systemds_not_running_answers_mean_no_restart() {
         for stopped in [true, false] {
             let fixture = Fixture::new();
@@ -2564,7 +2564,7 @@ mod tests {
     /// covered, including the gap BETWEEN the two restarts, which is the
     /// one that can leave a split configuration: a restarted supervisor on
     /// the new state tree beside a helm still on the old one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_restart_owed_by_a_failed_run_is_paid_by_the_next_one() {
         let supervisor = "farhelm-supervisor.service";
         let helm = "farhelm-helm.service";
@@ -2645,7 +2645,7 @@ mod tests {
     /// `enable --now` starts it, and a restart on top of that would be a
     /// second, pointless bounce. The marker is the record of that
     /// distinction, so it must not appear.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_changed_but_stopped_unit_owes_no_restart() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2676,7 +2676,7 @@ mod tests {
     /// Uninstall clears any outstanding obligation with the unit it
     /// belonged to. A marker left behind would make the NEXT install
     /// restart a service `enable --now` had just started.
-    #[test]
+    #[farhelm_testtrace::test]
     fn uninstall_clears_an_outstanding_restart_obligation() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2713,7 +2713,7 @@ mod tests {
     /// do and reported success — leaving the manager holding definitions
     /// for units that no longer exist, startable until something else
     /// reloaded it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_uninstall_retry_issues_a_reload_that_failed_after_deletion() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2748,7 +2748,7 @@ mod tests {
     /// half-finished machine. The transcript is buffered and written once
     /// at the end, so every unit file and every systemctl command still
     /// happens; the write error is reported afterwards.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_failing_writer_still_converges_the_machine() {
         struct BrokenWriter;
         impl Write for BrokenWriter {
@@ -2802,7 +2802,7 @@ mod tests {
     /// move it aside or delete it" for a permission error or a file with
     /// a stray byte in it asserts a conclusion nobody reached and
     /// recommends destroying the evidence.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unreadable_unit_file_reports_the_read_failure_not_an_ownership_claim() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2830,7 +2830,7 @@ mod tests {
     /// The dangerous order is the one the first test cannot reach: a
     /// perfectly ordinary supervisor unit, and a foreign helm unit
     /// discovered only after the supervisor was already replaced.
-    #[test]
+    #[farhelm_testtrace::test]
     fn foreign_targets_are_refused_in_every_shape_before_anything_is_written() {
         // A directory and a symlink are both "not a regular file", and a
         // symlink is the one that could otherwise redirect a write.
@@ -2898,7 +2898,7 @@ mod tests {
     /// DELETED before the foreign helm unit was noticed, leaving a
     /// half-uninstalled machine whose retry then skipped the reload as
     /// well.
-    #[test]
+    #[farhelm_testtrace::test]
     fn uninstall_refuses_a_foreign_second_target_before_removing_the_first() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2933,7 +2933,7 @@ mod tests {
     /// so the preview names the query and states the condition instead.
     /// Order matters as much as content: this is the sequence a reader
     /// will compare against what actually happens.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_dry_run_previews_the_status_query_and_the_conditional_restart() {
         let fixture = Fixture::new();
         let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
@@ -2986,7 +2986,7 @@ mod tests {
     /// four flags that would ask it to install something at the same
     /// time. Every other test here builds `SetupOptions` directly and so
     /// proves nothing about the parser.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_setup_command_line_parses_and_enforces_its_conflicts() {
         let parsed = crate::Cli::try_parse_from([
             "farhelm",

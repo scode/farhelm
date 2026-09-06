@@ -486,7 +486,7 @@ fn record_timestamp(home: &std::path::Path, cwd: &std::path::Path, conversation:
 ///
 /// This session never writes a record, so nothing here could have come
 /// from the scan: the identity is the agent's own answer or it is nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reported_identity_is_offered_for_resume() {
     let (h, fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -538,7 +538,7 @@ async fn a_reported_identity_is_offered_for_resume() {
 /// variable, which is what makes the id invisible in the argv marker. This
 /// test needs it visible, and the fixture's `extra` catch-all is what makes
 /// a bare `--resume <id>` acceptable to clap.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_second_report_replaces_the_first() {
     let (h, fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -628,7 +628,7 @@ async fn a_second_report_replaces_the_first() {
 /// The hook log is the second, independent witness: its contract is one
 /// line per run, so two `acked` lines for one id mean two hook processes
 /// really did dial the supervisor and be answered.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_repeated_report_of_one_id_is_two_hook_runs() {
     let (h, fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -683,7 +683,7 @@ async fn a_repeated_report_of_one_id_is_two_hook_runs() {
 /// that distinguishes "the report won" from "the scan happened to agree":
 /// it is also what a supervisor restart reloads the state from, so a right
 /// answer stored under the wrong provenance would come back wrong.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_scan_cannot_override_a_report() {
     let (h, fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -734,7 +734,7 @@ async fn a_scan_cannot_override_a_report() {
 /// Both halves run in their own working directory: the second half's whole
 /// point is a shared directory, and the first half's session must not be
 /// dragged into it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_report_before_the_scan_lands_is_not_clobbered() {
     let (h, fixtures, serving) = hook_harness().await;
 
@@ -843,7 +843,7 @@ async fn a_report_before_the_scan_lands_is_not_clobbered() {
 /// scan — so an overlapping rival is declared ambiguous without its
 /// candidate list ever being built. Disjoint windows plus a record minted
 /// late is the only shape in which the filter decides anything.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reported_id_is_excluded_from_a_rivals_candidates() {
     let (h, fixtures, serving) = hook_harness().await;
 
@@ -968,7 +968,7 @@ async fn a_reported_id_is_excluded_from_a_rivals_candidates() {
 /// session answering for itself says nothing about which record belongs to
 /// the other, and a report that resolved the WHOLE group would be exactly
 /// the guess this design refuses to make.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_report_clears_ambiguity() {
     let (h, fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1048,7 +1048,7 @@ async fn a_report_clears_ambiguity() {
 /// dropped and its accept loop stopped: an overlapping successor starts
 /// read-only and reconciles nothing, so a test that skipped the drain would
 /// exercise a path production never takes.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_report_survives_a_supervisor_restart() {
     let (h, fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1160,7 +1160,7 @@ async fn a_report_survives_a_supervisor_restart() {
 /// `begin_relaunch` is what would have cleared the columns, and a refusal
 /// that had already run it would leave the session with no identity and no
 /// relaunch either.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_fresh_restart_is_refused_while_a_report_stands() {
     let (h, fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1217,7 +1217,7 @@ async fn a_fresh_restart_is_refused_while_a_report_stands() {
 /// The assertion is on the surviving VALUE, not on a count of one: a merge
 /// attempt that rewrote the user's settings in place would keep the count
 /// at one while losing exactly what this test exists to protect.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn hook_flags_are_not_injected_when_the_invocation_already_has_settings() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1264,7 +1264,7 @@ async fn hook_flags_are_not_injected_when_the_invocation_already_has_settings() 
 /// only Claude's, and a tail of Codex's shape (or any future kind's) would
 /// pass an absence check while being exactly the defect. "Launched exactly
 /// as asked" is the claim, so exactly-as-asked is what is asserted.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn generic_sessions_get_no_hook_flags() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1327,7 +1327,7 @@ async fn generic_sessions_get_no_hook_flags() {
 /// build that read the setting as "hooks are disabled" would pass the
 /// claude half on its own. The codex session is the control — same
 /// supervisor, same launch path, opposite outcome.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn hooks_can_be_disabled_by_kind() {
     let (h, fixtures) = capture_harness_with_seams(|seams| {
         seams.agent_hooks =
@@ -1536,7 +1536,7 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
 /// run that never touched a socket — passing this test without exercising
 /// the failure it is named for. `connect-failed` in the log is what says
 /// the dial was actually attempted and actually failed.
-#[test]
+#[farhelm_testtrace::test]
 fn a_hook_with_no_supervisor_is_silent_and_leaves_a_trace() {
     let state = farhelm_teststate::tempdir().expect("state dir");
     let socket = state.path().join("supervisor.sock");
@@ -1642,7 +1642,7 @@ fn a_hook_talking_to_a_silent_supervisor_still_finishes_in_budget() {
 /// fragment, so a hook that gave up for any OTHER reason would also finish
 /// silently and in budget. `timeout stdin` is what says the budget stopped
 /// a read that was still blocked, which is the whole claim.
-#[test]
+#[farhelm_testtrace::test]
 fn a_hook_whose_stdin_is_never_closed_still_finishes_in_budget() {
     let state = farhelm_teststate::tempdir().expect("state dir");
     let socket = state.path().join("supervisor.sock");
@@ -1662,7 +1662,7 @@ fn a_hook_whose_stdin_is_never_closed_still_finishes_in_budget() {
 /// wrote it. There is no supervisor to report to and no session to report
 /// about, so the only acceptable behaviour is to leave no trace on any
 /// descriptor and get out of the agent's way.
-#[test]
+#[farhelm_testtrace::test]
 fn a_hook_outside_a_farhelm_session_does_nothing_silently() {
     let mut cmd = std::process::Command::new(farhelm_bin());
     cmd.args(["internal", "hook"])
@@ -1714,7 +1714,7 @@ const EXPECTED_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", 
 /// exactly a session whose agent may need to ask farhelm what is going on.
 /// The log line is read to prove the run really did take the failing path
 /// rather than skipping the socket entirely.
-#[test]
+#[farhelm_testtrace::test]
 fn an_announcing_hook_prints_exactly_the_pointer_line() {
     let state = farhelm_teststate::tempdir().expect("state dir");
     let socket = state.path().join("supervisor.sock");
@@ -1890,7 +1890,7 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
 /// name, read it twice, or forgot to pass the parsed value into
 /// `SupervisorStartup` at all — only a real process, started the way an
 /// operator actually starts one, can catch that class of bug.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn farhelm_agent_instructions_off_suppresses_announce_through_the_real_cli() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process_with_env([
@@ -1923,7 +1923,7 @@ async fn farhelm_agent_instructions_off_suppresses_announce_through_the_real_cli
 /// copy-paste, a locale mismatch) — the CLI's fallback direction matters
 /// precisely because this switch's OFF position removes a feature, so a
 /// value nobody can even read must not silently become "off".
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn farhelm_agent_instructions_non_utf8_falls_back_to_default_through_the_real_cli() {
     use std::os::unix::ffi::OsStringExt;
 

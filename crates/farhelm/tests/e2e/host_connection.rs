@@ -328,7 +328,7 @@ async fn recorded_identity(store: &HelmStore, host: HostId) -> Option<String> {
 /// Skipped loudly (never silently) where passwordless `ssh localhost` is
 /// unavailable — the repo's established pattern for a test whose
 /// precondition is a property of the host, not of the code.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_ssh_row_reaches_a_real_supervisor_and_caches_its_sessions() {
     if !self_ssh_available().await {
         eprintln!(
@@ -416,7 +416,7 @@ async fn an_ssh_row_reaches_a_real_supervisor_and_caches_its_sessions() {
 /// exactly as a down remote's do. Pinning it against a real socket is what
 /// proves `SystemTransport` dispatches on `HostKind` correctly; a scripted
 /// transport would answer the same for both kinds and prove nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_local_row_reaches_a_real_supervisor_over_its_unix_socket() {
     let remote = remote_supervisor().await;
     // Deliberately the SAME directory the supervisor serves from: that is

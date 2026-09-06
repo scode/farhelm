@@ -521,7 +521,7 @@ async fn seed_deep_scrollback(sup: &Arc<Supervisor>, session_id: &str, lines: us
 /// everything before the marker into one write and reveals the terminal at
 /// it, so a marker on the wrong side of either boundary is either a
 /// half-painted catch-up or a terminal that never appears.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_agent_reattach_marks_the_boundary_before_output_made_during_the_catch_up() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -568,7 +568,7 @@ async fn an_agent_reattach_marks_the_boundary_before_output_made_during_the_catc
 /// honest — so a marker emitted anywhere but after the final chunk lands
 /// with the tail of the history still to come, which is precisely the
 /// half-painted reattach M5 exists to remove.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -611,7 +611,7 @@ async fn a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk() {
 /// by channel, so with every test attaching on channel 1 a hard-coded
 /// `channel: 1` would pass them all. This attach runs on channel 7, and
 /// [`assert_marker_splits`] checks the marker names it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_tab_attach_is_marked_on_the_channel_it_attached() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -648,7 +648,7 @@ async fn a_tab_attach_is_marked_on_the_channel_it_attached() {
 /// be written AFTER the alternate-screen switch — none of which the
 /// normal-screen tests exercise. The pin is that the marker follows the
 /// whole of that assembled replay rather than, say, the prefill alone.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_alternate_screen_attach_marks_after_its_visible_snapshot() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -704,7 +704,7 @@ async fn an_alternate_screen_attach_marks_after_its_visible_snapshot() {
 /// terminal would leave an exited session's scrollback hidden forever,
 /// which is what makes "a dead terminal emits it anyway" load-bearing
 /// rather than tidy.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -773,7 +773,7 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
 /// first live output — an easy way to make every other test here pass —
 /// hangs at exactly that point, which this test observes as a timeout
 /// rather than as a subtly late marker.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -826,7 +826,7 @@ async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
 /// immediately after create is marked exactly once and keeps working
 /// afterwards. A marker gated on "there was something to replay" passes
 /// every other test here and hangs a freshly created session's terminal.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_fresh_terminal_attach_is_marked_once() {
     let h = harness().await;
     // Keep the attach racing startup: waiting for agent readiness would
@@ -860,7 +860,7 @@ async fn a_fresh_terminal_attach_is_marked_once() {
 /// re-attached. It also pins the once-per-ATTACH shape from the other
 /// side — the second attach to the same terminal must be marked, not
 /// treated as already caught up.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_takeover_marks_the_replacement_and_never_the_incumbent() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -927,7 +927,7 @@ async fn a_takeover_marks_the_replacement_and_never_the_incumbent() {
 /// supervisor does not have, since the replay would have to be held
 /// mid-flight — so "none" would be a flake generator, while tolerating
 /// either outcome is exactly what the contract says.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_takeover_during_the_catch_up_ends_it_with_or_without_a_marker() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -989,7 +989,7 @@ async fn a_takeover_during_the_catch_up_ends_it_with_or_without_a_marker() {
 /// that no marker accompanied the START of a catch-up, leaving the far
 /// more plausible regression (a marker where the recovery's replay ENDS,
 /// exactly as the attach path emits one) undetected.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_tmux_pause_catch_up_replays_without_a_marker() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");

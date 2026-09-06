@@ -51,7 +51,7 @@ pub(crate) async fn pane_capture(sock: &std::path::Path, tmux_name: &str) -> Str
 /// single-process agent cannot distinguish a tree kill from a plain one,
 /// and "reaps the prior run before relaunching, never alongside" is the
 /// clause under test.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
@@ -130,7 +130,7 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
 /// or the status was simply stale), and the flag is what tells the
 /// supervisor "the user was actually asked". So the assertion that matters
 /// is the process still being alive afterwards, not just the error.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -199,7 +199,7 @@ async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing(
 /// startup banner, because both runs print the same banner: an assertion
 /// on text only the first run could have produced is what makes this about
 /// retention rather than about the relaunch having printed something.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
@@ -304,7 +304,7 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
 /// proving nothing about the restart's own sweep. The daemon has fully
 /// reparented to init by then, so only the environment-marker scan can
 /// find it at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -364,7 +364,7 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
 /// The annotation is what makes this more than an error-message test: the
 /// clear commits with the new launch generation, so a restart that never
 /// gets a generation must leave the stopped outcome exactly as it was.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotation() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -429,7 +429,7 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
 /// staleness this exercises is a property of the SUPERVISOR's revalidation,
 /// and reproducing it only needs the request to be sent with a mode that
 /// was correct a moment earlier.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_capture_that_lands_after_the_clients_read_makes_a_fresh_restart_conflict() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -566,7 +566,7 @@ fn resumed_record_file(
 
 /// Archive preserves both a captured conversation identity and committed
 /// attachments, and resume uses those two retained facts together.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attachment() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -852,7 +852,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
 /// the Claude-shaped fixture. Kept as its own `#[tokio::test]` (rather than
 /// folded into a loop) so a failure names the agent kind directly in the
 /// test binary's output.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
     interrupted_session_resumes_its_conversation("claude").await;
 }
@@ -868,7 +868,7 @@ async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
 /// against Codex's differently-shaped, date-nested record tree
 /// (`resumed_record_file`) rules out a Claude-only bug hiding behind a
 /// kind-agnostic-looking code path.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal() {
     interrupted_session_resumes_its_conversation("codex").await;
 }
@@ -906,7 +906,7 @@ async fn an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_termin
 /// The supervisor must genuinely `serve()` here, unlike its scan-driven
 /// siblings: the hook is a separate process whose only way in is the unix
 /// socket. See `hook_identity`'s module docs.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
@@ -1081,7 +1081,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
 /// launch prints one marker and the fallback another — because "ran the
 /// right command" is the whole claim, and a template that silently fell
 /// back to the launch invocation would otherwise look identical.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_configured_fallback_template_is_what_a_restart_runs() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1207,7 +1207,7 @@ pub(crate) fn write_rc_files(home: &std::path::Path, value: &str) {
 /// it says so loudly and stops rather than asserting something it cannot
 /// observe: a silent pass would be worse than an honest skip, and a
 /// failure would blame the product for the harness's blind spot.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
     let home = farhelm_teststate::tempdir().expect("fixture home");
     write_rc_files(home.path(), "first");
@@ -1323,7 +1323,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
 /// sentinel lifecycle: the failed launch's sentinel sits at the very path
 /// this relaunch's own would use, and a build that left it there would
 /// classify a perfectly good agent as `error` forever.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_restart_clears_a_previous_launch_error() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");

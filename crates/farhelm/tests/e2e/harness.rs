@@ -2256,7 +2256,7 @@ mod tests {
     /// A request that never replies has no completed listing to show, and the
     /// helper's budget must cancel that pending wait rather than waiting for a
     /// transport-level timeout that this test does not control.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn listing_wait_times_out_when_the_first_request_never_completes() {
         let script = VecDeque::from([ScriptedListingReply::Pending]);
         let task = tokio::spawn(wait_for_listing_with(
@@ -2271,7 +2271,7 @@ mod tests {
     /// An empty reply is an observation, unlike a request that never
     /// completed. A later stuck request must retain that distinction in its
     /// timeout diagnostic instead of reporting the empty list as no result.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn listing_wait_retains_an_empty_reply_before_a_later_request_stalls() {
         let script = VecDeque::from([
             ScriptedListingReply::Completed(Ok(Vec::new())),
@@ -2289,7 +2289,7 @@ mod tests {
     /// One deadline covers the whole polling loop, not each request in
     /// isolation. The first complete listing starts neither a replacement
     /// budget nor a fresh diagnostic baseline before the next request stalls.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn listing_wait_keeps_one_budget_across_a_completed_listing_and_stall() {
         let script = VecDeque::from([
             ScriptedListingReply::Completed(Ok(vec![scripted_session(
@@ -2317,7 +2317,7 @@ mod tests {
 
     /// A later completed reply returns every row from that one observation,
     /// rather than only the matching row the predicate used to settle.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn listing_wait_returns_the_complete_reply_that_eventually_matches() {
         let initial = vec![scripted_session("first", "still-not-ready")];
         let matching = vec![
@@ -2342,7 +2342,7 @@ mod tests {
     /// Request errors are terminal evidence for this helper. Retrying them
     /// would delay the useful error and hide a broken list connection behind a
     /// timeout that says nothing about its cause.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn listing_wait_reports_an_rpc_error_without_retrying() {
         let script = VecDeque::from([ScriptedListingReply::Completed(Err(anyhow::anyhow!(
             "scripted RPC failure"
@@ -2359,7 +2359,7 @@ mod tests {
     /// The first request remains immediate, including at a zero-second
     /// budget. This preserves a useful one-shot assertion when its reply is
     /// already ready while still bounding every request that has to wait.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn listing_wait_allows_an_immediately_ready_zero_second_reply() {
         let expected = vec![scripted_session("ready", "immediate")];
         let script = VecDeque::from([ScriptedListingReply::Completed(Ok(expected.clone()))]);
@@ -2424,7 +2424,7 @@ mod tests {
 
     /// The normalizer must remove complete CSI and two-byte escapes without
     /// leaving a final byte glued to the first meaningful token.
-    #[test]
+    #[farhelm_testtrace::test]
     fn normalize_pane_text_removes_whole_sequences_and_nothing_else() {
         assert_eq!(normalize_pane_text(b"\x1b(B61 7f"), "61 7f");
         assert_eq!(normalize_pane_text(b"\x1b[1A61"), "61");
@@ -2438,7 +2438,7 @@ mod tests {
 
     /// Snapshot rows contain terminal positioning and width padding; the
     /// normalized form must expose only the text a test means to read.
-    #[test]
+    #[farhelm_testtrace::test]
     fn normalize_pane_text_trims_snapshot_row_padding() {
         assert_eq!(
             normalize_pane_text(b"\x1b[2;1HREADY       \r\nPROMPT   \r\n"),
@@ -2448,7 +2448,7 @@ mod tests {
 
     /// The returned replay boundary must point exactly between the initial
     /// catch-up bytes and the first live event.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn wait_for_replay_complete_returns_pre_marker_offset() {
         let mut source = ScriptedSource::new([
             TermEvent::Data(b"snapshot".to_vec()),
@@ -2463,7 +2463,7 @@ mod tests {
 
     /// A detach before the marker must explain that the helper was required
     /// to be the first wait on this fresh attachment.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     #[should_panic(expected = "this must be the first wait on a fresh attachment")]
     async fn wait_for_replay_complete_reports_missing_marker_rule() {
         let mut source = ScriptedSource::new([
@@ -2476,7 +2476,7 @@ mod tests {
 
     /// Raw waits must match a needle split across independently delivered
     /// terminal chunks.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn wait_for_matches_across_chunk_boundaries() {
         let mut source = ScriptedSource::new([
             TermEvent::Data(b"nee".to_vec()),
@@ -2488,7 +2488,7 @@ mod tests {
     }
 
     /// An ordinary wait timeout must name the raw needle that was missing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     #[should_panic(expected = "timed out waiting for \"needle\"")]
     async fn wait_for_timeout_names_needle() {
         let mut source = ScriptedSource::pending();
@@ -2498,7 +2498,7 @@ mod tests {
 
     /// Ordered waits must preserve the requirement that the second marker
     /// occurs after the first, even when both arrive in separate chunks.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn wait_for_after_matches_across_chunk_boundaries() {
         let mut source = ScriptedSource::new([
             TermEvent::Data(b"first".to_vec()),
@@ -2511,7 +2511,7 @@ mod tests {
 
     /// An ordered wait timeout must retain both marker labels in its
     /// diagnostic so the missing ordering edge is identifiable.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     #[should_panic(expected = "timed out waiting for \"then\" after \"first\"")]
     async fn wait_for_after_timeout_names_markers() {
         let mut source = ScriptedSource::pending();
@@ -2524,7 +2524,7 @@ mod tests {
     /// leaving the raw bytes in `seen` for any later byte-level assertion.
     /// A raw `contains` implementation, or one that normalizes only the
     /// newest chunk, fails this.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn wait_for_normalized_matches_only_after_normalization() {
         let mut source = ScriptedSource::new([
             TermEvent::Data(b"\x1b[2;1HREA".to_vec()),
@@ -2540,7 +2540,7 @@ mod tests {
     /// `wait_for` consumes the marker, and the boundary wait after it can
     /// only time out. Its timeout must name the rule, because a bare
     /// "timed out waiting for ReplayComplete" reads like a supervisor bug.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     #[should_panic(expected = "timed out waiting for ReplayComplete; this must be the first wait")]
     async fn wait_for_replay_complete_after_a_consuming_wait_names_the_rule() {
         let mut source = ScriptedSource::then_pending([
@@ -2557,7 +2557,7 @@ mod tests {
     /// queued behind it is drained and the predicate gets one last chance,
     /// because an agent's final output and the pane-death notice race.
     /// Dropping either the drain or the recheck would revive that race.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn wait_for_finds_a_needle_queued_behind_detached() {
         let mut source = ScriptedSource::new([
             TermEvent::Data(b"bye".to_vec()),
