@@ -1581,36 +1581,61 @@ try {
 test("late-evidence-cannot-confirm-a-closing-socket", async ({ page, request }) => {
 await reconnectTimingsFromNextLoad(page, {
   delaysMs: [50, 250, 250, 250, 250, 250],
+  // Keep a successor observable within the test deadline even if early
+  // attempts receive no frames and the ladder reaches its probing phase.
+  probeIntervalMs: 250,
 });
 let ownId: string | undefined;
 try {
   const own = await openOwnTerminal(page, request, `late-evidence-cannot-confirm-a-closing-s-${Date.now()}`);
   ownId = own.id;
 
-  // Replacement sockets hold every frame back until just after the
-  // catch-up watchdog has given up on them, then deliver the lot — the
-  // queued-frame race, made deterministic.
-  await page.evaluate(() => {
+  // The idle watchdog calls socketEnded before closing the replacement.
+  // Deliver held frames inside that close call, after the real socket has
+  // entered CLOSING: no second timer has to guess when the ending committed.
+  await page.evaluate((sessionId) => {
     const Real = (window as any).WebSocket;
     (window as any).__realWebSocket = Real;
+    const delivered = {
+      frames: 0, firstSocket: 0, sockets: 0, opened: 0, captured: 0,
+      closeState: null as number | null, hadHandler: false,
+    };
+    (window as any).__lateEvidence = delivered;
     const Late: any = function (url: string, protocols?: any) {
       const ws = new Real(url, protocols);
+      if (new URL(url, location.href).pathname !== `/api/sessions/${sessionId}/term/unowned`) return ws;
+      const ordinal = ++delivered.sockets;
       let handler: any = null;
-      const held: any[] = [];
-      let releasing = false;
+      // One real attachment-proof frame is enough to exercise the guard.
+      // Keep neither the full replay nor an unbounded history of attempts.
+      let held: MessageEvent | null = null;
       Object.defineProperty(ws, "onmessage", {
         get: () => handler,
-        set: (fn) => {
-          handler = fn;
-          if (releasing) return;
-          releasing = true;
-          setTimeout(() => {
-            for (const ev of held.splice(0)) if (handler) handler(ev);
-          }, 320);
-        },
+        set: (fn) => { handler = fn; },
         configurable: true,
       });
-      Real.prototype.addEventListener.call(ws, "message", (ev: any) => held.push(ev));
+      Real.prototype.addEventListener.call(ws, "open", () => { delivered.opened += 1; });
+      Real.prototype.addEventListener.call(ws, "message", (ev: MessageEvent) => {
+        const evidence = typeof ev.data === "string"
+          ? JSON.parse(ev.data).type === "replay_complete"
+          : ev.data.byteLength > 0;
+        if (evidence && !held) {
+          held = ev;
+          delivered.captured += 1;
+        }
+      });
+      const close = ws.close.bind(ws);
+      ws.close = (code?: number, reason?: string) => {
+        close(code, reason);
+        delivered.closeState = ws.readyState;
+        delivered.hadHandler = Boolean(handler);
+        if (ws.readyState !== Real.CLOSING || !handler || !held) return;
+        const ev = held;
+        held = null;
+        handler.call(ws, ev);
+        if (delivered.frames === 0) delivered.firstSocket = ordinal;
+        delivered.frames += 1;
+      };
       return ws;
     };
     for (const state of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
@@ -1618,19 +1643,33 @@ try {
     }
     (window as any).WebSocket = Late;
     (window as any).__farhelmTestReplay = { idleMs: 200 };
-  });
+  }, ownId);
   await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
 
   // The ladder must still be running after the late frames land: a
   // confirmed corpse would leave no surface at all.
   const surface = page.locator("#term-connecting");
-  await expect(surface).toHaveAttribute("data-reconnect-phase", "retrying");
+  let lastEvidence: unknown;
+  await expect.poll(async () => {
+    const observed = await page.evaluate(() => (window as any).__lateEvidence);
+    lastEvidence = observed;
+    return observed.frames;
+  }, {
+    timeout: 20_000,
+    message: "a closing replacement must receive real attachment evidence",
+  }).toBeGreaterThan(0).catch((error) => {
+    throw new Error(`${String(error)}\nlast late-frame snapshot: ${JSON.stringify(lastEvidence)}`);
+  });
+  const firstSocket = await page.evaluate(() => (window as any).__lateEvidence.firstSocket);
+  expect(firstSocket).toBeGreaterThan(0);
+  // Count an actual successor for this session, not the UI's next-rung
+  // label: the ladder may already be probing when the first frame arrives.
   await expect
-    .poll(async () => Number(await surface.getAttribute("data-reconnect-attempt")), {
+    .poll(() => page.evaluate(() => (window as any).__lateEvidence.sockets), {
       timeout: 20_000,
       message: "late evidence must not retire the ladder",
     })
-    .toBeGreaterThan(1);
+    .toBeGreaterThan(firstSocket);
 
   // And a real recovery still happens once the frames flow normally,
   // ending in a terminal that carries input.
