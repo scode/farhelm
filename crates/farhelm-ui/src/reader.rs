@@ -99,6 +99,72 @@ use web_time::Instant;
 use crate::reconnect::{PROBE_INTERVAL_MS, RETRY_LADDER_MS};
 use crate::skew;
 
+/// Register a component-owned, pull-only snapshot for opted-in browser tests.
+///
+/// The getter reads concrete signals with `peek`; it must not resolve global
+/// signals, subscribe, spawn work or mutate application state. Browser tests
+/// invoke all getters in one synchronous turn after their fixture's setup.
+/// Scope cleanup removes the getter before dropping its captured signals.
+/// Ordinary pages and native renderers do not allocate a callback.
+pub(crate) fn use_test_reader_snapshot(snapshot: impl Fn() -> serde_json::Value + 'static) {
+    #[cfg(target_arch = "wasm32")]
+    use_hook(move || std::rc::Rc::new(test_snapshot_bridge::Registration::new(snapshot)));
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = snapshot;
+}
+
+/// Direct wasm callbacks keep observation out of the asynchronous render queue.
+#[cfg(target_arch = "wasm32")]
+mod test_snapshot_bridge {
+    use wasm_bindgen::{closure::Closure, prelude::*};
+
+    #[wasm_bindgen(inline_js = "
+export function readerSnapshotEnabled() {
+    return globalThis.__farhelmTestReaders?.version === 1;
+}
+export function registerReaderSnapshot(getter) {
+    const observer = globalThis.__farhelmTestReaders;
+    if (!(observer?.getters instanceof Set) || observer.getters.size >= 16) {
+        if (observer) observer.error = 'invalid or overflowing reader snapshot registry';
+        return false;
+    }
+    observer.getters.add(getter);
+    return true;
+}
+export function removeReaderSnapshot(getter) {
+    globalThis.__farhelmTestReaders?.getters?.delete(getter);
+}
+")]
+    extern "C" {
+        #[wasm_bindgen(js_name = readerSnapshotEnabled)]
+        fn enabled() -> bool;
+        #[wasm_bindgen(js_name = registerReaderSnapshot)]
+        fn register(getter: &JsValue) -> bool;
+        #[wasm_bindgen(js_name = removeReaderSnapshot)]
+        fn remove(getter: &JsValue);
+    }
+
+    /// Own the callback until component drop; JavaScript never owns its lifetime.
+    pub(super) struct Registration(Closure<dyn Fn() -> String>);
+
+    impl Registration {
+        pub(super) fn new(snapshot: impl Fn() -> serde_json::Value + 'static) -> Option<Self> {
+            if !enabled() {
+                return None;
+            }
+            let callback =
+                Closure::wrap(Box::new(move || snapshot().to_string()) as Box<dyn Fn() -> String>);
+            register(callback.as_ref()).then_some(Self(callback))
+        }
+    }
+
+    impl Drop for Registration {
+        fn drop(&mut self) {
+            remove(self.0.as_ref());
+        }
+    }
+}
+
 /// Why a caller wants a read, as the call sites say it.
 ///
 /// The three are exactly the answers to the module header's two questions,
@@ -314,6 +380,18 @@ pub(crate) enum Next {
 }
 
 impl<T: ReaderTask> SurfaceReader<T> {
+    /// Current work owed by this reader, for opt-in browser-test snapshots.
+    ///
+    /// A network response alone does not prove retirement: a notice may have
+    /// left coalesced demand, or a failed read may own a retry sleeper. Expose
+    /// those facts without changing transitions or retaining task handles.
+    pub(crate) fn test_snapshot(&self) -> serde_json::Value {
+        serde_json::json!({
+            "running": self.running,
+            "demand": format!("{:?}", self.demand),
+            "task": self.reader.is_some(),
+        })
+    }
     /// Record a demand and, if the surface is free, claim it for a new
     /// reader — cancelling the sleeper that was holding it, if any.
     ///
