@@ -338,6 +338,7 @@ fn run_with_setup(
             PollResult::Exited => break,
             PollResult::Running => {
                 if !stdout_turn.read_any && !stderr_turn.read_any {
+                    // sleep-ok: neither pipe made progress; the shared poll interval preserves the execution deadline while waiting for output or child exit.
                     sleep_until(execution_deadline);
                 }
             }
@@ -599,6 +600,7 @@ fn cleanup_direct_child<C: ChildControl>(
                 outcome.direct_child_reaped = true;
                 return;
             }
+            // sleep-ok: after the kill attempt, the direct child remains owned until reaped; poll its exit within the remaining cleanup budget.
             Ok(None) => sleep_until(deadline),
             Err(error) => {
                 let stage = if error.raw_os_error() == Some(libc::ECHILD) {
@@ -659,6 +661,7 @@ fn set_nonblocking<T: AsRawFd + ?Sized>(file: &T, deadline: Instant) -> io::Resu
 fn sleep_until(deadline: Instant) {
     let remaining = deadline.saturating_duration_since(Instant::now());
     if !remaining.is_zero() {
+        // sleep-ok: central polling throttle for owned child supervision; cap the requested interval by the caller's remaining budget.
         std::thread::sleep(remaining.min(Duration::from_millis(1)));
     }
 }
@@ -1082,6 +1085,7 @@ mod tests {
                 Ok(_) => return,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     assert!(Instant::now() < deadline, "fixture release never arrived");
+                    // sleep-ok: the bound release listener is the readiness premise; wait for its explicit connection without busy-spinning.
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 Err(error) => panic!("fixture release listener failed: {error}"),
@@ -1181,6 +1185,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(1);
         while !path.exists() {
             assert!(Instant::now() < deadline, "fixture never wrote {path:?}");
+            // sleep-ok: observe the fixture's atomic readiness-file handoff; elapsed time alone never establishes readiness.
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(fs::read(path).unwrap(), b"ready");
