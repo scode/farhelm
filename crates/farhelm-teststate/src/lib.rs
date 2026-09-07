@@ -34,6 +34,13 @@
 //! Product code must never depend on this crate; it exists for harnesses
 //! and for the hidden `internal` CLI namespace that scripts call.
 
+/// Synchronous bounded command collection for test-harness diagnostics.
+///
+/// This stays separate from the sweep implementation below because callers
+/// need its direct-child ownership and bounded-output contract without also
+/// inheriting the sweep's deliberately best-effort policy.
+pub mod process;
+
 use std::fs::{self, File};
 use std::io;
 use std::os::fd::AsRawFd;
