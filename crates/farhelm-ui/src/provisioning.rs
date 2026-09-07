@@ -794,7 +794,7 @@ mod tests {
     /// page operation becomes busy before the mounted panel consumes it.
     /// The second pass proves acceptance, rather than observation, is the
     /// boundary that removes the one-shot request.
-    #[test]
+    #[farhelm_testtrace::test]
     fn refused_menu_request_remains_queued_until_a_later_pass_accepts_it() {
         let host_id = 7;
         let mut requests = HashMap::from([(host_id, ProvisioningOperation::Update)]);
@@ -822,7 +822,7 @@ mod tests {
     /// operation. Both are also exposed as stable data attributes, so a
     /// rename here is a contract change rather than copy editing. The valid
     /// idle view has no header and therefore does not belong in this test.
-    #[test]
+    #[farhelm_testtrace::test]
     fn run_labels_cover_the_wire_vocabulary() {
         assert_eq!(status_label(ProvisioningStatus::Running), "running");
         assert_eq!(status_label(ProvisioningStatus::Completed), "completed");

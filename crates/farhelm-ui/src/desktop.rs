@@ -1649,7 +1649,7 @@ mod tests {
     /// would clobber the developer's real clipboard on any machine with a
     /// display, and on a headless CI box would only ever prove that arboard
     /// errors without one; the real write is the manual Mac checklist's job.
-    #[test]
+    #[farhelm_testtrace::test]
     fn native_clipboard_sink_constructs_without_touching_a_clipboard() {
         let _sink = native_clipboard_sink();
     }
@@ -1700,7 +1700,7 @@ mod tests {
     /// The content type is the load-bearing part: a webview that receives
     /// `application/octet-stream` for a `<script src>` refuses to execute it,
     /// which looks exactly like an asset that never loaded.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_hit_returns_the_bytes_with_a_guessed_content_type() {
         let response = serve("GET", "/assets/terminal-dxhabc.js");
         assert_eq!(response.status(), 200);
@@ -1724,7 +1724,7 @@ mod tests {
     /// Decoding has to happen before BOTH the lookup and the `mime_guess`
     /// call: an undecoded `%20` would miss the entry, and a path decoded
     /// after the type guess would classify by the wrong extension.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_percent_escaped_path_is_decoded_once_before_lookup_and_typing() {
         let response = serve("GET", "/assets/a%20name%20with%20spaces.css");
         assert_eq!(response.status(), 200);
@@ -1738,7 +1738,7 @@ mod tests {
     /// to strip the body and recompute `Content-Length` the way axum does for
     /// the helm — so returning the same response is both the simplest and the
     /// only truthful option.
-    #[test]
+    #[farhelm_testtrace::test]
     fn head_is_answered_identically_to_get() {
         let head = serve("HEAD", "/assets/terminal-dxhabc.js");
         let get = serve("GET", "/assets/terminal-dxhabc.js");
@@ -1752,7 +1752,7 @@ mod tests {
     ///
     /// Parity with `farhelm-helm`'s `serve_embedded`, so the same request
     /// gets the same answer from the native window and from the browser.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_write_method_is_refused_with_the_allowed_set() {
         let response = serve("POST", "/assets/terminal-dxhabc.js");
         assert_eq!(response.status(), 405);
@@ -1767,7 +1767,7 @@ mod tests {
     /// its only clients are `<script>`, `<link>` and font requests, and
     /// handing one of those a page of HTML produces a parse error instead of
     /// a legible failure.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_miss_is_a_plain_404_with_no_spa_fallback() {
         for path in ["/assets/never-bundled.js", "/assets/looks-like-a-route"] {
             let response = serve("GET", path);
@@ -1782,7 +1782,7 @@ mod tests {
     /// path could ever match one. The webview is not a trusted input source
     /// in the sense that matters here: this runs in the app's own process,
     /// and a panic in the handler takes the window with it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_undecodable_path_is_a_miss_rather_than_a_panic() {
         let response = serve("GET", "/assets/%ff%fe.js");
         assert_eq!(response.status(), 404);
@@ -1799,7 +1799,7 @@ mod tests {
     ///
     /// Reachable as a test only because the lookup is a parameter: whether
     /// this binary embedded a tree was decided when it was compiled.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_build_with_no_embedded_ui_answers_every_asset_with_an_empty_404() {
         for path in ["/assets/terminal-dxhabc.js", "/assets/anything-at-all"] {
             let response = serve_unembedded("GET", path);
@@ -1814,7 +1814,7 @@ mod tests {
     /// identical across build configurations: a client asking the wrong way
     /// gets `405` and `Allow` whether or not this build has a UI, rather
     /// than a 404 that suggests the path was the problem.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_write_method_is_refused_even_with_no_embedded_ui() {
         let response = serve_unembedded("POST", "/assets/terminal-dxhabc.js");
         assert_eq!(response.status(), 405);
@@ -1828,7 +1828,7 @@ mod tests {
     /// `scripts/desktop-smoke.sh` depends on exactly this: it runs the dx
     /// build tree, where no `farhelm` sibling exists at all, and names the
     /// one it built.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_farhelm_override_wins_over_a_present_sibling() {
         let dir = tempfile::tempdir().expect("temp dir");
         let sibling = dir.path().join("farhelm");
@@ -1848,7 +1848,7 @@ mod tests {
     /// `~/.local/bin/farhelm-desktop`) and nothing else in the repository's
     /// automation exercises it — the smoke and the asset check both bypass
     /// it — so a regression here would first be noticed by a user.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_sibling_beside_this_executable_is_found_without_an_override() {
         let dir = tempfile::tempdir().expect("temp dir");
         let sibling = dir.path().join("farhelm");
@@ -1865,7 +1865,7 @@ mod tests {
     /// gets: a GUI binary that refuses to start has no window to explain
     /// itself in, and the two ways out (the install script, the override)
     /// have to be in the message or they are nowhere.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_missing_sibling_names_the_path_and_both_ways_out() {
         let dir = tempfile::tempdir().expect("temp dir");
         let exe = dir.path().join("farhelm-desktop");
@@ -1885,7 +1885,7 @@ mod tests {
     ///
     /// The check is `is_file` rather than "exists" for this case. Spawning a
     /// directory fails later and much less clearly than refusing here does.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_directory_named_farhelm_does_not_count_as_the_sibling() {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::create_dir(dir.path().join("farhelm")).expect("creating the decoy directory");
@@ -1900,7 +1900,7 @@ mod tests {
     /// ignored, the probe would "find" a match and this test could not tell
     /// the two cases apart, so a passing predicate is what makes this a real
     /// test of precedence rather than of the override merely being present.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ambient_tmux_override_wins_without_probing() {
         let resolved = resolve_supervisor_tmux(
             Some(std::ffi::OsString::from("/wherever/the/user/said/tmux")),
@@ -1917,7 +1917,7 @@ mod tests {
 
     /// Absent an override, the first prefix the predicate accepts is what the
     /// supervisor is launched with.
-    #[test]
+    #[farhelm_testtrace::test]
     fn probe_result_is_used_when_no_override_is_set() {
         let resolved = resolve_supervisor_tmux(
             None,
@@ -1934,7 +1934,7 @@ mod tests {
     /// list — the shape the non-macOS call site always passes) must yield
     /// `None`, leaving PATH resolution to the supervisor exactly as before
     /// this probe existed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_override_and_no_probe_hit_falls_back_to_nothing() {
         assert_eq!(
             resolve_supervisor_tmux(None, &["/opt/homebrew/bin"], |_| false),
@@ -1947,7 +1947,7 @@ mod tests {
     /// spells "no override", and the supervisor reads it that way too; the
     /// app must then probe rather than pass the empty value through, which
     /// would disable the discovery Finder launches depend on.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_empty_ambient_override_counts_as_unset_and_probes() {
         let resolved = resolve_supervisor_tmux(
             Some(std::ffi::OsString::new()),
@@ -1987,7 +1987,7 @@ mod tests {
     /// `std::process::Command` produces when the program cannot be found on
     /// disk or on `PATH` — must classify as [`TmuxRefusal::NotFound`], not
     /// surface as a generic error.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_not_found_probe_classifies_as_not_found() {
         let probed = Err(farhelm_supervisor::tmux::TmuxProbeError::NotRunnable(
             std::io::Error::from(std::io::ErrorKind::NotFound),
@@ -1999,7 +1999,7 @@ mod tests {
 
     /// A `-V` answer below `TMUX_FLOOR` must classify as `BelowFloor`,
     /// carrying the exact version found so the message can name it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_below_floor_version_classifies_with_the_found_version() {
         let refusal =
             classify_tmux_preflight(Path::new("tmux"), Ok(probe_ok("tmux", "tmux 3.4\n")))
@@ -2016,7 +2016,7 @@ mod tests {
     /// refusal — which is what lets an above-pin tmux through silently here
     /// (its "unaudited" warning is the supervisor's job once it actually
     /// starts, not this preflight's).
-    #[test]
+    #[farhelm_testtrace::test]
     fn at_or_above_the_floor_is_not_a_refusal() {
         assert_eq!(
             classify_tmux_preflight(Path::new("tmux"), Ok(probe_ok("tmux", "tmux 3.7c\n")))
@@ -2035,7 +2035,7 @@ mod tests {
     /// wrong permission bit, not an absent tmux, and the two need different
     /// operator repairs. The rendered chain must still name the program so
     /// the failure is actionable.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_permission_denied_probe_is_an_ordinary_error_naming_the_program() {
         let probed = Err(farhelm_supervisor::tmux::TmuxProbeError::NotRunnable(
             std::io::Error::from(std::io::ErrorKind::PermissionDenied),
@@ -2051,7 +2051,7 @@ mod tests {
     /// rendered chain must keep both the program and that stderr text,
     /// since stderr is the only actionable detail a caller ever gets for
     /// "something answered to this name and refused".
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_nonzero_probe_exit_names_the_program_and_keeps_its_stderr() {
         let probed = Err(farhelm_supervisor::tmux::TmuxProbeError::Unparseable(
             "libevent.so.2: cannot open shared object file".to_string(),
@@ -2070,7 +2070,7 @@ mod tests {
     /// variant as a nonzero exit (both come from `probe_tmux` unable to
     /// produce a usable version), so the rendered chain must still carry
     /// the malformed text even though nothing failed at the process level.
-    #[test]
+    #[farhelm_testtrace::test]
     fn malformed_successful_output_names_the_program_and_keeps_the_malformed_text() {
         let probed = Err(farhelm_supervisor::tmux::TmuxProbeError::Unparseable(
             "tmux 9.9zzz-vendor-mangled".to_string(),
@@ -2094,7 +2094,7 @@ mod tests {
     /// preflight never actually cleared, so the supervisor's own
     /// unbounded `-V` call could then hang or flood output with no
     /// preflight left to have caught it first.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_overrun_probe_is_an_ordinary_error_naming_the_program_and_detail() {
         let probed = Err(farhelm_supervisor::tmux::TmuxProbeError::Overran(
             "it did not answer -V within 5 seconds".to_string(),
@@ -2115,7 +2115,7 @@ mod tests {
     /// an `Error:`/backtrace-shaped line back in would be exactly the
     /// regression this preflight exists to prevent, and a looser assertion
     /// could miss any of those.
-    #[test]
+    #[farhelm_testtrace::test]
     fn refusal_messages_are_pinned_exactly_per_platform() {
         use farhelm_supervisor::tmux::TMUX_FLOOR;
 
@@ -2174,7 +2174,7 @@ mod tests {
     /// tmux, so both platforms' bodies must name `FARHELM_TMUX` as the
     /// thing to fix. Pinned exactly, and for both platforms, since this is
     /// the one clause that only appears when an override is in force.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_override_in_force_is_named_as_the_remedy_on_both_platforms() {
         use farhelm_supervisor::tmux::TMUX_FLOOR;
 
@@ -2222,7 +2222,7 @@ mod tests {
     /// `tmux_probe_targets` reports, in the SAME order — a message that
     /// invented its own list, or reordered the real one, would mislead
     /// exactly the operator trying to act on it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_not_found_message_names_every_probed_location_in_order() {
         let probed = tmux_probe_targets(
             None,
@@ -2252,7 +2252,7 @@ mod tests {
     /// there would be nothing for it to wrongly append. A fixed, populated
     /// list exercises the precedence regardless of which host runs the
     /// test.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_ambient_override_is_probed_alone() {
         assert_eq!(
             tmux_probe_targets(
@@ -2269,7 +2269,7 @@ mod tests {
     /// `an_empty_ambient_override_counts_as_unset_and_probes`), and this
     /// pins that `tmux_probe_targets` cannot drift from that decision by
     /// treating an empty value as a real override with nothing to report.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_empty_override_reports_the_same_targets_as_no_override() {
         let prefixes = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
         assert_eq!(
@@ -2281,7 +2281,7 @@ mod tests {
     /// The macOS refusal surface must preserve the multiline diagnostic in
     /// its alert while making the Console record one line, and must quote
     /// shell-looking text without changing either command's fixed argv.
-    #[test]
+    #[farhelm_testtrace::test]
     fn native_refusal_commands_escape_each_surface_exactly() {
         let message = "quote \"here\"\\path\nnext line";
         assert_eq!(
@@ -2314,7 +2314,7 @@ mod tests {
     /// dropped-on-rewrite half pins that the fields really are gone from
     /// the type and not merely tolerated, so nothing can quietly revive a
     /// per-client copy by reading them back.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_state_file_with_the_retired_preference_fields_decodes_as_credentials_only() {
         let root = tempfile::tempdir().unwrap();
         let state_path = root.path().join(APP_STATE_FILE);
@@ -2352,7 +2352,7 @@ mod tests {
 
     /// A failed atomic replacement must leave the credential visible to REST
     /// unchanged, or later requests can no longer drive webview recovery.
-    #[test]
+    #[farhelm_testtrace::test]
     fn persistence_failure_never_publishes_the_replacement_native_secret() {
         let root = tempfile::tempdir().unwrap();
         let missing_parent = root.path().join("missing");
@@ -2370,7 +2370,7 @@ mod tests {
 
     /// One stalled response must consume the readiness deadline itself rather
     /// than parking desktop startup forever inside reqwest body handling.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn supervisor_readiness_deadline_bounds_a_server_that_never_answers() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -2410,7 +2410,7 @@ mod tests {
     /// The first credential exchange shares one absolute startup deadline
     /// across connection, headers, and body decoding. A loopback listener that
     /// accepts but never answers must therefore fail instead of freezing launch.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn initial_native_credential_exchange_has_an_absolute_deadline() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -2441,24 +2441,38 @@ mod tests {
     /// Ambient proxy variables belong only to the child. The parent owns both
     /// listeners so it can prove the loopback request reached its destination
     /// and never opened a connection to the proxy.
-    #[test]
+    #[farhelm_testtrace::test]
     fn desktop_loopback_client_ignores_an_ambient_proxy() {
         if std::env::var_os(PROXY_CHILD_ENV).is_some() {
             let target = std::env::var(PROXY_TARGET_ENV).unwrap();
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            let body = runtime.block_on(async {
-                loopback_client()
-                    .unwrap()
-                    .get(target)
-                    .timeout(Duration::from_secs(2))
-                    .send()
-                    .await
-                    .unwrap()
-                    .text()
-                    .await
-                    .unwrap()
-            });
-            assert_eq!(body, "direct");
+            // The child is a fresh test-process invocation, so it needs this
+            // test's capture to own the fixture runtime through the assertion.
+            let context = farhelm_testtrace::current_thread_context()
+                .expect("the test wrapper installs a thread context");
+            context
+                .with_runtime(
+                    farhelm_testtrace::RuntimeConfig {
+                        flavor: farhelm_testtrace::RuntimeFlavor::MultiThread,
+                        worker_threads: None,
+                        start_paused: false,
+                    },
+                    |runtime| {
+                        let body = runtime.block_on(async {
+                            loopback_client()
+                                .unwrap()
+                                .get(target)
+                                .timeout(Duration::from_secs(2))
+                                .send()
+                                .await
+                                .unwrap()
+                                .text()
+                                .await
+                                .unwrap()
+                        });
+                        assert_eq!(body, "direct");
+                    },
+                )
+                .unwrap();
             return;
         }
 
@@ -2475,59 +2489,69 @@ mod tests {
         let target = TcpListener::bind("127.0.0.1:0").unwrap();
         let target_addr = target.local_addr().unwrap();
         target.set_nonblocking(true).unwrap();
+        // Capture immediately before each spawn: raw threads do not inherit
+        // the wrapper's thread-local dispatcher or test attribution.
+        let target_context = farhelm_testtrace::current_thread_context()
+            .expect("the test wrapper installs a thread context");
         let target_thread = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline {
-                match target.accept() {
-                    Ok((mut stream, _)) => {
-                        stream.set_nonblocking(false).unwrap();
-                        stream
-                            .set_read_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
-                        // Read the whole request head before answering, so
-                        // the response can never overtake the request even
-                        // on a platform that delivers it in several reads.
-                        let mut request = Vec::new();
-                        let mut chunk = [0_u8; 1024];
-                        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
-                            match stream.read(&mut chunk) {
-                                Ok(0) => break,
-                                Ok(n) => request.extend_from_slice(&chunk[..n]),
-                                Err(error) => panic!("target read failed: {error}"),
+            target_context.enter(|| {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while Instant::now() < deadline {
+                    match target.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false).unwrap();
+                            stream
+                                .set_read_timeout(Some(Duration::from_secs(3)))
+                                .unwrap();
+                            // Read the whole request head before answering, so
+                            // the response can never overtake the request even
+                            // on a platform that delivers it in several reads.
+                            let mut request = Vec::new();
+                            let mut chunk = [0_u8; 1024];
+                            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                                match stream.read(&mut chunk) {
+                                    Ok(0) => break,
+                                    Ok(n) => request.extend_from_slice(&chunk[..n]),
+                                    Err(error) => panic!("target read failed: {error}"),
+                                }
                             }
+                            stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect")
+                                .unwrap();
+                            return;
                         }
-                        stream
-                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect")
-                            .unwrap();
-                        return;
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("target accept failed: {error}"),
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("target accept failed: {error}"),
                 }
-            }
-            panic!("proxy child never reached the loopback target");
+                panic!("proxy child never reached the loopback target");
+            });
         });
         let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
         let proxy_addr = proxy.local_addr().unwrap();
         proxy.set_nonblocking(true).unwrap();
         let proxy_reached = Arc::new(AtomicBool::new(false));
         let proxy_witness = Arc::clone(&proxy_reached);
+        let proxy_context = farhelm_testtrace::current_thread_context()
+            .expect("the test wrapper installs a thread context");
         let proxy_thread = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline {
-                match proxy.accept() {
-                    Ok((_stream, _)) => {
-                        proxy_witness.store(true, Ordering::Release);
-                        return;
+            proxy_context.enter(|| {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while Instant::now() < deadline {
+                    match proxy.accept() {
+                        Ok((_stream, _)) => {
+                            proxy_witness.store(true, Ordering::Release);
+                            return;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("proxy accept failed: {error}"),
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("proxy accept failed: {error}"),
                 }
-            }
+            });
         });
 
         let output = std::process::Command::new(std::env::current_exe().unwrap())

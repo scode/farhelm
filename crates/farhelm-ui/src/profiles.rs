@@ -2187,7 +2187,7 @@ mod tests {
     /// Requests waiting for the page-owned driver collapse to the strongest
     /// authority, so background traffic cannot make a person's refresh stand
     /// down under build skew before the reader sees it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn pending_catalog_requests_keep_the_strongest_trigger() {
         assert_eq!(
             strongest_catalog_trigger(Some(Trigger::Scheduled), Trigger::Notice),
@@ -2230,7 +2230,7 @@ mod tests {
     /// reason: rows the user can still act on, marked as possibly out of
     /// date, beat an empty box — and a popup that emptied itself whenever one
     /// read dropped would look like the catalog had lost its profiles.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_failed_refresh_keeps_the_catalog_and_reports_itself() {
         let mut read = CatalogRead::default();
         read.record(Ok(catalog(vec![profile("p-1", "Codex")], Some("p-1"))));
@@ -2264,7 +2264,7 @@ mod tests {
     /// This distinction avoids a needless signal write and reconciliation;
     /// the separate error assertion preserves the visible stale-state line's
     /// contract even when the catalog contents themselves compare equal.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_identical_catalog_reply_needs_no_rendered_update() {
         let held = catalog(vec![profile("p-1", "Codex")], Some("p-1"));
         let mut read = CatalogRead::default();
@@ -2283,7 +2283,7 @@ mod tests {
     /// Catalog order participates in equality because it is observable UI
     /// state and an authoritative read must be able to replace the temporary
     /// append order produced by local create absorption.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reordered_profiles_are_a_catalog_change() {
         let first = profile("p-1", "First");
         let second = profile("p-2", "Second");
@@ -2305,7 +2305,7 @@ mod tests {
     /// still seed an editor from the definition that was just replaced.
     /// Saving THAT would undo an update the helm accepted, with nothing
     /// on screen to suggest anything went wrong.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_committed_mutation_is_folded_in_before_the_authoritative_read() {
         let mut read = CatalogRead::default();
         read.record(Ok(catalog(vec![profile("p-1", "Before")], None)));
@@ -2338,7 +2338,7 @@ mod tests {
     /// Reporting that absence lets a successful create choose a stable focus
     /// fallback instead of waiting on a row whose surrounding catalog has not
     /// arrived yet.
-    #[test]
+    #[farhelm_testtrace::test]
     fn absorbing_without_a_catalog_reports_no_focusable_row() {
         let mut read = CatalogRead::default();
 
@@ -2351,7 +2351,7 @@ mod tests {
     ///
     /// Keeping the pre-mutation row would let either consumer act on a
     /// definition the client already knows may have changed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn invalidating_a_catalog_makes_it_pending_without_reusing_old_rows() {
         let mut read = CatalogRead::default();
         read.record(Ok(catalog(vec![profile("p-1", "Before")], None)));
@@ -2367,7 +2367,7 @@ mod tests {
     /// launch an agent nobody chose from a dialog that looks like it
     /// remembered a preference, and substituting the command field would run
     /// whatever was typed into it earlier.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_first_catalog_decides_once_and_a_deleted_default_decides_nothing() {
         let held = catalog(
             vec![profile("p-1", "Claude Code"), profile("p-2", "Codex")],
@@ -2400,7 +2400,7 @@ mod tests {
     /// dialog that still consulted the default after the notification would
     /// change its selection under whoever was filling it in; the latch makes
     /// the default a decision this dialog made rather than a value it follows.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_seeded_dialog_never_follows_a_later_remembered_default() {
         let moved = catalog(
             vec![profile("p-1", "Claude Code"), profile("p-2", "Codex")],
@@ -2419,7 +2419,7 @@ mod tests {
 
     /// An explicit choice outranks the remembered default, and survives every
     /// re-read that still holds it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_explicit_choice_outranks_the_remembered_default() {
         let held = catalog(
             vec![profile("p-1", "Claude Code"), profile("p-2", "Codex")],
@@ -2457,7 +2457,7 @@ mod tests {
     /// picker still displaying a profile the create would not use, and a
     /// picker that silently reverts to the command field, which still holds
     /// whatever was typed there before the profile was chosen.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_chosen_profile_that_leaves_the_catalog_blocks_rather_than_falling_back() {
         let without = catalog(vec![profile("p-1", "Claude Code")], None);
         assert_eq!(
@@ -2483,7 +2483,7 @@ mod tests {
     /// when the read lands) and always escapable — choosing "custom command"
     /// is an answer, and so is typing into the command field, which records
     /// the same choice.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unread_catalog_confirms_nothing_at_all() {
         assert_eq!(
             resolve_agent(None, None, false),
@@ -2521,7 +2521,7 @@ mod tests {
     /// The placeholder decoding to `None` is the load-bearing half: it is what
     /// a blocked dialog SHOWS, and reading it as the command path would turn
     /// "nothing is selected" back into a silent launch of the field below.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_agent_choice_round_trips_through_its_option_value() {
         for choice in [AgentChoice::Command, AgentChoice::Profile("p-1".into())] {
             assert_eq!(AgentChoice::from_value(choice.value()), Some(choice));
@@ -2536,7 +2536,7 @@ mod tests {
     /// whichever kind the browser then reports, silently changing the one
     /// field that decides whether capture and status sharpening run. The
     /// known kinds must not be duplicated when the current one is among them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unknown_agent_kind_is_offered_so_an_edit_cannot_rewrite_it() {
         assert_eq!(kind_options("claude"), vec!["generic", "claude", "codex"]);
         assert_eq!(
@@ -2554,7 +2554,7 @@ mod tests {
     /// could be preserved from a seed but never typed, so the only way to have
     /// one was to have had it already. The round trip is the contract: what
     /// the field shows parses back to exactly what it shows.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_resume_argument_containing_spaces_can_be_written_and_read_back() {
         let authored = parse_resume("claude --resume {conversation} --note='two words'")
             .expect("a quoted argument parses");
@@ -2596,7 +2596,7 @@ mod tests {
     /// The alternative is worse than an error: an unclosed quote silently
     /// swallowing the rest of the line would save a resume command the user
     /// did not write, and a resume command is what a restart executes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unparseable_resume_command_is_refused_rather_than_guessed_at() {
         let unclosed = parse_resume("claude --note='two words").expect_err("an unclosed quote");
         assert!(unclosed.contains("unclosed"), "got {unclosed:?}");
@@ -2615,7 +2615,7 @@ mod tests {
     /// The failure this rules out is silent and total: a save replaces the
     /// definition, so any field the editor did not carry would be cleared by
     /// the first rename anyone performs.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_untouched_draft_saves_the_profile_it_was_opened_on() {
         let stored = Profile {
             resume_template: Some(vec![
@@ -2647,7 +2647,7 @@ mod tests {
     /// which is exactly what cleaning up a hostile name looks like) would have
     /// the control characters silently restored. Two intentions, one string;
     /// only an input event tells them apart.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_deliberately_retyped_escape_is_saved_as_typed() {
         let stored = Profile {
             name: "Claude\u{202E}Code".to_string(),
@@ -2691,7 +2691,7 @@ mod tests {
     /// heuristics and conversation capture to whatever the user typed next —
     /// a decision they never made, and one whose effects (a wrong resume
     /// command on restart) show up long afterwards.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_new_profile_claims_no_integration_until_one_is_chosen() {
         let blank = ProfileDraft::blank();
         assert_eq!(blank.agent_kind, "generic");
@@ -2711,7 +2711,7 @@ mod tests {
     /// under a different name; a deleted row is plain because an immutable
     /// historical label is not a warning. An unknown existence stays
     /// qualified rather than being rounded to a state this build understands.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_snapshotted_profile_reads_as_a_snapshot() {
         let source = |existence| SourceProfile {
             id: "p-1".to_string(),
@@ -2752,7 +2752,7 @@ mod tests {
     /// Deleting a row focuses the following row in catalog order, while the
     /// last row falls back to the stable new-profile control. This keeps a
     /// keyboard user from being stranded when the focused row disappears.
-    #[test]
+    #[farhelm_testtrace::test]
     fn delete_focus_uses_the_following_row_or_the_new_profile_fallback() {
         let catalog = catalog(
             vec![
@@ -2778,7 +2778,7 @@ mod tests {
     /// helm's own phase words rather than friendlier synonyms. Two states
     /// sharing a word would make an assertion about a renamed profile pass
     /// for a deleted one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_existence_has_its_own_wire_word() {
         let words = [
             existence_word(ProfileExistence::Present),

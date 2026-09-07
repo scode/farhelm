@@ -316,7 +316,7 @@ mod tests {
     ///
     /// Each case is expressed as an elapsed duration from a fixed `now` so
     /// the test reads as the specification it is rather than as arithmetic.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_relative_bucket_starts_and_ends_where_it_says() {
         let now = 1_700_000_000;
         let age = |elapsed: i64| relative_age(now, now - elapsed);
@@ -355,7 +355,7 @@ mod tests {
     /// evidence a reader has that the two machines disagree — the same
     /// "an abbreviation is never the only place a value is recorded" rule
     /// SPEC.md applies to the row's directory and invocation.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_stamp_from_the_future_reads_as_now_but_keeps_its_real_instant() {
         let now = 1_700_000_000;
         assert_eq!(relative_age(now, now + 5), "now");
@@ -374,7 +374,7 @@ mod tests {
     /// an age computed from a zero that means "this helm predates the field"
     /// (`Session::effective_activity`). Rendering it would put `56y` beside a
     /// perfectly healthy session.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_missing_stamp_produces_no_activity_at_all() {
         assert_eq!(ActivityStamp::new(Some(1_700_000_000), 0), None);
         assert_eq!(ActivityStamp::new(Some(1_700_000_000), -1), None);
@@ -390,7 +390,7 @@ mod tests {
     /// would have read as one where everything had just been touched. There
     /// is no visual cue that could distinguish that from the truth, which is
     /// why it has to be refused at the source.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unavailable_viewer_clock_renders_no_age_at_all() {
         assert_eq!(ActivityStamp::new(None, 1_700_000_000), None);
         assert_eq!(
@@ -415,7 +415,7 @@ mod tests {
     /// the epoch itself. Each expected string is an independent UTC golden
     /// (`date -u -d @N`), not a value re-derived from the same formula the
     /// test is checking.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_absolute_stamp_names_the_instant_and_its_zone() {
         assert_eq!(
             absolute_stamp(0),
@@ -468,7 +468,7 @@ mod tests {
     /// hold here. A truncating `/` and `%` would put this second on
     /// 1970-01-01 at a negative time-of-day, which is the trap the next
     /// caller of this formatter would inherit silently.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_pre_epoch_second_stays_before_the_epoch() {
         assert_eq!(
             absolute_stamp(-1),
@@ -480,7 +480,7 @@ mod tests {
     /// Both halves are built together or not at all, so a row can never show
     /// an age whose tooltip is missing — the abbreviation and the record
     /// behind it are one decision, not two.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_present_stamp_carries_both_the_age_and_the_record() {
         let stamp = ActivityStamp::new(Some(1_700_000_000), 1_700_000_000 - 7_200)
             .expect("a positive stamp always renders");
@@ -502,7 +502,7 @@ mod tests {
     /// which is what makes this a remount test rather than a first-mount
     /// one: it is written into the global BEFORE the clock mounts, the way
     /// a previous mount would have left it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_mounted_clock_publishes_now_before_its_first_sleep() {
         /// Far enough in the past that no real reading could be mistaken
         /// for it: 2001-09-09, the nine-digit-epoch second.
@@ -541,7 +541,7 @@ mod tests {
     /// [`TICK_MS`]: the cadence belongs to the loop and is asserted nowhere
     /// but there, while what this test is about is what a published value
     /// does once it lands.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_tick_advances_a_rendered_age_with_nothing_else_happening() {
         use std::cell::RefCell;
 

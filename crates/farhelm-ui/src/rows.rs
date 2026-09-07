@@ -483,7 +483,7 @@ mod tests {
     /// the row happens to print, and it must leave every other row and
     /// every other field alone (a rename changes nothing but the title,
     /// and the poll's status is fresher than anything this view holds).
-    #[test]
+    #[farhelm_testtrace::test]
     fn optimistic_renames_replace_only_the_renamed_row_s_title() {
         let listing = vec![session("a", "old-a"), session("b", "b")];
         let renamed: HashMap<String, (String, u64)> = [("a".to_string(), ("new-a".to_string(), 7))]
@@ -516,7 +516,7 @@ mod tests {
     ///
     /// What this deliberately does NOT test is absence, which is
     /// `retire_vanished_renames`' evidence and not every read's to use.
-    #[test]
+    #[farhelm_testtrace::test]
     fn optimistic_renames_retire_only_on_a_reply_that_could_have_seen_them() {
         let mut renamed: HashMap<String, (String, u64)> =
             [("a".to_string(), ("new-a".to_string(), 5))]
@@ -555,7 +555,7 @@ mod tests {
     /// correction that had nothing left to correct. Agreement needs no
     /// authority: a row that came back is the server's word about that
     /// session whatever query produced it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_filtered_reply_still_settles_the_rows_it_did_return() {
         let mut renamed: HashMap<String, (String, u64)> = [
             ("a".to_string(), ("new-a".to_string(), 5)),
@@ -582,7 +582,7 @@ mod tests {
     /// own rename back to the old title for as long as a filter is applied.
     /// Without the index check a read already in flight when the rename
     /// landed would do the same on a session it simply had not reached yet.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_a_read_with_authority_reads_absence_as_departure() {
         let renamed: HashMap<String, (String, u64)> = [("a".to_string(), ("new-a".to_string(), 5))]
             .into_iter()
@@ -615,7 +615,7 @@ mod tests {
     /// `menu_row_reordered` exists to catch, since `commit_listing`'s
     /// separate "is this id still listed" check cannot see it (the row IS
     /// still listed, just not where the panel was measured against).
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_row_inserted_or_removed_above_the_open_one_is_a_reorder() {
         let before = vec![session("a", "a"), session("b", "b")];
 
@@ -638,7 +638,7 @@ mod tests {
     /// as a reorder — the menu is still anchored exactly where it was
     /// measured, and closing it out from under a user still reading it
     /// would be a regression of its own.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_same_order_content_update_is_not_a_reorder() {
         let before = vec![session("a", "a"), session("b", "b")];
         let updated_in_place = vec![session("a", "a"), session("b", "b-updated")];
@@ -651,7 +651,7 @@ mod tests {
     /// user for zero positioning benefit. This is the guard against an
     /// overbroad implementation that treats any listing-length change as
     /// a reorder, which the above-row tests alone cannot catch.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_row_inserted_or_removed_below_the_open_one_is_not_a_reorder() {
         let before = vec![session("a", "a"), session("b", "b")];
 
@@ -673,7 +673,7 @@ mod tests {
     /// path is `SessionRow`'s own remount heal (see `menu_row_reordered`'s
     /// own doc), and this function racing it to the same conclusion by a
     /// different, coincidental route would buy nothing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn no_baseline_listing_is_never_a_reorder() {
         let current = vec![session("a", "a")];
         assert!(!menu_row_reordered(None, &current, "a"));
@@ -766,7 +766,7 @@ mod tests {
     /// a selector. Table-driven because the interesting part is the BOUNDARY
     /// between the two wordings, and the two conditions that can trigger the
     /// truncated form are independent (see `count_banner`'s own docs).
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_count_banner_pins_each_branchs_class_and_wording() {
         // (listing, expected class, expected text)
         let cases = [
@@ -825,7 +825,7 @@ mod tests {
     /// every stylesheet rule and browser assertion written against
     /// `.session-count` / `.truncation-banner` keeps matching — the wording
     /// change is not an excuse to move the selectors the suite already pins.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_filtered_list_reports_both_counts() {
         let banner = count_banner(&filtered_listing(12, 12, 700, false));
         assert_eq!(banner.class, "banner session-count filtered");
@@ -850,7 +850,7 @@ mod tests {
     /// A filtered reply the cap cut reports all THREE numbers, and a
     /// filtered reply the cap did not cut is complete however far below
     /// the fleet total its matches fall.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_truncated_filtered_reply_separates_shown_from_matching_from_the_fleet() {
         let complete_filter = count_banner(&filtered_listing(40, 40, 700, false));
         assert_eq!(
@@ -876,7 +876,7 @@ mod tests {
     /// closes the editor they have open, and drops the delete confirmation
     /// they are mid-decision on. All three are the client's own state, so
     /// nothing on the next read brings them back.
-    #[test]
+    #[farhelm_testtrace::test]
     fn absence_speaks_only_for_a_complete_unfiltered_listing() {
         assert!(
             absence_is_evidence(&listing(3, 3, false)),
@@ -908,7 +908,7 @@ mod tests {
     /// absence-as-departure fleet-wide would silently freeze every
     /// optimistic rename, open editor and delete confirmation for as long
     /// as the disagreement lasted.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_the_helms_flag_makes_a_listing_incomplete() {
         assert!(listing_is_complete(&listing(3, 3, false)));
         assert!(
@@ -931,7 +931,7 @@ mod tests {
     /// no-match line, so a user who just searched is shown a fleet that
     /// appears to have vanished. That is the opposite of what happened, and
     /// the two situations call for opposite reactions.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_an_unfiltered_empty_fleet_gets_the_bare_no_sessions_line() {
         assert!(is_empty_fleet(&listing(0, 0, false)));
         assert!(
@@ -975,7 +975,7 @@ mod tests {
     /// filter that never ran, which is the one thing a count line must never
     /// do. The unfiltered sentence plus a clause is the honest reading of
     /// what is actually being shown.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_filter_the_helm_ignored_is_said_out_loud_rather_than_counted() {
         let unanswered = old_peer_filtered_listing(700, 700, false);
         let banner = count_banner(&unanswered);
@@ -1008,7 +1008,7 @@ mod tests {
     /// saying nothing: it contradicts the banner beside it (which is
     /// reporting how many matched, or that the filter never ran) and sends
     /// the user off to change a query that was working.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_no_match_line_follows_the_matching_count_rather_than_the_rows() {
         assert_eq!(
             no_match_line(&filtered_listing(0, 0, 700, false)),

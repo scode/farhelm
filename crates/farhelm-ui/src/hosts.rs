@@ -2639,7 +2639,7 @@ mod tests {
 
     /// Probe and manual diagnostics cannot carry bidi or invisible controls
     /// into the add form even though the helm relays host-produced text.
-    #[test]
+    #[farhelm_testtrace::test]
     fn probe_errors_cross_the_peer_text_boundary() {
         let shown = detail_text(&probe_error_parts(
             "ssh failed \u{202E}spoof\u{200B}".to_string(),
@@ -2655,7 +2655,7 @@ mod tests {
     /// the add form's peer text, and needed for the same reason: a raw
     /// interpolated string would have let this line bypass the escaping
     /// and isolation the row's own NAME already gets.
-    #[test]
+    #[farhelm_testtrace::test]
     fn destination_details_cross_the_peer_text_boundary() {
         let shown = detail_text(&destination_detail_parts(
             "host\u{202E}spoof\u{200B}.example",
@@ -2730,7 +2730,7 @@ mod tests {
     /// Exhaustive over the whole taxonomy rather than a sample: a label is a
     /// one-line match arm, and the failure it guards against — a new phase
     /// borrowing another's word — is invisible unless every phase is listed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_phase_keeps_the_helms_wire_token() {
         let labels: Vec<&str> = every_phase().iter().map(phase_label).collect();
         assert_eq!(
@@ -2757,7 +2757,7 @@ mod tests {
     /// distinct states. This matters because the row spends words only on
     /// non-connected phases, so each word has to identify the state on its
     /// own while `data-host-phase` retains the exact token for automation.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_phase_has_humanized_display_words() {
         let labels: Vec<&str> = every_phase().iter().map(phase_display_label).collect();
         assert_eq!(
@@ -2780,7 +2780,7 @@ mod tests {
     /// that checkable field by field, which a per-phase spot check cannot: a
     /// detail that rendered some other variant's payload, or dropped a
     /// field, would still contain "plausible" text.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_phase_detail_carries_its_own_evidence() {
         let expectations: Vec<(HostPhase, Vec<&str>)> = vec![
             (
@@ -2872,7 +2872,7 @@ mod tests {
     /// `HostStateView::IdentityUnverified`'s own docs state as a renderer
     /// obligation. Checked across the whole taxonomy so a phase added later
     /// cannot quietly join the adoptable set.
-    #[test]
+    #[farhelm_testtrace::test]
     fn adopt_is_offered_only_for_an_identity_mismatch() {
         for state in every_phase() {
             let expected =
@@ -2901,7 +2901,7 @@ mod tests {
     /// which must move `adopt`'s position rather than leave a gap where
     /// `edit` would have sat — the same packing `MenuOrder::pack` guarantees
     /// for the session row.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_host_menu_follows_manageability_and_adoptability() {
         use HostMenuAction::{Adopt, Alias, AutomaticSetup, Edit, Remove, Rerun, Retry, Update};
 
@@ -3028,7 +3028,7 @@ mod tests {
     /// allowed to drift on the RULES: the helm remains the authority that
     /// decides whether a value is accepted at all, since only it can see
     /// every other host's current display name.
-    #[test]
+    #[farhelm_testtrace::test]
     fn validate_alias_draft_mirrors_the_helms_rules() {
         assert_eq!(
             validate_alias_draft("  My Box  "),
@@ -3069,7 +3069,7 @@ mod tests {
     /// draft is run through [`validate_alias_draft`] first, and a refused
     /// alias draft must not silently fall back to being treated as a
     /// destination.
-    #[test]
+    #[farhelm_testtrace::test]
     fn resolve_edit_submission_switches_on_the_field() {
         assert!(matches!(
             resolve_edit_submission(EditField::Destination, "  not trimmed  "),
@@ -3096,7 +3096,7 @@ mod tests {
     /// escaped form turns every unusual identity into a spurious 409, and
     /// showing the raw form is exactly the spoofing hole the escaping exists
     /// to close.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_adopted_identity_is_raw_while_its_label_is_escaped() {
         let raw = "id-\u{202E}safe";
         let state = HostPhase::IdentityMismatch {
@@ -3121,7 +3121,7 @@ mod tests {
     /// let assistive technology announce a host other than the one the
     /// sighted row shows, for a menu whose commands include Adopt, Edit,
     /// and Remove.
-    #[test]
+    #[farhelm_testtrace::test]
     fn host_menu_label_escapes_bidi_and_zero_width_characters() {
         let name = "safe\u{202E}evil\u{200B}host";
         let label = host_menu_label(name);
@@ -3144,7 +3144,7 @@ mod tests {
     /// asserted on flattened text: what makes the evidence tamper-proof is
     /// that `recorded` and `reported` never share an element with the words
     /// that say which is which.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_mismatch_evidence_keeps_each_identity_in_its_own_run() {
         let parts = state_detail(&HostPhase::IdentityMismatch {
             recorded: "id-old".to_string(),
@@ -3188,7 +3188,7 @@ mod tests {
     /// The row must also not print that same long chain twice: the helm's
     /// text is a REMEDY, so the diagnosis line beside it says only what
     /// happened.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_the_local_supervisor_cause_gets_the_manual_start_hint() {
         let reported = "no supervisor is running on this machine: supervisor does not appear to \
                         be running (socket /srv/state/supervisor.sock is not accepting \
@@ -3252,7 +3252,7 @@ mod tests {
     /// The skew remedy must be the helm's sentence VERBATIM, as a peer run.
     /// The helm is the side that knows which binary is behind, and a second
     /// copy of that advice written here is the one that would drift.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_skew_remedy_is_the_helms_own_sentence() {
         let remedy = state_remedy(&HostPhase::VersionSkew {
             peer_protocol: 9,
@@ -3278,7 +3278,7 @@ mod tests {
     /// reporting the failure (so nothing claims to be current). A model that
     /// dropped the snapshot on failure blanks the one surface SPEC.md
     /// requires to always show host state.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_failed_hosts_read_keeps_the_last_snapshot_and_reports_the_failure() {
         let mut read = HostsRead::default();
         assert!(read.is_loading());
@@ -3313,7 +3313,7 @@ mod tests {
     /// A failure with no snapshot behind it is its own state: there is
     /// nothing to draw and something to say. Conflating it with "loading"
     /// would leave a spinner on screen forever while the helm is down.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_first_read_that_fails_is_a_failure_rather_than_still_loading() {
         let mut read = HostsRead::default();
         read.record(Err("connection refused".to_string()));
@@ -3330,7 +3330,7 @@ mod tests {
     /// The failure precedence is the load-bearing part: after a failed
     /// refresh the view must NOT keep presenting the phase it last saw, or
     /// it would describe a possibly-recovered host as still down.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_host_lookup_separates_pending_absent_and_failed() {
         let mut read = HostsRead::default();
         assert_eq!(read.lookup(Some(1)), HostLookup::Pending);
@@ -3362,7 +3362,7 @@ mod tests {
     /// generic "unreachable" — SPEC.md's host-unreachable notice is the
     /// common case, not the only one, and a skewed host described as
     /// unreachable would hide the upgrade that fixes it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_stale_notice_names_the_real_state_and_carries_its_remedy() {
         let skewed = host(HostPhase::VersionSkew {
             peer_protocol: 9,
@@ -3396,7 +3396,7 @@ mod tests {
     /// failed, and a host that is gone from the registry — and the last one
     /// is not a connection problem at all, so describing it as one would
     /// send the user looking for a network fault that does not exist.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_stale_notice_distinguishes_unread_unrefreshed_and_unregistered() {
         let unread = detail_text(&stale_session_notice("user@box", HostLookup::Pending));
         assert!(unread.contains("has not been read yet"), "{unread}");
@@ -3421,7 +3421,7 @@ mod tests {
     /// `is_connected` decides presentation only, and must agree with the
     /// helm about what "connected" means — the session rows' stale marking
     /// and the selector's phase labelling both key off it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_a_connected_host_counts_as_connected() {
         for state in every_phase() {
             assert_eq!(
@@ -3438,7 +3438,7 @@ mod tests {
     /// leaves the host perfectly connected while its listed sessions are
     /// last-known, and reading that as a disconnection would be wrong in
     /// both directions.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_connected_hosts_detail_reports_its_refresh_health() {
         let failing = detail_text(&state_detail(&HostPhase::Connected {
             identity: None,
@@ -3529,7 +3529,7 @@ mod tests {
     /// on every fleet refresh. Sixty-four refreshes rather than one, because a
     /// prop that compares equal by accident on the first pass — a recycled
     /// allocation, say — will not keep doing it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_host_row() {
         fn app() -> Element {
             let destination_draft = use_signal(String::new);
@@ -3601,7 +3601,7 @@ mod tests {
     /// invalidating rows it does not describe, moves these per-row counts.
     /// Exercising `HostRowControls` and `HostRowActivity` in the same virtual
     /// DOM is what makes the test say which of the two broke.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_the_host_rows_whose_state_changed_rerender() {
         // Both facts live OUTSIDE the virtual DOM — the test moves them
         // between renders the way `HostsPanel`'s own signals move between
@@ -3723,7 +3723,7 @@ mod tests {
     /// nesting them safe on its own. The trap the direct-prop rule removes is
     /// that a struct literal in `rsx!` is where inline closures naturally get
     /// written, each render minting a new box.
-    #[test]
+    #[farhelm_testtrace::test]
     fn grouping_a_callback_is_safe_only_while_its_handle_is_stable() {
         std::thread_local! {
             static PROBE_RENDERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };

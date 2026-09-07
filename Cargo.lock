@@ -1896,6 +1896,7 @@ dependencies = [
  "dioxus",
  "farhelm-helm",
  "farhelm-supervisor",
+ "farhelm-testtrace",
  "futures-util",
  "gloo-timers",
  "mime_guess",

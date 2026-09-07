@@ -279,7 +279,7 @@ mod tests {
     /// Agreement — the overwhelmingly common case — must say nothing at
     /// all, including when the stamp arrives with the whitespace an HTTP
     /// header can legally carry around its value.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_matching_stamp_is_silent() {
         assert_eq!(skew_of("0.4.2", Some("0.4.2")), None);
         assert_eq!(skew_of("0.4.2", Some("  0.4.2 ")), None);
@@ -298,7 +298,7 @@ mod tests {
     /// An empty value is the same answer as no header for the same reason:
     /// a blank stamp says nothing, and "the helm reports ``" is not a
     /// sentence.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_missing_or_empty_stamp_is_a_mismatch_of_its_own_kind() {
         assert_eq!(skew_of("0.4.2", None), Some(Skew::Silent));
         assert_eq!(skew_of("0.4.2", Some("")), Some(Skew::Silent));
@@ -308,7 +308,7 @@ mod tests {
     /// A different stamp is reported, and reported as the helm SAID it
     /// rather than as something parsed: the check is deliberately exact
     /// equality, so a build that merely looks newer is still a mismatch.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_different_stamp_is_reported_verbatim() {
         assert_eq!(
             skew_of("0.4.2", Some("0.5.0")),
@@ -343,7 +343,7 @@ mod tests {
     /// pass that function's own definition (`seen && no skew`) into the
     /// policy, so a regression in either end still fails here; the signal
     /// plumbing between them is what the browser suite exercises.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_stale_bundle_across_the_m6_75_upgrade_prompts_and_stands_down() {
         let stale_bundle = "0.0.1";
         let upgraded_helm = "0.0.2";
@@ -392,7 +392,7 @@ mod tests {
     /// user's screen. The header comes over a socket, and a value with a
     /// megabyte in it would otherwise be rendered in full on a banner that
     /// sits above the whole app.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_over_long_stamp_is_cut_down_to_something_displayable() {
         let absurd = "9".repeat(4096);
         let Some(Skew::Reported(reported)) = skew_of("0.4.2", Some(&absurd)) else {
@@ -409,7 +409,7 @@ mod tests {
     /// to print, a notice built by interpolation would leave a blank where a
     /// number belongs, which reads as a rendering bug rather than as the
     /// diagnosis it is.
-    #[test]
+    #[farhelm_testtrace::test]
     fn both_shapes_of_prompt_say_what_happened_and_what_to_do() {
         let flatten = |parts: &[DetailPart]| -> String {
             parts
