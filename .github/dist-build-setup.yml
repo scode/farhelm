@@ -46,12 +46,12 @@
 # steps would produce a binary that serves nothing and defaults to refusing to
 # download provisioning payloads.
 #
-# ## Two deliberate departures from `ci.yml`'s `test` job
+# ## Release build isolation
 #
-# The gate below is that job's commands, but not its scaffolding:
+# The release gate keeps its build inputs separate from ordinary CI:
 #
 # - NO caching, anywhere in the release path. `ci.yml` caches `target/` and
-#   the pinned tmux build because it runs on every push; this runs a few times
+#   Cargo dependencies because it runs on every push; this runs a few times
 #   a year, and a cache is a mutable input to the one build whose output gets
 #   signed. Cold builds cost minutes and remove the question. (It also
 #   sidesteps the disk-exhaustion failure that made `ci.yml`'s desktop job
@@ -98,8 +98,28 @@
     fi
     echo "ok: $GITHUB_REF_NAME matches [workspace.package].version"
 
+- name: Free unused image toolchains before native desktop gates
+  # The release job later holds cargo-dist's musl output, the final web bundle,
+  # and a native WebKit/Dioxus smoke build at once. GitHub's stock Linux image
+  # starts nearly full of unrelated toolchains, so clearing this narrow
+  # allowlist before those builds preserves headroom without touching Rust,
+  # Cargo, dx, caches, or any release output.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: |
+    sudo rm -rf \
+      /usr/local/lib/android \
+      /usr/share/dotnet \
+      /usr/local/.ghcup \
+      /usr/share/swift \
+      /opt/hostedtoolcache/CodeQL \
+      /usr/lib/jvm \
+      /usr/local/share/powershell \
+      /usr/local/julia* \
+      /usr/share/miniconda
+    df -h /
+
 # ---------------------------------------------------------------------------
-# The gate: `ci.yml`'s `test` job, on the x86_64 Linux build job only.
+# The release gate, on the x86_64 Linux build job only.
 #
 # One job runs it, and the choice is about COST, not capability. The suite is
 # architecture-independent and takes ten minutes; running it on the arm64 job
@@ -110,8 +130,10 @@
 # cannot: the suite wants a systemd user manager and the tests' ssh loopback,
 # neither of which that runner has, which is why its leg is a compile instead.
 #
-# Rationale for each command lives on `ci.yml`'s copy; only what differs is
-# explained here.
+# Ordinary CI retains only fast compile, lint, formatter, installer, generated
+# workflow, and JavaScript-harness checks. The costly Rust, pinned-tmux,
+# desktop runtime, and cross-distribution gates live here, where a failure
+# rejects publication from the artifact job that ran it.
 # ---------------------------------------------------------------------------
 
 - name: Install pinned tmux build dependencies
@@ -167,13 +189,15 @@
   # and rc.2 tag builds three and two times respectively with the code they
   # check unchanged (TODO.md lists every one of them). Until they are
   # deflaked the gate runs every other test target, plus the farhelm crate's
-  # own unit tests; CI's `test` job still runs the full suite on every ready
-  # PR, so the e2e suite guards the stack at merge time, not at tag time.
+  # own unit tests. The excluded integration suite remains an explicit
+  # local/worker merge gate; it is not exercised by ordinary CI or this tag
+  # gate.
   #
   # `--workspace` reaches past `default-members`, so farhelm-desktop must be
   # excluded by name: it links WebKitGTK, which this runner does not have
   # (the v0.3.0-rc.3 gate died in gobject-sys's build script on exactly
-  # that), and its desktop coverage is CI's job, not this gate's.
+  # that). The native desktop tests and smoke step below provide the desktop
+  # coverage after the release-only dependencies are installed.
   #
   # The farhelm crate is a binary with no library target, so its unit tests
   # are selected with `--bins` ALONE: adding `--lib` makes cargo refuse the
@@ -199,9 +223,8 @@
   # The cross-distribution provisioning leg. It belongs in the release gate
   # more than anywhere else: what it proves is that the musl-static payloads
   # THIS BUILD is about to publish actually install and run on a host that is
-  # not the runner's own Ubuntu. `ci.yml` keeps it in a separate job so a
-  # flaky systemd-in-Docker cannot take the main suite down; here there is no
-  # such split to make, and a failure correctly refuses publication.
+  # not the runner's own Ubuntu. Keeping it inside the artifact job makes a
+  # failure refuse publication; ordinary CI does not run this container gate.
   #
   # musl-tools is installed again rather than reordered: the release-build
   # prerequisites further down run after every gate step, and a gate must not
@@ -258,9 +281,70 @@
 - name: Install the pinned Dioxus CLI
   # Pinned to the `dioxus` version in the ROOT Cargo.toml's
   # `[workspace.dependencies]`; dx refuses to build against a dioxus crate at
-  # a different version, so the two numbers move together (as do CI's own
-  # `dx` installs in ci.yml).
+  # a different version, so the two numbers move together. The only `dx`
+  # install left in ci.yml is the disabled browser job; release setup is the
+  # active hosted path that installs this tool.
   run: cargo install --locked dioxus-cli --version 0.7.10
+
+# ---------------------------------------------------------------------------
+# Native Linux desktop gate, after its wasm and dx prerequisites but before
+# the release web bundle is built and exported through FARHELM_UI_DIST.
+# ---------------------------------------------------------------------------
+
+- name: Install native desktop smoke dependencies
+  # The release artifact is musl, but WebKitGTK and the desktop shell build
+  # natively. Keep these packages on the Linux/X64 gate only; ordinary CI's
+  # desktop job only compiles and needs none of dx, wasm, Xvfb, or this smoke
+  # harness's display tools.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: |
+    sudo apt-get update
+    sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
+
+- name: Test the native desktop seams
+  # This is deliberately after the release job installed wasm and dx, so the
+  # following smoke step can reuse those prerequisites, but before the final
+  # release web build writes FARHELM_UI_DIST into the job environment.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: cargo test -p farhelm-ui --features desktop
+
+- name: Run the native desktop smoke gate
+  # desktop-smoke builds a native app and its own web bundle. Its target must
+  # never share cargo-dist's target tree, whose later musl outputs and final
+  # release bundle are publication inputs. The script keeps its state on
+  # failure; successful cleanup removes only this step's owned target tree.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  env:
+    CI: true
+    DESKTOP_SMOKE_DIR: ${{ runner.temp }}/desktop-smoke
+    CARGO_TARGET_DIR: ${{ runner.temp }}/desktop-smoke-target
+  run: |
+    PATH="$PWD/.ci-tmux:$PATH" scripts/desktop-smoke.sh
+    rm -rf -- "$CARGO_TARGET_DIR"
+
+- name: Collect native desktop smoke failure evidence
+  # The owned smoke state also contains sockets and credential-bearing config
+  # files. Archive only its human-readable logs, screenshot, and state dump;
+  # do not upload the state directory or disposable build tree wholesale.
+  # Stage explicit shell globs: cargo-dist's template cannot preserve a
+  # multiline upload path, and the uploader must receive only selected files.
+  if: failure() && runner.os == 'Linux' && runner.arch == 'X64'
+  run: |
+    evidence_dir="$RUNNER_TEMP/desktop-smoke-evidence"
+    mkdir -p "$evidence_dir"
+    for evidence in "$RUNNER_TEMP"/desktop-smoke/*.log "$RUNNER_TEMP"/desktop-smoke/*.png "$RUNNER_TEMP"/desktop-smoke/*.txt; do
+      if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
+        cp -- "$evidence" "$evidence_dir/"
+      fi
+    done
+
+- name: Upload native desktop smoke failure evidence
+  if: failure() && runner.os == 'Linux' && runner.arch == 'X64'
+  uses: actions/upload-artifact@v4
+  with:
+    name: desktop-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
+    if-no-files-found: warn
+    path: "${{ runner.temp }}/desktop-smoke-evidence"
 
 - name: Let the toolchain's rust-objcopy find libLLVM on macOS
   # Rust 1.98.0 links the Darwin toolchain's bundled `rust-objcopy` and

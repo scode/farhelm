@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The default transport/state phase is the CI desktop integration gate. Its
-# optional pixel-driven interaction phase remains experimental because
+# The default transport/state phase is the Linux release-artifact desktop
+# integration gate. Its optional pixel-driven interaction phase remains
+# experimental because
 # webkit2gtk under Xvfb paints
 # unreliably in this repo's testing so far: the window intermittently
 # stays black (tried: a window manager, resize nudges,
@@ -31,8 +32,9 @@
 # assertion still goes through the API or tmux. Screenshots are taken
 # only as debugging artifacts on failure.
 #
-# Why this exists: the desktop renderer is otherwise a compile-check-only
-# surface (CI builds it, nobody runs it), which is exactly how a bug that
+# Why this exists: ordinary CI compiles the desktop renderer, while this
+# release gate runs it on native WebKitGTK. A compile-only surface is exactly
+# how a bug that
 # bricked every desktop create (MT-5, an eval channel dying under wry)
 # survived to manual testing on macOS. This script runs the same wry +
 # dioxus-desktop code paths on the same engine family (WebKitGTK), so that

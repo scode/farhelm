@@ -107,11 +107,12 @@ fi
 
 # Rewritten names are necessary but not sufficient: they also have to name
 # files that EXIST in the bundle this binary embedded. `check-desktop-assets.sh`
-# owns that comparison — it is the per-change gate's verdict, in both
+# owns that comparison — it is the shared parity verdict, in both
 # directions — and this calls it rather than growing a second, weaker copy.
-# It matters more here than there: a tag may point at a commit that never
-# passed PR CI, so this may be the first time the two sets are compared for
-# these bytes.
+# This is the shipped-artifact parity check. It remains necessary even though
+# ordinary CI no longer pays for a separate dx asset rebuild: a tag can point
+# at a commit that never passed PR CI, and this compares the exact bytes about
+# to be archived.
 echo "== comparing requested assets against the embedded bundle"
 "$repo/scripts/check-desktop-assets.sh" --compare "$FARHELM_UI_DIST" "$work/requested"
 
