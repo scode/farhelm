@@ -187,6 +187,7 @@ async function findSessionIdByTitle(
     const listing = await (await request.get("/api/sessions")).json();
     const id = listing.sessions.find((s: any) => s.title === title)?.id;
     if (id !== undefined || Date.now() > deadline) return id;
+    // sleep-ok: centralized lookup polling; the 10s deadline is checked between API reads.
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
