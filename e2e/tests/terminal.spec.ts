@@ -608,25 +608,46 @@ test("terminal mounting waits for the clipboard naming helper", async ({ page, r
   await pinAutoSelect(page, bounce.id);
   await page.goto("/");
   await expect(sharedSessionRow(page)).toBeVisible();
-  await page.waitForFunction(() => Boolean((window as any).__farhelmIslands?.terminal));
+  const sharedId = await sessionIdFor(sharedSessionRow(page));
+  await waitForSessionRevealed(page, bounce.id);
   await page.evaluate(() => {
-    (window as any).__testClipboardNames = (window as any).farhelmClipboardNames;
-    delete (window as any).farhelmClipboardNames;
+    const state = window as any;
+    const names = state.farhelmClipboardNames;
+    const bridge = state.farhelmTerm;
+    const original = bridge.mountWhenReady;
+    if (!names || typeof original !== "function") throw new Error("clipboard mount fixture is not ready");
+    state.__testRestoreClipboardMount = () => {
+      state.farhelmClipboardNames = names;
+      bridge.mountWhenReady = original;
+      delete state.__testClipboardMountPath;
+      delete state.__testRestoreClipboardMount;
+    };
+    delete state.farhelmClipboardNames;
+    // Record only after the real mount's synchronous readiness check has
+    // returned. A row click alone can precede reconciliation on a slow page.
+    bridge.mountWhenReady = function (...args: any[]) {
+      const result = original.apply(this, args);
+      state.__testClipboardMountPath = new URL(args[0].path, location.href).pathname;
+      return result;
+    };
   });
 
   await sharedSessionRow(page).click();
-  await page.waitForTimeout(150);
+  await expect.poll(() => page.evaluate(() => (window as any).__testClipboardMountPath), {
+    timeout: 20_000,
+    message: "the requested terminal must check readiness while clipboard naming is withheld",
+  }).toBe(`/api/sessions/${sharedId}/term`);
   expect(
     await page.evaluate(() => Boolean((window as any).__farhelmIslands?.terminal)),
     "the terminal must remain unmounted while its clipboard policy is unavailable",
   ).toBe(false);
 
   await page.evaluate(() => {
-    (window as any).farhelmClipboardNames = (window as any).__testClipboardNames;
-    delete (window as any).__testClipboardNames;
+    (window as any).__testRestoreClipboardMount();
   });
-  await page.waitForFunction(() => Boolean((window as any).__farhelmIslands?.terminal));
+  await waitForSessionRevealed(page, sharedId);
   } finally {
+    await page.evaluate(() => (window as any).__testRestoreClipboardMount?.()).catch(() => {});
     await cleanupSession(request, bounce.id);
   }
 });
