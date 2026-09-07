@@ -8,6 +8,60 @@ use crate::terminal_tabs::{
     listed_tabs, run_in_shell, tab_pane, wait_for_shell, window_rows, write_daemon_script,
 };
 
+/// Observe shell exit through the pane before asking a listing to reconcile the tab.
+///
+/// A list request would exercise the behavior the caller is about to assert,
+/// so it cannot supply this premise. Query the named pane directly under one
+/// deadline, and kill an unresponsive query when its future is dropped.
+async fn wait_for_exited_tab_pane(sock: &std::path::Path, pane: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut last = String::new();
+    let result = tokio::time::timeout_at(deadline, async {
+        loop {
+            let out = tokio::process::Command::new("tmux")
+                .arg("-S")
+                .arg(sock)
+                .args(["display-message", "-p", "-t", pane, "#{pane_dead}"])
+                .kill_on_drop(true)
+                .output()
+                .await
+                .expect("query the tab pane");
+            last = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            if last == "1" {
+                return;
+            }
+            // sleep-ok: shell exit is asynchronous; observe pane death without triggering the listing reconciliation under test.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "the tab's shell never exited; pane {pane}, last pane_dead={last:?}"
+    );
+}
+
+/// Observe that a delete racing a tab operation left no process with the owned session marker.
+///
+/// Either operation may win. The caller checks its protocol outcome first;
+/// this independent process scan then covers descendants that could outlive
+/// an otherwise successful response. Keep the cleanup guard alive around it.
+async fn wait_for_tab_race_cleanup(session_id: &str, context: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let pids = marked_pids(session_id);
+        if pids.is_empty() {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{context}: marked processes survived: {pids:?}"
+        );
+        // sleep-ok: repeat the owned-marker scan within the existing cleanup observation window, retaining the final survivor assertion.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tab lifecycle edges
 // ---------------------------------------------------------------------------
@@ -122,22 +176,7 @@ async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
     // The pane goes dead — and the tab is gone from listings the moment
     // any list looks, without waiting on the ticker's kill.
     let pane = tab_pane(&h, &session.id, &tab.id).await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        let out = tmux_query(
-            &h.state.path().join("tmux.sock"),
-            &["display-message", "-p", "-t", &pane, "#{pane_dead}"],
-        )
-        .await;
-        if String::from_utf8_lossy(&out.stdout).trim() == "1" {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the tab's shell never exited"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_exited_tab_pane(&h.state.path().join("tmux.sock"), &pane).await;
     assert!(
         listed_tabs(&h.client, &session.id).await.is_empty(),
         "a tab whose shell exited must not be listed"
@@ -825,6 +864,7 @@ async fn an_open_tab_racing_a_delete_leaves_one_coherent_winner() {
         let open_id = session.id.clone();
         let opening =
             tokio::spawn(async move { opener.open_tab(&open_id).await.map(|tab| tab.id) });
+        // sleep-ok: vary the open/delete race's scheduling offset; either order is permitted, and deletion and cleanup are checked without assuming readiness.
         tokio::time::sleep(Duration::from_millis(offset_ms)).await;
         let deleted = h.client.delete_session(&session.id).await;
         let opened = opening.await.expect("the open task must not panic");
@@ -847,17 +887,14 @@ async fn an_open_tab_racing_a_delete_leaves_one_coherent_winner() {
                 .all(|listed| listed.id != session.id),
             "offset {offset_ms}: the deleted session must be gone from the list"
         );
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-        while !marked_pids(&session.id).is_empty() {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "offset {offset_ms}: a delete racing an open (which {}) left marked processes \
-                 behind: {:?}",
-                if opened.is_ok() { "won" } else { "lost" },
-                marked_pids(&session.id)
-            );
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        wait_for_tab_race_cleanup(
+            &session.id,
+            &format!(
+                "offset {offset_ms}: delete racing open (which {})",
+                if opened.is_ok() { "won" } else { "lost" }
+            ),
+        )
+        .await;
         drop(cleanup);
     }
 }
@@ -892,6 +929,7 @@ async fn a_close_tab_racing_a_delete_leaves_one_coherent_winner() {
         let close_tab_id = tab.id.clone();
         let closing =
             tokio::spawn(async move { closer.close_tab(&close_session, &close_tab_id).await });
+        // sleep-ok: vary the close/delete race's scheduling offset without requiring either operation to have reached a particular state.
         tokio::time::sleep(Duration::from_millis(offset_ms)).await;
         let deleted = h.client.delete_session(&session.id).await;
         let closed = closing.await.expect("the close task must not panic");
@@ -911,15 +949,11 @@ async fn a_close_tab_racing_a_delete_leaves_one_coherent_winner() {
                  as gone, not a teardown failure: {e:#}"
             );
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-        while !marked_pids(&session.id).is_empty() {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "offset {offset_ms}: a delete racing a close left marked processes behind: {:?}",
-                marked_pids(&session.id)
-            );
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        wait_for_tab_race_cleanup(
+            &session.id,
+            &format!("offset {offset_ms}: delete racing close"),
+        )
+        .await;
         drop(cleanup);
     }
 }
