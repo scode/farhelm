@@ -207,8 +207,6 @@ test("restart from the interrupted surface sends the resume request exactly once
   // No confirmation panel was interposed, and the click was not
   // re-delivered by the surface re-rendering around the in-flight request.
   await expect(page.locator(".restart-confirm")).toHaveCount(0);
-  await page.waitForTimeout(500);
-  expect(counter.restartRequests).toBe(1);
   // The reply ends the interrupted surface on its own, ahead of the
   // listing (which this fixture keeps pinned to `interrupted`): the band
   // and its control are gone and the terminal element is back for the new
@@ -217,6 +215,11 @@ test("restart from the interrupted surface sends the resume request exactly once
   await expect(page.locator(".interrupted-notice")).toHaveCount(0);
   await expect(page.locator("#terminal")).toHaveCount(1);
   await expect(page.locator(".restart-error")).toHaveCount(0);
+  // Begin the duplicate-request window only after the reply has replaced
+  // the interrupted surface; a slow reply must not consume the observation.
+  // sleep-ok: count any duplicate restart after the response-driven surface transition.
+  await page.waitForTimeout(500);
+  expect(counter.restartRequests).toBe(1);
 });
 
 // A live agent is the one case SPEC.md requires a confirmation for

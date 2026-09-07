@@ -40,7 +40,7 @@ import {
   waitForReplayReveal,
   installTerminalSuiteHooks,
 } from "./helpers/terminal-suite";
-import { waitForIslandMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
+import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 installTerminalSuiteHooks({ tabSweep: true });
 
@@ -813,9 +813,9 @@ test("background-probes-recover-without-a-click", async ({ page, request }) => {
 // into a pane that now belongs to a different session, and attach it under
 // a lease nothing on screen is using — the same class of zombie the
 // pre-M4 `mountWhenReady` retry loop produced, reintroduced one layer up.
-// The wait here is longer than the rung deliberately: the assertion is
-// that the timer FIRED HARMLESSLY or was cancelled, not that the test
-// looked before it could have run.
+// After the replacement attachment is identified, a finite window samples
+// whether a stale retry can reclaim its slot. The duration exceeds the
+// configured rung; elapsed time alone does not prove a browser timer ran.
 test("leaving-a-session-cancels-a-pending-reconnect", async ({ page, request }) => {
   await reconnectTimingsFromNextLoad(page, {
     delaysMs: [1_500, 1_500, 1_500, 1_500, 1_500, 1_500],
@@ -831,10 +831,13 @@ test("leaving-a-session-cancels-a-pending-reconnect", async ({ page, request }) 
     // singleton slot, so the zombie this pins would show up as the
     // `terminal` island's socket pointing back at the DEPARTED session —
     // a stale timer remounting under a lease nothing on screen is using.
-    await sharedSessionRow(page).click();
+    const shared = sharedSessionRow(page);
+    const sharedId = await shared.getAttribute("data-session-id");
+    expect(sharedId, "the replacement row must identify its session").toBeTruthy();
+    await shared.click();
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
-    await waitForIslandMounted(page, "terminal");
-    // Sample for a stale retry after selecting the shared session.
+    await waitForSessionMounted(page, sharedId!);
+    // sleep-ok: sample for a stale retry after the replacement attachment owns the slot.
     await page.waitForTimeout(2_500);
     const islands = await page.evaluate(() => {
       const map = (window as any).__farhelmIslands ?? {};
@@ -1529,7 +1532,11 @@ try {
   await page.evaluate(() => {
     (window as any).WebSocket = (window as any).__realWebSocket;
   });
-  await addTab(page, 0);
+  const tabId = await addTab(page, 0);
+  // The tab's own attachment proves the desired-set update reached the
+  // reconciler; the rendered tab slot alone could precede that work.
+  await waitForSessionMounted(page, session.id, { tabId });
+  // sleep-ok: observe the stalled agent after the same sync has mounted its new sibling tab.
   await page.waitForTimeout(1_000);
 
   expect(
