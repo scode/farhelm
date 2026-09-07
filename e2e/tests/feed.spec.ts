@@ -42,11 +42,16 @@ import {
   FeedStub,
   forceBuildSkew,
   hideSeenState,
+  holdReads,
   listSessions,
   openFilterBar,
   openRowMenu,
+  observeFeedReaders,
+  readFeedReaders,
   renameSession,
+  SESSION_LISTING,
   stubFeed,
+  waitForFeedReadersSettled,
 } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
@@ -259,6 +264,7 @@ async function reportStale(page: Page, id: string) {
  * confusing assertion rather than as a setup error.
  */
 async function healthyFeed(page: Page) {
+  await observeFeedReaders(page);
   const feed = await stubFeed(page);
   const reads = countReads(page);
   await page.goto("/");
@@ -279,6 +285,48 @@ test.describe("the invalidation feed", () => {
       const id = created.pop();
       if (id) await cleanupSession(request, id);
     }
+  });
+
+  /**
+   * The setup oracle must expose work queued behind an in-flight read and release
+   * callbacks when a keyed session view unmounts. Otherwise a quiet-window test
+   * could start early, or read signals whose owning component has already died.
+   * Held responses make both reader phases observable without a scheduling delay.
+   */
+  test("reader snapshots retain queued work and follow session selection", async ({ page, request }) => {
+    const first = await createSession(request, { title: `snapshot-first-${Date.now()}` });
+    created.push(first.id);
+    const second = await createSession(request, { title: `snapshot-second-${Date.now()}` });
+    created.push(second.id);
+    const { feed } = await healthyFeed(page);
+    await openSession(page, first.id, first.title);
+    await waitForFeedReadersSettled(page);
+
+    const held = await holdReads(page, SESSION_LISTING);
+    try {
+      feed.notify(2);
+      await held.waitForCaptures(1);
+      feed.notify(3);
+      await expect.poll(async () => {
+        const list = (await readFeedReaders(page)).find((snapshot) => snapshot.role === "list");
+        return list?.acted_on === list?.notices && list?.readers[0].running === true &&
+          list.readers[0].demand === "Notice" && list.readers[0].task === true;
+      }, { timeout: 30_000, message: "the snapshot must expose the follow-up owed behind the held read" }).toBe(true);
+      held.release(1);
+      await held.waitForCaptures(2);
+      const list = (await readFeedReaders(page)).find((snapshot) => snapshot.role === "list");
+      expect(list?.readers[0].running, "the held follow-up must still be running").toBe(true);
+    } finally {
+      held.releaseAll();
+    }
+    await waitForFeedReadersSettled(page);
+
+    await openSession(page, second.id, second.title);
+    await waitForFeedReadersSettled(page);
+    const snapshots = await readFeedReaders(page);
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots.filter((snapshot) => snapshot.role === "session").map((snapshot) => snapshot.id))
+      .toEqual([second.id]);
   });
 
   /**
@@ -353,11 +401,10 @@ test.describe("the invalidation feed", () => {
    */
   test("a healthy feed performs no periodic reads on the list", async ({ page }) => {
     const { reads } = await healthyFeed(page);
-    // Let the mount reads and the handshake's re-read land before the window
-    // opens.
-    await page.waitForTimeout(1_500);
+    await waitForFeedReadersSettled(page);
     const before = reads.count();
 
+    // sleep-ok: uninterrupted negative observation spanning the removed poll periods.
     await page.waitForTimeout(12_000);
 
     expect(
@@ -385,10 +432,11 @@ test.describe("the invalidation feed", () => {
     created.push(session.id);
     const { reads } = await healthyFeed(page);
     await openSession(page, session.id, session.title);
-    await page.waitForTimeout(1_500);
+    await waitForFeedReadersSettled(page);
     const before = reads.count();
     const detailBefore = reads.count("detail");
 
+    // sleep-ok: uninterrupted negative observation spanning the removed detail poll period.
     await page.waitForTimeout(12_000);
 
     // The detail surface first, since a surviving detail loop is what this
@@ -429,10 +477,11 @@ test.describe("the invalidation feed", () => {
     // The notice is what says the stale surface is really up: without it the
     // host read below would be absent for the boring reason.
     await expect(page.locator(".host-stale-notice")).toBeVisible({ timeout: 20_000 });
-    await page.waitForTimeout(1_500);
+    await waitForFeedReadersSettled(page, session.id);
     const before = reads.count();
     const hostsBefore = reads.count("hosts");
 
+    // sleep-ok: uninterrupted negative observation spanning the removed stale-host poll period.
     await page.waitForTimeout(12_000);
 
     expect(

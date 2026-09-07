@@ -36,6 +36,10 @@ shell-words.workspace = true
 web-time = "1.1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# Synchronous, opt-in browser-test snapshots of existing reader state. Using
+# a direct callback avoids adding an asynchronous observer to the scheduler
+# whose settlement the tests need to inspect.
+wasm-bindgen = "0.2.126"
 # `Storage` is added on top of the workspace features (which carry
 # `Window`/`Location` for every crate that needs them) for the per-client
 # preferences the browser build keeps in localStorage.

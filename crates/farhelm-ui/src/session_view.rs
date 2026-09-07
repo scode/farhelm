@@ -937,11 +937,26 @@ pub(crate) fn SessionView(
     // follow-up rather than a second concurrent walk.
     let feed_detail = request_detail.clone();
     let feed_host_read = request_host_state.clone();
-    use_feed_reader(move || {
+    let feed_acted_on = use_feed_reader(move || {
         feed_detail(Trigger::Notice);
         if current.peek().stale {
             feed_host_read(Trigger::Notice);
         }
+    });
+
+    // The stale fixture's confirmed-absent host result proves its initial
+    // staleness effect issued a read; an idle, never-used host reader alone
+    // would not establish that premise. No application work is scheduled here.
+    crate::reader::use_test_reader_snapshot(move || {
+        let shown = current.peek();
+        serde_json::json!({
+            "role": "session",
+            "id": shown.id,
+            "acted_on": feed_acted_on.peek().to_string(),
+            "stale": shown.stale,
+            "host_absent": matches!(host_read.peek().lookup(shown.host), HostLookup::Absent),
+            "readers": [detail_surface.peek().test_snapshot(), host_surface.peek().test_snapshot()],
+        })
     });
 
     // The documented fallback (PLAN_M6_75.md item 6): the timer runs

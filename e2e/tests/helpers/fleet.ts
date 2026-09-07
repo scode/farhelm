@@ -14,6 +14,84 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { recordPage } from "./timeline";
 
+/** The opt-in registry owns no application work; mounted Rust scopes own its getters. */
+type ReaderRegistry = { version: number; getters: Set<() => string>; error?: string };
+type ReaderState = { running: boolean; demand: string; task: boolean };
+type ReaderSnapshot = {
+  role: "list" | "session";
+  readers: ReaderState[];
+  acted_on: string;
+  notices?: string;
+  healthy?: boolean;
+  skew?: boolean;
+  selected?: string | null;
+  listing_answered?: boolean;
+  has_rows?: boolean;
+  resolving_remembered?: boolean;
+  id?: string;
+  stale?: boolean;
+  host_absent?: boolean;
+};
+
+/** Install before navigation; ordinary pages never register reader callbacks. */
+export async function observeFeedReaders(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const target = globalThis as typeof globalThis & { __farhelmTestReaders?: ReaderRegistry };
+    target.__farhelmTestReaders = { version: 1, getters: new Set() };
+  });
+}
+
+/** Read every mounted getter in one browser turn; a broken registry is a setup failure. */
+export async function readFeedReaders(page: Page): Promise<ReaderSnapshot[]> {
+  return page.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __farhelmTestReaders?: ReaderRegistry };
+    const registry = target.__farhelmTestReaders;
+    if (registry?.version !== 1 || !(registry.getters instanceof Set)) {
+      throw new Error("reader snapshot registry is not installed");
+    }
+    if (registry.error) throw new Error(registry.error);
+    return [...registry.getters].map((getter) => JSON.parse(getter()) as ReaderSnapshot);
+  });
+}
+
+/**
+ * Wait for the counted feed surfaces to retire setup work before a strict quiet window.
+ *
+ * Network completion cannot prove retirement: a notice may still owe a coalesced read.
+ * These synchronous getters read the real reader state and the existing consumer notice
+ * count without adding an effect. Selection agreement excludes a pending mount. In the
+ * deliberately stale fixture, pass its session ID: a confirmed-absent host proves its
+ * initial host effect ran. Other selected sessions must be fresh, as these fixtures expect.
+ * This is a setup boundary; the caller's uninterrupted zero-read window proves silence.
+ */
+export async function waitForFeedReadersSettled(page: Page, staleSession?: string): Promise<void> {
+  let last: ReaderSnapshot[] = [];
+  await expect.poll(async () => {
+    last = await readFeedReaders(page);
+    const lists = last.filter((snapshot) => snapshot.role === "list");
+    const sessions = last.filter((snapshot) => snapshot.role === "session");
+    const list = lists[0];
+    if (lists.length !== 1 || last.length !== lists.length + sessions.length ||
+      list.healthy !== true || list.skew !== false || list.listing_answered !== true ||
+      list.resolving_remembered !== false || typeof list.notices !== "string" ||
+      typeof list.has_rows !== "boolean" ||
+      (list.selected !== null && typeof list.selected !== "string") ||
+      (list.has_rows && !list.selected)) return false;
+    if (staleSession !== undefined && list.selected !== staleSession) return false;
+    if (list.selected ? sessions.length !== 1 || sessions[0].id !== list.selected : sessions.length !== 0) {
+      return false;
+    }
+    return last.every((snapshot) => snapshot.acted_on === list.notices &&
+      snapshot.readers.length === 2 && snapshot.readers.every((reader) =>
+        reader.running === false && reader.demand === "None" && reader.task === false
+      ) && (snapshot.role !== "session" ||
+        (snapshot.stale === (snapshot.id === staleSession) &&
+          (snapshot.id !== staleSession || snapshot.host_absent === true))));
+  }, { timeout: 30_000, message: "feed setup must retire its counted reader work" }).toBe(true).catch((error) => {
+    throw new Error(`${String(error)}\nlast reader snapshot: ${JSON.stringify(last)}`);
+  });
+}
+
 /**
  * The fake agent's `basic` script, as the create form's `invocation` string
  * — an absolute path, quoted, exactly as the terminal spec family's shared
