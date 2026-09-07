@@ -36,17 +36,22 @@ fn output_with_timeout(mut command: Command) -> Output {
     }
 }
 
-/// Serve one authenticated request with bounded accept and completion waits.
+/// Serve one authenticated request with cancellation across the entire exchange.
+///
+/// The returned owner cancels blocked handshake and reply writes during unwind.
+/// A six-second transaction allowance fits inside finish_server's seven-second
+/// result wait, which still requires protocol success before observing the join.
 fn mock_supervisor(
     socket: &std::path::Path,
     respond: impl FnOnce(ControlMsg) -> ControlMsg + Send + 'static,
 ) -> (
     std::sync::mpsc::Receiver<Result<(), String>>,
-    std::thread::JoinHandle<()>,
+    farhelm_teststate::thread::FixtureThread,
 ) {
     let std_listener = std::os::unix::net::UnixListener::bind(socket).expect("bind socket");
     std_listener.set_nonblocking(true).unwrap();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
     // The mock leaves libtest's thread, so it must carry the test's capture
     // through its runtime and back through runtime teardown.
     let context = farhelm_testtrace::current_thread_context().expect("test trace context");
@@ -62,67 +67,198 @@ fn mock_supervisor(
                         },
                         |runtime| {
                             runtime.block_on(async move {
-                                let listener =
-                                    tokio::net::UnixListener::from_std(std_listener).unwrap();
-                                let (stream, _) =
-                                    tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                                // Cancellation and the aggregate deadline cover handshake and
+                                // response writes too, including peers that stop draining output.
+                                let exchange = async move {
+                                    let listener =
+                                        tokio::net::UnixListener::from_std(std_listener).unwrap();
+                                    let (stream, _) =
+                                        tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                                            .await
+                                            .expect("spawn did not connect")
+                                            .expect("accept spawn");
+                                    let (read, write) = tokio::io::split(stream);
+                                    let mut reader = FrameReader::new(read);
+                                    let mut writer = FrameWriter::new(write);
+                                    let hello = handshake(&mut reader, &mut writer, "supervisor")
                                         .await
-                                        .expect("spawn did not connect")
-                                        .expect("accept spawn");
-                                let (read, write) = tokio::io::split(stream);
-                                let mut reader = FrameReader::new(read);
-                                let mut writer = FrameWriter::new(write);
-                                let hello = handshake(&mut reader, &mut writer, "supervisor")
+                                        .expect("handshake");
+                                    let ControlMsg::Hello {
+                                        role,
+                                        auth: Some(auth),
+                                        ..
+                                    } = hello
+                                    else {
+                                        panic!("spawn must authenticate in its hello: {hello:?}");
+                                    };
+                                    assert_eq!(role, "spawn");
+                                    assert_eq!(auth.session_id, "parent-123");
+                                    assert_eq!(auth.token, "secret");
+                                    let frame = tokio::time::timeout(
+                                        Duration::from_secs(5),
+                                        reader.read_frame(),
+                                    )
                                     .await
-                                    .expect("handshake");
-                                let ControlMsg::Hello {
-                                    role,
-                                    auth: Some(auth),
-                                    ..
-                                } = hello
-                                else {
-                                    panic!("spawn must authenticate in its hello: {hello:?}");
+                                    .expect("spawn did not send create")
+                                    .unwrap()
+                                    .expect("create request");
+                                    let reply = respond(parse_control(&frame).unwrap());
+                                    writer.write_control(&reply).await.unwrap();
                                 };
-                                assert_eq!(role, "spawn");
-                                assert_eq!(auth.session_id, "parent-123");
-                                assert_eq!(auth.token, "secret");
-                                let frame = tokio::time::timeout(
-                                    Duration::from_secs(5),
-                                    reader.read_frame(),
-                                )
-                                .await
-                                .expect("spawn did not send create")
-                                .unwrap()
-                                .expect("create request");
-                                let reply = respond(parse_control(&frame).unwrap());
-                                writer.write_control(&reply).await.unwrap();
-                            });
+                                tokio::select! {
+                                    _ = cancel_rx => Err("mock supervisor cancelled".to_string()),
+                                    result = tokio::time::timeout(Duration::from_secs(6), exchange) => {
+                                        result.map_err(|_| "mock supervisor exchange exceeded six seconds".to_string())
+                                    }
+                                }
+                            })
                         },
                     )
-                    .unwrap();
+                    .unwrap()
             }))
             .map_err(|panic| {
                 panic.downcast_ref::<&str>().map_or_else(
                     || "mock supervisor panicked".to_string(),
                     |s| (*s).to_string(),
                 )
-            });
+            })
+            .and_then(|result| result);
             let _ = done_tx.send(result);
         });
     });
-    (done_rx, thread)
+    let owner = farhelm_teststate::thread::FixtureThread::new(
+        "spawn_cli mock supervisor",
+        thread,
+        move || {
+            let _ = cancel_tx.send(());
+        },
+    )
+    .expect("start mock supervisor join observer");
+    (done_rx, owner)
 }
 
-/// Join only after the server has reported completion; this gives panics and
-/// missing requests a deterministic deadline of their own.
+/// Require protocol success before waiting for runtime and thread destruction.
+/// The owner stays armed through both assertions, so a failed result still
+/// cancels the mock instead of detaching it on the test's unwind path.
 fn finish_server(
     done: std::sync::mpsc::Receiver<Result<(), String>>,
-    thread: std::thread::JoinHandle<()>,
+    thread: farhelm_teststate::thread::FixtureThread,
 ) {
     done.recv_timeout(Duration::from_secs(7))
         .expect("mock supervisor did not finish")
         .expect("mock supervisor failed");
-    thread.join().expect("join mock supervisor");
+    thread
+        .finish(Duration::from_secs(1))
+        .expect("join mock supervisor");
+}
+
+/// Failed test setup must cancel an accept that has no peer, releasing the
+/// listener instead of leaving a detached mock alive until its normal deadline.
+#[farhelm_testtrace::test]
+fn mock_cleanup_cancels_before_accept() {
+    let state = farhelm_teststate::tempdir().unwrap();
+    let socket = state.path().join("mock.sock");
+    let (done, owner) = mock_supervisor(&socket, |_| panic!("no request expected"));
+    drop(owner);
+    assert_eq!(
+        done.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err("mock supervisor cancelled".to_string())
+    );
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_err());
+}
+
+/// Receiving the server's hello proves accept completed; withholding the rest
+/// of the client's frame then exercises cancellation inside the handshake.
+#[farhelm_testtrace::test]
+fn mock_cleanup_cancels_a_partial_handshake() {
+    use std::io::{Read, Write};
+    let state = farhelm_teststate::tempdir().unwrap();
+    let socket = state.path().join("mock.sock");
+    let (done, owner) = mock_supervisor(&socket, |_| panic!("no request expected"));
+    let mut peer = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+    peer.set_write_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    peer.read_exact(&mut [0_u8; 1]).unwrap();
+    peer.write_all(&[0]).unwrap();
+    drop(owner);
+    assert_eq!(
+        done.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err("mock supervisor cancelled".to_string())
+    );
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_err());
+}
+
+/// Cancellation must interrupt a response write when an authenticated peer
+/// stops reading. One received response byte proves the write began. The result
+/// channel must be empty before cleanup and report cancellation afterward.
+#[farhelm_testtrace::test]
+async fn mock_cleanup_cancels_response_backpressure() {
+    use tokio::io::AsyncReadExt;
+    let state = farhelm_teststate::tempdir().unwrap();
+    let socket = state.path().join("mock.sock");
+    let (done, owner) = mock_supervisor(&socket, |_| ControlMsg::Error {
+        req_id: 1,
+        kind: farhelm_proto::ErrorKind::InvalidRequest,
+        message: "x".repeat(4 * 1024 * 1024),
+    });
+    let peer = tokio::time::timeout(Duration::from_secs(5), async {
+        let peer = tokio::net::UnixStream::connect(&socket).await.unwrap();
+        let (mut read, write) = tokio::io::split(peer);
+        let mut reader = FrameReader::new(&mut read);
+        let mut writer = FrameWriter::new(write);
+        farhelm_proto::io::handshake_with_session_auth(
+            &mut reader,
+            &mut writer,
+            farhelm_proto::SessionAuth {
+                session_id: "parent-123".to_string(),
+                token: "secret".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        drop(reader);
+        writer
+            .write_control(&ControlMsg::ListSessions { req_id: 1 })
+            .await
+            .unwrap();
+        read.read_exact(&mut [0_u8; 1]).await.unwrap();
+        (read, writer)
+    })
+    .await
+    .expect("mock response must begin");
+    assert!(matches!(
+        done.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
+    // Keep the peer open and undrained through cleanup. Closing it here would
+    // make a broken cancellation path pass by causing an ordinary write error.
+    drop(owner);
+    assert_eq!(
+        done.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err("mock supervisor cancelled".to_string())
+    );
+    drop(peer);
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_err());
+}
+
+/// An assertion unwind must retain ownership long enough to cancel the mock;
+/// callers do not have to reach finish_server to release its listener.
+#[farhelm_testtrace::test]
+fn mock_unwind_cancels_its_listener() {
+    let state = farhelm_teststate::tempdir().unwrap();
+    let socket = state.path().join("mock.sock");
+    let (done, owner) = mock_supervisor(&socket, |_| panic!("no request expected"));
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _owner = owner;
+        panic!("test assertion unwind");
+    }));
+    assert!(unwind.is_err());
+    assert_eq!(
+        done.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err("mock supervisor cancelled".to_string())
+    );
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_err());
 }
 
 /// Prove a precondition failure returned before opening the supplied socket.
