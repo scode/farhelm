@@ -244,6 +244,10 @@ Deferred work, with its original triggers:
 
 ## Maybe later
 
+- Free up more space for session names in the sidebar: the agent and yolo/profile labels currently take too much of each
+  row. Use one small indicator for the agent and a separate small indicator for whether it is running in yolo mode.
+  Decide the agent indicator's form (SVG icon, short name, etc.) and the remaining display details when doing the work.
+
 - Let the user mark each host as "yolo is fine" or "yolo is not fine", controlling which hosts appear red in the session
   list. This could also support warnings when the user is about to run an unsandboxed agent on a host marked "yolo is
   not fine".
