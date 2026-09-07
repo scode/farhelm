@@ -9821,6 +9821,7 @@ pub(crate) mod tests {
                         let _ = child.wait();
                         return;
                     }
+                    // sleep-ok: give this guard's owned cleanup child time to exit before the bounded kill-and-reap fallback.
                     Ok(None) => std::thread::sleep(Duration::from_millis(20)),
                 }
             }
@@ -10637,6 +10638,36 @@ pub(crate) mod tests {
         );
     }
 
+    /// Establish the dead-pane premise before reload reconciles durable state.
+    ///
+    /// A launching row can lack a pane id, so one caller identifies its
+    /// fixture by session name; a stopped row retains the exact pane id.
+    /// Keep that choice explicit instead of accepting any dead pane on the
+    /// private server. The fixture remains owned while timeout diagnostics
+    /// report the states that failed to satisfy the selected boundary.
+    async fn wait_for_dead_fixture_pane(
+        sup: &Supervisor,
+        description: &str,
+        matches: impl Fn(&str, &crate::tmux::PaneState) -> bool,
+    ) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            if states
+                .iter()
+                .any(|(pane, state)| state.dead && matches(pane, state))
+            {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the fixture pane never died ({description}); observed states: {states:?}"
+            );
+            // sleep-ok: tmux reports shell exit asynchronously; retry the selected dead-pane premise until the original deadline.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
     /// The one terminal the entry-replacement tests above and
     /// `service::status`'s classification tests use.
     pub(crate) fn a_terminal() -> Terminal {
@@ -10714,21 +10745,10 @@ pub(crate) mod tests {
                 .expect("insert a launching row");
         }
         // The dead pane has to actually be dead before the reload asks.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            if states
-                .values()
-                .any(|state| state.session_name == "fh-dead" && state.dead)
-            {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the fixture pane never died"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        wait_for_dead_fixture_pane(&sup, "launching session fh-dead", |_, state| {
+            state.session_name == "fh-dead"
+        })
+        .await;
 
         let (sessions, _) = Supervisor::reload_sessions(
             &sup.state_dir,
@@ -11252,18 +11272,10 @@ pub(crate) mod tests {
                 .expect("record the intent");
             panes.insert(id, pane);
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            if states.get(&panes["landed"]).is_some_and(|state| state.dead) {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the fixture pane never died"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        wait_for_dead_fixture_pane(&sup, "stopped session landed", |pane, _| {
+            pane == panes["landed"]
+        })
+        .await;
 
         Supervisor::reload_sessions(
             &sup.state_dir,
@@ -13750,6 +13762,31 @@ pub(crate) mod tests {
         );
     }
 
+    /// Observe the connection error after the fixture has dropped its listener.
+    ///
+    /// A concurrent fork can briefly retain a copy of the listening
+    /// descriptor until exec closes it. Keep successful probe streams
+    /// short-lived and wait for the actual error; the caller separately
+    /// checks its kind, so this helper must not accept a particular errno
+    /// on the caller's behalf.
+    async fn wait_for_connection_error(state_dir: &Path) -> anyhow::Error {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match connect(state_dir).await {
+                Err(error) => return error,
+                Ok(stream) => {
+                    drop(stream);
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "a socket whose listener is gone kept accepting connections"
+                    );
+                    // sleep-ok: a forked child can retain the listener until exec; retry the actual connection failure inside the original bound.
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        }
+    }
+
     /// "No supervisor is running here" is the single most common way this
     /// dial fails, and the raw kernel text for it ("No such file or
     /// directory", "Connection refused (os error 111)") tells an operator
@@ -13788,20 +13825,7 @@ pub(crate) mod tests {
         // that window costs nothing; asserting on the first answer made
         // the whole suite fail about one run in three.
         // Bounded, so a genuine regression fails loudly instead of hanging.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let refused = loop {
-            match connect(dir.path()).await {
-                Err(error) => break error,
-                Ok(stream) => {
-                    drop(stream);
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "a socket whose listener is gone kept accepting connections"
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            }
-        };
+        let refused = wait_for_connection_error(dir.path()).await;
 
         for (err, expected_kind) in [
             (missing, std::io::ErrorKind::NotFound),
@@ -14505,23 +14529,33 @@ pub(crate) mod tests {
         .await
         .expect("the retry launches: the repoint happened after the check, not before it");
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        let reported = loop {
-            if let Ok(reported) = std::fs::read_to_string(&landed) {
-                break reported;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the stub shim never reported the directory it started in"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        };
+        let reported = wait_for_shim_directory_report(&landed).await;
         assert_eq!(
             reported.trim(),
             canonical_original,
             "the agent must have started in the directory the identity check verified, not in \
              whatever the link was repointed at afterwards"
         );
+    }
+
+    /// Read the stub shim's directory witness before checking launch authority.
+    ///
+    /// Creation of the supervisor's launch request does not prove that
+    /// the shim ran. Wait for its file to become readable, preserving the
+    /// caller's separate comparison with the canonical directory.
+    async fn wait_for_shim_directory_report(path: &Path) -> String {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(reported) = std::fs::read_to_string(path) {
+                return reported;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stub shim never reported the directory it started in"
+            );
+            // sleep-ok: the separately spawned shim publishes its directory witness asynchronously; retry readability at the original cadence.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// Every shell tab receives the same spawn authority as its owning agent.
