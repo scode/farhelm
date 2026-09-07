@@ -17,62 +17,67 @@ Climb one rung at a time, and only when the rung below failed to reproduce:
 
 1. The exact failing test, repeated in a loop.
 2. Its module (Rust) or spec file (Playwright), still on one engine.
-3. Its test binary at the release gate's thread count, or the spec file on both engines.
+3. Its test binary at the release gate's runner budget, or the spec file on both engines.
 4. The full battery, exactly as AGENTS.md states it.
 
 Repetition belongs on every rung: a flake that fires once in twenty runs needs twenty runs of evidence, and twenty runs
 of one test cost far less than one run of everything.
 
-## Rust: cargo test filters
+## Rust: recorded nextest selections
 
 The workspace holds roughly 2,100 Rust tests. Most are per-crate unit tests (`farhelm-helm` ~610, `farhelm-supervisor`
 ~590, `farhelm-ui` ~300, `farhelm-proto` ~100, `farhelm` ~100). The expensive battery is the one integration binary
 `crates/farhelm/tests/e2e` (~330 tests driving a real supervisor and real tmux); `crates/farhelm/tests/` also has five
 smaller process-level binaries (`agent_cli`, `spawn_cli`, and friends). Everything is selectable with cargo's ordinary
-test filters — there is no bespoke runner.
+target flags and nextest filter expressions. Nextest starts one process per test; doctests remain a separate cargo run.
 
 Use the run recorder around the selected command so each attempt retains its own output, source state, and substrate
 identity. The shapes below are child commands after `--`, not substitutes for the recorder. For a controlled Rust
 reproduction, put the pinned tmux first on PATH; its build is cached under `.ci-tmux/` after the first call:
 
 ```sh
-PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" python3 scripts/record-test-run.py \
-  --kind repetition --selection 'terminal_tabs module' --concurrency '4 libtest threads' --tmux required \
-  -- cargo test -p farhelm --test e2e terminal_tabs:: -- --show-output --test-threads=4
+nextest_dir=$(python3 scripts/install-pinned-nextest.py) && \
+tmux_dir=$(scripts/build-pinned-tmux-ci.sh) && \
+PATH="$nextest_dir:$tmux_dir:$PATH" python3 scripts/record-test-run.py \
+  --runner nextest --kind repetition --selection 'terminal_tabs module' \
+  --concurrency '4 nextest slots; retries 0' --tmux required \
+  -- cargo nextest run -p farhelm --test e2e -E 'test(terminal_tabs::)'
 ```
 
 For checks without tmux, use `--tmux none`; a deliberate comparison with another local binary uses `warn`. Record the
-real thread count or runner default in `--concurrency`. Do not label a one-test run as a four-test load merely because
-its thread budget is four. `docs/test-run-evidence.md` describes private retention and incomplete runs. Failed attempts
+actual selection and four-slot runner budget in `--concurrency`. Do not label a one-test run as a four-test load merely
+because its budget is four. `docs/test-run-evidence.md` describes private retention and incomplete runs. Failed attempts
 stay in the working log and on disk before a retry; only latent flakes belong in FLAKES.md.
 
 The shapes, narrowest first:
 
 - One test, exactly:
-  `cargo test -p farhelm --test e2e session_rename::a_rename_is_visible_in_the_next_list_reply_without_a_restart -- --exact --show-output`
-  (the e2e binary's test names are `module::test_name`; get the real name from the failure output or `-- --list`).
-- One filter (substring match): `cargo test -p farhelm-supervisor shutdown_acks -- --show-output`.
-- A whole e2e module: `cargo test -p farhelm --test e2e terminal_tabs:: -- --show-output`.
-- A crate's unit tests only: `cargo test -p farhelm-helm --lib provisioning:: -- --show-output`.
+  `cargo nextest run -p farhelm --test e2e -E 'test(=session_rename::a_rename_is_visible_in_the_next_list_reply_without_a_restart)'`
+  (the e2e binary's test names are `module::test_name`; get the name from failure output or `cargo nextest list`).
+- One filter (substring match): `cargo nextest run -p farhelm-supervisor --lib -E 'test(shutdown_acks)'`.
+- A whole e2e module: `cargo nextest run -p farhelm --test e2e -E 'test(terminal_tabs::)'`.
+- A crate's unit tests only: `cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::)'`.
 - Repetition for a flake: loop the complete recorder invocation, stopping at the first failure and preserving its run
   directory. Choose the count explicitly; twenty attempts are a focused option, not a default gate. Each invocation is a
-  fresh test process, which matters for tmux-teardown flakes (`scripts/test-tmux-pinned-shutdown.sh` exists precisely
-  because a surviving client or server can contaminate the next scenario inside one shared process; any of its ten
-  single-test invocations can be run directly, copied verbatim from the script).
-- Desktop-feature seams: `cargo test -p farhelm-ui --features desktop <filter>` — same mechanics, needs the
+  fresh runner invocation, and nextest gives every selected test its own process. The pinned shutdown script retains ten
+  explicit release scenarios; a combined local nextest run already gives those scenarios process isolation.
+- Desktop-feature seams: `cargo nextest run -p farhelm-ui --features desktop -E 'test(substring)'` — needs the
   webkit2gtk/gtk dev packages.
 
-`--exact` needs the full path including the `tests` module for unit tests (e.g. `store::tests::the_name`); when in
-doubt, use the substring filter or `-- --list` first. `--show-output` is worth keeping even on narrow runs — it is what
-makes a loudly-skipped test (no systemd user manager, no passwordless ssh to localhost) visibly skipped rather than
-silently green.
+`test(=name)` needs the full path including the `tests` module for unit tests (e.g. `store::tests::the_name`). When in
+doubt, use `cargo nextest list` with the same package/target/filter options first; listing may compile missing test
+binaries but does not run them. Recorded execution refuses an empty selection and does not retry failures. Immediate
+success output preserves runtime `SKIPPED` messages (no systemd user manager or passwordless SSH). Such a test still
+appears as passed in JUnit; read the output before claiming substrate coverage. Rust doctests are separate: use the
+generic recorder around `cargo test --locked --doc -p PACKAGE -- --show-output --test-threads=4` when relevant.
 
 Two caveats before trusting a narrow non-reproduction:
 
-- Thread count. The narrow run has no contention; the release gate runs its retained Rust targets at `--test-threads=4`.
-  Ordinary CI does not run Rust tests, and the full e2e binary remains excluded from the release gate. Before concluding
-  "only fails in the big run", reproduce that thread budget locally at rung 3:
-  `cargo test -p farhelm --test e2e -- --test-threads=4 --show-output`.
+- Concurrency. A narrow run may have no contention; nextest shares four slots across selected binaries, with an e2e
+  group cap and explicit expensive-test reservations in `.config/nextest.toml`. The in-process SLOTS semaphore cannot
+  coordinate nextest children. Ordinary CI does not run Rust tests, and full e2e remains excluded from release. At rung
+  3, use `cargo nextest run -p farhelm --test e2e` through the recorder. Cross-binary contention may require a broader
+  package selection after that; do not run both full nextest and full libtest batteries by default.
 - Ambient environment. A shell inside a farhelm session carries `FARHELM_AGENT_ID`, and the supervisor's sweep tests
   inspect live `/proc` environs. Four `service::sweep::tests` cases in `farhelm-supervisor` have failed under an ambient
   marker on machines with a systemd user manager (they skip themselves elsewhere). The recorder removes every ambient

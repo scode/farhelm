@@ -8,6 +8,7 @@ tests or retries on its own, and missing report evidence stays incomplete.
 from __future__ import annotations
 
 import hashlib
+import argparse
 import json
 import os
 import pathlib
@@ -76,7 +77,7 @@ def selection_args(argv: list[str]) -> list[str]:
     return result
 
 
-def read_regular(path: pathlib.Path, limit: int) -> bytes:
+def read_regular(path: pathlib.Path, limit: int, *, parent_fd: int | None = None) -> bytes:
     """Read a bounded regular file without following its final symlink.
 
     The deadline bounds runnable reads; a filesystem operation stuck in the
@@ -84,7 +85,7 @@ def read_regular(path: pathlib.Path, limit: int) -> bytes:
     checkout or the recorder's private run, not an arbitrary artifact walk.
     """
 
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent_fd)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
@@ -217,3 +218,64 @@ def collect(run_dir: pathlib.Path) -> dict[str, object]:
     except (OSError, ValueError, KeyError, ET.ParseError) as error:
         result["reason"] = type(error).__name__
     return result
+
+
+def export_evidence(run_dir: pathlib.Path, destination: pathlib.Path) -> dict[str, object]:
+    """Copy only bounded runner inputs and JUnit bytes, retaining omissions explicitly.
+
+    Every input directory component beneath the run root is opened without following links. No raw test directory is
+    walked. Export preserves report bytes, including malformed XML, because a report parser failure is useful evidence
+    too. This collection status describes files, not test outcomes. Existing destination files are never replaced.
+    """
+    files = (
+        (("nextest.toml",), "nextest.toml", CONFIG_LIMIT),
+        (("nextest-store.toml",), "nextest-store.toml", CONFIG_LIMIT),
+        (("nextest", "default", "junit.xml"), "nextest-junit.xml", REPORT_LIMIT),
+    )
+    result = {"complete": True, "files": [], "errors": []}
+    root_fd = None
+    try:
+        root_fd = os.open(run_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        destination.mkdir(mode=0o700, parents=False, exist_ok=True)
+        if destination.is_symlink() or not destination.is_dir():
+            raise ValueError("export destination must be a directory, not a link")
+        for parts, name, limit in files:
+            held = []
+            try:
+                parent = root_fd
+                for component in parts[:-1]:
+                    parent = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                     dir_fd=parent)
+                    held.append(parent)
+                data = read_regular(pathlib.Path(parts[-1]), limit, parent_fd=parent)
+                write_private(destination / name, data)
+                result["files"].append({
+                    "source": "/".join(parts), "path": name, "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                })
+            except (OSError, ValueError) as error:
+                result["complete"] = False
+                result["errors"].append({"source": "/".join(parts), "reason": type(error).__name__})
+            finally:
+                for fd in reversed(held):
+                    os.close(fd)
+    except (OSError, ValueError) as error:
+        result["complete"] = False
+        result["errors"].append({"source": "run or destination directory", "reason": type(error).__name__})
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
+    return result
+
+
+def main() -> None:
+    """Expose fixed-layout export for release failure collection, including incomplete-file status."""
+    parser = argparse.ArgumentParser(description="Export bounded nextest evidence; omissions remain in JSON output.")
+    parser.add_argument("run_dir", type=pathlib.Path)
+    parser.add_argument("destination", type=pathlib.Path)
+    args = parser.parse_args()
+    print(json.dumps(export_evidence(args.run_dir, args.destination), sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

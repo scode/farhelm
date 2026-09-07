@@ -27,7 +27,12 @@ pub(super) struct ScratchServer {
     _slot: tokio::sync::SemaphorePermit<'static>,
 }
 
-/// Caps how many real-tmux tests in THIS binary run at once.
+/// Caps real-tmux fixtures inside one process; nextest supplies the shared two-slot group.
+///
+/// `.config/nextest.toml` groups the driver, stream, and sink test modules
+/// across nextest children. This semaphore remains a fallback for explicit
+/// libtest diagnosis and multiple fixtures inside one test; it cannot enforce
+/// a cap between separate processes.
 ///
 /// libtest runs every test in a binary concurrently and bounds only
 /// the thread count, not what those threads start. Some stream and sink
