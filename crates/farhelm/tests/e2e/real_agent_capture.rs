@@ -127,12 +127,14 @@ async fn wait_for_agent_ready(
         );
         if trust_dialog_markers.iter().any(|m| text.contains(m)) {
             client.send_input(chan, b"\r".to_vec()).await;
+            // sleep-ok: pace dialog-answer retries; the next rendered marker decides readiness.
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
         }
         if text.contains(ready_marker) {
             return;
         }
+        // sleep-ok: poll the rendered readiness marker between deadline checks.
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
@@ -241,6 +243,7 @@ async fn real_agent_captures_its_conversation(
     // while claude submitted the same burst every time. Splitting it costs
     // nothing (the capture window is anchored on the first input byte and
     // is a minute wide) and removes the whole class of flake.
+    // sleep-ok: separate prompt text from Enter to avoid the vendor's paste heuristic.
     tokio::time::sleep(Duration::from_secs(1)).await;
     client.send_input(chan, b"\r".to_vec()).await;
 
@@ -264,6 +267,7 @@ async fn real_agent_captures_its_conversation(
              transcript so far:\n{}",
             String::from_utf8_lossy(&seen)
         );
+        // sleep-ok: poll published capture identity; list passes drive capture each round.
         tokio::time::sleep(Duration::from_secs(1)).await;
     };
 
@@ -493,6 +497,7 @@ async fn wait_for_reported_identity(
                 String::from_utf8_lossy(&pane.stdout),
             );
         }
+        // sleep-ok: poll changed identity plus hook acknowledgement between deadline checks.
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
@@ -558,6 +563,7 @@ async fn assert_identity_stays(
             expected,
             "the identity moved before the vendor event that is supposed to move it"
         );
+        // sleep-ok: space repeated negative identity samples across the observation interval.
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
@@ -678,6 +684,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
             "the composer never showed the typed /clear; rendered pane:\n{text}"
         );
         client.send_input(chan, b"/clear".to_vec()).await;
+        // sleep-ok: pace command retries while polling a new rendered occurrence of /clear.
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     // Executed, not merely typed — and the only proof of that which cannot
@@ -692,6 +699,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     'entered: loop {
         client.send_input(chan, b"\r".to_vec()).await;
         for _ in 0..10 {
+            // sleep-ok: sample identity between Enter retries; the outer loop checks the deadline.
             tokio::time::sleep(Duration::from_millis(500)).await;
             let snapshot = sup
                 .session_snapshot(&session.id)
@@ -869,11 +877,13 @@ async fn real_codex_session_reports_its_identity_across_new() {
         if news(&text) <= baseline {
             client.send_input(chan, b"/new".to_vec()).await;
         }
+        // sleep-ok: poll the command popup and pace guarded retyping between deadline checks.
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         client.send_input(chan, b"\r".to_vec()).await;
+        // sleep-ok: pace Enter retries before checking the old conversation's resume marker.
         tokio::time::sleep(Duration::from_secs(2)).await;
         let text = pane_within(&sock, &tmux_name, deadline).await;
         if text.contains(&format!("codex resume {first}")) {
@@ -973,6 +983,7 @@ async fn submit_prompt(
             tokio::time::Instant::now() < deadline,
             "the composer never showed the typed prompt; rendered pane:\n{text}"
         );
+        // sleep-ok: poll rendered prompt text between deadline checks before submitting it.
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
 
@@ -996,6 +1007,7 @@ async fn submit_prompt(
         if text.contains(&prompt) {
             client.send_input(chan, b"\r".to_vec()).await;
         }
+        // sleep-ok: pace conditional Enter retries and poll the answer marker in this manual audit.
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
 }
