@@ -221,6 +221,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--concurrency", required=True)
     parser.add_argument("--tmux", choices=("warn", "required", "none"), default="warn")
     parser.add_argument("--timeout", type=finite_positive)
+    parser.add_argument(
+        "--termination-grace", type=finite_positive, default=CHILD_KILL_GRACE_SECONDS,
+        help="seconds allowed for command-owned cleanup after interruption or timeout (maximum 60)",
+    )
     parser.add_argument("--output-root", type=pathlib.Path)
     parser.add_argument("--keep-farhelm-env", action="append", default=[], type=farhelm_name)
     if "--" in argv:
@@ -231,6 +235,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         option_argv = argv
         command = []
     parsed = parser.parse_args(option_argv)
+    if parsed.termination_grace > 60:
+        raise UsageRefusal("--termination-grace must be at most 60 seconds")
     if "--" not in argv:
         raise UsageRefusal("missing `--` before the command argv")
     if not command:
@@ -1230,8 +1236,16 @@ def run_command(
     intent: SignalIntent,
     output: OutputStore,
     console: ConsoleForwarder,
+    *,
+    termination_grace: float = CHILD_KILL_GRACE_SECONDS,
 ) -> CommandResult:
-    """Own one process group through spawn, stream, termination, and bounded drain."""
+    """Own one process group through spawn, stream, termination, and bounded drain.
+
+    A runner may own child process groups outside ours. Allow its declared
+    termination grace before killing the runner, so it can forward signals and
+    finish its own cleanup. This does not give us ownership of those groups.
+    The ordinary post-exit pipe drain retains its separate fixed allowance.
+    """
 
     try:
         process = subprocess.Popen(
@@ -1290,7 +1304,7 @@ def run_command(
             if (
                 termination_started is not None
                 and cleanup_attempted_at is None
-                and now - termination_started >= CHILD_KILL_GRACE_SECONDS
+                and now - termination_started >= termination_grace
             ):
                 found_group = terminate_group(process, signal.SIGKILL)
                 forced_cleanup = found_group or forced_cleanup
@@ -1483,7 +1497,10 @@ def initial_manifest(
         "started_at": utc_now(),
         "finished_at": None,
         "duration_seconds": None,
-        "command": {"argv": args.command, "cwd": os.fspath(cwd), "timeout_seconds": args.timeout},
+        "command": {
+            "argv": args.command, "cwd": os.fspath(cwd), "timeout_seconds": args.timeout,
+            "termination_grace_seconds": args.termination_grace,
+        },
         "labels": {
             "kind": args.kind,
             "selection": args.selection,
@@ -1647,7 +1664,10 @@ def run(argv: list[str]) -> int:
         manifest.write()
         output = OutputStore(run_dir)
         console = ConsoleForwarder()
-        result = run_command(args.command, cwd, child_env, args.timeout, intent, output, console)
+        result = run_command(
+            args.command, cwd, child_env, args.timeout, intent, output, console,
+            termination_grace=args.termination_grace,
+        )
         output.close()
         manifest.data["output"] = output.evidence()
         manifest.data["console"] = console.finish()
