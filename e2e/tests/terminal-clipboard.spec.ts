@@ -118,6 +118,7 @@ async function findViewportRow(
   let geometry = await scan(needle);
   const deadline = Date.now() + 10_000;
   while (geometry.rowIndex < 0 && Date.now() < deadline) {
+    // sleep-ok: this shared geometry helper polls for the rendered marker before deriving mouse coordinates from its row.
     await page.waitForTimeout(250);
     geometry = await scan(needle);
   }
@@ -668,6 +669,7 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
     // No poll here on purpose, matching the no-clobber test's own
     // reasoning: the claim is that nothing happens, and polling for
     // absence would only race a regression rather than prove one.
+    // sleep-ok: retain the clipboard observation window after the mouse-reporting drag; early unchanged content is not enough.
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(baseline);
 
@@ -741,6 +743,7 @@ test("a click without a drag does not clobber the system clipboard (F19: zero wr
     // clipboard write a regression might produce rather than proving it
     // never arrives. A short settle window plus one direct read is the
     // honest shape of a negative assertion.
+    // sleep-ok: watch for a late clipboard write after a click with no selection, without retrying until the original value returns.
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as any).__writeTextCalls)).toBe(0);
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(seeded);

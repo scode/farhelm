@@ -173,6 +173,7 @@ async function injectReplayFrames(
           delivered += payload.length;
           island.ws.onmessage({ data: payload.buffer });
           sent += 1;
+          // sleep-ok: retain page-local frame cadence; runner round trips would distort the silence the replay timer measures.
           if (sent < count) setTimeout(tick, gapMs);
           else resolve(delivered);
         };
@@ -204,6 +205,7 @@ async function injectEmptyFrames(
         const tick = () => {
           island.ws.onmessage({ data: new ArrayBuffer(0) });
           sent += 1;
+          // sleep-ok: exercise the no-progress timer with empty frames spread over time instead of one synchronous burst.
           if (sent < count) setTimeout(tick, gapMs);
           else resolve();
         };
@@ -254,6 +256,7 @@ async function stuckWebSocketFromNextLoad(page: Page) {
         const onclose = this.onclose;
         // Asynchronously, like the real close handshake — a synchronous
         // callback would run inside the caller that just closed it.
+        // sleep-ok: schedule the fake close event after close returns, preserving the real socket's non-reentrant callback boundary.
         if (onclose) setTimeout(() => onclose({}), 0);
       }
       addEventListener() {}
