@@ -57,6 +57,7 @@ import {
   installTerminalSuiteHooks,
 } from "./helpers/terminal-suite";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
+import { routeGate } from "./helpers/route-gate";
 
 installTerminalSuiteHooks({ tabSweep: true });
 
@@ -822,10 +823,9 @@ makes the error actionable, so it has to reach the line the user reads",
 // here — the characters typed DURING the upload land first, and the path
 // lands after them.
 //
-// The upload is throttled at the network seam rather than by uploading
-// something genuinely large: what this test needs is a transfer that is
-// still running while a human types, and a delayed `continue()` gives that
-// deterministically while leaving the upload itself entirely real.
+// Hold the upload at the network seam until the typed text is visible.
+// That establishes typing during the transfer independently of machine
+// speed while leaving the eventual upload itself entirely real.
 test("typing stays live during an upload, and the path lands at the cursor position it finds", async ({
   page,
   request,
@@ -835,9 +835,10 @@ test("typing stays live during an upload, and the path lands at the cursor posit
   const name = `slow-${stamp}.txt`;
   const body = `slow-upload-${stamp}`;
   let id: string | undefined;
+  const upload = routeGate();
   try {
     await page.route("**/api/sessions/*/attachments*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await upload.wait();
       await route.continue();
     });
     const session = await openAttachmentSession(page, request, `attach-slow-${stamp}`);
@@ -859,6 +860,7 @@ test("typing stays live during an upload, and the path lands at the cursor posit
     // the ordering assertion below would fail.
     await page.keyboard.type("LIVE");
     await waitForIslandMatch(page, "terminal", /PRE:LIVE/);
+    upload.release();
 
     const match = await waitForIslandMatch(
       page,
@@ -870,6 +872,7 @@ test("typing stays live during an upload, and the path lands at the cursor posit
     // The indicator goes away on its own once nothing is in flight.
     await expect(busy).toHaveCount(0);
   } finally {
+    upload.release();
     if (id) await cleanupSession(request, id);
   }
 });
@@ -1204,9 +1207,10 @@ test("an upload that outlives its socket reports the path it could not insert", 
   const stamp = Date.now();
   const landed = `/tmp/fh-landed-${stamp}/attachments/s/late.png`;
   let id: string | undefined;
+  const upload = routeGate();
   try {
     await page.route("**/api/sessions/*/attachments*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      await upload.wait();
       await fulfillAsHelm(route, {
         status: 200,
         contentType: "application/json",
@@ -1226,6 +1230,10 @@ test("an upload that outlives its socket reports the path it could not insert", 
     // Killed while the upload is in flight, so completion lands on a
     // terminal that can no longer receive anything.
     await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
+    await expect.poll(() => page.evaluate(() =>
+      (window as any).__farhelmIslands["terminal"].ws.readyState
+    )).toBe(3);
+    upload.release();
 
     const error = page.locator('[data-terminal="agent"] .attach-error');
     await expect(error).toBeVisible({ timeout: 20_000 });
@@ -1236,6 +1244,7 @@ test("an upload that outlives its socket reports the path it could not insert", 
       "the path was reported, not pasted into a socket that would swallow it",
     ).not.toContain(landed);
   } finally {
+    upload.release();
     if (id) await cleanupSession(request, id);
   }
 });
@@ -1281,9 +1290,9 @@ test("error text carrying replacement tokens renders literally", async ({ page, 
 // count says one while the remembered name is the one that just landed, so
 // the line names the wrong file for as long as the other runs.
 //
-// The two uploads are made to finish out of order deliberately — the
-// second returns immediately, the first is held — which is the exact
-// arrangement that exposed it.
+// Both uploads stay open until the two-file indicator is visible. Release
+// the second first, then keep the first held until the indicator names it;
+// each assertion observes a state the fixture cannot time its way out of.
 test("the indicator names the upload still running, not the one that just finished", async ({
   page,
   request,
@@ -1291,13 +1300,14 @@ test("the indicator names the upload still running, not the one that just finish
   test.setTimeout(120_000);
   const stamp = Date.now();
   let id: string | undefined;
+  const quickUpload = routeGate();
+  const slowUpload = routeGate();
   try {
     await page.route("**/api/sessions/*/attachments*", async (route) => {
-      // The quick one is not instant: both have to be in flight together
-      // long enough for the many-files form to be observable, or this
-      // test would pass without ever seeing the state it is about.
+      // Keep both requests open until their shared indicator is observed,
+      // then let the test choose completion order independently of load.
       const slow = route.request().url().includes("slow");
-      await new Promise((resolve) => setTimeout(resolve, slow ? 6_000 : 1_500));
+      await (slow ? slowUpload : quickUpload).wait();
       await fulfillAsHelm(route, {
         status: 200,
         contentType: "application/json",
@@ -1319,9 +1329,13 @@ test("the indicator names the upload still running, not the one that just finish
     const busy = page.locator('[data-terminal="agent"] .attach-busy');
     await expect(busy).toContainText("2 files");
     // The quick one lands first; the line must then name the slow one.
+    quickUpload.release();
     await expect(busy).toContainText("slow.txt", { timeout: 15_000 });
+    slowUpload.release();
     await expect(busy).toHaveCount(0, { timeout: 20_000 });
   } finally {
+    quickUpload.release();
+    slowUpload.release();
     if (id) await cleanupSession(request, id);
   }
 });
@@ -1521,10 +1535,11 @@ test("leaving mid-upload and reopening leaves exactly one set of hooks", async (
   const stamp = Date.now();
   const uploads = countUploads(page);
   let id: string | undefined;
+  const abandonedUpload = routeGate();
   try {
     await page.route("**/api/sessions/*/attachments*", async (route) => {
       if (route.request().url().includes("abandoned")) {
-        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        await abandonedUpload.wait();
       }
       await route.continue();
     });
@@ -1559,6 +1574,7 @@ test("leaving mid-upload and reopening leaves exactly one set of hooks", async (
       "and one upload is one insertion",
     ).toBe(1);
   } finally {
+    abandonedUpload.release();
     if (id) await cleanupSession(request, id);
   }
 });
@@ -1667,9 +1683,10 @@ test("the attachment indicator never resizes the terminal", async ({ page, reque
   test.setTimeout(120_000);
   const stamp = Date.now();
   let id: string | undefined;
+  const upload = routeGate();
   try {
     await page.route("**/api/sessions/*/attachments*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      await upload.wait();
       await route.continue();
     });
     const session = await openAttachmentSession(page, request, `attach-geometry-${stamp}`);
@@ -1687,6 +1704,7 @@ test("the attachment indicator never resizes the terminal", async ({ page, reque
     });
     await expect(page.locator('[data-terminal="agent"] .attach-busy')).toBeVisible();
     expect(await geometry(), "the indicator must not take rows from the terminal").toEqual(before);
+    upload.release();
 
     await waitForIslandMatch(
       page,
@@ -1695,6 +1713,7 @@ test("the attachment indicator never resizes the terminal", async ({ page, reque
     );
     expect(await geometry(), "and it must not give them back either").toEqual(before);
   } finally {
+    upload.release();
     if (id) await cleanupSession(request, id);
   }
 });

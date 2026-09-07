@@ -18,6 +18,7 @@ import fs from "node:fs";
 import { stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
+import { routeGate } from "./helpers/route-gate";
 import {
   addTab,
   createTabSession,
@@ -1042,6 +1043,7 @@ test("repeated activations while an open is in flight produce exactly one tab", 
   const title = `tab-reentry-${Date.now()}`;
   let id: string | undefined;
   let posts = 0;
+  const open = routeGate();
   try {
     const session = await createTabSession(request, title);
     id = session.id;
@@ -1051,9 +1053,9 @@ test("repeated activations while an open is in flight produce exactly one tab", 
         return;
       }
       posts++;
-      // Long enough that the extra activations below land while the first
-      // request is genuinely still open.
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      // The test releases this only after the synchronous re-entry stimulus
+      // has run and the first request has reached this route.
+      await open.wait();
       await route.continue();
     });
 
@@ -1069,13 +1071,15 @@ test("repeated activations while an open is in flight produce exactly one tab", 
       add.click();
       add.click();
     });
-
+    await expect.poll(() => posts).toBeGreaterThanOrEqual(1);
+    open.release();
     await expect(page.locator(".tab-slot")).toHaveCount(1, { timeout: 30_000 });
     expect(posts, "one intended open must send one request").toBe(1);
     // The control comes back once the operation finishes, or the user
     // could never open a second tab.
     await expect(page.locator(".tab-add")).toBeEnabled();
   } finally {
+    open.release();
     if (id) await cleanupSession(request, id);
   }
 });
