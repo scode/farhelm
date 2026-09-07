@@ -72,7 +72,7 @@
 // coverage for.
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { cleanupSession, createSession } from "./helpers/fleet";
+import { cleanupSession, createSession, pinAutoSelect } from "./helpers/fleet";
 import { termText, waitForTermText } from "./helpers/term";
 import { waitForSessionSocketOpen } from "./helpers/terminal-readiness";
 
@@ -107,15 +107,22 @@ async function attachAtFontMountBoundary(page: Page, id: string): Promise<void> 
  * completes, exactly the shape `FONT_SETTLE_DEADLINE_MS` exists to bound.
  * See this file's header for why this replaces an earlier, more direct
  * approach that monkey-patched `document.fonts.load` instead.
+ * The returned observation distinguishes an intercepted regular-face fetch
+ * from an installed route that never receives that request.
  */
-async function interceptFontRequests(page: Page, mode: "reject" | "hang"): Promise<void> {
+async function interceptFontRequests(page: Page, mode: "reject" | "hang"): Promise<{ regularRequested: boolean }> {
+  const observation = { regularRequested: false };
   await page.route("**/assets/JetBrainsMonoNerdFont-*.woff2", async (route) => {
+    if (new URL(route.request().url()).pathname === "/assets/JetBrainsMonoNerdFont-Regular.woff2") {
+      observation.regularRequested = true;
+    }
     if (mode === "reject") {
       await route.abort("failed");
     }
     // "hang": deliberately no fulfill/continue/abort call — see this
     // function's own docs.
   });
+  return observation;
 }
 
 test("a failed font fetch still mounts a usable terminal in the fallback font (F7a)", async ({
@@ -153,11 +160,17 @@ test("a failed font fetch still mounts a usable terminal in the fallback font (F
   }
 });
 
+/**
+ * A hung real font request must reach the fail-open deadline before the
+ * primary terminal is constructed. Record that ordering inside the page:
+ * host-side sleeps cannot establish a pre-deadline premise under load.
+ */
 test("a font fetch that never completes delays mount until the settle deadline, then mounts once (F7b)", async ({
   page,
   request,
+  timeline,
 }) => {
-  await interceptFontRequests(page, "hang");
+  const fontRequests = await interceptFontRequests(page, "hang");
   const marker = `font-hang-e2e-${Date.now()}`;
   const session = await createSession(request, {
     title: `font-hang-${Date.now()}`,
@@ -165,40 +178,71 @@ test("a font fetch that never completes delays mount until the settle deadline, 
     invocation: `sh -c 'printf "${marker}\\n"; sleep 300'`,
   });
   try {
+    await pinAutoSelect(page, session.id);
+    await page.addInitScript(() => {
+      (window as any).__farhelmTestFontMount = {};
+    });
     await page.goto("/");
     const target = page.locator(`[data-session-id="${session.id}"]`);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await target.locator(".session-row-open").click();
 
-    // Comfortably under terminal.js's ~3s `FONT_SETTLE_DEADLINE_MS`: a
-    // font load that never settles at all must not let the gate open
-    // early — there is no signal here for it to open on besides the
-    // deadline itself.
-    await page.waitForTimeout(1_000);
-    expect(
-      await page.evaluate(() => (window as any).__farhelmTermReady === true),
-      "a hung font load must not let the terminal mount before its settle deadline",
-    ).toBe(false);
-
-    // The real wait past the deadline — acceptable here, deliberately:
-    // this test's whole subject IS that deadline. Once it fires,
-    // `fontSettled` goes true on the TIMEOUT path (never a loaded font)
-    // and the terminal mounts in the fallback.
+    // Wait for the outcome, then inspect evidence recorded at construction.
+    // This remains a real font deadline test, without requiring the host to
+    // sample the page before that deadline expires.
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
       timeout: 10_000,
     });
     await waitForTermText(page, marker);
 
-    // "Mounts exactly once": the ready flag does not flap back to
-    // something falsy on a later poll, which is the shape a spurious
-    // extra mount/unmount cycle would leave behind.
+    const first = await page.evaluate(() => (window as any).__farhelmTestFontMount);
+    expect(first.budgetMs).toBe(3_000);
+    expect(fontRequests.regularRequested).toBe(true);
+    expect(first.regularPending).toBe(true);
+    expect(Number.isFinite(first.startedAt)).toBe(true);
+    expect(Number.isFinite(first.firstConstructionAt)).toBe(true);
+    expect(new URL(first.firstPath, page.url()).pathname).toBe(`/api/sessions/${session.id}/term`);
+    // Permit 10 ms of timer/observation resolution uncertainty. This checks
+    // the minimum budget from its origin, not the precise callback order.
+    expect(first.firstConstructionAt - first.startedAt).toBeGreaterThanOrEqual(first.budgetMs - 10);
+    expect(first.constructions).toBe(1);
+
+    // sleep-ok: observe unwanted repeat construction after fallback mount; this is a finite window.
     await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (window as any).__farhelmTestFontMount.constructions)).toBe(1);
     expect(await page.evaluate(() => (window as any).__farhelmTermReady)).toBe(true);
 
     expect(
       await page.evaluate(() => (window as any).__farhelmTerm.options.fontFamily),
       "the fallback font, not JetBrains Mono — the load never actually resolved",
     ).not.toMatch(/JetBrains/i);
+  } catch (error) {
+    // Keep premise evidence before cleanup removes the subject. A stuck page
+    // must not turn failure diagnostics into another unbounded wait.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const state = await Promise.race([
+        page.evaluate(() => ({
+          startedAt: (window as any).__farhelmTestFontMount?.startedAt,
+          budgetMs: (window as any).__farhelmTestFontMount?.budgetMs,
+          firstConstructionAt: (window as any).__farhelmTestFontMount?.firstConstructionAt,
+          firstPath: (window as any).__farhelmTestFontMount?.firstPath,
+          constructions: (window as any).__farhelmTestFontMount?.constructions,
+          pendingAtConstruction: (window as any).__farhelmTestFontMount?.regularPending,
+          requestPendingNow: (window as any).__farhelmTestFontMount?.regularRequestPending,
+        })),
+        new Promise<{ pageRead: string }>((resolve) => {
+          // sleep-ok: cap failure-only page diagnostics without delaying successful runs.
+          timer = setTimeout(() => resolve({ pageRead: "timed out" }), 1_000);
+        }),
+      ]);
+      timeline.record("font-failure", [["regularRequested", fontRequests.regularRequested], ...Object.entries(state)]);
+    } catch {
+      timeline.record("font-failure", [["regularRequested", fontRequests.regularRequested], ["state", "page unavailable"]]);
+    } finally {
+      clearTimeout(timer);
+    }
+    throw error;
   } finally {
     await cleanupSession(request, session.id);
   }
