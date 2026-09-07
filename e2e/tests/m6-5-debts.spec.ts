@@ -274,19 +274,17 @@ test.describe("the M6.5 test debts", () => {
 
     // The pre-restart read answers 404. Nothing may come of it.
     reads.release(1, { status: 404, body: `no such session: ${session.id}\n` });
-    // Given time to be believed before being disbelieved: a second is many
-    // round trips on this stack, and the restart that would repair the screen
-    // is still held, so anything on screen at the end of it is what the 404
-    // did.
+    // A discarded reply leaves its demand owed. Capturing the next read
+    // proves the old reply was consumed before the observation window;
+    // that new reply and the restart response remain held, so neither can
+    // repair a stale notice during the window.
+    await reads.waitForCaptures(2);
+    // sleep-ok: finite stale-notice observation after the old reply was consumed, with both possible repair responses held.
     await page.waitForTimeout(1_000);
     await expect(
       page.locator(".refresh-stale"),
       "a 404 about the run that just ended is not evidence about the run that replaced it",
     ).toHaveCount(0);
-    // The other half of a discarded reply: it applied nothing, so the demand
-    // behind it is still owed and the reader asks again. (Held, like
-    // everything else here, so it cannot repair anything yet.)
-    await reads.waitForCaptures(2);
 
     // A change the discarded read could not have carried, so the refresh that
     // ends this test is visibly the one that spoke.
@@ -400,10 +398,10 @@ test.describe("the M6.5 test debts", () => {
       "a read launched during a restart describes the run that ended, and the second bump is " +
         "the only thing between it and the header while the refresh is held",
     ).toHaveText(original);
-    // Held across a beat as well, since "never rendered" is the claim and a
-    // single look is a single frame. An exact-text assertion is what makes
-    // this say what it means: the signature CONTAINS the original title, so
-    // anything looser would pass while the header wore it.
+    // Keep the repair held for a finite delayed-paint observation as well.
+    // The signature CONTAINS the original title, so an exact-text assertion
+    // is needed to distinguish it from the untouched header.
+    // sleep-ok: finite stale-title observation after reply consumption, while the replacement detail response remains held.
     await page.waitForTimeout(1_000);
     await expect(page.locator(".titlebar .title")).toHaveText(original);
 
