@@ -825,7 +825,9 @@ async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
 #[tokio::test]
 async fn a_fresh_terminal_attach_is_marked_once() {
     let h = harness().await;
-    let (session, _work) = basic_session(&h).await;
+    // Keep the attach racing startup: waiting for agent readiness would
+    // remove the empty-history boundary this test is meant to exercise.
+    let (session, _work) = basic_session_mid_launch(&h).await;
 
     let mut peer = MarkerPeer::connect(&h.sup, 1).await;
     peer.attach(&session.id, TerminalSelector::Agent, "viewer")
