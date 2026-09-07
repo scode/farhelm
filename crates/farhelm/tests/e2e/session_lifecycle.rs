@@ -2962,17 +2962,36 @@ async fn large_input_survives_chunking() {
 #[farhelm_testtrace::test]
 async fn attach_with_degenerate_size_still_works() {
     let h = harness().await;
-    let (session, _work) = basic_session(&h).await;
+    let (session, _work) = basic_session_mid_launch(&h).await;
     let (_chan, rx_replay, mut rx) = h
         .client
         .attach_live(&session.id, 0, 0)
         .await
         .expect("attach with 0x0 must succeed");
     let mut seen = rx_replay;
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    // At one column, replay can wrap every character onto a separate row.
+    // Match the same marker across those row boundaries; requiring its
+    // original line layout mistakes a successful clamped replay for lost
+    // output. Keep this attachment during launch, and keep the geometry
+    // assertion below independent of the text representation.
+    wait_until(
+        &mut rx,
+        &mut seen,
+        20,
+        "READY across 1x1 replay rows",
+        |seen| {
+            seen.iter()
+                .copied()
+                .filter(|byte| !matches!(byte, b'\r' | b'\n'))
+                .collect::<Vec<_>>()
+                .windows(b"FAKE-AGENT READY".len())
+                .any(|window| window == b"FAKE-AGENT READY")
+        },
+    )
+    .await;
 
-    // The attach's resize ran before the replay that carried the marker
-    // above, so a single read is race-free here.
+    // attach_live consumed the replay boundary after the attach's resize,
+    // so the geometry is settled even if READY arrived as later live output.
     let out = tmux_query(
         &h.state.path().join("tmux.sock"),
         &["display-message", "-p", "#{window_width}x#{window_height}"],

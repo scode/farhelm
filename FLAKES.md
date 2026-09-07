@@ -439,3 +439,20 @@ as a same-substrate baseline. This bookkeeping correction does not claim a new r
 Class: substrate
 
 Cause: unknown
+
+## 2026-09-07 — `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e/session_lifecycle.rs)
+
+A full workspace nextest run on a 4-CPU Linux worker failed this case while 2,301 others passed: receipt
+`9edbb6f2-61a7-4103-ad96-966b1ae075f4`, clean `c2fcabf53525ec91f5e383de87890c8bdc7d3498`,
+`cargo nextest run --locked --workspace --exclude farhelm-desktop`, four global slots and zero retries. The retained
+transcript contains the complete READY marker wrapped one character per row; pane diagnostics show a live agent and the
+expected 1x1 dimensions. The byte-substring wait mistook replay row boundaries for missing output. This change ignores
+CR/LF only when recognizing that marker, retains the independent geometry assertion, and explicitly uses the mid-launch
+fixture to preserve the test's original boundary. The run used pinned tmux 3.7c, executable SHA256
+`eec88f3db9d844d72f5ff2a13ef73e95f2386945cc7e9e8adca9ba57053ba630`, `LC_CTYPE=C.UTF-8`, with `LANG` and `LC_ALL` unset.
+No ambient `FARHELM_*` variables were present; the recorder supplied `FARHELM_TEST_TRACE_DIR`. Disposition: corrected by
+the accompanying test change; the earlier failed receipt remains retained.
+
+Class: ambiguous-observable
+
+Cause: established

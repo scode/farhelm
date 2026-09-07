@@ -176,13 +176,6 @@ is a clean gate.
   producer as the explanation for a pass. On recurrence, retain every RSS/progress sample, active sibling identities,
   and a bounded allocator breakdown to attribute growth before changing a queue or bound. The four-thread full binary
   supplies the co-resident allocations an isolated loop omits.
-- Deflake `session_lifecycle::attach_with_degenerate_size_still_works` in
-  `crates/farhelm/tests/e2e/session_lifecycle.rs`. Twenty exact baseline runs passed. Historical failures occurred only
-  in loaded four-thread full binaries, waiting for READY before asserting the clamped 1x1 geometry. `basic_session`
-  returns after pane creation, while `basic_session_ready` waits for agent execution; substituting the latter would
-  change the launch/attach boundary under test. On a failing run retain attach/replay markers and bounded pane capture,
-  dead state, current command, and dimensions to distinguish launch, tmux grid, and live delivery. A missing READY is
-  not evidence that the clamp failed, and no budget correction is established.
 - Deflake `session_rename::a_renamed_title_survives_a_supervisor_restart` in
   `crates/farhelm/tests/e2e/session_rename.rs`. Twenty exact baseline runs passed. The historical loaded four-thread
   failure was the replacement supervisor ownership assertion in the shared `create_idempotency.rs` handoff helper,
