@@ -11,7 +11,7 @@ use crate::harness::*;
 
 use crate::conversation_identity_capture::{
     TEST_CAPTURE_AFTER, TEST_CAPTURE_GRACE, capture_harness, provoke_record, record_session,
-    wait_for_capture,
+    wait_for_capture, wait_for_capture_clock_past, wait_for_first_input,
 };
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::terminal_backpressure::drain_for;
@@ -114,10 +114,10 @@ async fn listed_title(client: &SupervisorClient, session_id: &str) -> String {
 /// One session's captured conversation as the DATABASE holds it, read
 /// through a second store handle.
 ///
-/// Read-only and pass-free, which is the point wherever it is used: every
-/// other way of asking (a list reply, `session_snapshot`) DRIVES a capture
-/// pass, so a test that asked that way could not tell an identity the code
-/// under test captured from one the question itself captured.
+/// Read-only and pass-free, which is the point wherever it is used. A list
+/// reply drives a capture pass and could commit the identity this helper
+/// is only meant to observe. `session_snapshot` is also pass-free; this
+/// helper reads the stored identity independently of reply construction.
 async fn stored_conversation(state: &std::path::Path, session_id: &str) -> Option<String> {
     let store = SessionStore::open(&state.join("supervisor.db"), false)
         .await
@@ -303,8 +303,8 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
 /// landed) would leave the reply nothing to do but read a value already
 /// committed — it would pass against a reply that never ran a capture pass
 /// at all. So NOTHING here drives a pass, before or after: the record is
-/// provoked, the horizon is slept past, and the rename is the first pass
-/// of any kind to run afterwards. `Resume` in its reply can then only mean
+/// provoked, the durable input's capture horizon is crossed, and the rename
+/// is the first pass of any kind to run afterwards. `Resume` in its reply can then only mean
 /// the rename's own pass captured the identity, which is the
 /// `ListSessions` behavior the protocol promises this reply matches.
 ///
@@ -324,11 +324,17 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
     );
     let (_chan, _rx, _seen, conversation) = provoke_record(&h, &session).await;
 
-    // Past the horizon, without a single list: nothing may have committed
-    // this session's identity before the rename runs. The margin is the
-    // same shape the capture tests use — the window plus its publication
-    // grace, plus a second for clock granularity.
-    tokio::time::sleep(TEST_CAPTURE_AFTER + TEST_CAPTURE_GRACE + Duration::from_secs(1)).await;
+    // Observe the same durable anchor and Unix clock the correlator uses,
+    // without driving a list or capture pass. An elapsed delay alone would
+    // assume that input persistence and the wall clock had advanced together.
+    let at = wait_for_first_input(&h, &session.id, 20).await;
+    wait_for_capture_clock_past(at + (TEST_CAPTURE_AFTER + TEST_CAPTURE_GRACE).as_secs() as i64)
+        .await;
+    assert_eq!(
+        stored_conversation(h.state.path(), &session.id).await,
+        None,
+        "test premise: no pass may capture the identity before the rename"
+    );
 
     let reply = renamed(rename(&h.sup, &session.id, "renamed-after-capture").await);
     assert_eq!(reply.title, "renamed-after-capture");
