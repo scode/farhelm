@@ -48,6 +48,7 @@ import {
   openRowMenu,
   observeFeedReaders,
   readFeedReaders,
+  ReadSurface,
   renameSession,
   SESSION_LISTING,
   stubFeed,
@@ -509,60 +510,35 @@ test.describe("the invalidation feed", () => {
    * again. The last one is what stops the fallback from being a one-way
    * door.
    *
-   * Run twice, once with the list mounted and once with a session view, for
-   * the reason the no-polling tests are split the same way: the fallback is
-   * per-surface (each page owns its own loop and its own gate), so a
-   * list-only run leaves the session view's fallback entirely unobserved —
-   * both the half that must poll and the half that must stop.
+   * Observe listing fallback first, then detail fallback with an explicitly
+   * selected session. Auto-selection can already mount a session in the first
+   * phase; neither phase claims to isolate a list-only page.
    *
-   * ## Why the handover is counted exactly
+   * ## Recovery and silence are separate observations
    *
-   * The recovery half is not "fewer reads afterwards" but "exactly the reads
-   * the handshake owes, and nothing else". Marking the counter AFTER the
-   * notification would hide the failure worth catching: a page that
-   * re-handshakes but leaves its fallback running double-reads for one
-   * interval and then settles, which a window opened after the settling
-   * cannot see. So the mark is taken BEFORE the notification, and the
-   * notification is fired just after a fallback tick has landed — which
-   * leaves most of a poll interval clear, so a tick and the handshake's
-   * re-read cannot both fall inside the same counted window by accident.
-   *
-   * The read the greeting produces IS the handshake's re-read, and it is what
-   * the counts below expect: one listing walk and one host read on the list,
-   * one detail read on the session view. The mark is taken with a socket
-   * confirmed open, so the notice is delivered in the same breath rather than
-   * waiting for the next rung of the page's ladder — which would leave the
-   * counted window open across a fallback tick that has nothing to do with
-   * the handover.
+   * Counts marked before the greeting establish that each surface reads
+   * across recovery. They cannot attribute an individual read to the greeting:
+   * independently phased fallback ticks may already be in flight. The reader
+   * snapshot then establishes that the greeting was consumed and all pending
+   * work retired. The uninterrupted quiet window is what rules out a fallback
+   * continuing beside the recovered feed; it is never restarted to hide a read.
    */
   test("a dead feed falls back to polling and recovers on its own", async ({ page, request }) => {
-    // Two kill-and-recover cycles at a three-second cadence, plus a real
-    // session create: past the 60-second default by construction rather than
-    // by being slow.
+    // Two outage/recovery cycles include bounded setup waits and separate
+    // uninterrupted observation windows; retain the budget for both phases.
     test.setTimeout(150_000);
     const session = await createSession(request, { title: `fallback-${Date.now()}` });
     created.push(session.id);
     const { feed, reads } = await healthyFeed(page);
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
 
-    /**
-     * Wait until one more fallback tick has been observed, then leave a beat
-     * for the rest of that tick's reads to be issued.
-     *
-     * A tick fires its reads together (the list's listing walk and its host
-     * read are spawned in one go), so "the count moved" does not mean the
-     * tick is over — half a second later it is, and the remainder of the
-     * interval is then clear for the caller to notify into.
-     */
-    const afterFallbackTick = async () => {
-      const before = reads.count();
-      await expect
-        .poll(() => reads.count(), {
-          timeout: 15_000,
-          message: "the fallback must keep polling until the feed comes back",
-        })
-        .toBeGreaterThan(before);
-      await page.waitForTimeout(500);
+    /** Another surface's first tick cannot establish that this surface keeps polling. */
+    const waitForAnotherFallbackRead = async (surface: ReadSurface) => {
+      const before = reads.count(surface);
+      await expect.poll(() => reads.count(surface), {
+        timeout: 15_000,
+        message: `the ${surface} fallback must keep polling until the feed comes back`,
+      }).toBeGreaterThan(before);
     };
 
     /**
@@ -583,22 +559,19 @@ test.describe("the invalidation feed", () => {
         .toBeGreaterThan(0);
     };
 
-    await page.waitForTimeout(1_500);
+    await waitForFeedReadersSettled(page);
     const quiet = reads.count("listing");
     feed.kill();
-    // Two poll intervals plus slack: the fallback's first tick is one
-    // interval away, so a single interval could pass on timing alone.
-    await page.waitForTimeout(8_000);
-    expect(
-      reads.count("listing") - quiet,
-      "a dead feed on a matching build must fall back to the documented poll",
-    ).toBeGreaterThan(0);
+    await expect.poll(() => reads.count("listing") - quiet, {
+      timeout: 8_000,
+      message: "a dead feed on a matching build must fall back to the documented poll",
+    }).toBeGreaterThan(0);
 
-    // The client reconnects unasked — the ladder's first rung is half a
-    // second, so this has long since happened by now. It may well be on its
-    // second or third attempt: nothing has greeted any of them.
-    expect(feed.connections()).toBeGreaterThan(1);
-    await afterFallbackTick();
+    await expect.poll(() => feed.connections(), {
+      timeout: 8_000,
+      message: "the client must reconnect without being asked",
+    }).toBeGreaterThan(1);
+    await waitForAnotherFallbackRead("listing");
     await waitForLiveSocket();
     const handover = {
       listing: reads.count("listing"),
@@ -624,8 +597,9 @@ test.describe("the invalidation feed", () => {
         message: "and one host read",
       })
       .toBeGreaterThanOrEqual(1);
-    await page.waitForTimeout(2_000);
+    await waitForFeedReadersSettled(page);
     const settledFirst = reads.count();
+    // sleep-ok: uninterrupted negative observation across three fallback periods after recovery.
     await page.waitForTimeout(9_000);
     expect(
       reads.urls().slice(settledFirst),
@@ -641,19 +615,18 @@ test.describe("the invalidation feed", () => {
     // for a stale session, which this one is not, so the detail side
     // still owes exactly one.)
     await openSession(page, session.id, session.title);
-    await page.waitForTimeout(1_500);
+    await waitForFeedReadersSettled(page);
     const detailQuiet = reads.count("detail");
     // Disarmed before the kill, or the socket the page opens next is greeted
     // on arrival and there is no outage left to cover.
     feed.notifyOnConnect();
     feed.kill();
-    await page.waitForTimeout(8_000);
-    expect(
-      reads.count("detail") - detailQuiet,
-      "the session view's own fallback must cover a dead feed too",
-    ).toBeGreaterThan(0);
+    await expect.poll(() => reads.count("detail") - detailQuiet, {
+      timeout: 8_000,
+      message: "the session view's own fallback must cover a dead feed too",
+    }).toBeGreaterThan(0);
 
-    await afterFallbackTick();
+    await waitForAnotherFallbackRead("detail");
     await waitForLiveSocket();
     const detailHandover = {
       detail: reads.count("detail"),
@@ -686,12 +659,13 @@ test.describe("the invalidation feed", () => {
         message: "and its host read",
       })
       .toBeGreaterThanOrEqual(1);
-    // ...then, with recovery observed everywhere and any straggler tick
-    // given time to land, the loops must fall SILENT: a healthy feed
+    // ...then, with recovery observed everywhere and pending work retired,
+    // the loops must fall SILENT: a healthy feed
     // switches every fallback off rather than running beside it. This
     // quiet window is the assertion the exact counts were standing in for.
-    await page.waitForTimeout(2_000);
+    await waitForFeedReadersSettled(page);
     const settled = reads.count();
+    // sleep-ok: uninterrupted negative observation across three fallback periods after recovery.
     await page.waitForTimeout(9_000);
     expect(
       reads.urls().slice(settled),
