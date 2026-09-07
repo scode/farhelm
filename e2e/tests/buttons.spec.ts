@@ -253,11 +253,8 @@ test("the row kebab is hidden at rest and revealed by hover, focus, selection, o
   });
   let newer: { id: string } | undefined;
   try {
-    // created_at has one-second granularity (sidebar.spec.ts's own
-    // auto-select test notes the same gap for the same reason); a real
-    // gap is what makes "newest" deterministic rather than a coin flip on
-    // which of two same-second rows the fallback prefers.
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    // The remembered choice below establishes selection directly; these
+    // fixtures need distinct identities, not distinct creation timestamps.
     newer = await createSession(request, {
       title: `kebab-newer-${Date.now()}`,
       cwd: "/tmp",

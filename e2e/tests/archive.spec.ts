@@ -8,6 +8,7 @@ import { Page } from "@playwright/test";
 import {
   cleanupSession,
   createSession,
+  holdMutation,
   openFilterBar,
   openRowMenu,
 } from "./helpers/fleet";
@@ -453,27 +454,29 @@ test("a pending detail archive blocks navigation and competing mutations", async
   }
 });
 
+// Keep the tab reply pending until archive's opening-tab guard is observed.
+// A fixed server delay can expire before a loaded browser checks the control.
 test("archive stays unavailable while a terminal tab is opening", async ({ page, request }) => {
   const session = await createSession(request, { title: `archive-tab-race-${Date.now()}` });
+  let finishTab = () => {};
   try {
-    await page.route(`**/api/sessions/${session.id}/tabs`, async (route) => {
-      if (route.request().method() !== "POST") {
-        await route.continue();
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
-      await route.continue();
-    });
     await page.goto("/");
     await row(page, session.id).locator(".session-row-open").click();
 
-    await page.locator(".tab-add").click();
+    const tabPath = `/api/sessions/${session.id}/tabs`;
+    finishTab = await holdMutation(page, (url) => url.pathname === tabPath);
+    await Promise.all([
+      page.waitForRequest((req) => req.method() === "POST" && new URL(req.url()).pathname === tabPath),
+      page.locator(".tab-add").click(),
+    ]);
     await expect(page.locator(".archive-primary")).toBeDisabled();
+    finishTab();
     await expect(page.locator(".tab-strip .tab:not(.tab-agent)")).toHaveCount(1, {
       timeout: 20_000,
     });
     await expect(page.locator(".archive-primary")).toBeEnabled();
   } finally {
+    finishTab();
     await cleanupSession(request, session.id);
   }
 });
