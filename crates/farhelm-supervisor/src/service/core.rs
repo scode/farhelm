@@ -418,6 +418,15 @@ struct SimulatedCrash;
 /// not care about a given stage returns `Ok(())` for it.
 pub type CreateCrashSeam = Arc<dyn Fn(CreateStage) -> anyhow::Result<()> + Send + Sync>;
 
+/// Observe a keyed create whose lock acquisition has returned `Pending`.
+///
+/// Called at most once per request, after polling the real acquisition future.
+/// This establishes that the request reached acquisition, not why it yielded:
+/// runtime scheduling can also make an acquisition pending. A contention test
+/// must independently hold the same key before accepting this observation.
+/// The callback must return promptly; it cannot release or replace the lock.
+pub type CreateIntentWaiting = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Which of a sampling pass's two tmux reads a [`SampleFault`] is being
 /// asked about (PLAN_M6_75.md items 1 and 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -594,6 +603,8 @@ pub struct SupervisorSeams {
     pub agent_instructions: crate::agent_kind::AgentInstructions,
     /// See [`CreateCrashSeam`]. `None` in production.
     pub create_crash: Option<CreateCrashSeam>,
+    /// See [`CreateIntentWaiting`]. `None` in production.
+    pub create_intent_waiting: Option<CreateIntentWaiting>,
     /// Where the agents' own record directories are rooted (PLAN_M3.md
     /// item 8): `~/.claude/projects/...`, `~/.codex/sessions/...`.
     ///
@@ -780,6 +791,7 @@ impl Default for SupervisorSeams {
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             create_crash: None,
+            create_intent_waiting: None,
             agent_home: None,
             user_home: None,
             capture_window: CaptureWindowBounds::default(),
@@ -4923,7 +4935,26 @@ impl Supervisor {
         // Held for the whole of the rest of this create — lookup, launch,
         // and outcome settlement alike — so a concurrent retry of the same
         // intent waits for this one's answer instead of racing it.
-        let _intent = self.intent_locks.claim(&claim.intent_key).await;
+        let _intent = if let Some(observer) = self.seams.create_intent_waiting.as_ref() {
+            let acquisition = self.intent_locks.claim(&claim.intent_key);
+            tokio::pin!(acquisition);
+            let mut observer = Some(observer);
+            // Observe the actual future yielding, rather than announcing a
+            // request before it has even attempted acquisition. Keep polling
+            // the same future so observation does not alter its queue position.
+            std::future::poll_fn(|cx| {
+                let result = std::future::Future::poll(acquisition.as_mut(), cx);
+                if result.is_pending()
+                    && let Some(observer) = observer.take()
+                {
+                    observer(&claim.intent_key);
+                }
+                result
+            })
+            .await
+        } else {
+            self.intent_locks.claim(&claim.intent_key).await
+        };
         let existing = self
             .store
             .reservation(&claim.intent_key)
