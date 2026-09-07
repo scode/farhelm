@@ -111,6 +111,7 @@ pub(crate) async fn wait_for_dead_pane(sock: &std::path::Path, tmux_name: &str) 
             tokio::time::Instant::now() < deadline,
             "pane of {tmux_name} never died"
         );
+        // sleep-ok: poll tmux pane death without making the supervisor observe that death first.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -632,6 +633,7 @@ async fn a_list_polling_through_a_stop_never_erases_the_annotation() {
             if poller.list_sessions().await.is_err() {
                 break;
             }
+            // sleep-ok: pace the finite series of list requests that races the stop operation.
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     });

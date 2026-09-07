@@ -1082,6 +1082,7 @@ async fn a_report_survives_a_supervisor_restart() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while Arc::strong_count(&sup) > 1 {
         assert!(tokio::time::Instant::now() < deadline, "connection drain");
+        // sleep-ok: observe connection-reference drain before dropping the old supervisor.
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(sup);
@@ -1445,6 +1446,7 @@ fn spawn_silent_supervisor(
                         break;
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        // sleep-ok: retry nonblocking accept while checking cancellation and the deadline.
                         std::thread::sleep(Duration::from_millis(10));
                     }
                     Err(error) => panic!("accept failed: {error}"),
@@ -1557,6 +1559,7 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
                     "the hook did not finish within {SILENCE_DEADLINE:?}; a run this long is \
                      one the vendor times out and shows the user"
                 );
+                // sleep-ok: poll child exit while respecting the caller's chosen stdin lifetime.
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
@@ -1912,6 +1915,7 @@ fn run_hook(mut cmd: std::process::Command, payload: &[u8]) -> std::process::Out
                     "the hook did not finish within {SILENCE_DEADLINE:?}; ChildGuard will kill \
                      and reap it on the way out"
                 );
+                // sleep-ok: poll hook exit under the helper's deadline before inspecting its output.
                 std::thread::sleep(Duration::from_millis(50));
             }
         }

@@ -109,6 +109,7 @@ async fn wait_for_state_dir_claim_release(state: &std::path::Path, deadline: tok
                 tokio::time::Instant::now() < deadline,
                 "the old supervisor never released the state directory's claim: {error}"
             );
+            // sleep-ok: retry the actual kernel claim until acquired or the shared deadline expires.
             std::thread::sleep(Duration::from_millis(20));
         }
     })
@@ -151,6 +152,7 @@ pub(crate) async fn handoff_to_new_supervisor_with_seams(
             tokio::time::Instant::now() < deadline,
             "the old supervisor's connection tasks never released it"
         );
+        // sleep-ok: observe reference drain before dropping the owner and checking kernel-lock release.
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(sup);
@@ -669,6 +671,7 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while Arc::strong_count(&sup1) > 1 {
         assert!(tokio::time::Instant::now() < deadline, "connection drain");
+        // sleep-ok: drain old connection references before the test tears down its reboot fixture.
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(sup1);
