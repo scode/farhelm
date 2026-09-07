@@ -804,6 +804,23 @@ test("a client that stops draining is detached with the stall reason after the f
     });
 
     await row.click();
+    await waitForSessionSocketOpen(page, id);
+    // Keep the original socket before releasing the producer. Taking the
+    // baseline after the detach could accidentally accept a replacement.
+    // Observe the close event, not just CLOSED state: the product's close
+    // handler is the decision point that may start unwanted recovery.
+    await page.evaluate(() => {
+      const win = window as any;
+      const ws = win.__farhelmIslands["terminal"].ws as WebSocket;
+      if (ws !== win.__farhelmWs || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("the stall fixture lost its open terminal socket before the flood");
+      }
+      win.__farhelmStalledWs = ws;
+      win.__farhelmStalledWsClosed = false;
+      ws.addEventListener("close", () => {
+        win.__farhelmStalledWsClosed = true;
+      }, { once: true });
+    });
     await sendFloodGateByte(page, id);
 
     // The pause must actually happen, and promptly — this is the moment
@@ -847,18 +864,18 @@ test("a client that stops draining is detached with the stall reason after the f
     // its write callbacks, so a fresh attachment would stall out again on
     // its own — and the user is supposed to act first.
     //
-    // The ladder was tuned short before this page loaded, so waiting a
-    // second here is waiting out several rungs of it; a client that was
-    // going to bounce back has had many chances by now. Three
+    // Wait for the original socket's close event before the finite
+    // observation window: the detach notice alone does not establish
+    // that the event which could trigger recovery has occurred. Three
     // observations, because each fails differently: no fresh socket (the
     // island still holds the one it was detached on), no recovery surface,
     // and no manual control offering a way out of a state that is not a
     // connection failure.
-    const stalledSocketUnchanged = await page.evaluate(
-      () => ((window as any).__farhelmStalledWs = (window as any).__farhelmIslands["terminal"].ws)
-        !== undefined,
-    );
-    expect(stalledSocketUnchanged).toBe(true);
+    await expect.poll(
+      () => page.evaluate(() => (window as any).__farhelmStalledWsClosed === true),
+      { timeout: 10_000, message: "the original stalled socket never delivered its close event" },
+    ).toBe(true);
+    // sleep-ok: finite window for forbidden reattachment after the original socket's close event.
     await page.waitForTimeout(1_000);
     expect(
       await page.evaluate(
