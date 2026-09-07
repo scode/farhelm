@@ -887,13 +887,16 @@ test("UPDATE plans once, binds to the row, and releases OpLock at acceptance", a
 /**
  * A plan can land after Details and the fixed filter are already open. The
  * confirmation changes host-list height without toggling Details, so its
- * arrival must dismiss the filter independently.
+ * arrival must dismiss the filter independently of sidebar resize events.
  */
 test("a newly landed plan closes an already-open filter", async ({
   page,
   request,
 }, testInfo) => {
   const remote = destination(testInfo, "plan-filter");
+  // Keep the expanded sidebar in view. Otherwise focusing the new filter
+  // can scroll its ancestor, legitimately dismissing it before plan arrival.
+  await page.setViewportSize({ width: 1280, height: 1600 });
   const accepted = await startAdd(request, remote);
   await waitForProgress(request, accepted.host_id, "completed");
   let release!: () => void;
@@ -905,31 +908,36 @@ test("a newly landed plan closes an already-open filter", async ({
     await route.continue();
   });
 
+  // Isolate the plan-arrival callback. Sidebar resize would both race this
+  // test's setup and hide a missing callback by closing the filter itself.
+  // Other resize observers, including the terminal's, retain their behavior.
+  await page.addInitScript(() => {
+    const Real = window.ResizeObserver;
+    window.ResizeObserver = class extends Real {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const relevant = entries.filter((entry) => !entry.target.classList.contains("app-sidebar"));
+          if (relevant.length) callback(relevant, observer);
+        });
+      }
+    };
+  });
   await page.goto("/");
   await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").click();
-  // Choosing update opens Details for every row, which resizes the sidebar,
-  // and that resize is itself a layout change the page answers by closing
-  // the filter. How long the details keep settling depends on the machine,
-  // so rather than guessing a quiet period, open the filter and require it
-  // to SURVIVE a beat; a filter closed by leftover settling is reopened.
-  // Once it holds, the only thing that can close it is the plan the held
-  // route is about to release.
+  // Details must already be open: otherwise toggling it could supply the
+  // dismissal that this test requires from the newly arrived plan.
   await expect(page.locator(".host-details-toggle")).toBeChecked();
   await expect(row.locator(".provisioning-planning")).toBeVisible();
+  await expect.poll(() => page.locator(".app-sidebar").evaluate((sidebar) =>
+    sidebar.scrollHeight - sidebar.clientHeight
+  ), { message: "expanded sidebar must fit without scrolling before opening the filter" }).toBeLessThanOrEqual(0);
   const toggle = page.locator(".filter-toggle");
-  await expect
-    .poll(
-      async () => {
-        if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
-        await page.waitForTimeout(300);
-        return page.locator(".filter-popover").count();
-      },
-      { timeout: 20_000, intervals: [100, 250, 500] },
-    )
-    .toBe(1);
+  await toggle.click();
+  await expect(page.locator(".filter-popover")).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   release();
 
   await expect(row.locator(".provisioning-plan")).toBeVisible();

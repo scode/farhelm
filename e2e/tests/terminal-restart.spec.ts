@@ -259,7 +259,7 @@ test("restart from the interrupted surface sends the resume request exactly once
 // `LIVE_BADGE` instead would have been the wrong fix: that constant is
 // shared, and every other caller's assertion is about the plain live word.
 test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => {
-  // The sampling window alone is 20 seconds, and it sits between a real
+  // The observation window alone is 20 seconds, and it sits between a real
   // create and a real restart — comfortably past the 60-second default.
   test.setTimeout(120_000);
   const title = `restart-badge-${Date.now()}`;
@@ -278,34 +278,55 @@ test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => 
     // so there has to be one to lose.
     await expect(badge).toHaveText(LIVE_BADGE, { timeout: 20_000 });
 
-    const restart = request.post(`/api/sessions/${id}/restart`, {
-      data: { mode: "fresh", stop_if_running: true },
-    });
-    // Sampled while the restart is in flight AND for a stretch afterwards,
+    // Observe each DOM mutation batch in the browser, so a slow driver does
+    // not need to squeeze an arbitrary number of samples into the window.
+    // As with polling, this does not assert every transient paint within a
+    // single batch; it checks the badge's presence after DOM updates settle.
+    await page.evaluate((sessionId) => {
+      const selector = `[data-session-id="${sessionId}"] .status-badge`;
+      if (!document.querySelector(selector)) throw new Error("restart badge missing before observation");
+      const observed = { checks: 0, missing: 0, firstMissingMs: null as number | null };
+      const start = performance.now();
+      const sample = () => {
+        observed.checks += 1;
+        if (!document.querySelector(selector)) {
+          observed.missing += 1;
+          observed.firstMissingMs ??= performance.now() - start;
+        }
+      };
+      const observer = new MutationObserver(sample);
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+      sample();
+      (window as any).__stopRestartBadgeObservation = () => {
+        sample();
+        observer.disconnect();
+        return observed;
+      };
+    }, id);
+    // Observed while the restart is in flight AND for a stretch afterwards,
     // since the window this is about — the gap between the relaunch and
     // the first classification of the new run — opens after the request
     // returns, not during it.
-    const missing: number[] = [];
-    const deadline = Date.now() + 20_000;
-    let samples = 0;
-    while (Date.now() < deadline) {
-      if ((await badge.count()) === 0) missing.push(Date.now());
-      samples += 1;
-      await page.waitForTimeout(100);
-    }
-    const restarted = await restart;
+    const restarted = await request.post(`/api/sessions/${id}/restart`, {
+      data: { mode: "fresh", stop_if_running: true },
+    });
     expect(restarted.ok(), `restarting ${id}`).toBe(true);
-    expect(samples).toBeGreaterThan(50);
+    // sleep-ok: retain the finite restart/reclassification observation window, with mutation evidence captured in-page.
+    await page.waitForTimeout(20_000);
+    const observed = await page.evaluate(() => (window as any).__stopRestartBadgeObservation());
     expect(
-      missing.length,
+      observed.missing,
       "the list must never blank a session's status badge across a restart: the helm holds " +
         "the previous definite status precisely so this window shows something true rather " +
-        "than nothing",
+        `than nothing; observation: ${JSON.stringify(observed)}`,
     ).toBe(0);
-    // And it is still a live status at the end — the restarted agent got
-    // classified, rather than the badge merely being stuck on a stale word.
+    // The final displayed status is still live. The word alone does not
+    // distinguish a new classification from the retained pre-restart value.
     await expect(badge).toHaveText(LIVE_BADGE, { timeout: 20_000 });
   } finally {
+    if (!page.isClosed()) {
+      await page.evaluate(() => (window as any).__stopRestartBadgeObservation?.());
+    }
     if (id) await cleanupSession(request, id);
   }
 });
