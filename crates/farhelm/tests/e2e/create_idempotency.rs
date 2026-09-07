@@ -185,7 +185,7 @@ pub(crate) async fn handoff_to_new_supervisor_with_seams(
 async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
@@ -301,7 +301,7 @@ async fn a_key_reused_for_a_different_request_is_refused() {
 async fn concurrent_creates_under_one_intent_key_yield_one_session() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     // Released by the test once the second create is in flight; the first
     // create parks inside its launch until then.
@@ -445,7 +445,7 @@ struct CrashScene {
 /// not injecting where it claims to.
 async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sock = state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_seams(
@@ -645,7 +645,7 @@ async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
 async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let guard = TmuxServerGuard(state.path().join("tmux.sock"));
+    let guard = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
@@ -677,7 +677,7 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     // the reload to find, which is not a reboot at all. The replacement
     // guard covers the server the next supervisor starts.
     drop(guard);
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let sup2 = supervisor_believing_boot(state.path(), Some("boot-b")).await;
     assert!(
@@ -731,7 +731,7 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
 async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let home = farhelm_teststate::tempdir().expect("home");
     std::fs::create_dir(home.path().join("ws")).expect("workdir");
     let sup1 = Supervisor::new_with_seams(
@@ -811,7 +811,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
 async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -922,7 +922,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
 async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let home = farhelm_teststate::tempdir().expect("home");
     let workdir = home.path().join("ws");
     std::fs::create_dir(&workdir).expect("workdir");

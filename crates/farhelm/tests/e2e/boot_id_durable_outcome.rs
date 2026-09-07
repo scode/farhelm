@@ -79,7 +79,7 @@ pub(crate) async fn harness_believing_boot(boot: &str) -> Harness {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup = supervisor_believing_boot(state.path(), Some(boot)).await;
-    let guard = TmuxServerGuard(state.path().join("tmux.sock"));
+    let guard = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
     Harness {
         client,
@@ -415,7 +415,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
 async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sup1 = supervisor_believing_boot(state.path(), None).await;
     let client1 = connect_client(&sup1).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -478,7 +478,7 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
 async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),

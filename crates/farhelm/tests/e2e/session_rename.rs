@@ -402,7 +402,7 @@ async fn a_rename_before_first_input_still_captures_the_conversation() {
 async fn a_renamed_title_survives_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
