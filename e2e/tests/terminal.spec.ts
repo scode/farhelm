@@ -1045,17 +1045,34 @@ test("input dismisses both the xterm and native selections", async ({
   };
 
   try {
-    // First leg: a selection SURVIVES terminal-generated traffic. The
-    // fake agent echoes the typed line back, and that inbound output —
-    // like any auto-reply xterm generates in response to queries — flows
-    // through paths that must NOT clear a selection: only user-origin
-    // input may. A `clearSelection` that migrated into `onData` (where
-    // those replies also flow) would fail here.
+    // Seed selectable output before making the selection. Then ask xterm
+    // for a device-status reply while the selection exists: its generated
+    // onData event must preserve selection, unlike a real key or paste.
+    // Injecting the query through write exercises the parser and existing
+    // onData listeners without a keyboard event dismissing the selection.
     await page.keyboard.type("probe");
     await page.keyboard.press("Enter");
     await waitForTermText(page, "echo:probe", 10_000);
     await dragSelect();
-    await page.waitForTimeout(200);
+    const generated = await page.evaluate(async () => {
+      const term = (window as any).__farhelmTerm;
+      let count = 0;
+      let reply = "";
+      const listener = term.onData((data: string) => {
+        count += 1;
+        reply = data.slice(0, 64);
+      });
+      try {
+        // The write callback follows parsing, so both the generated reply
+        // and the production selection handlers have run before we sample.
+        await new Promise<void>((resolve) => term.write("\u001b[5n", resolve));
+        return { count, reply };
+      } finally {
+        listener.dispose();
+      }
+    });
+    expect(generated, "the selected terminal must actually generate a device-status reply")
+      .toEqual({ count: 1, reply: "\u001b[0n" });
     expect(await selectionState()).toMatchObject({ xterm: true });
 
     // Second leg: a keystroke dismisses both selections. The key is never
