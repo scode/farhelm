@@ -507,7 +507,7 @@ test("an external archive invalidates an open detail confirmation", async ({ pag
  * it is the reason `omits_fleet_members` exists as a second flag rather
  * than a second reading of `filtered`. The default view now reads as
  * UNFILTERED — the banner says "N sessions" — while still withholding every
- * archived row, so a listing poll that treated its own absences as
+ * archived row, so a listing refresh that treated its own absences as
  * departures would retire an answer the user is in the middle of giving.
  * Collapse the two predicates and this test fails by the editor closing
  * under the user's hands the moment somebody else archives the session.
@@ -531,18 +531,24 @@ test("an external archive does not close an open rename editor", async ({ page, 
     await target.locator(".session-row-rename").click();
     await expect(target.locator(".rename-form")).toBeVisible();
     // Typed and deliberately NOT submitted: an answer in progress is
-    // exactly what a poll must not be allowed to throw away.
+    // exactly what a listing refresh must not be allowed to throw away.
     await target.locator(".rename-input").fill(draft);
 
     const archived = await request.post(`/api/sessions/${session.id}/archive`);
     expect(archived.ok(), await archived.text()).toBeTruthy();
-    await expect(
-      target,
-      "the default view withholds archived rows, which is the premise of this test",
-    ).toHaveCount(0, { timeout: 20_000 });
-    // Several polls' worth, so this is "the reconciliation declined to run"
-    // rather than "the first read had not landed yet".
-    await page.waitForTimeout(6_000);
+    // The committed listing reconciles editor state before publishing its
+    // rows. Seeing this row disappear therefore proves that the archive
+    // update already passed the reconciliation whose behavior we test.
+    // Require the successful-listing surface in the same observation: an
+    // error also removes every row, but does not reconcile editor state.
+    await expect.poll(
+      () => page.evaluate((id) => ({
+        listingPresent: document.querySelector(".session-list") !== null,
+        targetRows: Array.from(document.querySelectorAll(".session-row"))
+          .filter((element) => element.getAttribute("data-session-id") === id).length,
+      }), session.id),
+      { timeout: 20_000, message: "a successful default listing must omit the externally archived row" },
+    ).toEqual({ listingPresent: true, targetRows: 0 });
 
     // Focus left the popover for the row above (a row menu, a confirm), which
     // closes it; reopen before touching its controls again.
