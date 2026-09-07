@@ -174,13 +174,26 @@
     # and report green on coverage that never ran.
     ssh -o BatchMode=yes localhost true
 
+- name: Select Python with non-reaping child observation on macOS
+  # The recorder needs waitid/WNOWAIT, exposed on macOS starting in Python3.13.
+  if: runner.os == 'macOS'
+  uses: actions/setup-python@v7
+  with:
+    python-version: '3.13'
+
+- name: Install the pinned test runner
+  # Only these jobs execute Rust tests. The tool's immutable byte pins are
+  # verified in a fresh job directory; no shared release cache is introduced.
+  if: runner.os == 'macOS' || (runner.os == 'Linux' && runner.arch == 'X64')
+  run: |
+    nextest_dir=$(python3 scripts/install-pinned-nextest.py --output-root "$RUNNER_TEMP/nextest-tools") || exit 1
+    printf '%s\n' "$nextest_dir" >> "$GITHUB_PATH"
+
 - name: Run the test suite against the pinned tmux
-  # `--show-output` keeps a loudly-skipped test's reason visible (the cgroup
-  # tests skip themselves where no systemd user manager exists, and libtest
-  # hides a passing test's output otherwise). `--test-threads=4` matches the
-  # runner's vCPU count: these binaries spawn real tmux servers and
-  # supervisors per test, so it keeps process and memory pressure
-  # predictable. PATH puts the pinned build first for this process tree only.
+  # Nextest starts a process per test with four slots shared across binaries.
+  # Immediate success output retains runtime SKIPPED explanations: a test
+  # returning early is still a pass in JUnit, not measured substrate coverage.
+  # Doctests use Rust's separate runner because nextest does not execute them.
   #
   # The `farhelm` crate's integration tests (the tmux-driven e2e suite under
   # crates/farhelm/tests) are deliberately NOT part of this gate. On this
@@ -207,24 +220,26 @@
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
-      --kind release --selection 'workspace except farhelm and farhelm-desktop' \
-      --concurrency '4 libtest threads per binary; binaries sequential' --tmux required \
+      --runner nextest --kind release --selection 'workspace except farhelm and farhelm-desktop' \
+      --concurrency '4 nextest slots across binaries; retries 0' --tmux required \
       --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo test --workspace --exclude farhelm --exclude farhelm-desktop -- --show-output --test-threads=4
+      -- cargo nextest run --workspace --exclude farhelm --exclude farhelm-desktop
     PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
-      --kind release --selection 'farhelm binary unit tests' \
-      --concurrency '4 libtest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo test -p farhelm --bins -- --show-output --test-threads=4
+      --runner nextest --kind release --selection 'farhelm binary unit tests' \
+      --concurrency '4 nextest slots; retries 0' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- cargo nextest run -p farhelm --bins
+    PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+      --kind release --selection 'workspace doctests except farhelm and farhelm-desktop' \
+      --concurrency '4 doctest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- cargo test --locked --doc --workspace --exclude farhelm --exclude farhelm-desktop -- --show-output --test-threads=4
 
 - name: Regress safe output-client teardown on the pinned tmux
   # Its own step after the full suite: each scenario gets a fresh test
   # process, so a surviving client or server cannot contaminate the next.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
-    PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
-      --kind release --selection 'pinned output-client teardown scenarios' \
-      --concurrency '10 sequential test processes; 1 libtest thread each' --tmux required \
-      --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/test-tmux-pinned-shutdown.sh
+    PATH="$PWD/.ci-tmux:$PATH" scripts/test-tmux-pinned-shutdown.sh \
+      --kind release --output-root "$RUNNER_TEMP/test-run-evidence"
 
 - name: Run the JS unit harness
   if: runner.os == 'Linux' && runner.arch == 'X64'
@@ -249,7 +264,8 @@
     sudo apt-get update && sudo apt-get install -y musl-tools python3-venv
     PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
       --kind release --selection 'CentOS provisioning fixture' --concurrency 'one selected test' \
-      --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/test-provision-centos.sh
+      --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/test-provision-centos.sh \
+      --kind release --output-root "$RUNNER_TEMP/test-run-evidence"
 
 # ---------------------------------------------------------------------------
 # The macOS half of the gate.
@@ -266,14 +282,6 @@
 # behaviour. What is unique here is the compile.
 # ---------------------------------------------------------------------------
 
-- name: Select Python with non-reaping child observation on macOS
-  # Python exposed waitid/WNOWAIT on macOS starting in 3.13. The recorder
-  # needs that API to retain process-group identity until cleanup finishes.
-  if: runner.os == 'macOS'
-  uses: actions/setup-python@v7
-  with:
-    python-version: '3.13'
-
 - name: Compile the CLI half of the Mac release
   # `--locked` because a release must build from the committed lockfile and
   # nothing else.
@@ -286,9 +294,13 @@
   if: runner.os == 'macOS'
   run: |
     python3 scripts/record-test-run.py \
-      --kind release --selection 'macOS desktop unit tests' --concurrency 'libtest default' \
+      --runner nextest --kind release --selection 'macOS desktop unit tests' --concurrency '4 nextest slots; retries 0' \
       --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo test -p farhelm-ui --features desktop
+      -- cargo nextest run -p farhelm-ui --features desktop
+    python3 scripts/record-test-run.py \
+      --kind release --selection 'macOS desktop doctests' --concurrency '4 doctest threads' \
+      --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
 
 # ---------------------------------------------------------------------------
 # Release-build prerequisites, on every build job.
@@ -337,9 +349,13 @@
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     python3 scripts/record-test-run.py \
-      --kind release --selection 'Linux desktop unit tests' --concurrency 'libtest default' \
+      --runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' \
       --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo test -p farhelm-ui --features desktop
+      -- cargo nextest run -p farhelm-ui --features desktop
+    python3 scripts/record-test-run.py \
+      --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
+      --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
 
 - name: Run the native desktop smoke gate
   # desktop-smoke builds a native app and its own web bundle. Its target must
@@ -403,6 +419,12 @@
           cp -- "$evidence" "$evidence_dir/$run_id/"
         fi
       done
+      # Keep fixed runner inputs and raw JUnit bytes through a bounded
+      # collector; missing, oversized or unreadable files remain explicit.
+      if [ -e "$run_dir/nextest.toml" ] || [ -e "$run_dir/nextest" ]; then
+        python3 scripts/test_run_nextest.py "$run_dir" "$evidence_dir/$run_id" \
+          > "$evidence_dir/$run_id/nextest-collection.json"
+      fi
       # Export through the fixed-layout collector even if the recorder died
       # before building its own archive. Never recursively upload raw state.
       if [ -d "$run_dir/test-traces" ] && [ ! -L "$run_dir/test-traces" ]; then

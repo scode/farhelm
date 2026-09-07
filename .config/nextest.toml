@@ -28,13 +28,27 @@ report-skipped = "all"
 
 [test-groups]
 e2e = { max-threads = 4 }
+supervisor-tmux = { max-threads = 2 }
 
 [[profile.default.overrides]]
-filter = 'package(farhelm) & binary(e2e)'
+# ScratchServer's process-local semaphore cannot coordinate nextest children.
+# Cover its modules rather than enumerating today's consumers, so new fixture
+# users inherit the two-server allowance. Pure tests in these modules share it.
+filter = "package(farhelm-supervisor) & (test(tmux::tests::) | test(tmux::stream::tests::) | test(tmux::sink::tests::))"
+test-group = "supervisor-tmux"
+
+[[profile.default.overrides]]
+filter = "package(farhelm) & binary(e2e)"
 test-group = "e2e"
+
+[[profile.default.overrides]]
+# This fixture starts two supervisors and previously reserved two in-process
+# harness permits. Charge both to the runner's shared process budget as well.
+filter = "test(=merged_hosts::two_real_hosts_serve_one_merged_list_and_both_are_operable)"
+threads-required = 2
 
 [[profile.default.overrides]]
 # This test measures memory growth while deliberately blocking a viewer.
 # Reserve the default global budget rather than measuring alongside other tests.
-filter = 'test(terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled)'
+filter = "test(terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled)"
 threads-required = 4
