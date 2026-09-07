@@ -99,6 +99,15 @@ jobs:
           cache: false
           rustflags: ""
       - run: cargo fmt --all -- --check
+      # Parse test source in this existing lightweight job; no test binaries
+      # or browser sessions are started by the sleep convention check.
+      - name: Check test delay rationales
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-venv
+          python3 -m venv "$RUNNER_TEMP/test-sleep-env"
+          "$RUNNER_TEMP/test-sleep-env/bin/python" -m pip install --only-binary=:all: -r scripts/test-sleep-requirements.txt
+          "$RUNNER_TEMP/test-sleep-env/bin/python" -B scripts/check-test-sleeps.py
 
   clippy:
     needs: changes
