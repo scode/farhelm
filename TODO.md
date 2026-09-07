@@ -212,14 +212,6 @@ problems before turning out to be invalid premises. That is why the scale factor
 deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
 than behind it.
 
-- Process-per-test with cargo-nextest, workspace-wide, effort medium. Retires cross-test interference as a class (the
-  one confirmed instance, #384, is in `farhelm-teststate`'s unit binary, not e2e) and supplies per-test timeouts, JUnit
-  for the ledger, and retries that report "flaky." nextest interleaves binaries where `cargo test` runs them
-  sequentially, so the profile needs an explicit `test-threads`, a `max-threads` group for the e2e binary (the harness's
-  `SLOTS` semaphore becomes inert at one holder per process), and `success-output = immediate` to keep loud skips
-  visible. Maintained local/worker instructions and release execution change together, so the class does not disappear
-  from the evidence model. Retries only for the diagnosed load-sensitive group, always reported. The RSS test's
-  allowance is re-baselined, since it starts measuring what it claims to.
 - Local/worker hunt tooling, effort low for Rust and medium for the browser leg. Explicit developer-invoked commands
   reproduce the relevant pinned substrate and concurrency, repeat selected or changed tests within a stated bound, and
   retain commands, counts, environment identity, and failure artifacts. Twenty repetitions remain a focused mode, not a
