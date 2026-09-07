@@ -725,8 +725,14 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
     // happen against a genuinely dead pane to exercise the path.
     let sock = h.state.path().join("tmux.sock");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut last_observation = None;
     loop {
-        let out = tmux_query(&sock, &["display-message", "-p", "#{pane_dead}"]).await;
+        let out =
+            tmux_query_before_deadline(&sock, &["display-message", "-p", "#{pane_dead}"], deadline)
+                .await
+                .unwrap_or_else(|| panic!(
+                    "pane of session {} never died after quit; last completed pane-death response prefix (None means no response): {last_observation:?}", session.id
+                ));
         if String::from_utf8_lossy(&out.stdout).trim() == "1" {
             break;
         }
@@ -734,6 +740,8 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
             tokio::time::Instant::now() < deadline,
             "the agent never exited after quit"
         );
+        last_observation =
+            Some(String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(2048)]).into_owned());
         // sleep-ok: poll pane death before attach; the last output bytes alone do not prove exit.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

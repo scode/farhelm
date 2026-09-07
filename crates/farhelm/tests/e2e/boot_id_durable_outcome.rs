@@ -98,12 +98,17 @@ pub(crate) async fn harness_believing_boot(boot: &str) -> Harness {
 /// in-process supervisor), and a list is exactly such an observation.
 pub(crate) async fn wait_for_dead_pane(sock: &std::path::Path, tmux_name: &str) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut last_observation = None;
     loop {
-        let out = tmux_query(
+        let out = tmux_query_before_deadline(
             sock,
             &["display-message", "-p", "-t", tmux_name, "#{pane_dead}"],
+            deadline,
         )
-        .await;
+        .await
+        .unwrap_or_else(|| panic!(
+            "pane of {tmux_name} never died; last completed pane-death response prefix (None means no response): {last_observation:?}"
+        ));
         if String::from_utf8_lossy(&out.stdout).trim() == "1" {
             return;
         }
@@ -111,6 +116,8 @@ pub(crate) async fn wait_for_dead_pane(sock: &std::path::Path, tmux_name: &str) 
             tokio::time::Instant::now() < deadline,
             "pane of {tmux_name} never died"
         );
+        last_observation =
+            Some(String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(2048)]).into_owned());
         // sleep-ok: poll tmux pane death without making the supervisor observe that death first.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

@@ -91,7 +91,7 @@ mod tests {
                 8192,
             )
             .unwrap();
-            let mut start = std::process::Command::new(&executable);
+            let mut start = std::process::Command::new(executable);
             start.args(["-S"]).arg(&socket).args([
                 "-f",
                 "/dev/null",
@@ -173,7 +173,7 @@ mod tests {
                         .all(|event| event.sequence < shutdown[0].sequence)
                 );
             }
-            let mut probe = std::process::Command::new(&executable);
+            let mut probe = std::process::Command::new(executable);
             probe.arg("-S").arg(&socket).arg("list-sessions");
             let stopped = run_bounded(&mut probe, &limits).unwrap();
             assert!(

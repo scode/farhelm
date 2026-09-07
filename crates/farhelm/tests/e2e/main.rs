@@ -33,6 +33,8 @@
 //! `--exact` filter needs the qualified name — a deliberate trade for
 //! real modules with real per-module imports.
 
+#[path = "../cli_support/mod.rs"]
+pub mod cli_support;
 mod harness;
 mod session_lifecycle;
 
