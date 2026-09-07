@@ -307,6 +307,7 @@ pub(crate) async fn kill_tmux_server_and_wait(sock: &std::path::Path) {
             tokio::time::Instant::now() < deadline,
             "tmux server never finished dying after kill-server"
         );
+        // sleep-ok: kill-server returns before teardown finishes; retry the private server's disappearance probe until its deadline.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -395,6 +396,7 @@ pub(crate) async fn wait_for_supervisor_ready(state_dir: &std::path::Path) {
                     "nothing was listening on {}'s supervisor socket: {e:#}",
                     state_dir.display()
                 );
+                // sleep-ok: retry the named socket-listening boundary while the supervisor binds and starts accepting peers.
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
@@ -460,12 +462,12 @@ pub(crate) struct SupervisorProcess {
 }
 
 /// Start a real `farhelm supervisor run` on a fresh state directory and
-/// wait for its socket to accept.
+/// wait for its socket path to appear.
 ///
-/// The socket wait is what makes the rest of a test deterministic: a helm
-/// started against a directory with no socket yet is not wrong — it simply
-/// retries — but it would turn every later assertion into a race with the
-/// reconnect ladder.
+/// This establishes that startup has published the path, not that a peer
+/// can connect or that later initialization is finished. Call
+/// [`wait_for_supervisor_ready`] before an action that requires an
+/// accepting socket; a helm started earlier may still be retrying.
 pub(crate) async fn supervisor_process() -> SupervisorProcess {
     supervisor_process_with_env(std::iter::empty()).await
 }
@@ -519,15 +521,9 @@ pub(crate) async fn supervisor_process_on_state(
         .spawn()
         .expect("spawn supervisor");
     let socket = state.path().join("supervisor.sock");
-    let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
-    while !socket.exists() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the supervisor at {} never bound its socket",
-            state.path().display()
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    // Preserve this fixture's path-created boundary. Callers that need an
+    // accepting peer establish that separately with wait_for_supervisor_ready.
+    wait_for_file(&socket, REAL_STACK_SETTLE.as_secs()).await;
     SupervisorProcess {
         _child: child,
         _tmux: tmux,
@@ -890,10 +886,11 @@ pub(crate) async fn wait_for_agent_ready(sock: &std::path::Path, session_id: &st
                  deadline expired={expired}), so this test's subject never started. A dead \
                  pane means the launch died before printing readiness — before farhelm's \
                  exec shim, or inside the agent's own setup — and the text below is whatever \
-                 it left on the pty; a live pane means the launch was merely slow. Pane \
-                 text:\n{last_text}"
+                it left on the pty; a live pane means the launch was merely slow. Pane \
+                text:\n{last_text}"
             );
         }
+        // sleep-ok: wait for the agent's own readiness marker, checking pane liveness and bounded text again on each poll.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -1052,6 +1049,7 @@ where
                 return sessions;
             }
             last_listing = Some(sessions);
+            // sleep-ok: listings converge asynchronously; retry the caller's explicit predicate inside the overall timeout.
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     })
@@ -1199,6 +1197,7 @@ pub(crate) async fn wait_for_exit_code(
                  {secs}s (last observed: {last_seen:?})"
             );
         }
+        // sleep-ok: retain the exit-status observation window, including the known tmux missing-code case decided only at its deadline.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -1725,6 +1724,7 @@ pub(crate) async fn wait_until_pid_gone(pid: u32, secs: u64) {
             tokio::time::Instant::now() < deadline,
             "pid {pid} was still alive after {secs}s"
         );
+        // sleep-ok: process teardown completes asynchronously; recheck the owned PID's disappearance until the caller's deadline.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -1788,15 +1788,18 @@ pub(crate) async fn wait_for_child(parent: u32, secs: u64) -> u32 {
             tokio::time::Instant::now() < deadline,
             "pid {parent} never forked a child within {secs}s"
         );
+        // sleep-ok: observe an actual child of this parent before a test can rely on that descendant existing.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
-/// Poll until `path` exists, failing the test if it never does. Used
-/// wherever a fake-agent script's own readiness cannot be observed
-/// through the terminal (its child's stdio is disconnected — see
-/// `spawner-stubborn`'s docs) and instead signals by creating a file in
-/// the session's working directory.
+/// Wait for a fixture-owned path to appear, without implying that its
+/// contents or the service behind it are ready.
+///
+/// Disconnected fake-agent children signal by creating a file (see
+/// `spawner-stubborn`); a spawned supervisor uses its socket path as a
+/// separate construction boundary. A caller needing a parseable PID or
+/// an accepting socket must use the corresponding stronger oracle.
 pub(crate) async fn wait_for_file(path: &std::path::Path, secs: u64) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
     loop {
@@ -1808,6 +1811,7 @@ pub(crate) async fn wait_for_file(path: &std::path::Path, secs: u64) {
             "{} never appeared within {secs}s",
             path.display()
         );
+        // sleep-ok: the fixture publishes this path asynchronously; existence is the caller's explicitly chosen boundary.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -1829,6 +1833,7 @@ pub(crate) async fn wait_for_pid_file(path: &std::path::Path, secs: u64) -> u32 
             "{} never contained a parseable pid within {secs}s",
             path.display()
         );
+        // sleep-ok: a created PID file may precede its contents; retry until the fixture publishes a complete parseable identity.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
