@@ -19,6 +19,9 @@ use farhelm_proto::{
 use std::process::{Command, Output};
 use std::time::Duration;
 
+mod cli_support;
+use cli_support::output_with_timeout;
+
 /// Serve exactly one authenticated request, asserting the handshake this
 /// CLI is required to perform, and answer with whatever `respond` returns.
 ///
@@ -279,33 +282,6 @@ fn mock_unwind_cancels_its_listener() {
         Err("mock supervisor cancelled".to_string())
     );
     assert!(std::os::unix::net::UnixStream::connect(&socket).is_err());
-}
-
-/// Run the child with a hard deadline, so a relay regression that hangs
-/// fails the test instead of pinning the run.
-///
-/// `farhelm agent` deliberately has no timeout of its own (the supervisor
-/// owns that bound), which is exactly why the TEST has to impose one.
-fn output_with_timeout(mut command: Command) -> Output {
-    command
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = command.spawn().expect("spawn farhelm");
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if child.try_wait().expect("poll farhelm").is_some() {
-            return child.wait_with_output().expect("collect farhelm output");
-        }
-        if std::time::Instant::now() >= deadline {
-            child.kill().expect("kill wedged farhelm");
-            let output = child.wait_with_output().expect("collect killed farhelm");
-            panic!(
-                "farhelm agent exceeded its 10-second test deadline: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
 }
 
 /// Start with no inherited Farhelm launch contract, then let each case add
