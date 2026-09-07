@@ -291,8 +291,8 @@ async fn a_key_reused_for_a_different_request_is_refused() {
 /// The barrier is what makes this a real concurrency test rather than two
 /// requests that happened to be issued close together: the first create is
 /// HELD inside its launch (through the create-lifecycle seam) until the
-/// second has demonstrably been issued, so the two genuinely overlap. A
-/// plain `join!` proves nothing — the runtime is free to run them one after
+/// second has reached its pending lock acquisition, so the two genuinely
+/// overlap. A plain `join!` proves nothing — the runtime is free to run them one after
 /// the other, and usually does.
 ///
 /// Two connections, not one: the supervisor handles each connection's
@@ -305,10 +305,16 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
-    // Released by the test once the second create is in flight; the first
-    // create parks inside its launch until then.
+    // Released only after the contender is observed. Expiry must fail the
+    // fixture, not let the first create finish and erase the overlap premise.
     let (release, held) = std::sync::mpsc::channel::<()>();
     let held = std::sync::Mutex::new(held);
+    let launch_entered = Arc::new(tokio::sync::Notify::new());
+    let contender_waiting = Arc::new(tokio::sync::Notify::new());
+    let first_holds_key = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let entered = Arc::clone(&launch_entered);
+    let held_key = Arc::clone(&first_holds_key);
+    let waiting = Arc::clone(&contender_waiting);
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -316,15 +322,28 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
         SupervisorSeams {
             create_crash: Some(Arc::new(move |stage| {
                 if stage == CreateStage::DuringLaunch {
+                    held_key.store(true, std::sync::atomic::Ordering::Release);
+                    entered.notify_one();
                     // Blocking, not awaiting: the seam is synchronous, and
                     // `block_in_place` is what keeps the rest of the
                     // runtime — including the second create — running.
+                    // Return expiry through the request: a panic in the detached
+                    // connection task would not fail the awaiting test task.
                     tokio::task::block_in_place(|| {
                         let held = held.lock().expect("barrier mutex");
-                        let _ = held.recv_timeout(Duration::from_secs(30));
-                    });
+                        held.recv_timeout(Duration::from_secs(30))
+                    })
+                    .map_err(|error| anyhow::anyhow!("held launch was not released: {error}"))?;
                 }
                 Ok(())
+            })),
+            create_intent_waiting: Some(Arc::new(move |key| {
+                // A runtime may yield even on an uncontended acquisition.
+                // Ignore those early observations: only after the held launch
+                // is reached does pending acquisition prove overlapping work.
+                if key == "intent-3" && first_holds_key.load(std::sync::atomic::Ordering::Acquire) {
+                    waiting.notify_one();
+                }
             })),
             ..SupervisorSeams::default()
         },
@@ -339,18 +358,25 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
         let work = work.path().to_path_buf();
         tokio::spawn(async move { create_keyed(&client, &work, "intent-3").await })
     };
-    // The second create is issued while the first is parked in its launch.
+    tokio::time::timeout(Duration::from_secs(10), launch_entered.notified())
+        .await
+        .expect("the first create never reached its held launch");
+    // The second create must reach acquisition while the first owns the key.
     let racing_create = {
         let client = Arc::clone(&second_client);
         let work = work.path().to_path_buf();
         tokio::spawn(async move { create_keyed(&client, &work, "intent-3").await })
     };
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::timeout(Duration::from_secs(10), contender_waiting.notified())
+        .await
+        .expect("the second create never reached pending acquisition of the held key");
     assert!(
         !held_create.is_finished() && !racing_create.is_finished(),
         "test fixture: both creates must still be in flight when the barrier releases"
     );
-    let _ = release.send(());
+    release
+        .send(())
+        .expect("the held launch expired before the contender was released");
 
     let a = held_create.await.expect("join").expect("first create");
     let b = racing_create.await.expect("join").expect("second create");
