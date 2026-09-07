@@ -1915,6 +1915,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wasm-bindgen",
  "web-sys",
  "web-time",
 ]

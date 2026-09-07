@@ -1293,7 +1293,7 @@ pub(crate) fn ListView(
     // dropped — it becomes the follow-up read the reader runs next.
     let feed_listing = request_listing.clone();
     let feed_hosts = request_hosts.clone();
-    use_feed_reader(move || {
+    let feed_acted_on = use_feed_reader(move || {
         feed_listing(Trigger::Notice);
         feed_hosts(Trigger::Notice);
     });
@@ -2208,6 +2208,27 @@ pub(crate) fn ListView(
             }
             on_open.call(session.clone());
         }
+    });
+    // Snapshot concrete signals, without adding reactive subscriptions or
+    // another scheduled effect. Selection agreement keeps a not-yet-mounted
+    // session view from looking like an idle listing-only page to feed tests.
+    let snapshot_feed = crate::feed::FLEET_FEED.signal();
+    let snapshot_skew = crate::skew::HELM_BUILD_SKEW.signal();
+    crate::reader::use_test_reader_snapshot(move || {
+        let feed = snapshot_feed.peek();
+        let rows = listing.peek();
+        serde_json::json!({
+            "role": "list",
+            "notices": feed.notices.to_string(),
+            "healthy": feed.healthy,
+            "skew": snapshot_skew.peek().is_some(),
+            "acted_on": feed_acted_on.peek().to_string(),
+            "selected": selected.peek().clone(),
+            "listing_answered": matches!(rows.as_ref(), Some(Ok(_))),
+            "has_rows": rows.as_ref().is_some_and(|result| result.as_ref().is_ok_and(|rows| !rows.sessions.is_empty())),
+            "resolving_remembered": *resolving_remembered.peek(),
+            "readers": [listing_surface.peek().test_snapshot(), hosts_surface.peek().test_snapshot()],
+        })
     });
     let toggle_menu = use_callback(move |id: String| {
         let currently = menu_open.peek().as_deref() == Some(id.as_str());

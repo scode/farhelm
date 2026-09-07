@@ -281,7 +281,12 @@ pub(crate) async fn fallback_sleep() {
 /// notification is spent once `reread` has been called, and this module
 /// never hears how the read ended; recovering a failed one is the surface
 /// reader's job (see the module header).
-pub(crate) fn use_feed_reader(mut reread: impl FnMut() + 'static) {
+///
+/// The returned count lets the opt-in browser snapshot observe whether this
+/// consumer handled the current notice. Read it from a synchronous browser
+/// callback: that callback cannot interleave between setting the count and
+/// calling `reread`, so it also observes the demands that callback issued.
+pub(crate) fn use_feed_reader(mut reread: impl FnMut() + 'static) -> ReadSignal<u64> {
     let mut acted_on = use_signal(|| FLEET_FEED.peek().notices);
     use_effect(move || {
         // The ONE tracked read in this closure. Everything else peeks, so
@@ -307,6 +312,7 @@ pub(crate) fn use_feed_reader(mut reread: impl FnMut() + 'static) {
         }
         reread();
     });
+    acted_on.into()
 }
 
 /// Everything `events.js` needs to run the subscription, as the JSON
