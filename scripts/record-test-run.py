@@ -810,7 +810,13 @@ class ConsoleForwarder:
                     self.forwarded += count
                 view = view[count:]
 
-    def finish(self) -> dict[str, int]:
+    def finish(self) -> dict[str, int | bool]:
+        """Bound the console drain and disclose whether its worker actually stopped.
+
+        Reusing this recorder in one process is safe only when the caller does
+        not accumulate surviving forwarding workers. Byte totals alone cannot
+        establish that lifetime: the terminal queue item may not have fit.
+        """
         try:
             self.items.put_nowait(None)
         except queue.Full:
@@ -822,6 +828,7 @@ class ConsoleForwarder:
                 "forwarded_bytes": self.forwarded,
                 "dropped_or_pending_bytes": self.observed - self.forwarded,
                 "queue_rejected_bytes": self.rejected,
+                "worker_finished": not self._thread.is_alive(),
             }
 
 
@@ -1267,6 +1274,10 @@ def run_command(
     The ordinary post-exit pipe drain retains its separate fixed allowance.
     """
 
+    # Preparation and manifest writes can observe cancellation before this
+    # boundary. Do not spawn a new runner merely to terminate it immediately.
+    if intent.received is not None:
+        return CommandResult("interrupted", 128 + intent.received, None, None, False)
     try:
         process = subprocess.Popen(
             argv,
@@ -1581,12 +1592,18 @@ def finalize(
     manifest.write()
 
 
-def run(argv: list[str]) -> int:
-    """Execute the recorder and return its conventional process status."""
+def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
+    """Execute one recorded command, optionally sharing a caller-owned signal intent.
+
+    Ordinary callers receive the recorder's historical per-invocation signal
+    lifecycle. A bounded scheduler may supply one intent for several calls so
+    a signal observed between attempts cannot be lost or mistaken for a child
+    exit status.
+    """
 
     total_started = time.monotonic()
     ambient = dict(os.environ)
-    intent = SignalIntent()
+    intent = signal_intent or SignalIntent()
     prior_handlers = {
         signum: signal.signal(signum, intent.handle) for signum in (signal.SIGINT, signal.SIGTERM)
     }
