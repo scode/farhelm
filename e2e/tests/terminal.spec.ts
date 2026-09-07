@@ -1630,28 +1630,30 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
 // session or a clear error, never two silently"): the submit control must
 // be disabled for the WHOLE round trip, not just synchronously after the
 // click handler returns. A normal create is too fast to observe that
-// window reliably, so this delays the POST response by a fixed, short
-// amount via route interception — long enough to deterministically
-// observe the disabled state, short enough to keep the test fast. Only
-// POST is intercepted (GET keeps flowing straight through) so the list's
-// own background polling is unaffected. Also covers the two OTHER controls
-// this same in-flight `submitting` flag locks: the "new session" toggle
+// window reliably, so this holds the POST until the assertions finish.
+// Only POST is held; the list's reads keep flowing. Also covers the two
+// other controls the shared submission guard locks: the "new session" toggle
 // (which would otherwise unmount the form mid-POST) and every row's open
-// button (which would otherwise unmount `ListView` itself mid-POST) — see
-// `nav_locked`'s docs in lib.rs for why opening ANY row is unsafe here,
-// not just a hypothetically "related" one.
+// button (which would change selection while the create is about to
+// reconcile it). See `guarded_open` in list/view.rs for the shared token's
+// role even though the sidebar itself stays mounted.
 test("create dialog disables the submit control while a create is in flight", async ({
   page,
   request,
 }) => {
   const title = `double-submit-${Date.now()}`;
+  // A failed guard assertion must abort the pending create before cleanup.
+  let release!: (proceed: boolean) => void;
+  const held = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") {
       await route.continue();
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    await route.continue();
+    if (await held) await route.continue();
+    else await route.abort();
   });
 
   try {
@@ -1662,9 +1664,15 @@ test("create dialog disables the submit control while a create is in flight", as
       title,
     });
     const submit = form.locator('button[type="submit"]');
-    await submit.click();
+    await Promise.all([
+      page.waitForRequest(
+        (req) => req.method() === "POST" && new URL(req.url()).pathname === "/api/sessions",
+        { timeout: 20_000 },
+      ),
+      submit.click(),
+    ]);
 
-    // The delayed POST is still in flight here — this is exactly the
+    // The held POST is still in flight here — this is exactly the
     // window a double-click or a timeout-triggered retry would otherwise
     // land a second request into.
     await expect(submit).toBeDisabled();
@@ -1672,22 +1680,24 @@ test("create dialog disables the submit control while a create is in flight", as
     // is this form's only cancel/close affordance, and toggling
     // `show_create` off while the create is in flight would unmount
     // `CreateSessionForm` mid-`spawn`, stranding the POST's eventual
-    // response with nothing left to act on it (see the toggle button's
-    // own doc in lib.rs).
+    // response with nothing left to act on it (see CreateSessionForm's
+    // lifecycle contract in list/create_form.rs).
     await expect(page.locator(".new-session-button")).toBeDisabled();
     // And the row-open guard from the same design: opening the shared
-    // session right now would navigate away and unmount `ListView`
-    // itself, cancelling this in-flight create exactly the same way —
-    // see `nav_locked` in lib.rs.
+    // session right now would replace the keyed session view and change
+    // selection while the create is about to reconcile it. The sidebar
+    // remains mounted; the shared operation token guards this transition.
     await expect(
       sharedSessionRow(page).locator(".session-row-open"),
     ).toBeDisabled();
 
-    // Let the delayed response land: success navigates into the new
+    // Let the held request proceed: success navigates into the new
     // session's terminal, same as the multi-session flow above.
+    release(true);
     await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await expect(page.locator(".titlebar .title")).toHaveText(title);
   } finally {
+    release(false);
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
       await request.post(`/api/sessions/${id}/stop`).catch(() => {});
@@ -2626,7 +2636,7 @@ test("deleting a session with unknown status confirms first, with wording that a
 // native `submit` event without going through the (disabled) button.
 // `HTMLFormElement.requestSubmit()` is exactly such a path — it fires a
 // real `submit` event the disabled button cannot intercept — so a second
-// call here is what actually pins the RUST-SIDE `submitting` guard, not
+// call here is what actually pins the Rust-side submission guard, not
 // merely the disabled attribute's cosmetic effect.
 test("submitting the create form twice while one create is in flight produces exactly one session", async ({
   page,
@@ -2634,14 +2644,21 @@ test("submitting the create form twice while one create is in flight produces ex
 }) => {
   const title = `double-submit-guard-${Date.now()}`;
   let postCount = 0;
+  // Hold every create so a duplicate cannot finish and unmount the form
+  // before the observation window ends. Failed pre-release assertions
+  // abort them all instead of racing cleanup against a late creation.
+  let release!: (proceed: boolean) => void;
+  const held = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") {
       await route.continue();
       return;
     }
     postCount++;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await route.continue();
+    if (await held) await route.continue();
+    else await route.abort();
   });
 
   try {
@@ -2652,12 +2669,17 @@ test("submitting the create form twice while one create is in flight produces ex
       title,
     });
     await form.locator('button[type="submit"]').click();
+    await expect.poll(() => postCount, { timeout: 20_000 }).toBe(1);
     // Bypasses the (already disabling) submit button entirely.
     await page.evaluate(() => {
       document
         .querySelector<HTMLFormElement>(".create-session-form")
         ?.requestSubmit();
     });
+    // sleep-ok: retain the duplicate-dispatch window while every create is held, before success can unmount the form.
+    await page.waitForTimeout(500);
+    expect(postCount).toBe(1);
+    release(true);
 
     // Auto-select means __farhelmTermReady is ALREADY true (the page
     // attached a session at load), so it cannot gate on the create any
@@ -2669,6 +2691,7 @@ test("submitting the create form twice while one create is in flight produces ex
     const listing = await (await request.get("/api/sessions")).json();
     expect(listing.sessions.filter((s: any) => s.title === title)).toHaveLength(1);
   } finally {
+    release(false);
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
       await request.post(`/api/sessions/${id}/stop`).catch(() => {});
