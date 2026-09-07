@@ -776,6 +776,140 @@ class RecorderTest(unittest.TestCase):
         run_dir = self.run_directories()[-1]
         return run_dir, json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
 
+    def install_nextest_fixture(self, report: str | None, status: int = 0) -> dict[str, str]:
+        """Provide a real CLI child that exposes its effective argv and report location.
+
+        This fixture covers recorder integration without compiling Rust. Real
+        nextest signal and process-group behavior requires a separate runner
+        integration check; this stand-in cannot establish that contract.
+        """
+
+        bin_dir = self.base / "nextest-bin"
+        bin_dir.mkdir(exist_ok=True)
+        config_dir = self.repo / ".config"
+        config_dir.mkdir(exist_ok=True)
+        shutil.copyfile(SCRIPT.parent.parent / ".config" / "nextest.toml", config_dir / "nextest.toml")
+        binary = bin_dir / "cargo-nextest"
+        binary.write_text(
+            f"#!{PYTHON}\n"
+            "import json, os, pathlib, sys, tomllib\n"
+            "if sys.argv[1:] == ['nextest', '--version']:\n"
+            "    print('cargo-nextest 0.9.143 (fixture)'); sys.exit(0)\n"
+            "tool = pathlib.Path(sys.argv[sys.argv.index('--tool-config-file') + 1].split(':', 1)[1])\n"
+            "store = pathlib.Path(tomllib.loads(tool.read_text())['store']['dir'])\n"
+            "store.mkdir()\n"
+            "(store / 'observed.json').write_text(json.dumps({'argv': sys.argv, "
+            "'nextest_env': sorted(k for k in os.environ if k.startswith('NEXTEST_'))}))\n"
+            f"report = {report!r}\n"
+            "if report is not None:\n"
+            "    (store / 'default').mkdir()\n"
+            "    (store / 'default' / 'junit.xml').write_text(report)\n"
+            f"sys.exit({status})\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o700)
+        return self.environment(PATH=f"{bin_dir}:{os.environ.get('PATH', '')}",
+                                NEXTEST_TEST_THREADS="99", NEXTEST_PROFILE="ambient", NEXTEST_RETRIES="7")
+
+    def test_nextest_mode_records_actual_policy_and_unique_reports(self) -> None:
+        """Ambient options cannot change a recorded run or overwrite its predecessor's report."""
+
+        report = ('<testsuites tests="2" skipped="1" failures="0" errors="0" uuid="fixture">'
+                  '<testsuite tests="2" skipped="1" failures="0" errors="0">'
+                  '<testcase name="pass"/><testcase name="skip"><skipped/></testcase>'
+                  '</testsuite></testsuites>')
+        env = self.install_nextest_fixture(report)
+        requested = ["cargo", "nextest", "run", "-p", "fixture", "-E", "test(=pass)"]
+        observed_roots = []
+        for _ in range(2):
+            result = self.invoke(requested, "--runner", "nextest", env=env)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            run_dir, manifest = self.latest_manifest()
+            observed_roots.append(run_dir)
+            observed = json.loads((run_dir / "nextest" / "observed.json").read_text())
+            self.assertEqual(observed["nextest_env"], [])
+            self.assertEqual(observed["argv"], manifest["command"]["argv"])
+            self.assertEqual(manifest["command"]["requested_argv"], requested)
+            self.assertEqual(manifest["command"]["termination_grace_seconds"], 10)
+            self.assertEqual(manifest["runner"]["report"]["counts"]["passed"], 1)
+            self.assertEqual(manifest["runner"]["report"]["counts"]["skipped"], 1)
+            self.assertEqual(manifest["runner"]["removed_environment_names"],
+                             ["NEXTEST_PROFILE", "NEXTEST_RETRIES", "NEXTEST_TEST_THREADS"])
+            self.assertEqual((run_dir / "nextest.toml").read_bytes(),
+                             (self.repo / ".config" / "nextest.toml").read_bytes())
+        self.assertNotEqual(*observed_roots)
+        for run_dir in observed_roots:
+            self.assertEqual((run_dir / "nextest" / "default" / "junit.xml").read_text(), report)
+
+    def test_nextest_missing_report_fails_evidence_without_losing_child_failure(self) -> None:
+        """A zero exit cannot replace missing evidence, and collection cannot erase exit seven."""
+
+        for child, expected in [(0, 125), (7, 7)]:
+            with self.subTest(child=child):
+                env = self.install_nextest_fixture(None, child)
+                result = self.invoke(["cargo", "nextest", "run"], "--runner", "nextest", env=env)
+                self.assertEqual(result.returncode, expected, result.stderr.decode())
+                manifest = self.latest_manifest()[1]
+                self.assertEqual(manifest["child_status"]["raw_returncode"], child)
+                self.assertFalse(manifest["runner"]["report"]["complete"])
+
+    def test_nextest_post_run_io_failure_preserves_observed_status(self) -> None:
+        """Report IO faults cannot erase a command result already published by finalize.
+
+        Inject failure at the new post-command boundary while keeping real
+        manifest publication. A later successful write must retain the child
+        status, duration and cleanup fields, including timeout/interruption.
+        """
+
+        for phase in ("collection", "publication"):
+            for outcome, code, child in [("completed", 0, 0), ("completed", 100, 100),
+                                         ("timed_out", 124, -9), ("interrupted", 130, -15)]:
+                with self.subTest(phase=phase, outcome=outcome, code=code):
+                    actual_write = RECORDER.Manifest.write
+                    injected = False
+
+                    def write_with_one_fault(manifest):
+                        nonlocal injected
+                        report = manifest.data.get("runner", {}).get("report", {})
+                        if phase == "publication" and report.get("complete") and not injected:
+                            injected = True
+                            raise OSError("injected report publication failure")
+                        actual_write(manifest)
+
+                    def collect(_):
+                        if phase == "collection":
+                            raise OSError("injected report collection failure")
+                        return {"complete": True, "counts": {"tests": 1, "skipped": 0, "failures": 0}}
+
+                    command_result = RECORDER.CommandResult(outcome, code, child, 9.5, True,
+                                                           cleanup_limit="fixture cleanup limit")
+                    with mock.patch.object(RECORDER.pathlib.Path, "cwd", return_value=self.repo), \
+                            mock.patch.object(RECORDER.test_run_nextest, "prepare", side_effect=lambda *args: (
+                                [PYTHON, "-c", "pass"], {"report": {"complete": False}})), \
+                            mock.patch.object(RECORDER, "run_command", return_value=command_result), \
+                            mock.patch.object(RECORDER.test_run_nextest, "collect", side_effect=collect), \
+                            mock.patch.object(RECORDER.Manifest, "write", write_with_one_fault):
+                        returned = RECORDER.run(self.cli(["cargo", "nextest", "run"], "--runner", "nextest")[2:])
+                    self.assertEqual(returned, code if code else 125)
+                    manifest = self.latest_manifest()[1]
+                    self.assertEqual(manifest["child_status"]["raw_returncode"], child)
+                    self.assertEqual(manifest["command"]["duration_seconds"], 9.5)
+                    self.assertTrue(manifest["recorder"]["forced_cleanup"])
+                    self.assertEqual(manifest["recorder"]["cleanup_limit"], "fixture cleanup limit")
+                    self.assertEqual(manifest["outcome"], outcome if code else "recorder-error")
+                    self.assertEqual(injected, phase == "publication")
+
+    def test_nextest_policy_refusal_happens_before_spawn(self) -> None:
+        """A short outer grace or injected retry setting must not start the selected runner."""
+
+        for options, selection in [
+            (["--termination-grace", "2"], []), ([], ["--retries=3"]), ([], ["--profile", "other"]),
+        ]:
+            with self.subTest(options=options, selection=selection):
+                result = self.invoke(["cargo", "nextest", "run", *selection], "--runner", "nextest", *options)
+                self.assertEqual(result.returncode, 125)
+                self.assertEqual(self.run_directories(), [])
+
     def install_tmux_fixture(
         self, version: str = "9.9", matching: bool = True, reject_environment_name: str | None = None
     ) -> pathlib.Path:
