@@ -230,32 +230,19 @@ is a clean gate.
 
 ### Systematic deflake
 
-Ordered; execute top-down. The goal is the rate, not the tickets: fewer flaky tests written, and the ones that are
-written found and diagnosed while the author still has the context. The entries under "Difficult deflake" and the
-FLAKES.md corpus are evidence of which classes this codebase produces, not the work list. `plans/systematic-deflake.md`
-holds the classification of that corpus (26 distinct issues: 13 diagnosed, 8 hypothesis, 5 unknown), the mechanism notes
-behind each entry, and the two adversarial reviews the list went through. What the classification says: ordering races
-dominate (about twelve of the twenty-one diagnosed-or-hypothesized issues acted, measured, or tore down before the
-system was in the assumed state); fixed budgets account for one, and three "timed out" failures were read as budget
-problems before turning out to be invalid premises. That is why the scale factor that used to head this list is now
-deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
-than behind it.
+Deferred work, with its original triggers:
 
-- Authoring rules as a reviewer checklist and a sleep allowlist, effort low. A short checklist the review swarm's
-  test-quality lens loads verbatim and CLAUDE.md's "Finishing work" names for PRs touching tests: premise asserted;
-  readiness from the named oracle; confirm the other party is still there before writing or tearing down; no lock or fd
-  across a spawn; measure an owned process; assert on something that distinguishes two mechanisms; no megabyte polls;
-  reset pointer and focus state. Sleeps live in harness helpers; a test-body sleep carries `// sleep-ok: <why>` and an
-  existing lightweight validation path requires zero un-annotated ones. A count ratchet was rejected: 28 of about 103
-  sleeps are poll intervals and `feed.spec.ts`'s observation windows are legitimate.
-
-Deferred, with triggers, detailed in the plan: a typed scale factor on harness budgets (trigger: a budget-class
-recurrence after the oracle entry lands); product observables that attribute their cause without changing the shared
-detach reason string (product work, belongs under "Near term"); running the tag gate's suite away from the release build
-(nothing to measure until "Restore the release integration gate" lands). Tracking: an explicit manual script over
-FLAKES.md and retained local/worker/release summaries, distinguishing development runs, focused repetitions, and release
-runs; it reports incomplete evidence rather than claiming a rate from sparse samples. A class recurring after its entry
-landed means sharpen the entry, not add a retry.
+- A typed scale factor on harness budgets, triggered by a budget-class recurrence after the readiness-oracle changes
+  land. Keep harness budgets distinct from product deadlines (`Budget::harness` versus `Budget::product`, and
+  `expect.configure` plus a browser helper); `terminal-flood.spec.ts` has both kinds of deadline. A slow wait caused by
+  an invalid fixture premise is not evidence for scaling its budget.
+- Product observables that attribute their cause without changing the deliberately shared stall-detach reason string:
+  supervisor stall versus helm backstop, sentinel unlink path and errno, and bounded helm-death detection latency.
+  Attribution belongs in a secondary field or retained log line. This remains product work for "Near term" when the
+  maintainer chooses to schedule it.
+- Running the tag gate's suite away from the release build, after "Restore the release integration gate" lands. The
+  release gate still excludes the e2e target; evaluate any concurrency experiment using the then-current runner budget
+  rather than reviving the old libtest thread setting.
 
 ## Maybe later
 
