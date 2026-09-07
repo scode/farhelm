@@ -22,7 +22,7 @@
 // under test is deleted: a queued repair landing microseconds after the
 // damage is invisible to any assertion taken afterwards.
 import { expect, test } from "./helpers/evidence";
-import { Page, Route } from "@playwright/test";
+import { Page, Request, Route } from "@playwright/test";
 import {
   cleanupSession,
   countReads,
@@ -30,7 +30,9 @@ import {
   holdMutation,
   holdReads,
   listSessions,
+  observeFeedReaders,
   pinAutoSelect,
+  readFeedReaders,
   stubFeed, openRowMenu } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
@@ -80,12 +82,41 @@ test.describe("read ordering and recovery", () => {
     request,
   }) => {
     test.setTimeout(120_000);
+    await observeFeedReaders(page);
     const session = await createSession(request, { title: `stale-epoch-${Date.now()}` });
     created.push(session.id);
+
+    /**
+     * Retire the fresh detail transition without waiting away the held host
+     * reply. After release, require retirement as well as the separate HTTP
+     * success checks: a failed read can also retire through a no-op retry.
+     */
+    const waitForFreshReaderBoundary = async (hostHeld: boolean) => {
+      let last: Awaited<ReturnType<typeof readFeedReaders>> = [];
+      await expect.poll(async () => {
+        last = await readFeedReaders(page);
+        const lists = last.filter((snapshot) => snapshot.role === "list");
+        const sessions = last.filter((snapshot) => snapshot.role === "session");
+        if (lists.length !== 1 || sessions.length !== 1) return false;
+        const list = lists[0];
+        const shown = sessions[0];
+        if (list.healthy !== true || list.skew !== false || list.selected !== session.id ||
+          shown.id !== session.id || shown.stale !== false ||
+          typeof list.notices !== "string" || shown.acted_on !== list.notices ||
+          shown.readers.length !== 2) return false;
+        const [detail, host] = shown.readers;
+        return !detail.running && !detail.task && detail.demand === "None" &&
+          (hostHeld ? host.running && host.task : !host.running && !host.task && host.demand === "None");
+      }, { timeout: 30_000, message: `fresh detail must settle with host reply ${hostHeld ? "held" : "processed"}` })
+        .toBe(true).catch((error) => {
+          throw new Error(`${String(error)}\nlast reader snapshot: ${JSON.stringify(last)}`);
+        });
+    };
 
     // The staleness switch. Flipped by the test, read by every detail reply
     // on its way to the page.
     let stale = true;
+    let sessionHost: number | undefined;
     await page.route(
       (url) => url.pathname === `/api/sessions/${session.id}`,
       async (route: Route) => {
@@ -95,6 +126,7 @@ test.describe("read ordering and recovery", () => {
         }
         const response = await route.fetch();
         const detail = await response.json();
+        sessionHost = detail.host;
         await route.fulfill({ response, json: { ...detail, stale } });
       },
     );
@@ -112,12 +144,19 @@ test.describe("read ordering and recovery", () => {
 
     // Held from here on, so the registry reply this test is about cannot land
     // until it says so.
+    const hostRequests: Request[] = [];
+    const recordHostRequest = (request: Request) => {
+      if (request.method() === "GET" && new URL(request.url()).pathname === "/api/hosts") {
+        hostRequests.push(request);
+      }
+    };
+    page.on("request", recordHostRequest);
     const registry = await holdReads(page, (url) => url.pathname === "/api/hosts");
 
     await row(page, session.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toHaveText(session.title, { timeout: 20_000 });
-    // The stale surface is up, and its explanation is out asking the registry
-    // — that read is capture #1 and it is going nowhere for now.
+    // The list can ask for hosts too, so capture #1 need not be the session's
+    // request. The reader snapshot below establishes the held session read.
     await expect(page.locator(".host-stale-notice")).toBeVisible({ timeout: 20_000 });
     await registry.waitForCaptures(1);
 
@@ -127,13 +166,31 @@ test.describe("read ordering and recovery", () => {
     stale = false;
     feed.notify(2);
     await expect(page.locator(".host-stale-notice")).toHaveCount(0, { timeout: 20_000 });
-    // Settled, so the reads that belong to the transition are behind us and
-    // the window below contains only what the release causes.
-    await page.waitForTimeout(1_500);
+    // Only the detail reader must retire here: the host reader is the
+    // deliberately unfinished premise, so waiting for all readers deadlocks.
+    await waitForFreshReaderBoundary(true);
     const before = reads.count("detail");
 
     // The reply from the outage lands.
     registry.releaseAll();
+    await waitForFreshReaderBoundary(false);
+    page.off("request", recordHostRequest);
+    // Check every overlapping host read rather than guessing which belongs
+    // to the session. Retirement alone also accepts a failed fetch followed
+    // by a no-op retry, which would never exercise the successful-reply gate.
+    expect(typeof sessionHost).toBe("number");
+    expect(hostRequests.length).toBeGreaterThan(0);
+    for (const request of hostRequests) {
+      const response = await request.response();
+      expect(response, `host request failed: ${request.failure()?.errorText}`).not.toBeNull();
+      expect(await response!.finished()).toBeNull();
+      expect(response!.ok()).toBe(true);
+      const body = await response!.json();
+      expect(body.hosts).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: sessionHost, state: expect.objectContaining({ phase: "connected" }) }),
+      ]));
+    }
+    // sleep-ok: finite no-follow-up window after the stale host reply's reader has retired.
     await page.waitForTimeout(3_000);
 
     expect(

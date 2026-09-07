@@ -660,7 +660,10 @@ export async function holdReads(
     // Pushed only once the reply is IN HAND, which is what makes a capture
     // count a statement about staleness rather than about arrival.
     held.push({ reply, deliver });
-    const replacement = await released;
+    // releaseAll may have run while route.fetch was still obtaining this
+    // response. Such a late capture must inherit the released state rather
+    // than wait for a second release that the caller will never issue.
+    const replacement = open ? undefined : await released;
     if (!replacement) {
       await route.fulfill(reply);
       return;
