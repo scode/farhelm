@@ -2,7 +2,8 @@
 
 `scripts/record-test-run.py` runs one command and leaves a private, bounded record of what ran, where it ran, which
 source tree it saw, and how the process ended. It is meant to provide input for later run tracking and flake hunting. It
-is not a test scheduler, retry loop, pass/fail counter, or claim that a label makes a run reproducible.
+is not a test scheduler or retry loop, and a label never makes a run reproducible. Explicit nextest mode also retains
+the runner's configuration and reported test counts.
 
 NOTE: The command argv and combined stdout/stderr are retained exactly. Do not put credentials in argv. Output is
 private local evidence, not publication-ready material; review it before copying any part of a run directory elsewhere.
@@ -25,9 +26,8 @@ PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" python3 scripts/record-test-run.
   -- cargo test -p farhelm --test e2e session_lifecycle::create_attach_and_roundtrip_input -- --exact --show-output
 ```
 
-The labels are recorded verbatim. The recorder does not parse test counts or infer coverage from them. It invokes the
-argv directly with the caller's current directory as the child's current directory. There is no shell joining, retry, or
-scheduling layer.
+The labels are recorded verbatim; coverage is never inferred from them. Generic mode invokes the argv directly with the
+caller's current directory as the child's current directory. There is no shell joining, retry, or scheduling layer.
 
 `--kind` accepts `development`, `repetition`, or `release`. `--timeout` is an optional finite positive number of seconds
 and starts after the command is spawned; metadata probe time is separate. `--tmux` accepts `warn` (the default),
@@ -42,12 +42,53 @@ The default root is `$XDG_STATE_HOME/farhelm-test-runs` when `XDG_STATE_HOME` is
 `~/.local/state/farhelm-test-runs`. This is deliberately separate from live product state. The recorder rejects roots
 equal to or below the tested Git checkout, the conventional `~/.local/state/farhelm` tree, or `$XDG_STATE_HOME/farhelm`
 when XDG state is configured. A newly created root and every run directory use mode `0700`; private files use mode
-`0600`. An existing root must have no group or other permission bits, and the recorder does not change its owner
-permissions.
+`0600` for recorder-created files. Runner-created files may use their own file modes inside the private run directory.
+An existing root must have no group or other permission bits, and the recorder does not change its owner permissions.
 
 Every invocation gets a full UUID directory. A retry always creates another directory, so a later passing run cannot
 overwrite the failure that prompted it. The path is written to stderr as `test-run evidence: PATH` once the directory
 exists, including when required tmux validation refuses the command.
+
+## Recorded nextest runs
+
+Use `--runner nextest` from the checkout root with Python 3.11 or newer and exactly cargo-nextest 0.9.143 on `PATH`
+(macOS still needs Python 3.13 for the recorder's wait-ownership contract):
+
+```console
+PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" python3 scripts/record-test-run.py \
+  --runner nextest --kind development --tmux required \
+  --selection 'one session roundtrip' --concurrency '4 nextest slots; one selected test' \
+  -- cargo nextest run -p farhelm --test e2e -E 'test(=session_lifecycle::create_attach_and_roundtrip_input)'
+```
+
+This mode accepts package, target, feature and filter selection; it refuses options that replace the runner policy. It
+invokes the resolved cargo-nextest binary directly with four global slots, zero retries, failure on a flaky outcome, and
+failure on an empty selection. `.config/nextest.toml` adds the e2e group's four-slot cap, per-test timeout and
+five-second signal grace. The recorder allows ten seconds for runner cleanup by default and refuses a shorter allowance.
+Ambient `NEXTEST_*` settings are removed from the child environment, and nextest's user config is disabled. The names
+removed are retained, never their values. Generic recording remains available for explicit experiments with other
+policies, but such a command does not acquire these controlled-run claims.
+
+Each run retains `nextest.toml`, `nextest-store.toml`, the actual executable path/hash/version probe, the requested
+argv, and the actual argv. The tool config directs output to that run's `nextest/default/junit.xml`; it cannot overwrite
+an earlier run. The [JUnit report](https://nexte.st/docs/machine-readable/junit/) includes selected-out and ignored
+tests, so skipped cases stay separate from passes. Standard output remains in the recorder's bounded log and per-test
+traces, without duplicating it into XML. XML inspection has a 16 MiB cap; missing, partial, oversized or contradictory
+reports are recorded as incomplete. The raw runner-written report is retained in place; the inspection cap is not a
+quota on nextest's writes. Review that file before exporting it, like other raw run evidence.
+
+`runner.report.complete` concerns report structure and totals, not source identity, test coverage or an assertion that
+the process exited successfully. The command status remains separate. A zero command exit with incomplete evidence, no
+executed cases, failures or flaky outcomes becomes recorder error 125, with the actual child status still retained. An
+existing nonzero command status is preserved. A recorder killed before collection leaves the report's completeness
+unproven. Nextest does not run doctests; maintained suite commands must retain a separate doctest invocation.
+
+When changing this integration, run the small Python policy/recorder checks and, on a Linux sandbox with the pinned
+runner, `python3 scripts/test-nextest-cleanup.py --output-root /tmp/nextest-cleanup-evidence`. Repeat with
+`--trigger test` to exercise nextest's own test deadline instead of the recorder's execution deadline. The fixture
+shortens only its copy of the per-test execution period for that case, retaining the real five-second signal grace. Both
+commands compile a dependency-free fixture and verify that nextest kills a SIGTERM-resistant test and its child in the
+runner-owned test group. These are explicit lifecycle checks, not a per-edit stress requirement or an added CI job.
 
 ## Exit status and lifecycle
 
@@ -97,7 +138,10 @@ The top-level fields are:
 - `started_at` and `finished_at`: UTC RFC 3339 timestamps. `finished_at` is null while running.
 - `duration_seconds`: total monotonic duration, or null while running.
 - `command`: exact string `argv`, actual caller/child `cwd`, requested `timeout_seconds` and
-  `termination_grace_seconds`, and terminal `duration_seconds`.
+  `termination_grace_seconds`, and terminal `duration_seconds`. Nextest mode also retains `requested_argv` before
+  resolving the executable and inserting controlled options.
+- `runner`, when nextest mode is selected: preparation status, resolved executable identity, removed environment names,
+  retained configuration paths/hashes, execution policy, and report completeness/counts.
 - `labels`: caller-supplied `kind`, `selection`, and `concurrency`, plus a reminder that they are descriptive.
 - `environment`: locale identity and FARHELM variable-name handling.
 - `platform`: OS release, machine architecture, logical CPU count, and Python identity. Processor probing is omitted

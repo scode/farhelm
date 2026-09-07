@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Run one command while retaining bounded, private evidence about the run.
 
-This recorder is intentionally a wrapper, not a test runner. It does not retry,
-schedule work, interpret test counts, or turn descriptive labels into claims
-about what the command exercised.
+This recorder is a wrapper: it does not retry or schedule work. Descriptive
+labels never prove what a command exercised. Its explicit nextest mode retains
+runner configuration and report evidence in addition to the command outcome.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ _previous_bytecode_setting = sys.dont_write_bytecode
 try:
     sys.dont_write_bytecode = True
     import test_run_traces
+    import test_run_nextest
 finally:
     sys.dont_write_bytecode = _previous_bytecode_setting
     del _previous_bytecode_setting
@@ -221,8 +222,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--concurrency", required=True)
     parser.add_argument("--tmux", choices=("warn", "required", "none"), default="warn")
     parser.add_argument("--timeout", type=finite_positive)
+    parser.add_argument("--runner", choices=("nextest",))
     parser.add_argument(
-        "--termination-grace", type=finite_positive, default=CHILD_KILL_GRACE_SECONDS,
+        "--termination-grace", type=finite_positive,
         help="seconds allowed for command-owned cleanup after interruption or timeout (maximum 60)",
     )
     parser.add_argument("--output-root", type=pathlib.Path)
@@ -235,13 +237,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         option_argv = argv
         command = []
     parsed = parser.parse_args(option_argv)
+    if parsed.termination_grace is None:
+        parsed.termination_grace = (
+            test_run_nextest.TERMINATION_GRACE if parsed.runner == "nextest" else CHILD_KILL_GRACE_SECONDS
+        )
     if parsed.termination_grace > 60:
         raise UsageRefusal("--termination-grace must be at most 60 seconds")
+    if parsed.runner == "nextest" and parsed.termination_grace < test_run_nextest.TERMINATION_GRACE:
+        raise UsageRefusal("nextest mode requires at least 10 seconds of termination grace")
     if "--" not in argv:
         raise UsageRefusal("missing `--` before the command argv")
     if not command:
         raise UsageRefusal("no command argv follows `--`")
     parsed.command = command
+    if parsed.runner == "nextest":
+        try:
+            test_run_nextest.selection_args(command)
+        except ValueError as error:
+            raise UsageRefusal(str(error)) from error
     return parsed
 
 
@@ -1645,6 +1658,28 @@ def run(argv: list[str]) -> int:
                 )
                 return 125
 
+        if args.runner == "nextest":
+            if checkout is None or cwd != checkout:
+                raise UsageRefusal("nextest mode must run from the checkout root")
+            manifest.data["runner"] = {"name": "nextest", "prepared": False}
+            manifest.write()
+            try:
+                command, runner = test_run_nextest.prepare(
+                    run_dir, checkout, args.command, child_env,
+                    lambda argv: bounded_probe(argv, cwd=cwd, env=child_env, intent=intent),
+                )
+            except (ValueError, KeyError) as error:
+                if intent.received is not None:
+                    exit_code = 128 + intent.received
+                    finalize(manifest, outcome="interrupted", recorder_exit=exit_code,
+                             total_started=total_started, error="interrupted during nextest preparation")
+                    return exit_code
+                raise UsageRefusal(str(error)) from error
+            manifest.data["command"]["requested_argv"] = args.command
+            manifest.data["command"]["argv"] = command
+            manifest.data["runner"] = {**runner, "prepared": True}
+            args.command = command
+
         trace_root, trace_fd = test_run_traces.create_run_root(run_dir)
         child_env[test_run_traces.TRACE_ENV] = os.fspath(trace_root)
         manifest.data["environment"] = environment_evidence(
@@ -1685,6 +1720,38 @@ def run(argv: list[str]) -> int:
             error=result.error,
             cleanup_limit=result.cleanup_limit,
         )
+        final_exit = result.recorder_exit
+        if args.runner == "nextest":
+            try:
+                report = test_run_nextest.collect(run_dir)
+            except Exception as error:
+                report = {"complete": False, "reason": f"collection error: {type(error).__name__}"}
+            manifest.data["runner"]["report"] = report
+            # A successful command with missing or contradictory evidence is
+            # an evidence failure. Preserve its actual child status and never
+            # replace an existing nonzero test/timeout/interruption result.
+            counts = report.get("counts", {})
+            if final_exit == 0 and (
+                not report["complete"] or counts.get("tests", 0) == counts.get("skipped", 0)
+                or any(counts.get(name, 0) for name in ("failures", "errors", "flaky"))
+            ):
+                final_exit = 125
+                manifest.data["outcome"] = "recorder-error"
+                manifest.data["recorder"]["exit_code"] = final_exit
+                manifest.data["recorder"]["error"] = "nextest report missing, incomplete, or inconsistent with success"
+            try:
+                manifest.write()
+            except Exception as error:
+                # The command result was published before collection. A
+                # transient write failure must not reach the outer handler,
+                # which handles pre-command failures without a child status.
+                manifest.data["runner"]["report_publication_error"] = type(error).__name__
+                if final_exit == 0:
+                    final_exit = 125
+                    manifest.data["outcome"] = "recorder-error"
+                    manifest.data["recorder"]["exit_code"] = final_exit
+                    manifest.data["recorder"]["error"] = "nextest report publication failed"
+                best_effort_write(2, b"nextest report publication failed; actual child status retained\n")
         try:
             collected = test_run_traces.collect(trace_fd, run_dir / "traces.tar")
         except Exception as error:
@@ -1700,7 +1767,7 @@ def run(argv: list[str]) -> int:
                 2, f"test trace collection publication failed ({type(error).__name__}); "
                 "earlier command result retained\n".encode(),
             )
-        return result.recorder_exit
+        return final_exit
     except UsageRefusal as error:
         best_effort_write(2, f"record-test-run: refused: {error}\n".encode("utf-8", "replace"))
         if manifest is not None:
