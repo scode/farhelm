@@ -57,7 +57,7 @@ import {
   selfSshAvailable,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
-import { termText } from "./helpers/term";
+import { attachSession, termText } from "./helpers/term";
 import { submitPrompt, waitUntilAgentReady } from "./helpers/real-agent";
 
 /**
@@ -183,10 +183,7 @@ async function waitForFlatText(page: Page, needle: string, timeout = 30_000) {
  */
 async function openRelayTerminal(page: Page, id: string): Promise<void> {
   await page.goto("/");
-  const row = page.locator(`[data-session-id="${id}"]`);
-  await expect(row).toBeVisible({ timeout: 20_000 });
-  await row.locator(".session-row-open").click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await attachSession(page, id);
   await waitUntilAgentReady(page, { trustDialogMarkers: [], readyMarker: "FAKE-AGENT READY" });
   await waitForFlatText(page, "POINTER:farhelm: when the user writes");
   await waitForFlatText(page, "INSTRUCTIONS:ok");

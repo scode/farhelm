@@ -32,6 +32,7 @@ import {
 } from "./helpers/real-agent";
 import { requireProductPageAuth } from "./helpers/device-auth";
 import { stackScratchDir } from "./helpers/scratch";
+import { attachSession } from "./helpers/term";
 
 const FARHELM = path.resolve(__dirname, "../../target/debug/farhelm");
 const SPAWN_AGENT = `"${FARHELM}" internal fake-agent --script spawn`;
@@ -48,9 +49,7 @@ async function openReadyTerminal(
   markers: { trustDialogMarkers: string[]; readyMarker: string },
 ) {
   await page.goto("/");
-  await expect(row(page, id)).toBeVisible({ timeout: 20_000 });
-  await row(page, id).locator(".session-row-open").click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await attachSession(page, id);
   await waitUntilAgentReady(page, markers);
 }
 

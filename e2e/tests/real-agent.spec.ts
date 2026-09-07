@@ -37,6 +37,7 @@ import {
   type SubmitPromptEvent,
 } from "./helpers/real-agent";
 import { stackScratchDir } from "./helpers/scratch";
+import { waitForSessionReady } from "./helpers/terminal-readiness";
 
 /**
  * The fake-agent invocation for every CI-runnable leg below, built from
@@ -214,7 +215,7 @@ async function createReadyFakeAgentSession(page: Page, title: string): Promise<s
   const { id } = await createSession(page, { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title });
   // Success navigates straight into the new session's terminal, same as
   // every create-dialog flow in terminal.spec.ts.
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await waitForSessionReady(page, id);
   // The fake agent never shows an onboarding dialog, so this exercises
   // `waitUntilAgentReady`'s "nothing to dismiss" leg specifically — the
   // same code path a real agent's non-empty markers drive.
@@ -479,7 +480,7 @@ test("drives a real `claude` session through the trust dialog to a detected repl
           title,
         });
         id = created.id;
-        await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+        await waitForSessionReady(page, id);
 
         // Lesson (a): the scratch cwd above is untrusted, so Claude
         // Code's folder-trust dialog is EXPECTED here.
