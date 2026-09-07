@@ -28,10 +28,12 @@ import {
   listHosts,
   listSessions,
   localHostId,
+  observeFeedReaders,
   openFilterBar,
   SessionPage,
   stopSession,
   stubFeed,
+  waitForFeedReadersSettled,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 
@@ -221,10 +223,14 @@ test.describe("session list filtering", () => {
    * not only the final DOM, because duplicate reads can render the same rows.
    */
   test("filter debounce coalesces text and yields to discrete changes", async ({ page }) => {
+    await observeFeedReaders(page);
     await listWithStubbedFeed(page);
+    await waitForFeedReadersSettled(page);
     const reads = await watchListingReads(page);
 
     await page.locator(".filter-title").pressSequentially("debounce");
+    await expect.poll(() => reads.length, { timeout: 20_000 }).toBeGreaterThan(0);
+    // sleep-ok: after the requested reply arrives, retain the window for unwanted duplicate listing replies.
     await page.waitForTimeout(500);
     expect(reads).toHaveLength(1);
     expect(reads[0].url.searchParams.get("title")).toBe("debounce");
@@ -240,6 +246,8 @@ test.describe("session list filtering", () => {
       title.dispatchEvent(new Event("input", { bubbles: true }));
       popover.querySelector<HTMLInputElement>(".filter-include-archived")!.click();
     });
+    await expect.poll(() => reads.length, { timeout: 20_000 }).toBeGreaterThan(0);
+    // sleep-ok: keep observing after the discrete reply for a text debounce that incorrectly remained armed.
     await page.waitForTimeout(500);
     expect(reads).toHaveLength(1);
     expect(reads[0].url.searchParams.get("title")).toBe("retire-delay");
