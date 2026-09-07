@@ -3154,7 +3154,7 @@ mod tests {
     /// Round-trip through the real encoder/decoder: any drift between
     /// encode and decode shows up here before it shows up between a helm
     /// and a supervisor built from different checkouts.
-    #[test]
+    #[farhelm_testtrace::test]
     fn frame_roundtrip_control_and_data() {
         let mut wire = Vec::new();
         let hello = ControlMsg::hello("helm");
@@ -3180,7 +3180,7 @@ mod tests {
     /// Golden bytes for the simplest data frame. This is the test that
     /// makes wire-format changes loud: if it fails, PROTOCOL_VERSION must
     /// be bumped, not the expectation silently updated.
-    #[test]
+    #[farhelm_testtrace::test]
     fn frame_wire_format_is_pinned() {
         let mut wire = Vec::new();
         Frame::data(2, vec![0x41, 0x42]).encode(&mut wire).unwrap();
@@ -3197,7 +3197,7 @@ mod tests {
 
     /// Partial buffers must return None (read more), not an error: the
     /// stream reader depends on this to handle short reads.
-    #[test]
+    #[farhelm_testtrace::test]
     fn decode_of_partial_frame_asks_for_more() {
         let mut wire = Vec::new();
         Frame::data(1, vec![1, 2, 3]).encode(&mut wire).unwrap();
@@ -3208,7 +3208,7 @@ mod tests {
 
     /// A hostile or corrupt length prefix must be rejected before
     /// allocation, and an unknown kind tag must fail decode.
-    #[test]
+    #[farhelm_testtrace::test]
     fn decode_rejects_garbage() {
         let huge = (MAX_FRAME_LEN + 1).to_be_bytes();
         let mut buf = huge.to_vec();
@@ -3243,7 +3243,7 @@ mod tests {
     /// would sail past a sender's guard undetected and only surface once
     /// the frame reaches the writer, as a write error it cannot attribute
     /// to this specific oversized message.
-    #[test]
+    #[farhelm_testtrace::test]
     fn frame_size_boundary_accepts_the_maximum_and_rejects_one_more() {
         let largest_body = MAX_FRAME_LEN as usize - 5;
         let at_cap = Frame::data(1, vec![0; largest_body]);
@@ -3276,7 +3276,7 @@ mod tests {
     /// (agent terminal, empty lease) belongs here rather than only in
     /// `attach_terminal_selector_and_lease_json_shapes_are_pinned` below,
     /// which covers the non-default values.
-    #[test]
+    #[farhelm_testtrace::test]
     fn control_json_shape_is_pinned() {
         let msg = ControlMsg::Attach {
             req_id: 3,
@@ -3314,7 +3314,7 @@ mod tests {
     /// directions (`to_value` then `from_value` on the real type) since
     /// these are the two new fields this PR actually adds meaning to,
     /// unlike the rest of `Attach`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn attach_terminal_selector_and_lease_json_shapes_are_pinned() {
         for (msg, expected) in [
             (
@@ -3379,7 +3379,7 @@ mod tests {
     /// mirroring `restart_session_stop_if_running_defaults_false_when_absent`'s
     /// treatment of an older field whose absence must resolve to a
     /// specific, safe default rather than an arbitrary one.
-    #[test]
+    #[farhelm_testtrace::test]
     fn bare_legacy_attach_json_decodes_to_agent_terminal_and_empty_lease() {
         let old_shape = serde_json::json!({
             "type": "attach",
@@ -3434,7 +3434,7 @@ mod tests {
         },
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn new_attach_json_decodes_under_a_legacy_pre_terminal_selector_decoder() {
         let new_msg = ControlMsg::Attach {
             req_id: 12,
@@ -3481,7 +3481,7 @@ mod tests {
     /// pinned here too, bare — as `ErrorKind` alone, not wrapped in a full
     /// `ControlMsg::Error` — since its wire shape (a snake_case string) is
     /// independent of which message happens to carry it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn error_kind_json_shape_is_pinned() {
         let msg = ControlMsg::Error {
             req_id: 7,
@@ -3535,7 +3535,7 @@ mod tests {
     /// the wire at all, which is what a real absent-field sender would
     /// produce; the sibling test below covers that case with hand-written
     /// JSON instead.
-    #[test]
+    #[farhelm_testtrace::test]
     fn hello_json_shape_is_pinned_with_and_without_host_identity() {
         for (msg, expected) in [
             (
@@ -3604,7 +3604,7 @@ mod tests {
 
     /// Debugging a hello must retain the authenticated session identity
     /// without copying its bearer secret into logs or panic output.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_auth_debug_redacts_the_bearer_token() {
         let token = "token-that-must-never-appear";
         let hello = ControlMsg::Hello {
@@ -3642,7 +3642,7 @@ mod tests {
     /// `ControlMsg`, is what makes the key's absence real instead of an
     /// explicit `null` that merely happens to render the same in this
     /// one crate's own encoder.
-    #[test]
+    #[farhelm_testtrace::test]
     fn hello_json_decodes_with_host_identity_key_entirely_absent() {
         let raw = r#"{
             "type": "hello",
@@ -3690,7 +3690,7 @@ mod tests {
         },
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn new_hello_json_decodes_under_a_legacy_pre_host_identity_decoder() {
         let new_msg = ControlMsg::Hello {
             protocol_version: 8,
@@ -3723,7 +3723,7 @@ mod tests {
     /// cannot creep back in as an "optional" addition: SPEC.md's Session
     /// list section says no layer paginates, and the wire shape is where
     /// that rule is cheapest to enforce.
-    #[test]
+    #[farhelm_testtrace::test]
     fn list_sessions_json_shape_is_pinned() {
         let msg = ControlMsg::ListSessions { req_id: 1 };
         let expected = serde_json::json!({
@@ -3744,7 +3744,7 @@ mod tests {
     /// so a rename or a type change here deserves a failure that points
     /// straight at this field rather than getting lost in a larger
     /// struct's diff.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
             parent: None,
@@ -3771,7 +3771,7 @@ mod tests {
     /// PLAN_M7.md item 2's parent and archive flag, including both default
     /// and populated wire shapes. Archive remains metadata beside status;
     /// it is never serialized as a status variant.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_info_parent_and_archived_json_shapes_are_pinned() {
         for (parent, archived, expected_parent) in [
             (None, false, serde_json::Value::Null),
@@ -3828,7 +3828,7 @@ mod tests {
     /// against a literal, so they FOLLOW this constant instead of needing
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
-    #[test]
+    #[farhelm_testtrace::test]
     fn protocol_version_is_pinned_at_15() {
         assert_eq!(PROTOCOL_VERSION, 15);
     }
@@ -3847,7 +3847,7 @@ mod tests {
     /// crate's e2e suite (the helm's loop shares the same `?` shape), so
     /// a later refactor that catches and swallows the parse error cannot
     /// hide behind this unit test staying green.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unknown_control_message_tag_fails_decode() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -3866,7 +3866,7 @@ mod tests {
     /// "detached:" prefix (the UI adds its own banner prefix — see the
     /// constant's docs) fails loudly instead of surfacing as a garbled
     /// user-facing banner.
-    #[test]
+    #[farhelm_testtrace::test]
     fn stall_detach_reason_json_shape_is_pinned() {
         let detached = ControlMsg::Detached {
             channel: 7,
@@ -3888,7 +3888,7 @@ mod tests {
     /// above: a serde attribute change here would compile and pass a
     /// round-trip test while quietly producing bytes an unmodified peer
     /// cannot parse.
-    #[test]
+    #[farhelm_testtrace::test]
     fn stop_and_delete_json_shapes_are_pinned() {
         let stop = ControlMsg::StopSession {
             req_id: 11,
@@ -3941,7 +3941,7 @@ mod tests {
     /// above — this is what would catch a drift between the codec's
     /// framing and serde's JSON shape, which the pure-JSON test just
     /// above cannot see.
-    #[test]
+    #[farhelm_testtrace::test]
     fn stop_and_delete_roundtrip_through_frames() {
         for msg in [
             ControlMsg::StopSession {
@@ -3969,7 +3969,7 @@ mod tests {
     /// Archive's request and fresh-session reply are golden-pinned here.
     /// The reply carries the archived row so an idempotent retry returns
     /// the same useful answer as the first request.
-    #[test]
+    #[farhelm_testtrace::test]
     fn archive_session_json_shapes_are_pinned() {
         let session = SessionInfo {
             parent: None,
@@ -4036,7 +4036,7 @@ mod tests {
     /// exercises the M2 additions above — this is what would catch a drift
     /// between the codec's framing and serde's JSON shape for the wire
     /// vocabulary PLAN_M2_5.md's version 4 bump exists for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn pause_and_resume_output_roundtrip_through_frames() {
         for msg in [
             ControlMsg::PauseOutput { channel: 9 },
@@ -4060,7 +4060,7 @@ mod tests {
     /// cannot parse — and for these two variants specifically, "unmodified
     /// peer" now means a hard decode error rather than a silently ignored
     /// field, per `unknown_control_message_tag_is_connection_fatal` above.
-    #[test]
+    #[farhelm_testtrace::test]
     fn pause_and_resume_output_json_shapes_are_pinned() {
         let pause = ControlMsg::PauseOutput { channel: 4 };
         assert_eq!(
@@ -4088,7 +4088,7 @@ mod tests {
     /// `SessionList` old/new tolerance pair from M2; without it, someone
     /// could add `deny_unknown_fields` (or serde could change defaults)
     /// and mixed v4 builds would break with every test green.
-    #[test]
+    #[farhelm_testtrace::test]
     fn pause_and_resume_with_future_extra_fields_decode_through_parse_control() {
         for (tag, extra) in [("pause_output", "budget"), ("resume_output", "credit")] {
             let frame = Frame {
@@ -4118,7 +4118,7 @@ mod tests {
     /// field. Together with the future-extra-fields test above this pins
     /// both halves of the additive discipline the `PROTOCOL_VERSION`
     /// docs promise for 4.
-    #[test]
+    #[farhelm_testtrace::test]
     fn current_pause_output_decodes_under_a_future_v4_decoder_with_defaults() {
         #[derive(serde::Deserialize)]
         struct FuturePauseOutput {
@@ -4164,7 +4164,7 @@ mod tests {
     /// arm with no golden value attached anywhere. Here the arm IS the
     /// pinning, so the compiler's demand for an arm is a demand for a wire
     /// shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_status_json_shapes_are_pinned() {
         for status in [
             SessionStatus::Unknown,
@@ -4211,7 +4211,7 @@ mod tests {
     /// picking whichever arm compiles. The three live statuses answering
     /// alike is the whole point — a consumer must never be able to tell
     /// them apart through this predicate.
-    #[test]
+    #[farhelm_testtrace::test]
     fn is_live_answers_for_every_status() {
         for (status, live) in [
             (SessionStatus::Running, true),
@@ -4249,7 +4249,7 @@ mod tests {
     /// unrecognized `alive` to `Unknown` would turn a version skew into a
     /// fleet of sessions with no status at all, which reads as a product
     /// bug rather than as the version problem it is.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_removed_alive_status_no_longer_decodes() {
         serde_json::from_value::<SessionStatus>(serde_json::json!({ "state": "alive" }))
             .expect_err("`alive` was REPLACED at version 10, not kept as a tolerated alias");
@@ -4276,7 +4276,7 @@ mod tests {
         Interrupted,
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_split_live_statuses_fail_under_a_legacy_v9_decoder() {
         for status in [
             SessionStatus::Running,
@@ -4322,7 +4322,7 @@ mod tests {
         },
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn interrupted_and_error_status_fail_under_a_legacy_v4_decoder() {
         let interrupted = serde_json::to_value(SessionStatus::Interrupted).unwrap();
         serde_json::from_value::<LegacyV4SessionStatus>(interrupted).expect_err(
@@ -4351,7 +4351,7 @@ mod tests {
         Internal,
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn conflict_error_kind_fails_under_a_legacy_v4_decoder() {
         let conflict = serde_json::to_value(ErrorKind::Conflict).unwrap();
         serde_json::from_value::<LegacyV4ErrorKind>(conflict)
@@ -4390,7 +4390,7 @@ mod tests {
 
     /// A v10 decoder cannot mistake v11's authorization failure for an
     /// older error kind; it must reject the tagged value.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unauthorized_error_fails_under_a_legacy_v10_decoder() {
         let error = ControlMsg::Error {
             req_id: 1,
@@ -4403,7 +4403,7 @@ mod tests {
 
     /// A v10 decoder has neither archive tag and must reject both messages
     /// rather than ignore either as an additive field on an older operation.
-    #[test]
+    #[farhelm_testtrace::test]
     fn archive_messages_fail_under_a_legacy_v10_decoder() {
         for archive in [
             ControlMsg::ArchiveSession {
@@ -4442,7 +4442,7 @@ mod tests {
 
     /// Version 11 has one archive-reply shape: the post-teardown session is
     /// required, not an optional field a same-version peer may omit.
-    #[test]
+    #[farhelm_testtrace::test]
     fn original_v11_archive_reply_requires_the_session() {
         #[derive(Debug, Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case")]
@@ -4490,7 +4490,7 @@ mod tests {
     /// defaulted: a reply that omitted it would read as complete, and a
     /// silently complete-looking partial list is the one failure the flag
     /// exists to rule out.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_list_json_shape_is_pinned() {
         for (msg, expected) in [
             (
@@ -4540,7 +4540,7 @@ mod tests {
     /// (`truncated` present), because the envelope is NOT tolerant — see
     /// `session_list_json_shape_is_pinned` — and this test is about the
     /// rows, not the envelope.
-    #[test]
+    #[farhelm_testtrace::test]
     fn old_shape_session_info_rows_decode_with_defaulted_new_fields() {
         let old_shape = serde_json::json!({
             "type": "session_list",
@@ -4624,7 +4624,7 @@ mod tests {
         },
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn new_session_list_json_decodes_under_a_legacy_pre_status_decoder() {
         let new_msg = ControlMsg::SessionList {
             req_id: 4,
@@ -4690,7 +4690,7 @@ mod tests {
     /// DIFFERENT from `created_at` here for one reason worth stating: the
     /// two are independent fields, and equal values would let a
     /// serialization that derived one from the other pass unnoticed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
             parent: None,
@@ -4811,7 +4811,7 @@ mod tests {
     /// second, subtly different fallback would show ages that disagree with
     /// the order. The `0` case is the whole point — a sender that
     /// predates the field must sort by its creation time, not at the epoch.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {
             id: "s1".to_string(),
@@ -4855,7 +4855,7 @@ mod tests {
     /// `tab_open_and_close_json_shapes_are_pinned` pins separately — no
     /// standalone `TabInfo`-only test exists because both call sites
     /// already golden-pin its shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
             parent: None,
@@ -4898,7 +4898,7 @@ mod tests {
     /// one; a `#[serde(deny_unknown_fields)]` added to `SessionInfo` alone
     /// (never touching `ControlMsg` itself) would break this specific case
     /// while every other test in this file stayed green.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_list_with_unknown_field_inside_session_decodes_through_parse_control() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -4938,7 +4938,7 @@ mod tests {
     /// `terminal` object must still decode through the REAL
     /// `parse_control` path, not just a hand-rolled
     /// `serde_json::from_value::<TerminalSelector>`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn attach_with_unknown_field_inside_terminal_selector_decodes_through_parse_control() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -4997,7 +4997,7 @@ mod tests {
     /// reconnect would fall through to its generic banner and keep
     /// climbing the ladder against a session it can never have — the exact
     /// eviction loop the refusal exists to end, minus the eviction.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_refused_attach_reason_is_the_takeover_wording() {
         assert_eq!(ATTACH_REFUSED_TAKEN_OVER, "another client attached");
     }
@@ -5006,7 +5006,7 @@ mod tests {
     /// a future field inside a `TabInfo` object (here, the one
     /// `TabOpened` carries) must still decode through `parse_control`,
     /// keeping the tab id intact.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_opened_with_unknown_field_inside_tab_info_decodes_through_parse_control() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -5039,7 +5039,7 @@ mod tests {
     /// refuse an unrecognized `kind` outright, never silently default to
     /// `Agent`, or a real version skew would attach the wrong terminal
     /// instead of failing loudly.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unknown_terminal_selector_kind_fails_decode() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -5071,7 +5071,7 @@ mod tests {
     /// order, so a decoder that silently reordered (a `HashSet`-backed
     /// field, say) would relabel every tab without any field actually
     /// being wrong.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_list_tabs_decode_in_order_through_parse_control() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -5136,7 +5136,7 @@ mod tests {
     /// still only forces an arm to exist for a new variant, but that arm
     /// is now the one place this test would ever assert its shape, so
     /// there is no separate golden list left to forget populating.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_kind_restart_and_terminal_selector_vocabulary_json_shapes_are_pinned() {
         for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Generic] {
             let expected = match kind {
@@ -5201,7 +5201,7 @@ mod tests {
     /// them present, matching the treatment every other message shape in
     /// this file gets — now in the raw resolved-bundle shape with no source
     /// profile beside the invocation.
-    #[test]
+    #[farhelm_testtrace::test]
     fn create_session_snapshot_override_fields_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 1,
@@ -5249,7 +5249,7 @@ mod tests {
     /// profile-mode create is the shape with no legacy sender to have
     /// established it by precedent: encode must produce exactly this, and
     /// this must decode back.
-    #[test]
+    #[farhelm_testtrace::test]
     fn create_session_profile_mode_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 2,
@@ -5295,7 +5295,7 @@ mod tests {
     /// PLAN_M7.md item 2's named-spawn selector and parent reference, pinned
     /// in both directions. The selectorless-spawn golden below completes the
     /// valid protocol-15 create shapes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn create_session_profile_name_and_parent_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 3,
@@ -5337,7 +5337,7 @@ mod tests {
     /// Full-authority creates still refuse this shape in their handler. The
     /// codec cannot make that authority distinction, so it must preserve the
     /// request for the restricted dispatcher to interpret.
-    #[test]
+    #[farhelm_testtrace::test]
     fn create_session_selectorless_spawn_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 4,
@@ -5385,7 +5385,7 @@ mod tests {
     /// unrelated session on it along. The neither-selector case is a
     /// full-authority handler refusal only; the selectorless-spawn golden
     /// above pins its valid restricted meaning.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_create_naming_both_modes_or_neither_still_decodes_for_the_handler_to_refuse() {
         for invocation in [Some("agent".to_string()), None] {
             let msg = ControlMsg::CreateSession {
@@ -5427,7 +5427,7 @@ mod tests {
     /// bytes decoding under a decoder that predates these fields — is
     /// `new_create_session_json_decodes_under_a_legacy_pre_snapshot_decoder`
     /// below.
-    #[test]
+    #[farhelm_testtrace::test]
     fn old_shape_create_session_json_decodes_with_defaulted_new_fields() {
         let old_shape = serde_json::json!({
             "type": "create_session",
@@ -5487,7 +5487,7 @@ mod tests {
         },
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn new_create_session_json_decodes_under_a_legacy_pre_snapshot_decoder() {
         let new_msg = ControlMsg::CreateSession {
             req_id: 6,
@@ -5577,7 +5577,7 @@ mod tests {
     /// resolve — a request whose meaning it cannot see. The handshake is
     /// what keeps this unreachable; this test states what would happen
     /// without it, which is the argument for the bump.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_profile_mode_create_cannot_decode_under_a_legacy_v9_decoder() {
         let raw = ControlMsg::CreateSession {
             req_id: 1,
@@ -5635,7 +5635,7 @@ mod tests {
     /// `agent_kind_and_restart_vocabulary_json_shapes_are_pinned`, so this
     /// test's only remaining job is proving the codec/serde frame path
     /// itself does not drift, which does not depend on which mode is used.
-    #[test]
+    #[farhelm_testtrace::test]
     fn restart_session_roundtrips_through_frames() {
         let msg = ControlMsg::RestartSession {
             req_id: 42,
@@ -5688,7 +5688,7 @@ mod tests {
     /// used here specifically (its OTHER value, absence-defaults-false, is
     /// its own separate pin below, since that direction is the safety
     /// property that actually matters).
-    #[test]
+    #[farhelm_testtrace::test]
     fn restart_session_json_shape_is_pinned() {
         let msg = ControlMsg::RestartSession {
             req_id: 7,
@@ -5715,7 +5715,7 @@ mod tests {
     /// naive client's restart request kills a live agent's process tree
     /// with no consent ever expressed, which is exactly the authorization
     /// bug this field exists to prevent.
-    #[test]
+    #[farhelm_testtrace::test]
     fn restart_session_stop_if_running_defaults_false_when_absent() {
         let old_shape = serde_json::json!({
             "type": "restart_session",
@@ -5744,7 +5744,7 @@ mod tests {
     /// other but not with an unmodified peer — the same reasoning
     /// `control_json_shape_is_pinned` and `error_kind_json_shape_is_pinned`
     /// document for why round-trips alone are not enough.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_restarted_json_shape_is_pinned() {
         let msg = ControlMsg::SessionRestarted {
             req_id: 8,
@@ -5795,7 +5795,7 @@ mod tests {
     /// attribute change here (dropping `rename_all`, renaming a field)
     /// would compile and round-trip cleanly while quietly producing bytes
     /// an unmodified peer cannot parse.
-    #[test]
+    #[farhelm_testtrace::test]
     fn report_conversation_json_shapes_are_pinned() {
         let report = ControlMsg::ReportConversation {
             req_id: 21,
@@ -5828,7 +5828,7 @@ mod tests {
     /// between the codec's framing and serde's JSON shape for the version
     /// 12 vocabulary this bump adds, which the JSON-only golden test above
     /// cannot see.
-    #[test]
+    #[farhelm_testtrace::test]
     fn report_conversation_roundtrip_through_frames() {
         for msg in [
             ControlMsg::ReportConversation {
@@ -5854,7 +5854,7 @@ mod tests {
     /// older operation — the same reasoning
     /// `archive_messages_fail_under_a_legacy_v10_decoder` pins for the v10
     /// -> v11 boundary, one bump earlier.
-    #[test]
+    #[farhelm_testtrace::test]
     fn report_conversation_messages_fail_under_a_legacy_v11_decoder() {
         /// The v11 control slice needed to prove the version-12-earning
         /// report/ack tags are unrecognized by a decoder that predates
@@ -5900,7 +5900,7 @@ mod tests {
     /// 9): its only independent claim would be that a hand-rolled shadow
     /// struct's own `#[serde(default)]` works, which is serde's own
     /// well-tested behavior, not this crate's.
-    #[test]
+    #[farhelm_testtrace::test]
     fn restart_session_with_future_extra_field_decodes_through_parse_control() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -5944,7 +5944,7 @@ mod tests {
     /// duplicated the three-variant fixture table and its "decode"
     /// direction only round-tripped bytes it had itself just produced,
     /// which proves self-agreement, not agreement with the pinned shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn replay_complete_and_rename_json_shapes_are_pinned() {
         for (msg, expected) in [
             (
@@ -6047,7 +6047,7 @@ mod tests {
     /// highest cost of getting it wrong. The golden test above already
     /// decodes all three variants' exact shapes through the same
     /// parser.
-    #[test]
+    #[farhelm_testtrace::test]
     fn rename_session_with_future_extra_field_decodes_through_parse_control() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -6079,7 +6079,7 @@ mod tests {
     /// representative-variant argument as the future-extra-field test
     /// above: the tolerance is the enum derive's property, pinned once
     /// on the variant where a wrong answer costs most.
-    #[test]
+    #[farhelm_testtrace::test]
     fn current_rename_session_decodes_under_a_future_v7_decoder_with_defaults() {
         #[derive(serde::Deserialize)]
         struct FutureRenameSession {
@@ -6131,7 +6131,7 @@ mod tests {
     ///
     /// This pins the shape the helm's HTTP API serves so removing the wire
     /// messages cannot accidentally rename a browser-facing field.
-    #[test]
+    #[farhelm_testtrace::test]
     fn profile_json_shape_is_pinned() {
         let expected = serde_json::json!({
             "id": "prof-7",
@@ -6157,7 +6157,7 @@ mod tests {
     /// THIS fixture's `Generic` kind means no resume template at all
     /// (there is no integration to derive a default from; see the field's
     /// two-outcome rule).
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_generic_profile_states_its_kind_and_omits_no_field() {
         let profile = Profile {
             id: "prof-8".to_string(),
@@ -6190,7 +6190,7 @@ mod tests {
     /// every reply, so its exact key (`source_profile`) and its bare
     /// snake_case existence string are what a client's filter and its
     /// no-longer-exists rendering both key off.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_info_source_profile_json_shapes_are_pinned() {
         for existence in [
             ProfileExistence::Unresolved,
@@ -6263,7 +6263,7 @@ mod tests {
     /// - TODAY'S SENDER → future decoder: a later build that grew an
     ///   optional field on this record must read today's bytes and default
     ///   it, rather than refusing a snapshot that predates it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn source_profile_tolerates_unknown_fields_in_both_directions() {
         let frame = Frame {
             kind: FrameKind::Control,
@@ -6343,7 +6343,7 @@ mod tests {
     /// on: if absence decoded as anything but "raw-created", every session
     /// in the fleet would acquire a phantom profile the day the field
     /// shipped.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_absent_source_profile_decodes_as_raw_created_either_spelling() {
         let with_null = serde_json::json!({
             "id": "s1",
@@ -6383,7 +6383,7 @@ mod tests {
 
     /// Profile JSON tolerates future fields even though it no longer nests
     /// inside a supervisor control message.
-    #[test]
+    #[farhelm_testtrace::test]
     fn profile_json_tolerates_unknown_fields_in_both_directions() {
         let mut future = serde_json::to_value(a_profile()).unwrap();
         future["initial_prompt"] = serde_json::json!("value from tomorrow");
@@ -6417,7 +6417,7 @@ mod tests {
     /// This matters because accepting one as an ignored request would leave
     /// an old caller waiting forever instead of failing at the protocol
     /// boundary.
-    #[test]
+    #[farhelm_testtrace::test]
     fn removed_profile_control_tags_fail_decode() {
         for tag in [
             "list_profiles",
@@ -6445,7 +6445,7 @@ mod tests {
     /// cannot parse. A (message, expected JSON) table rather than four
     /// separately-named locals, since each is the identical
     /// construct-then-assert shape.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_open_and_close_json_shapes_are_pinned() {
         for (msg, expected) in [
             (
@@ -6503,7 +6503,7 @@ mod tests {
     /// session-lifecycle pair — this is what would catch a drift between
     /// the codec's framing and serde's JSON shape, which the pure-JSON
     /// test just above cannot see.
-    #[test]
+    #[farhelm_testtrace::test]
     fn tab_open_and_close_roundtrip_through_frames() {
         for msg in [
             ControlMsg::OpenTab {
@@ -6547,7 +6547,7 @@ mod tests {
     /// `stall_detach_reason_json_shape_is_pinned`'s treatment of
     /// `DETACH_REASON_STALLED`) so an accidental edit to the constant
     /// fails this test instead of silently changing what ships.
-    #[test]
+    #[farhelm_testtrace::test]
     fn upload_control_json_shapes_are_pinned() {
         for (msg, expected) in [
             (
@@ -6638,7 +6638,7 @@ mod tests {
     /// path, matching `tab_open_and_close_roundtrip_through_frames`'s
     /// treatment of the tab-lifecycle pair — the deserialize-direction
     /// half of the golden test above.
-    #[test]
+    #[farhelm_testtrace::test]
     fn upload_control_roundtrip_through_frames() {
         for msg in [
             ControlMsg::BeginUpload {
@@ -6689,7 +6689,7 @@ mod tests {
     /// narrowing (a serde attribute, or a change to either field's type)
     /// that silently truncated a multi-gigabyte upload's declared or
     /// acknowledged size.
-    #[test]
+    #[farhelm_testtrace::test]
     fn upload_size_and_received_survive_values_above_u32_max() {
         let big: u64 = u32::MAX as u64 + 1;
 
@@ -6759,7 +6759,7 @@ mod tests {
     /// the cast, which would silently truncate and pass for a chunk
     /// constant large enough to overflow `u32`, and omitted the header,
     /// which understates how much of a frame a chunk actually occupies.
-    #[test]
+    #[farhelm_testtrace::test]
     fn upload_consts_are_pinned() {
         assert_eq!(UPLOAD_CHUNK_BYTES, 256 * 1024);
         assert!(
@@ -6783,7 +6783,7 @@ mod tests {
     /// records in its log; `ConversationReported` classified as a request
     /// would leave the hook waiting on a reply that the demultiplexer
     /// never routes to it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn report_conversation_pair_is_classified_as_request_and_reply() {
         let request = ControlMsg::ReportConversation {
             req_id: 21,
@@ -6815,7 +6815,7 @@ mod tests {
     /// docs say: the three groups map to Some/None as intended, and a
     /// request is not merely absent from the reply list but actively
     /// answered `None` while carrying a `req_id` of its own.
-    #[test]
+    #[farhelm_testtrace::test]
     fn reply_req_id_is_some_for_exactly_the_reply_variants() {
         // Replies: the `req_id` comes back verbatim, including `Error`'s.
         assert_eq!(
@@ -6888,7 +6888,7 @@ mod tests {
     /// with a request, and a misclassified `AgentResponse` would leave the
     /// asking `farhelm agent` process blocked on a frame the demultiplexer
     /// never routes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_relay_pair_is_classified_as_request_and_reply() {
         let request = ControlMsg::AgentRequest {
             req_id: 31,
@@ -6919,7 +6919,7 @@ mod tests {
     /// (a session's raw argv, its cwd) and be able to push that reply past
     /// [`MAX_FRAME_LEN`]. A fat `SessionList` is the shape that does both,
     /// so that is the fixture: its name must come back with none of it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_variant_name_carries_no_payload() {
         let fat = ControlMsg::SessionList {
             req_id: 1,
@@ -6982,7 +6982,7 @@ mod tests {
     /// success shapes have their own tag values, and the two relay-specific
     /// error kinds (`unavailable`, `timeout`) are the words that tell a
     /// caller whether retrying is free.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_relay_pair_has_pinned_json_tags() {
         let request = ControlMsg::AgentRequest {
             req_id: 1,
@@ -7204,7 +7204,7 @@ mod tests {
     /// (`AgentRequest`/`AgentResponse`) and never look inside `AgentVerb` at
     /// all — the same accessors `agent_relay_pair_is_classified_as_request_
     /// and_reply` already pins for the read-only pair.
-    #[test]
+    #[farhelm_testtrace::test]
     fn lifecycle_agent_verbs_have_pinned_json_tags() {
         let rename = ControlMsg::AgentRequest {
             req_id: 5,
@@ -7371,7 +7371,7 @@ mod tests {
     /// an old or third-party decoder sees while every round trip inside
     /// this crate stayed green. The DECODER's leniency is pinned separately,
     /// by [`unknown_agent_verb_fails_decode`]'s second case.
-    #[test]
+    #[farhelm_testtrace::test]
     fn creating_agent_verbs_have_pinned_json_tags() {
         let create = ControlMsg::AgentRequest {
             req_id: 9,
@@ -7530,7 +7530,7 @@ mod tests {
     /// same reason in weaker form: each defaults to `false`, which is the
     /// reassuring answer, so a field lost in serde would read as "complete
     /// listing, live row, not archived" rather than as an error.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_listing_replies_roundtrip() {
         for reply in [
             AgentReply::Hosts {
@@ -7586,7 +7586,7 @@ mod tests {
     /// mainly to pin that an EMPTY struct variant still needs its `reply`
     /// tag on the wire to decode back to itself — nothing else about it
     /// could regress silently, but a tag typo would.
-    #[test]
+    #[farhelm_testtrace::test]
     fn agent_lifecycle_replies_roundtrip() {
         for reply in [
             AgentReply::Session {
@@ -7658,7 +7658,7 @@ mod tests {
     /// the same protocol — and pinning it here keeps a future
     /// `deny_unknown_fields`-style tightening from breaking such a peer
     /// without anyone noticing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unknown_agent_verb_fails_decode() {
         let body = br#"{"type":"agent_request","req_id":1,"session_id":"s1",
                         "request":{"verb":"teleport"}}"#;
@@ -7686,7 +7686,7 @@ mod tests {
     /// The shared validator pins the safety rules both stores must enforce:
     /// invalid labels and invocations are refused before either can persist a
     /// profile, while a valid integrated definition remains accepted.
-    #[test]
+    #[farhelm_testtrace::test]
     fn profile_field_validation_is_pure_and_shared() {
         assert!(validate_profile_fields("Claude", "claude", AgentKind::Claude, None).is_ok());
         assert!(validate_profile_fields(" ", "claude", AgentKind::Claude, None).is_err());

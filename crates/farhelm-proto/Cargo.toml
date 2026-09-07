@@ -17,3 +17,6 @@ serde_json.workspace = true
 shell-words.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+farhelm-testtrace.workspace = true
