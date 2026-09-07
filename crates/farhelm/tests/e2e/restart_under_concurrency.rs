@@ -11,6 +11,79 @@ use crate::conversation_identity_capture::{
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::restart_with_resume::pane_capture;
 
+/// Observe the first restart's dying pane while its original generation is stopping.
+///
+/// Stop intent alone precedes signaling, so a competing restart could still
+/// see a live pane and refuse even with broken serialization. Require pane
+/// death too. Direct store and tmux observations do not acquire the lifecycle
+/// claim or ask a listing to classify the pane. The stubborn child keeps this
+/// phase observable; an advanced generation is a missed fixture premise.
+async fn wait_for_restart_sweep(store: &SessionStore, sock: &std::path::Path, session_id: &str) {
+    let mut last = None;
+    let mut last_pane = String::new();
+    let target = format!("fh-{session_id}");
+    let result = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let row = store
+                .session(session_id)
+                .await
+                .expect("read restart's durable state")
+                .expect("the restarting session still exists");
+            assert_eq!(
+                row.generation, 0,
+                "restart advanced before its dying original pane was observed"
+            );
+            last = Some(row.outcome.clone());
+            if row.outcome == LastOutcome::StopRequested {
+                let output = tokio::process::Command::new("tmux")
+                    .arg("-S")
+                    .arg(sock)
+                    .args(["display-message", "-p", "-t", &target, "#{pane_dead}"])
+                    .kill_on_drop(true)
+                    .output()
+                    .await
+                    .expect("observe the stopping pane");
+                assert!(
+                    output.status.success(),
+                    "restart pane query failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                last_pane = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                if last_pane == "1" {
+                    return;
+                }
+            }
+            // sleep-ok: observe the first restart's durable lifecycle phase; scheduling its client task alone does not establish dispatch.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "restart never exposed a dying generation-zero pane; last outcome={last:?}, pane_dead={last_pane:?}"
+    );
+}
+
+/// Check the delete's process-ownership postcondition while the cleanup guard is still alive.
+///
+/// Keep one survivor snapshot per poll so timeout diagnostics describe the
+/// observation that failed, rather than a second scan of a changing process table.
+async fn wait_for_restart_delete_cleanup(session_id: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let survivors = marked_pids(session_id);
+        if survivors.is_empty() {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "processes carrying the deleted session's marker survived: {survivors:?}"
+        );
+        // sleep-ok: repeat the owned-marker observation within the existing cleanup window; only an empty scan satisfies the postcondition.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 // ---------------------------------------------------------------------
 // Restart under concurrency, and the failure paths that must not lose
 // durable metadata (PR8 review-swarm fix batch, items 1 and 4).
@@ -61,6 +134,9 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     wait_for_file(&work.path().join("stubborn-ready"), 10).await;
 
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the durable restart observer");
     // The first restart, with consent: it will spend seconds in the sweep.
     let first_client = Arc::clone(&h.client);
     let first_id = session.id.clone();
@@ -69,9 +145,7 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
             .restart_session(&first_id, farhelm_proto::RestartMode::Fresh, true)
             .await
     });
-    // Long enough to be inside that sweep, short enough to be well before
-    // it ends (`kill_process_tree`'s grace period alone is ~1s).
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    wait_for_restart_sweep(&store, &h.state.path().join("tmux.sock"), &session.id).await;
     let second = h
         .client
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
@@ -130,6 +204,9 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     wait_for_file(&work.path().join("stubborn-ready"), 10).await;
 
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the durable restart observer");
     let restart_client = Arc::clone(&h.client);
     let restart_id = session.id.clone();
     let restart = tokio::spawn(async move {
@@ -137,7 +214,7 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
             .restart_session(&restart_id, farhelm_proto::RestartMode::Fresh, true)
             .await
     });
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    wait_for_restart_sweep(&store, &h.state.path().join("tmux.sock"), &session.id).await;
     h.client
         .delete_session(&session.id)
         .await
@@ -157,17 +234,7 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
             .all(|s| s.id != session.id),
         "the delete must win the session's existence outright"
     );
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        if marked_pids(&session.id).is_empty() {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "no process carrying this session's marker may outlive the delete"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_restart_delete_cleanup(&session.id).await;
 }
 
 /// PLAN_M3.md item 4's binding contract, and the one this PR could most
@@ -492,29 +559,26 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
     std::fs::write(&stale_sentinel, "exec_failed argv0=/nope errno=2")
         .expect("plant a stale generation-0 sentinel");
 
-    // A live status only means the pane hasn't died yet, not that the shim's own
-    // `exec` chain has reached the real agent (`wait_for_live_status`'s
-    // own docs) — killing on that signal alone would race the shim itself
-    // and reproduce the WRAPPER-failure shape
-    // (`a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit`),
-    // not the one under test here. The shim unlinks its own spec the
-    // moment it has read it, strictly before exec'ing the real agent
-    // (`exec_launch_spec_with_seam`'s docs), so generation 1's spec file
-    // going away is the earliest reliable proof that the shim has handed
-    // off and the real fake agent — not its wrapper — now owns the pane.
-    // (An attach-and-wait-for-the-ready-banner alternative was tried and
-    // rejected: this pane's tmux scrollback can still hold generation 0's
-    // OWN ready banner from before the restart, so a naive text search
-    // matches instantly against stale output rather than generation 1's.)
-    let gen1_spec = spec_path_for_launch(h.state.path(), &session.id, 1);
-    let shim_handoff_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    while gen1_spec.exists() {
-        assert!(
-            tokio::time::Instant::now() < shim_handoff_deadline,
-            "generation 1's shim never consumed its own spec"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    // Consuming a launch spec precedes exec, so file disappearance cannot
+    // prove the agent owns the pane. A fresh post-replay round trip can:
+    // the colored echo prefix comes from the fake agent, not the terminal
+    // driver's input echo, and this marker never went to generation zero.
+    let (chan, _replay, mut output) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach generation one");
+    let marker = "GENERATION-ONE-HANDOFF";
+    h.client
+        .send_input(chan, format!("{marker}\r").into_bytes())
+        .await;
+    wait_for(
+        &mut output,
+        &mut Vec::new(),
+        &format!("echo:\x1b[36m{marker}"),
+        20,
+    )
+    .await;
 
     // Kill generation 1's pane's OWN process directly, bypassing
     // `stop_session`, so the pane goes dead (tmux keeps a dead pane around
