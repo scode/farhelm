@@ -55,11 +55,22 @@ Use `--runner nextest` from the checkout root with Python 3.11 or newer and exac
 (macOS still needs Python 3.13 for the recorder's wait-ownership contract):
 
 ```console
-PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" python3 scripts/record-test-run.py \
+nextest_dir=$(python3 scripts/install-pinned-nextest.py) && \
+tmux_dir=$(scripts/build-pinned-tmux-ci.sh) && \
+PATH="$nextest_dir:$tmux_dir:$PATH" python3 scripts/record-test-run.py \
   --runner nextest --kind development --tmux required \
   --selection 'one session roundtrip' --concurrency '4 nextest slots; one selected test' \
   -- cargo nextest run -p farhelm --test e2e -E 'test(=session_lifecycle::create_attach_and_roundtrip_input)'
 ```
+
+The installer uses `.github/nextest-pins.json` to verify both the public release archive and its executable. It supports
+glibc Linux on x86_64/ARM64 and macOS on Intel/Apple Silicon, requires curl 8.4.0 or newer for downloads, and caches
+only under `.ci-nextest/` by default. Cached executables are rehashed before reuse. `--output-root PATH` selects a
+different tool directory; release jobs should use their temporary directory instead of a shared mutable cache. A failed
+download or checksum leaves any existing executable untouched and returns failure, so keep the guarded assignments
+above. The installer's stdout is only the resulting directory; it does not replace the user's Cargo tools. Pin upgrades
+must update both archive and executable hashes from the verified upstream artifacts, together with the recorder's
+required version and runner config.
 
 This mode accepts package, target, feature and filter selection; it refuses options that replace the runner policy. It
 invokes the resolved cargo-nextest binary directly with four global slots, zero retries, failure on a flaky outcome, and

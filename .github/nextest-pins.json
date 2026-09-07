@@ -1,0 +1,17 @@
+{
+  "version": "0.9.143",
+  "targets": {
+    "x86_64-unknown-linux-gnu": {
+      "archive_sha256": "66786b9abe23920d022a182d1416b1bbc8130dd4872a9553d76985a1708dcd1e",
+      "binary_sha256": "d97959a56feb7a1297576c1b47d9aaf7b5badd6be596e695ed203fa4490884ea"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "archive_sha256": "2a64b3566a92508550a7ab29c3e8db25472ca37730ecb4d22100b6aa440c2a68",
+      "binary_sha256": "38dc9f7e6ef58ceb01771bd1d312bc892f367417be58a3683c635c160f4d7c2f"
+    },
+    "universal-apple-darwin": {
+      "archive_sha256": "4830d430411148d17602a75cc880bfb4dc8dac153dea59a48a2ef4cc93577f07",
+      "binary_sha256": "0834e83a817f56160c002f739fa81e3f06e6ac58d02f80ed5d6503468d846b0c"
+    }
+  }
+}
