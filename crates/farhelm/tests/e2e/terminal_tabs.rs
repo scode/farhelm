@@ -270,8 +270,7 @@ async fn wait_for_dead_tab_pane(h: &Harness, session_id: &str) {
             "no marked tab pane of session {session_id} ever became dead; rows:\n{}",
             rows.join("\n")
         );
-        // 100ms like the suite's other dead-pane waits: each poll is a tmux
-        // process, and the gate means nothing is gained by noticing faster.
+        // sleep-ok: pace tmux subprocess probes until the marked pane is visibly dead
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -1612,6 +1611,7 @@ async fn wait_for_pane_geometry(h: &Harness, pane: &str, expected: &str) {
             tokio::time::Instant::now() < deadline,
             "window of pane {pane} never reached {expected} (last: {got})"
         );
+        // sleep-ok: poll the geometry applied by the asynchronous resize command
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -1766,6 +1766,7 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
             .send_input(agent_chan, format!("{marker}\r").into_bytes())
             .await;
         wait_for(&mut agent_rx, &mut agent_seen, &marker, 10).await;
+        // sleep-ok: spread repeated input round-trips across the intentional stalled-tab window
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     assert!(
@@ -1889,20 +1890,75 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
         "the second sink must be a new process, not the registry handing back a dead one"
     );
     h.client.detach(chan).await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    while h.sup.session_sink_pid(&tmux_name).is_some() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the final detach must take the replacement sink down"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    wait_for_sink_absent(
+        &h,
+        &tmux_name,
+        "the final detach must take the replacement sink down",
+    )
+    .await;
     await_process_gone(second, "the final detach must kill the sink's client").await;
     assert_eq!(
         attached_control_clients(&h).await,
         0,
         "no control client may remain attached once the session has no terminals"
     );
+}
+
+/// Observe a replacement sink identity before checking that its process is alive.
+///
+/// The old PID must not satisfy healing: a registry entry for the killed
+/// sink is precisely the stale state this wait excludes. Process liveness
+/// remains a separate caller assertion after the registry changes.
+async fn wait_for_replacement_sink(h: &Harness, tmux_name: &str, doomed: u32) -> u32 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(pid) = h.sup.session_sink_pid(tmux_name)
+            && pid != doomed
+        {
+            return pid;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the sink never came back after being killed"
+        );
+        // sleep-ok: poll for the replacement registry identity while the sink task heals
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Observe the three-client attachment boundary before asserting each client's role.
+///
+/// The sink starts from a spawned task, so the attachment reply alone does
+/// not establish the complete roster. Return the observed roster so the
+/// caller's PID and flag assertions describe that same observation.
+async fn wait_for_attached_client_roster(sock: &std::path::Path) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let roster = control_client_roster(sock).await;
+        if roster.lines().count() == 3 {
+            return roster;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "an attached terminal never reached three control clients: {roster}"
+        );
+        // sleep-ok: poll the asynchronously populated roster without spawning tmux continuously
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Observe absence of a published sink PID after detach.
+///
+/// Detach is sent without a synchronous teardown reply. An absent PID does
+/// not prove process exit or registry pruning; callers retain the separate
+/// process or registry-size assertion their cleanup contract requires.
+async fn wait_for_sink_absent(h: &Harness, tmux_name: &str, what: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while h.sup.session_sink_pid(tmux_name).is_some() {
+        assert!(tokio::time::Instant::now() < deadline, "{what}");
+        // sleep-ok: poll the detached session's sink registry without a busy loop
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// Wait for `pid` to be gone, or fail saying what was expected of it.
@@ -1916,6 +1972,7 @@ async fn await_process_gone(pid: u32, what: &str) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     while std::path::Path::new(&path).exists() {
         assert!(tokio::time::Instant::now() < deadline, "{what}");
+        // sleep-ok: poll process disappearance after the supervisor initiates asynchronous teardown
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -1980,6 +2037,7 @@ async fn wait_for_pane_text(h: &Harness, pane: &str, needle: &str, timeout_secs:
             tokio::time::Instant::now() < deadline,
             "the pane never contained producer marker {needle:?}"
         );
+        // sleep-ok: pace pane captures until the producer's marker is observable
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
@@ -2347,19 +2405,7 @@ async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
         .expect("an attached session must have a sink");
     kill_verified_tmux_client(doomed, &h).await;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    let healed = loop {
-        if let Some(pid) = h.sup.session_sink_pid(&tmux_name)
-            && pid != doomed
-        {
-            break pid;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the sink never came back after being killed"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
+    let healed = wait_for_replacement_sink(&h, &tmux_name, doomed).await;
     await_process_gone(doomed, "the killed sink's process must be gone").await;
     assert!(
         std::path::Path::new(&format!("/proc/{healed}")).exists(),
@@ -2614,57 +2660,7 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     // (e.g. "server exited unexpectedly" means the tmux SERVER died in
     // the dead supervisor's teardown storm, a different bug than the
     // clients merely being slow to register).
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        let attached = roster_pids(&control_client_roster(&sock).await);
-        if stale_pids.iter().all(|pid| attached.contains(pid)) {
-            break;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            use tokio::io::AsyncReadExt as _;
-            let mut fates = String::new();
-            for (i, stale) in stale_clients.iter_mut().enumerate() {
-                use std::fmt::Write as _;
-                match stale.try_wait() {
-                    Ok(Some(status)) => {
-                        let mut stderr_text = String::new();
-                        if let Some(mut err) = stale.stderr.take() {
-                            let _ = tokio::time::timeout(
-                                Duration::from_secs(2),
-                                err.read_to_string(&mut stderr_text),
-                            )
-                            .await;
-                        }
-                        let _ = writeln!(
-                            fates,
-                            "fabricated client {i} (pid {}): EXITED {status:?}, stderr: {}",
-                            stale_pids[i],
-                            stderr_text.trim()
-                        );
-                    }
-                    Ok(None) => {
-                        let _ = writeln!(
-                            fates,
-                            "fabricated client {i} (pid {}): still running, never listed",
-                            stale_pids[i]
-                        );
-                    }
-                    Err(e) => {
-                        let _ = writeln!(
-                            fates,
-                            "fabricated client {i} (pid {}): try_wait failed: {e}",
-                            stale_pids[i]
-                        );
-                    }
-                }
-            }
-            panic!(
-                "test setup: the fabricated stale clients never attached\n{fates}roster now:\n{}",
-                control_client_roster(&sock).await
-            );
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_fabricated_clients(&sock, &stale_pids, &mut stale_clients).await;
     // Queue real output behind every attached client. The fake agent
     // still runs — the session outlives its supervisor — so keystrokes
     // injected straight through tmux still produce pane output, which
@@ -2697,17 +2693,7 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     // a survivor whose stdin has a LIVE write-end holder is a leaked
     // duplicate — the fd-leak bug this test originally hunted — not the
     // known drain stall, and the sweep must not be allowed to mask it.
-    let grace = tokio::time::Instant::now() + Duration::from_secs(20);
-    while count_control_clients(&sock).await > stale_pids.len() + 1 {
-        if tokio::time::Instant::now() >= grace {
-            println!(
-                "note: control clients beyond the expected set outlived the grace period\n{}",
-                orphaned_client_report(&sock, &pre_kill_roster).await
-            );
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    observe_protocol_cleanup_grace(&sock, stale_pids.len() + 1, &pre_kill_roster).await;
     for pid in roster_pids(&control_client_roster(&sock).await) {
         if stale_pids.contains(&pid) {
             continue;
@@ -2750,15 +2736,7 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     }
     drop(held_stdins);
     drop(held_stdouts);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while count_control_clients(&sock).await > 0 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the replacement's startup reap must leave a clean client roster\n{}",
-            orphaned_client_report(&sock, &pre_kill_roster).await
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_reaped_client_roster(&sock, &pre_kill_roster).await;
     {
         let client = connect_over_socket(state.path()).await;
         let (_chan, initial_replay, mut rx) = client
@@ -2802,9 +2780,116 @@ async fn connect_over_socket(state_dir: &std::path::Path) -> Arc<SupervisorClien
                     tokio::time::Instant::now() < deadline,
                     "the supervisor never began accepting: {e:#}"
                 );
+                // sleep-ok: retry the actual connection while the spawned supervisor starts listening
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
+    }
+}
+
+/// Establish that every deliberately stale client is attached before starting the reap stimulus.
+///
+/// A spawned child alone is insufficient: tmux may refuse its attachment.
+/// On timeout, retain each child's exit state and bounded stderr alongside
+/// the server roster so a dead fixture is distinguishable from slow registration.
+async fn wait_for_fabricated_clients(
+    sock: &std::path::Path,
+    stale_pids: &[u32],
+    stale_clients: &mut [tokio::process::Child],
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let attached = roster_pids(&control_client_roster(sock).await);
+        if stale_pids.iter().all(|pid| attached.contains(pid)) {
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            use tokio::io::AsyncReadExt as _;
+            let mut fates = String::new();
+            for (i, stale) in stale_clients.iter_mut().enumerate() {
+                use std::fmt::Write as _;
+                match stale.try_wait() {
+                    Ok(Some(status)) => {
+                        let mut stderr_bytes = Vec::new();
+                        if let Some(err) = stale.stderr.take() {
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(2),
+                                err.take(16 * 1024).read_to_end(&mut stderr_bytes),
+                            )
+                            .await;
+                        }
+                        let _ = writeln!(
+                            fates,
+                            "fabricated client {i} (pid {}): EXITED {status:?}, stderr (up to 16 KiB): {}",
+                            stale_pids[i],
+                            String::from_utf8_lossy(&stderr_bytes).trim()
+                        );
+                    }
+                    Ok(None) => {
+                        let _ = writeln!(
+                            fates,
+                            "fabricated client {i} (pid {}): still running, never listed",
+                            stale_pids[i]
+                        );
+                    }
+                    Err(e) => {
+                        let _ = writeln!(
+                            fates,
+                            "fabricated client {i} (pid {}): try_wait failed: {e}",
+                            stale_pids[i]
+                        );
+                    }
+                }
+            }
+            panic!(
+                "test setup: the fabricated stale clients never attached\n{fates}roster now:\n{}",
+                control_client_roster(sock).await
+            );
+        }
+        // sleep-ok: wait for actual roster membership before exercising startup reaping
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Allow protocol teardown to settle before inspecting survivors for inherited stdin writers.
+///
+/// Expiry is diagnostic, not failure: queued output can legitimately hold
+/// a client until the replacement supervisor reaps it. The caller must
+/// still distinguish that drain stall from a leaked live write-end holder.
+async fn observe_protocol_cleanup_grace(
+    sock: &std::path::Path,
+    expected_survivors: usize,
+    pre_kill_roster: &str,
+) {
+    let grace = tokio::time::Instant::now() + Duration::from_secs(20);
+    while count_control_clients(sock).await > expected_survivors {
+        if tokio::time::Instant::now() >= grace {
+            println!(
+                "note: control clients beyond the expected set outlived the grace period\n{}",
+                orphaned_client_report(sock, pre_kill_roster).await
+            );
+            break;
+        }
+        // sleep-ok: observe bounded protocol cleanup before the separate live-writer assertion
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Require an empty control-client roster after the replacement's startup reap.
+///
+/// This is stronger than protocol cleanup grace: the replacement must
+/// remove even clients stalled on queued output before a fresh attachment.
+/// Keep the old roster for diagnostics that explain any surviving process.
+async fn wait_for_reaped_client_roster(sock: &std::path::Path, pre_kill_roster: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while count_control_clients(sock).await > 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the replacement's startup reap must leave a clean client roster\n{}",
+            orphaned_client_report(sock, pre_kill_roster).await
+        );
+        // sleep-ok: pace roster probes until startup reaping removes all old clients
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -3303,20 +3388,7 @@ async fn the_client_roster_identifies_all_three_roles_by_flags() {
     let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let sock = h.state.path().join("tmux.sock");
-    // The sink comes up from a spawned task, so the roster is polled to
-    // three rather than asserted immediately.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    let roster = loop {
-        let roster = control_client_roster(&sock).await;
-        if roster.lines().count() == 3 {
-            break roster;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "an attached terminal never reached three control clients: {roster}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
+    let roster = wait_for_attached_client_roster(&sock).await;
     assert_eq!(
         roster_pids(&roster).len(),
         3,
@@ -3383,14 +3455,7 @@ async fn the_sink_registry_does_not_grow_with_dead_sessions() {
         let mut seen = initial_replay;
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
         h.client.detach(chan).await;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-        while h.sup.session_sink_pid(&tmux_name).is_some() {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "a detached session must lose its sink"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        wait_for_sink_absent(&h, &tmux_name, "a detached session must lose its sink").await;
         h.client
             .delete_session(&session.id)
             .await
