@@ -355,6 +355,7 @@ pub(super) async fn tail_containing(
             tokio::time::Instant::now() < deadline,
             "the pane never rendered {want:?}; last tail was:\n{tail}"
         );
+        // sleep-ok: throttle this shared rendered-grid poll; only the captured marker establishes readiness.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 }

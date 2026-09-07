@@ -2148,6 +2148,7 @@ mod tests {
                 tokio::time::Instant::now() < deadline,
                 "the abandoned output client was not reaped"
             );
+            // sleep-ok: no-output acknowledgement precedes asynchronous client reaping; list-clients must show the target gone.
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         assert!(

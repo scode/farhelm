@@ -2173,6 +2173,7 @@ mod tests {
         signal_validated(pid, bogus_starttime, libc::SIGKILL)
             .expect("a starttime mismatch is a skip, not an error");
 
+        // sleep-ok: preserve the survival observation window; a wrongly delivered SIGKILL need not be visible to try_wait immediately.
         std::thread::sleep(Duration::from_millis(200));
         assert!(
             matches!(child.try_wait(), Ok(None)),
