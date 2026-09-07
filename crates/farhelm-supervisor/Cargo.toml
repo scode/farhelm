@@ -30,6 +30,8 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# Scratch servers share bounded cleanup and diagnostic ownership with e2e fixtures.
+farhelm-teststate.workspace = true
 # Per-test capture owns each test's dispatcher and Tokio runtime without
 # installing a subscriber shared by concurrently running tests.
 farhelm-testtrace.workspace = true
