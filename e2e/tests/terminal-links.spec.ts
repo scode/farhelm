@@ -77,17 +77,21 @@ async function clickLinkRow(page: Page, needle: string): Promise<void> {
     return { rows: t.rows, cols: t.cols, rowIndex: -1 };
   }, needle);
   expect(geometry.rowIndex, `no viewport row contains ${needle}`).toBeGreaterThanOrEqual(0);
-  const box = (await page.locator("#terminal .xterm-screen").boundingBox())!;
+  const screen = page.locator("#terminal .xterm-screen");
+  const box = (await screen.boundingBox())!;
   const cellWidth = box.width / geometry.cols;
   const cellHeight = box.height / geometry.rows;
   const x = box.x + 1.5 * cellWidth;
   const y = box.y + (geometry.rowIndex + 0.5) * cellHeight;
-  // xterm only decorates (and activates) a link after a mousemove has
-  // given its Linkifier a chance to resolve the cell under the pointer;
-  // a click that teleports straight to the cell can land before that
-  // resolution and fall through to plain-text handling.
+  // Visit a different column before leaving: xterm retains its last cell
+  // on mouseleave and ignores re-entry at that same cell. Leaving then
+  // clears any earlier link, so its decoration cannot satisfy readiness.
+  // The pointer decoration appears after the new hovered link is resolved.
+  await page.mouse.move(box.x + box.width - cellWidth / 2, y);
+  await page.mouse.move(box.x + box.width / 2, box.y - 1);
+  await expect(screen).not.toHaveClass(/\bxterm-cursor-pointer\b/);
   await page.mouse.move(x, y);
-  await page.waitForTimeout(200);
+  await expect(screen).toHaveClass(/\bxterm-cursor-pointer\b/);
   await page.mouse.click(x, y);
 }
 
