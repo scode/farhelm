@@ -3,6 +3,8 @@
 
 use crate::harness::*;
 
+mod rss;
+
 // ---------------------------------------------------------------------
 // Terminal-path backpressure (PLAN_M2_5.md)
 //
@@ -884,10 +886,18 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
 /// Two processes are sampled for two different claims. tmux is the one
 /// the audit measured and the one `pause-after` protects. The supervisor
 /// is this test process — the harness runs it in-process — so its number
-/// carries libtest and the harness itself and is necessarily noisier;
-/// it gets the looser bound, and is included because an unbounded
+/// carries this test's runtime and harness. It is included because an unbounded
 /// per-connection queue would grow it without limit while tmux stayed
 /// flat.
+///
+/// The maintained nextest profile gives this test its own process and reserves
+/// all four runner slots. Other tests in this invocation cannot inflate its RSS
+/// or compete for those slots; unrelated host workloads remain outside that
+/// guarantee. Both process handles stay bound across the sample series, and
+/// smaps_rollup supplies resident bytes without assuming a host page size.
+/// Every sample is retained in runner output, including producer progress and
+/// the time spent reading the two processes, so a later allowance change has
+/// actual measurements to compare.
 ///
 /// Sampled across several windows rather than as a before/after pair:
 /// a single pair cannot tell a leak from an allocator that grabbed one
@@ -899,14 +909,6 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
 /// memory cannot be explained by a producer that finished during setup.
 #[farhelm_testtrace::test]
 async fn memory_stays_flat_while_a_viewer_is_stalled() {
-    /// Resident bytes of a process, from `/proc/<pid>/statm` (field 2 is
-    /// resident pages).
-    fn rss_bytes(pid: u32) -> Option<u64> {
-        let statm = std::fs::read_to_string(format!("/proc/{pid}/statm")).ok()?;
-        let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
-        Some(pages * 4096)
-    }
-
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
@@ -930,6 +932,8 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
             .expect("tmux must report its server pid")
     };
     let own_pid = std::process::id();
+    let tmux_memory = rss::ProcessRss::bind(tmux_pid).expect("bind private tmux process");
+    let own_memory = rss::ProcessRss::bind(own_pid).expect("bind this test's supervisor process");
 
     let (chan, mut seen, mut rx) = h
         .client
@@ -966,15 +970,39 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
         .expect("read flood progress before RSS sampling")
         .parse()
         .expect("flood progress must be a record count");
-    let tmux_baseline = rss_bytes(tmux_pid).expect("tmux rss");
-    let own_baseline = rss_bytes(own_pid).expect("own rss");
+    let sampling_started = std::time::Instant::now();
+    // Retain every sample even on success so the allowance can be evaluated
+    // against actual isolated-process data. Successful capture is discarded by
+    // the test wrapper, so the same bounded record also goes to runner output.
+    let sample = |index: u32, producer_records: u64| {
+        let read_started = std::time::Instant::now();
+        let tmux_rss = tmux_memory.bytes().expect("private tmux RSS rollup");
+        let supervisor_rss = own_memory.bytes().expect("own supervisor RSS rollup");
+        let record = serde_json::json!({
+            "sample": index, "elapsed_ms": sampling_started.elapsed().as_millis(),
+            "read_us": read_started.elapsed().as_micros(), "producer_records": producer_records,
+            "tmux_pid": tmux_memory.pid, "tmux_start_ticks": tmux_memory.start_time_ticks,
+            "supervisor_pid": own_memory.pid, "supervisor_start_ticks": own_memory.start_time_ticks,
+            "tmux_rss_bytes": tmux_rss, "supervisor_rss_bytes": supervisor_rss,
+            "metric": "smaps_rollup.Rss",
+        });
+        tracing::info!(sample = %record, "stalled viewer RSS sample");
+        eprintln!("RSS_SAMPLE {record}");
+        (tmux_rss, supervisor_rss)
+    };
+    let (tmux_baseline, own_baseline) = sample(0, progress_before_sampling);
 
     let mut tmux_peak = tmux_baseline;
     let mut own_peak = own_baseline;
-    for _ in 0..6 {
+    for index in 1..=6 {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        tmux_peak = tmux_peak.max(rss_bytes(tmux_pid).expect("tmux rss"));
-        own_peak = own_peak.max(rss_bytes(own_pid).expect("own rss"));
+        let producer_records = std::fs::read_to_string(&progress)
+            .expect("read producer progress during sampling")
+            .parse()
+            .expect("producer record count");
+        let (tmux_rss, own_rss) = sample(index, producer_records);
+        tmux_peak = tmux_peak.max(tmux_rss);
+        own_peak = own_peak.max(own_rss);
     }
     let progress_after_sampling: u64 = std::fs::read_to_string(&progress)
         .expect("read flood progress after RSS sampling")
@@ -987,21 +1015,25 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
          {progress_before_sampling})"
     );
 
-    // Six seconds of stall. Unbounded, the audited growth rate would put
-    // tmux ~21 MB over baseline; 8 MB is comfortably above ordinary
-    // allocator noise and far below that.
+    // Re-baselined with pinned tmux 3.7c and nextest 0.9.143 on Linux,
+    // 2026-09-07: six isolated runs, seven smaps_rollup samples each, saw
+    // peak growth of 0–64 KiB for tmux and 64–132 KiB for the supervisor.
+    // Each producer advanced over five million records during sampling.
+    // Eight MiB leaves allocator headroom well above that observed noise
+    // while rejecting sustained growth at the audit's ~3.5 MB/s rate.
+    // These samples calibrate the allowance; they do not prove a flake rate.
     let tmux_growth = tmux_peak.saturating_sub(tmux_baseline);
     assert!(
         tmux_growth < 8 * 1024 * 1024,
         "the tmux server grew {tmux_growth} bytes during a stalled viewer — `pause-after` is \
          not bounding it"
     );
-    // Looser, for the reason in this test's docs: this number is the
-    // whole test process. Still far below what an unbounded per-connection
-    // queue would reach against this producer.
+    // The former 64 MiB allowance included unrelated libtest bodies. With
+    // nextest isolation, this process's own runtime and harness fit the same
+    // eight MiB growth allowance; retaining 64 MiB would hide smaller leaks.
     let own_growth = own_peak.saturating_sub(own_baseline);
     assert!(
-        own_growth < 64 * 1024 * 1024,
+        own_growth < 8 * 1024 * 1024,
         "the supervisor process grew {own_growth} bytes during a stalled viewer — a queue on \
          the terminal path is unbounded"
     );
