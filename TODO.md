@@ -18,6 +18,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Investigate Codex resuming the existing conversation after using "Replace" on a session. Reported in ordinary use: the
+  replacement retained the previous conversation and could summarize the earlier work, instead of starting a fresh
+  conversation. Replace should preserve the session's directory, title, and agent choice while starting fresh. Cause and
+  reproducibility are not established.
+
 - Color the "this machine" icon in the session list red by default to make local sessions unmistakable. Assume the local
   machine is not an appropriate place for `--yolo` mode; the color should keep the user clearly aware that the session
   is local.
