@@ -33,6 +33,20 @@ const TEST_CAPTURE_BEFORE: Duration = Duration::from_secs(1);
 pub(crate) const TEST_CAPTURE_AFTER: Duration = Duration::from_secs(2);
 pub(crate) const TEST_CAPTURE_GRACE: Duration = Duration::from_secs(1);
 
+/// Release the old connections before rebuilding a capture supervisor.
+///
+/// Dropping the client initiates asynchronous cleanup; the caller retains
+/// the one supervisor reference allowed here and drops it after the wait.
+/// The replacement must not overlap predecessor connection-owned state.
+async fn wait_for_capture_connections_to_drain(sup: &Arc<Supervisor>) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while Arc::strong_count(sup) > 1 {
+        assert!(tokio::time::Instant::now() < deadline, "connection drain");
+        // sleep-ok: predecessor connection tasks release their supervisor references asynchronously after the client is dropped.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// The bounds every capture harness injects.
 pub(crate) fn test_capture_bounds() -> CaptureWindowBounds {
     CaptureWindowBounds::new(TEST_CAPTURE_BEFORE, TEST_CAPTURE_AFTER, TEST_CAPTURE_GRACE)
@@ -228,6 +242,7 @@ pub(crate) async fn wait_for_first_input(h: &Harness, session_id: &str, secs: u6
             tokio::time::Instant::now() < deadline,
             "session {session_id} never recorded a durable first-input time within {secs}s"
         );
+        // sleep-ok: confirmed input delivery is persisted asynchronously; observe this session's durable anchor before doing window arithmetic.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -242,7 +257,26 @@ pub(crate) async fn wait_for_first_input(h: &Harness, session_id: &str, secs: u6
 pub(crate) async fn wait_until_window_disjoint_from(earlier: i64) {
     let target =
         earlier + TEST_CAPTURE_AFTER.as_secs() as i64 + TEST_CAPTURE_BEFORE.as_secs() as i64 + 1;
-    while farhelm_supervisor::agent_kind::now_unix() <= target {
+    wait_for_capture_clock_past(target).await;
+}
+
+/// Cross a capture horizon without driving any supervisor scan.
+///
+/// The correlator uses whole Unix seconds, so elapsed monotonic time alone
+/// cannot establish this premise. A separate monotonic bound prevents a
+/// stalled or backwards-moving wall clock from hanging the test indefinitely.
+async fn wait_for_capture_clock_past(target: i64) {
+    let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+    loop {
+        let now = farhelm_supervisor::agent_kind::now_unix();
+        if now > target {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "capture clock never passed {target}; last Unix second {now}"
+        );
+        // sleep-ok: window membership uses Unix seconds; wait for the actual clock boundary without triggering a capture pass.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -296,7 +330,41 @@ pub(crate) async fn wait_for_capture(h: &Harness, session_id: &str, secs: u64) -
             tokio::time::Instant::now() < deadline,
             "session {session_id} never captured a conversation identity within {secs}s"
         );
+        // sleep-ok: record publication and the bounded capture horizon must complete before a durable identity can appear.
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Give a forbidden capture transition repeated opportunities to occur.
+///
+/// These finite passes are observation stimulus, not a readiness oracle.
+/// Callers retain the state assertion and any preceding horizon premise;
+/// a fixed number of passes alone cannot prove that capture has settled.
+async fn drive_capture_observation_passes(
+    client: &SupervisorClient,
+    passes: usize,
+    cadence: Duration,
+) {
+    for _ in 0..passes {
+        client.list_sessions().await.expect("list drives capture");
+        // sleep-ok: pace the caller's finite negative-observation passes; the caller separately asserts the forbidden transition did not occur.
+        tokio::time::sleep(cadence).await;
+    }
+}
+
+/// Keep scanning an unprompted session past every capture-window constant.
+///
+/// The caller has deliberately sent no input. Spanning this whole period
+/// while driving scans makes a creation-anchored timeout observable before
+/// the caller sends the first real prompt and requires successful capture.
+async fn observe_before_first_prompt(client: &SupervisorClient) {
+    let idle =
+        TEST_CAPTURE_BEFORE + TEST_CAPTURE_AFTER + TEST_CAPTURE_GRACE + Duration::from_secs(2);
+    let deadline = tokio::time::Instant::now() + idle;
+    while tokio::time::Instant::now() < deadline {
+        client.list_sessions().await.expect("list");
+        // sleep-ok: this negative observation must outlast every capture-window constant without sending a first input byte.
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
 
@@ -314,14 +382,12 @@ pub(crate) async fn settle_past_horizon(h: &Harness) {
         + Duration::from_secs(2);
     while tokio::time::Instant::now() < deadline {
         h.client.list_sessions().await.expect("list drives capture");
+        // sleep-ok: negative capture evidence must span the configured horizon and publication grace while scans continue to run.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    // A few more passes with the clock already past every horizon, so the
-    // final complete scan has certainly run.
-    for _ in 0..3 {
-        h.client.list_sessions().await.expect("list drives capture");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    // Keep driving after the observation window, giving a final scan
+    // additional opportunities before the caller checks the outcome.
+    drive_capture_observation_passes(&h.client, 3, Duration::from_millis(50)).await;
 }
 
 /// SPEC.md's per-session resume promise, at its hardest: two sessions in
@@ -452,13 +518,7 @@ async fn a_first_prompt_delayed_past_every_window_constant_still_captures() {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
 
-    let idle =
-        TEST_CAPTURE_BEFORE + TEST_CAPTURE_AFTER + TEST_CAPTURE_GRACE + Duration::from_secs(2);
-    let deadline = tokio::time::Instant::now() + idle;
-    while tokio::time::Instant::now() < deadline {
-        h.client.list_sessions().await.expect("list");
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
+    observe_before_first_prompt(&h.client).await;
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::FreshOnly,
@@ -673,10 +733,7 @@ async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
         "the fixture's append must actually grow the record ({before} -> {after})"
     );
 
-    for _ in 0..3 {
-        h.client.list_sessions().await.expect("list drives capture");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    drive_capture_observation_passes(&h.client, 3, Duration::from_millis(50)).await;
     assert_eq!(
         snapshot_of(&h, &session.id).await.captured_conversation,
         Some(id.clone()),
@@ -787,11 +844,8 @@ async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
 
     // Past the horizon, so the successor's very first pass is allowed to
     // commit — but with no list on THIS supervisor, so nothing here can.
-    while farhelm_supervisor::agent_kind::now_unix()
-        <= at + (TEST_CAPTURE_AFTER + TEST_CAPTURE_GRACE).as_secs() as i64
-    {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_capture_clock_past(at + (TEST_CAPTURE_AFTER + TEST_CAPTURE_GRACE).as_secs() as i64)
+        .await;
     assert_eq!(
         snapshot_of(&h, &session.id).await.captured_conversation,
         None,
@@ -816,11 +870,7 @@ async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
         _slot,
     } = h;
     drop(client);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while Arc::strong_count(&sup) > 1 {
-        assert!(tokio::time::Instant::now() < deadline, "connection drain");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_for_capture_connections_to_drain(&sup).await;
     drop(sup);
 
     let restarted = Supervisor::new_with_seams(
@@ -890,11 +940,7 @@ async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
         _slot,
     } = h;
     drop(client);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while Arc::strong_count(&sup) > 1 {
-        assert!(tokio::time::Instant::now() < deadline, "connection drain");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_for_capture_connections_to_drain(&sup).await;
     drop(sup);
 
     // The rival's record is gone by the time the successor looks.
@@ -1007,10 +1053,7 @@ async fn an_empty_input_frame_never_starts_the_correlator() {
         .expect("attach");
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, Vec::new()).await;
-    for _ in 0..5 {
-        h.client.list_sessions().await.expect("list");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    drive_capture_observation_passes(&h.client, 5, Duration::from_millis(50)).await;
     assert_eq!(
         snapshot_of(&h, &session.id).await.first_input_at,
         None,
@@ -1065,11 +1108,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
         _slot,
     } = h;
     drop(client);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while Arc::strong_count(&sup) > 1 {
-        assert!(tokio::time::Instant::now() < deadline, "connection drain");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_for_capture_connections_to_drain(&sup).await;
     drop(sup);
 
     let store = SessionStore::open(&state.path().join("supervisor.db"), false)
@@ -1144,10 +1183,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
         listing.truncated,
         "this test's premise is that there are more sessions than the reply cap"
     );
-    for _ in 0..5 {
-        client.list_sessions().await.expect("list drives capture");
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_ambiguous_capture(&restarted, &client, &session.id).await;
     assert!(
         restarted
             .session_snapshot(&session.id)
@@ -1158,6 +1194,47 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
         "a rival beyond the reply cap must still poison this session's window"
     );
     drop(_slot);
+}
+
+/// Observe durable ambiguity while driving capture with list requests.
+///
+/// A truncated listing is only the fixture premise; a fixed number of
+/// scans does not establish that ambiguity has been persisted. The owning
+/// supervisor's snapshot supplies that state, but does not identify which
+/// scan found the rival: reload may already have done so. Bound the requests
+/// as well as the polling, retaining the last observation for timeout output.
+async fn wait_for_ambiguous_capture(
+    supervisor: &Supervisor,
+    client: &SupervisorClient,
+    session_id: &str,
+) {
+    let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+    let mut phase = "list request";
+    let mut last_ambiguous = None;
+    let result = tokio::time::timeout_at(deadline, async {
+        loop {
+            phase = "list request";
+            client.list_sessions().await.expect("list drives capture");
+            phase = "durable snapshot";
+            let snapshot = supervisor
+                .session_snapshot(session_id)
+                .await
+                .expect("snapshot")
+                .expect("present");
+            last_ambiguous = Some(snapshot.capture_ambiguous);
+            if snapshot.capture_ambiguous {
+                return;
+            }
+            phase = "poll interval";
+            // sleep-ok: list-driven capture may need another scan to persist ambiguity; observe durable state rather than counting passes.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "session {session_id} did not persist ambiguity: timed out during {phase}; last capture_ambiguous={last_ambiguous:?}"
+    );
 }
 
 /// A session whose kind basename recognition would miss (`env claude`, a
