@@ -686,6 +686,8 @@ test.describe("agent profiles", () => {
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.focusSettled)
     ).toBe("unknown");
+    // This finite window does not prove the delayed renderer continuation finished.
+    // sleep-ok: observe forbidden late focus after the request expires.
     await page.waitForTimeout(250);
     await expect(target).not.toBeFocused();
     expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusAttempts)).toBe(1);
@@ -760,6 +762,8 @@ test.describe("agent profiles", () => {
     });
     await section(page).locator(".new-profile-button").click();
     await expect(section(page)).toBeVisible();
+    // Initial visibility alone would miss a later close.
+    // sleep-ok: observe erroneous dismissal after focus-placement failures.
     await page.waitForTimeout(400);
     await expect(section(page)).toBeVisible();
 
@@ -768,6 +772,8 @@ test.describe("agent profiles", () => {
     });
     const outside = page.locator(".host-details-toggle");
     await outside.focus();
+    // Elapsed time is not proof that the delayed classifier continuation retired.
+    // sleep-ok: observe forbidden dismissal or focus stealing after outside focus.
     await page.waitForTimeout(500);
     await expect(section(page)).toBeVisible();
     await expect(outside).toBeFocused();
@@ -801,6 +807,8 @@ test.describe("agent profiles", () => {
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.classificationAttempts)
     ).toBeGreaterThanOrEqual(2);
+    // The focus-worker settlement below does not settle every dismissal task.
+    // sleep-ok: observe a wrongly delayed transit dismissal.
     await page.waitForTimeout(400);
     // Verify the uncertainty branch itself: a hidden target that settled as
     // Missing would test a different dismissal contract even if still visible.
@@ -1082,6 +1090,7 @@ test.describe("agent profiles", () => {
     profiles.push(stored.id);
     await expect(form).toHaveCount(0, { timeout: 20_000 });
     await expect(section(page).locator(".new-profile-button")).toBeFocused();
+    // sleep-ok: observe unwanted dismissal after fallback focus while the catalog answer is held.
     await page.waitForTimeout(400);
     await expect(section(page)).toBeVisible();
 
@@ -2037,6 +2046,8 @@ test.describe("agent profiles", () => {
 
     await expect(form.locator(".profile-form-error")).toBeVisible({ timeout: 20_000 });
     await expect(form.locator(".profile-name-input")).toBeFocused();
+    // The focused input alone does not rule out a later popup close.
+    // sleep-ok: observe unwanted dismissal after refusal restores form focus.
     await page.waitForTimeout(400);
     await expect(section(page)).toBeVisible();
     // Preserved, not cleared or reset — including the fields the refusal was
@@ -2174,6 +2185,8 @@ test.describe("agent profiles", () => {
 
     await expect(target.locator(".profile-error")).toContainText("refused", { timeout: 20_000 });
     await expect(target.locator(".profile-edit")).toBeFocused();
+    // Immediate visibility alone would miss a later popup close.
+    // sleep-ok: observe unwanted dismissal after refusal restores row focus.
     await page.waitForTimeout(400);
     await expect(section(page)).toBeVisible();
     await expect(target, "a refused delete must not remove the row").toBeVisible();
