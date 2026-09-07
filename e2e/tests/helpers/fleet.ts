@@ -65,14 +65,34 @@ export async function readFeedReaders(page: Page): Promise<ReaderSnapshot[]> {
  * This is a setup boundary; the caller's uninterrupted zero-read window proves silence.
  */
 export async function waitForFeedReadersSettled(page: Page, staleSession?: string): Promise<void> {
+  await waitForFeedReaderBoundary(page, false, staleSession);
+}
+
+/**
+ * Establish withdrawal before measuring silence on a mismatched build.
+ *
+ * Mounts and user actions still owe attended reads. Unattended demand may remain
+ * recorded after withdrawal, but no reader task or running read may remain. The
+ * existing JavaScript latch also proves withdrawal executed before a held feed
+ * asset is released; rendering the banner alone does not order those two actions.
+ */
+export async function waitForFeedReadersWithdrawn(page: Page): Promise<void> {
+  await waitForFeedReaderBoundary(page, true);
+}
+
+/** Share selection and retirement checks while keeping the two public premises explicit. */
+async function waitForFeedReaderBoundary(page: Page, withdrawn: boolean, staleSession?: string): Promise<void> {
   let last: ReaderSnapshot[] = [];
   await expect.poll(async () => {
     last = await readFeedReaders(page);
+    if (withdrawn && !await page.evaluate(() =>
+      (window as typeof window & { farhelmFeedWithdrawn?: boolean }).farhelmFeedWithdrawn === true
+    )) return false;
     const lists = last.filter((snapshot) => snapshot.role === "list");
     const sessions = last.filter((snapshot) => snapshot.role === "session");
     const list = lists[0];
     if (lists.length !== 1 || last.length !== lists.length + sessions.length ||
-      list.healthy !== true || list.skew !== false || list.listing_answered !== true ||
+      list.healthy !== !withdrawn || list.skew !== withdrawn || list.listing_answered !== true ||
       list.resolving_remembered !== false || typeof list.notices !== "string" ||
       typeof list.has_rows !== "boolean" ||
       (list.selected !== null && typeof list.selected !== "string") ||
@@ -83,7 +103,8 @@ export async function waitForFeedReadersSettled(page: Page, staleSession?: strin
     }
     return last.every((snapshot) => snapshot.acted_on === list.notices &&
       snapshot.readers.length === 2 && snapshot.readers.every((reader) =>
-        reader.running === false && reader.demand === "None" && reader.task === false
+        reader.running === false && reader.task === false &&
+        (withdrawn ? ["None", "Scheduled", "Retry", "Notice"].includes(reader.demand) : reader.demand === "None")
       ) && (snapshot.role !== "session" ||
         (snapshot.stale === (snapshot.id === staleSession) &&
           (snapshot.id !== staleSession || snapshot.host_absent === true))));

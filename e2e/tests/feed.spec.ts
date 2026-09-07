@@ -53,6 +53,7 @@ import {
   SESSION_LISTING,
   stubFeed,
   waitForFeedReadersSettled,
+  waitForFeedReadersWithdrawn,
 } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
@@ -798,6 +799,7 @@ test.describe("the invalidation feed", () => {
    * explanation is the silent degradation the skew gate exists to prevent.
    */
   test("build skew stops the feed and the fallback poll both", async ({ page }) => {
+    await observeFeedReaders(page);
     const feed = await stubFeed(page);
     const reads = countReads(page);
     await forceBuildSkew(page, "9.9.9-not-this-bundle");
@@ -811,7 +813,7 @@ test.describe("the invalidation feed", () => {
     await expect(page.locator(".build-skew")).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".build-skew")).toContainText("reload");
 
-    await page.waitForTimeout(2_000);
+    await waitForFeedReadersWithdrawn(page);
     const subscriptions = feed.connections();
     expect(
       subscriptions,
@@ -833,6 +835,7 @@ test.describe("the invalidation feed", () => {
       .toBe(0);
     const before = reads.count();
 
+    // sleep-ok: uninterrupted negative observation spanning the withdrawn fallback and reconnect periods.
     await page.waitForTimeout(12_000);
     expect(
       reads.count() - before,
@@ -867,6 +870,7 @@ test.describe("the invalidation feed", () => {
    * floodgates — restoring live filtering by ungating reads altogether.
    */
   test("a skewed page still reads after a live filter edit", async ({ page, request }) => {
+    await observeFeedReaders(page);
     const stamp = Date.now();
     const needle = `skew-needle-${stamp}`;
     const wanted = await createSession(request, { title: needle });
@@ -887,8 +891,9 @@ test.describe("the invalidation feed", () => {
 
     // Nothing unattended is running: four poll intervals with a socket the
     // page was told to give up and a fallback it was told not to start.
-    await page.waitForTimeout(1_500);
+    await waitForFeedReadersWithdrawn(page);
     const quiet = reads.count();
+    // sleep-ok: uninterrupted negative observation before the explicit user action.
     await page.waitForTimeout(12_000);
     expect(
       reads.count() - quiet,
@@ -945,6 +950,7 @@ test.describe("the invalidation feed", () => {
   test("a page that latched skew before the feed asset loaded never subscribes", async ({
     page,
   }) => {
+    await observeFeedReaders(page);
     const feed = await stubFeed(page);
     const reads = countReads(page);
     feed.notifyOnConnect(7);
@@ -980,12 +986,19 @@ test.describe("the invalidation feed", () => {
     await expect
       .poll(() => reads.count("detail"), { timeout: 20_000 })
       .toBeGreaterThanOrEqual(1);
-    await page.waitForTimeout(1_500);
+    await waitForFeedReadersWithdrawn(page);
     const before = reads.count();
 
     release();
-    // Long enough for the island's registration poll (50ms) and a
-    // subscription to follow it many times over.
+    // Registration must actually execute; otherwise a missing asset would
+    // satisfy zero subscriptions without exercising the withdrawal latch.
+    await page.waitForFunction(
+      () => typeof (window as typeof window & { farhelmEvents?: { subscribe?: unknown } }).farhelmEvents?.subscribe ===
+        "function",
+      undefined,
+      { timeout: 20_000 },
+    );
+    // sleep-ok: uninterrupted negative observation after asset registration, retaining the pre-release read baseline.
     await page.waitForTimeout(5_000);
 
     expect(
