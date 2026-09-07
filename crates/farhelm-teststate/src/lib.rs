@@ -41,6 +41,12 @@
 /// inheriting the sweep's deliberately best-effort policy.
 pub mod process;
 
+/// Bounded private-server shutdown with Linux pidfd fallback authority.
+///
+/// This is separate from [`process`] because it owns socket-derived server
+/// authority, while the process runner only owns its direct client child.
+pub mod tmux;
+
 use std::fs::{self, File};
 use std::io;
 use std::os::fd::AsRawFd;
