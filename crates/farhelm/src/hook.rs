@@ -728,6 +728,7 @@ fn append_log(path: Option<&Path>, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use farhelm_teststate::thread::FixtureThread;
     use std::io::Cursor;
 
     /// The Claude Code 2.1.241 `SessionStart` payload, verbatim from the
@@ -761,6 +762,186 @@ mod tests {
     /// blocking. Short enough not to distort a budget test, long enough
     /// not to spin a core.
     const SERVER_POLL: Duration = Duration::from_millis(5);
+
+    /// Owns a silent supervisor fixture and witnesses for its connection and release edges.
+    ///
+    /// The witnesses let focused tests prove both cancellation before a dial and
+    /// cancellation while a peer is held, without synchronizing on sleeps.
+    struct SilentSupervisor {
+        owner: FixtureThread,
+        stop: mpsc::Sender<()>,
+        accepted: mpsc::Receiver<()>,
+        released: mpsc::Receiver<()>,
+    }
+
+    /// Hold an accepted peer open without speaking until cancellation or the safety deadline.
+    ///
+    /// Keeping the peer alive preserves the timeout premise; closing it early would test
+    /// connection failure instead. The listener must be nonblocking so cancellation can
+    /// interrupt the accept loop. The owner retains the test trace through thread exit.
+    fn spawn_silent_supervisor(
+        listener: std::os::unix::net::UnixListener,
+        context: farhelm_testtrace::ThreadContext,
+    ) -> SilentSupervisor {
+        let (stop, stop_rx) = mpsc::channel::<()>();
+        let (accepted_tx, accepted) = mpsc::channel();
+        let (released_tx, released) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            context.enter(|| {
+                let deadline = Instant::now() + SERVER_DEADLINE;
+                let mut held = None;
+                while Instant::now() < deadline {
+                    // Drop cleanup can happen before the hook ever dials. Poll
+                    // cancellation before every accept attempt so that case
+                    // does not fall through to another wait.
+                    match stop_rx.try_recv() {
+                        Ok(()) | Err(mpsc::TryRecvError::Disconnected) => {
+                            drop(listener);
+                            let _ = released_tx.send(());
+                            return;
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {}
+                    }
+                    match listener.accept() {
+                        Ok(connection) => {
+                            let _ = accepted_tx.send(());
+                            held = Some(connection);
+                            break;
+                        }
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(SERVER_POLL);
+                        }
+                        Err(err) => panic!("accept failed: {err}"),
+                    }
+                }
+                let _ = stop_rx.recv_timeout(SERVER_DEADLINE);
+                drop(held);
+                drop(listener);
+                let _ = released_tx.send(());
+            });
+        });
+        let cancellation = stop.clone();
+        let owner = FixtureThread::new("hook-silent-supervisor", server, move || {
+            let _ = cancellation.send(());
+        })
+        .expect("start fixture join observer");
+        SilentSupervisor {
+            owner,
+            stop,
+            accepted,
+            released,
+        }
+    }
+
+    /// Owns an async round-trip fixture and reports whether its transaction succeeded.
+    struct RoundTripSupervisor {
+        owner: FixtureThread,
+        outcome: mpsc::Receiver<Result<(), &'static str>>,
+    }
+
+    /// Run the complete supervisor exchange under one deadline and report cancellation separately.
+    ///
+    /// The nonblocking listener belongs to a separate runtime because the synchronous hook
+    /// entry point creates its own runtime. The captured context covers this server runtime's
+    /// full lifetime, including teardown, rather than only its protocol future.
+    fn spawn_round_trip_supervisor(
+        listener: std::os::unix::net::UnixListener,
+        context: farhelm_testtrace::ThreadContext,
+        seen_tx: mpsc::Sender<(String, String, Option<SessionAuth>)>,
+    ) -> RoundTripSupervisor {
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+        let (outcome_tx, outcome) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            context
+                .with_runtime(
+                    farhelm_testtrace::RuntimeConfig {
+                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
+                        worker_threads: None,
+                        start_paused: false,
+                    },
+                    |runtime| {
+                        runtime.block_on(async move {
+                            let listener = tokio::net::UnixListener::from_std(listener)
+                                .expect("adopt listener");
+                            // One aggregate bound covers the whole exchange. The stage
+                            // bounds retain useful diagnostics, but cannot multiply the
+                            // time this fixture keeps the test alive.
+                            let transaction = async {
+                                let (stream, _) =
+                                    tokio::time::timeout(SERVER_DEADLINE, listener.accept())
+                                        .await
+                                        .expect("the hook must connect within the deadline")
+                                        .expect("accept");
+                                let (read, write) = tokio::io::split(stream);
+                                let mut reader = FrameReader::new(read);
+                                let mut writer = FrameWriter::new(write);
+                                let hello = tokio::time::timeout(
+                                    SERVER_DEADLINE,
+                                    farhelm_proto::io::handshake(
+                                        &mut reader,
+                                        &mut writer,
+                                        "supervisor",
+                                    ),
+                                )
+                                .await
+                                .expect("the handshake must complete within the deadline")
+                                .expect("handshake");
+                                let auth = match hello {
+                                    ControlMsg::Hello { auth, .. } => auth,
+                                    other => panic!("expected a hello, got {other:?}"),
+                                };
+                                let frame =
+                                    tokio::time::timeout(SERVER_DEADLINE, reader.read_frame())
+                                        .await
+                                        .expect("the report must arrive within the deadline")
+                                        .expect("read the report")
+                                        .expect("a frame, not EOF");
+                                match parse_control(&frame).expect("decode the report") {
+                                    ControlMsg::ReportConversation {
+                                        req_id,
+                                        conversation,
+                                        source,
+                                    } => {
+                                        let _ = seen_tx.send((conversation, source, auth));
+                                        tokio::time::timeout(
+                                            SERVER_DEADLINE,
+                                            writer.write_control(
+                                                &ControlMsg::ConversationReported { req_id },
+                                            ),
+                                        )
+                                        .await
+                                        .expect(
+                                            "the acknowledgement must be written within the deadline",
+                                        )
+                                        .expect("acknowledge");
+                                    }
+                                    other => panic!("expected a report, got {other:?}"),
+                                }
+                                Ok::<(), &'static str>(())
+                            };
+                            let outcome = match tokio::time::timeout(SERVER_DEADLINE, async {
+                                tokio::select! {
+                                    _ = cancel_rx => Err("fixture cancelled"),
+                                    result = transaction => result,
+                                }
+                            })
+                            .await
+                            {
+                                Ok(outcome) => outcome,
+                                Err(_) => Err("aggregate timeout"),
+                            };
+                            let _ = outcome_tx.send(outcome);
+                        });
+                    },
+                )
+                .expect("server runtime");
+        });
+        let owner = FixtureThread::new("hook-round-trip-supervisor", server, move || {
+            let _ = cancel_tx.send(());
+        })
+        .expect("start fixture join observer");
+        RoundTripSupervisor { owner, outcome }
+    }
 
     /// Read the hook log, asserting it holds exactly one line.
     ///
@@ -1151,35 +1332,15 @@ mod tests {
         let socket = dir.path().join("supervisor.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
         listener.set_nonblocking(true).expect("nonblocking");
-        let (stop_tx, stop_rx) = mpsc::channel::<()>();
         // This server leaves the wrapped test thread, so retain the capture
         // while its bounded hold and cleanup run on the raw thread.
         let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = std::thread::spawn(move || {
-            context.enter(|| {
-                // Accept and hold the connection open without ever speaking,
-                // then wait to be told the test is done. Both waits are
-                // bounded (see `SERVER_DEADLINE`): this server's whole purpose
-                // is to answer nothing, so an unbounded wait here would be a
-                // thread designed to hang.
-                let deadline = Instant::now() + SERVER_DEADLINE;
-                let mut accepted = None;
-                while Instant::now() < deadline {
-                    match listener.accept() {
-                        Ok(connection) => {
-                            accepted = Some(connection);
-                            break;
-                        }
-                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(SERVER_POLL);
-                        }
-                        Err(err) => panic!("accept failed: {err}"),
-                    }
-                }
-                let _ = stop_rx.recv_timeout(SERVER_DEADLINE);
-                drop(accepted);
-            });
-        });
+        let SilentSupervisor {
+            owner: server,
+            stop: stop_tx,
+            accepted: _,
+            released,
+        } = spawn_silent_supervisor(listener, context);
 
         let started = Instant::now();
         run_with(
@@ -1207,7 +1368,83 @@ mod tests {
         );
 
         let _ = stop_tx.send(());
-        server.join().expect("server thread");
+        server
+            .finish(Duration::from_secs(1))
+            .expect("silent supervisor fixture");
+        released
+            .recv_timeout(Duration::from_secs(1))
+            .expect("silent supervisor released its listener and peer");
+    }
+
+    /// Cancellation before accept must release the listener during assertion unwind.
+    #[farhelm_testtrace::test]
+    fn a_silent_supervisor_cancels_before_accept_on_unwind() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let SilentSupervisor {
+            owner,
+            stop,
+            accepted,
+            released,
+        } = spawn_silent_supervisor(listener, context);
+        drop(stop);
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _owner = owner;
+            panic!("exercise cancellation before accept");
+        }));
+        assert!(unwind.is_err());
+        assert!(accepted.try_recv().is_err());
+        released
+            .recv_timeout(Duration::from_secs(1))
+            .expect("cancellation released the pre-accept listener");
+        // Unlinking would permit rebinding even while the original listener remained alive.
+        assert!(
+            std::os::unix::net::UnixStream::connect(&socket).is_err(),
+            "the original listener must refuse new connections"
+        );
+    }
+
+    /// Cancellation while a peer is held must close that peer during unwind.
+    #[farhelm_testtrace::test]
+    fn a_silent_supervisor_cancels_while_holding_a_peer_on_unwind() {
+        use std::io::Read as _;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let SilentSupervisor {
+            owner,
+            stop,
+            accepted,
+            released,
+        } = spawn_silent_supervisor(listener, context);
+        let mut peer = std::os::unix::net::UnixStream::connect(&socket).expect("connect peer");
+        accepted
+            .recv_timeout(Duration::from_secs(1))
+            .expect("fixture accepted the peer");
+        peer.set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("bound peer read");
+        drop(stop);
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _owner = owner;
+            panic!("exercise cancellation while holding a peer");
+        }));
+        assert!(unwind.is_err());
+        released
+            .recv_timeout(Duration::from_secs(1))
+            .expect("cancellation released the held peer");
+        let mut byte = [0; 1];
+        assert_eq!(peer.read(&mut byte).expect("peer EOF"), 0);
+        // Unlinking would permit rebinding even while the original listener remained alive.
+        assert!(
+            std::os::unix::net::UnixStream::connect(&socket).is_err(),
+            "the original listener must refuse new connections"
+        );
     }
 
     /// The whole point, end to end: a supervisor that completes the
@@ -1223,83 +1460,11 @@ mod tests {
         listener.set_nonblocking(true).expect("nonblocking");
         let (seen_tx, seen_rx) = mpsc::channel::<(String, String, Option<SessionAuth>)>();
 
-        // The supervisor's side runs on its own thread with its own
-        // current-thread runtime: `run_with` builds and owns the client
-        // runtime, so the test cannot host both on this thread.
-        // The raw thread therefore carries the test context for the
-        // runtime's full lifetime, including its teardown.
         let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = std::thread::spawn(move || {
-            context
-                .with_runtime(
-                    farhelm_testtrace::RuntimeConfig {
-                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
-                        worker_threads: None,
-                        start_paused: false,
-                    },
-                    |runtime| {
-                        runtime.block_on(async move {
-                            // Every milestone carries its own deadline. This server is
-                            // driven by the code under test, so a regression there —
-                            // a hook that never connects, never sends, or sends
-                            // something unreadable — would otherwise park this thread
-                            // forever and take the `join` below with it.
-                            let listener = tokio::net::UnixListener::from_std(listener)
-                                .expect("adopt listener");
-                            let (stream, _) =
-                                tokio::time::timeout(SERVER_DEADLINE, listener.accept())
-                                    .await
-                                    .expect("the hook must connect within the deadline")
-                                    .expect("accept");
-                            let (read, write) = tokio::io::split(stream);
-                            let mut reader = FrameReader::new(read);
-                            let mut writer = FrameWriter::new(write);
-                            let hello = tokio::time::timeout(
-                                SERVER_DEADLINE,
-                                farhelm_proto::io::handshake(
-                                    &mut reader,
-                                    &mut writer,
-                                    "supervisor",
-                                ),
-                            )
-                            .await
-                            .expect("the handshake must complete within the deadline")
-                            .expect("handshake");
-                            let auth = match hello {
-                                ControlMsg::Hello { auth, .. } => auth,
-                                other => panic!("expected a hello, got {other:?}"),
-                            };
-                            let frame = tokio::time::timeout(SERVER_DEADLINE, reader.read_frame())
-                                .await
-                                .expect("the report must arrive within the deadline")
-                                .expect("read the report")
-                                .expect("a frame, not EOF");
-                            match parse_control(&frame).expect("decode the report") {
-                                ControlMsg::ReportConversation {
-                                    req_id,
-                                    conversation,
-                                    source,
-                                } => {
-                                    let _ = seen_tx.send((conversation, source, auth));
-                                    tokio::time::timeout(
-                                        SERVER_DEADLINE,
-                                        writer.write_control(&ControlMsg::ConversationReported {
-                                            req_id,
-                                        }),
-                                    )
-                                    .await
-                                    .expect(
-                                        "the acknowledgement must be written within the deadline",
-                                    )
-                                    .expect("acknowledge");
-                                }
-                                other => panic!("expected a report, got {other:?}"),
-                            }
-                        });
-                    },
-                )
-                .expect("server runtime");
-        });
+        let RoundTripSupervisor {
+            owner: server,
+            outcome,
+        } = spawn_round_trip_supervisor(listener, context, seen_tx);
 
         run_with(
             Some(HookCredential {
@@ -1311,7 +1476,15 @@ mod tests {
             Duration::from_secs(5),
             Some(log.clone()),
         );
-        server.join().expect("server thread");
+        server
+            .finish(SERVER_DEADLINE)
+            .expect("round-trip supervisor fixture");
+        assert_eq!(
+            outcome
+                .recv_timeout(SERVER_DEADLINE)
+                .expect("round-trip outcome"),
+            Ok(())
+        );
 
         let (conversation, source, auth) = seen_rx
             .recv_timeout(SERVER_DEADLINE)
@@ -1327,6 +1500,27 @@ mod tests {
             line.ends_with(" acked 6af192d4-0000-4000-8000-000000000000 startup"),
             "line was {line:?}"
         );
+    }
+
+    /// Cancellation before accept must produce an explicit unsuccessful transaction result.
+    #[farhelm_testtrace::test]
+    fn a_round_trip_fixture_reports_cancellation_before_accept() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let (seen_tx, seen_rx) = mpsc::channel::<(String, String, Option<SessionAuth>)>();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let RoundTripSupervisor { owner, outcome } =
+            spawn_round_trip_supervisor(listener, context, seen_tx);
+        drop(owner);
+        assert_eq!(
+            outcome
+                .recv_timeout(Duration::from_secs(1))
+                .expect("round-trip cancellation outcome"),
+            Err("fixture cancelled")
+        );
+        assert!(seen_rx.try_recv().is_err());
     }
 
     /// The log directory is created on demand and kept private.
