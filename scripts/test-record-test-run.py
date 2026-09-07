@@ -230,6 +230,37 @@ class RecorderTest(unittest.TestCase):
             self.assertIsNone(RECORDER.observe_exit(process))
             waitid.assert_called_once()
 
+    def test_preparation_cancellation_never_spawns_the_requested_command(self) -> None:
+        """Cancellation during successful runner setup prevents the later command spawn.
+
+        Metadata probes may already have run. The shared intent must survive
+        successful preparation and final evidence writes without starting a
+        runner that the operator has already cancelled.
+        """
+
+        intent = RECORDER.SignalIntent()
+        marker = self.base / "unexpected-command"
+
+        def prepare(*_args):
+            intent.received = signal.SIGTERM
+            return [PYTHON, "-c", f"open({str(marker)!r}, 'w').close()"], {"name": "nextest"}
+
+        with mock.patch.object(RECORDER.pathlib.Path, "cwd", return_value=self.repo), \
+                mock.patch.object(RECORDER.test_run_nextest, "prepare", side_effect=prepare) as prepared, \
+                mock.patch.object(RECORDER, "run_command", wraps=RECORDER.run_command) as command:
+            result = RECORDER.run([
+                "--kind", "repetition", "--selection", "fixture", "--concurrency", "4",
+                "--tmux", "none", "--runner", "nextest", "--output-root", str(self.evidence),
+                "--", "cargo", "nextest", "run", "--lib",
+            ], signal_intent=intent)
+        prepared.assert_called_once()
+        command.assert_called_once()
+        self.assertEqual(result, 128 + signal.SIGTERM)
+        self.assertFalse(marker.exists())
+        manifest = json.loads(next(self.evidence.glob("*/manifest.json")).read_text())
+        self.assertEqual(manifest["outcome"], "interrupted")
+        self.assertIsNone(manifest["child_status"]["raw_returncode"])
+
     def test_lost_wait_status_remains_unknown_in_command_evidence(self) -> None:
         """A different waiter must not turn a real exit seven into Popen's synthetic zero."""
 
