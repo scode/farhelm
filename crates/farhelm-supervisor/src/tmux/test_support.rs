@@ -4,9 +4,8 @@
 
 use super::TmuxDriver;
 use super::stream::{OutputEvent, OutputStream};
-use std::process::Stdio;
 
-/// A tmux server on a throwaway socket, killed on drop.
+/// Own a private tmux server through diagnostic capture and bounded drop-time cleanup.
 ///
 /// Tests that use this harness are the subset that start real tmux servers;
 /// the remaining tests do not start a server, though some invoke tmux or use
@@ -15,15 +14,17 @@ use std::process::Stdio;
 /// explicit cleanup call, and leaked tmux servers accumulate across runs.
 pub(super) struct ScratchServer {
     pub(super) driver: TmuxDriver,
+    /// Capture the still-live server before stopping it; drop before its directory.
+    _server: farhelm_teststate::tmux::guard::TmuxServerGuard,
     /// Also the scratch space tests put out-of-band fixtures in — the
     /// progress files a filtered pane writes so its liveness is
     /// observable when its output reaches nobody (see
     /// [`read_progress`]). It outlives the server by drop order.
-    pub(super) dir: tempfile::TempDir,
-    /// Released once this server is gone, letting the next real-tmux
+    pub(super) dir: farhelm_teststate::TestDir,
+    /// Released after server cleanup, letting the next real-tmux
     /// test start its own — see [`REAL_TMUX_SLOTS`]. Declared last so
     /// it is released only after the tempdir and driver have been,
-    /// which is after `Drop` has killed the server.
+    /// which is after the bounded server cleanup has been attempted.
     _slot: tokio::sync::SemaphorePermit<'static>,
 }
 
@@ -49,18 +50,6 @@ pub(super) struct ScratchServer {
 /// e2e suite's own `SLOTS`, which exists for the same reason.
 static REAL_TMUX_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
-impl Drop for ScratchServer {
-    fn drop(&mut self) {
-        let _ = std::process::Command::new("tmux")
-            .arg("-S")
-            .arg(&self.driver.socket)
-            .arg("kill-server")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
 impl ScratchServer {
     /// Take a concurrency slot, then start a server on a fresh
     /// socket. The slot is acquired here rather than in each test so
@@ -72,11 +61,18 @@ impl ScratchServer {
             .acquire()
             .await
             .expect("semaphore is never closed");
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = farhelm_teststate::tempdir().expect("tempdir");
         let driver = TmuxDriver::new(dir.path());
+        // Establish ownership before startup: an error after tmux starts must
+        // still collect evidence and stop the private server during unwind.
+        let server = farhelm_teststate::tmux::guard::TmuxServerGuard::with_program(
+            driver.socket.clone(),
+            &driver.program,
+        );
         driver.ensure_server().await.expect("tmux server");
         ScratchServer {
             driver,
+            _server: server,
             dir,
             _slot: slot,
         }

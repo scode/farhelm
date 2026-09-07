@@ -2512,7 +2512,7 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     supervisor_command
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path());
-    let _tmux = TmuxServerGuard::for_supervisor_child(sock.clone(), supervisor_command.as_std());
+    let _tmux = tmux_guard_for_supervisor_child(sock.clone(), supervisor_command.as_std());
 
     let mut supervisor = supervisor_command
         .kill_on_drop(true)
