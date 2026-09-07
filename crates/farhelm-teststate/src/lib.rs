@@ -41,6 +41,9 @@
 /// inheriting the sweep's deliberately best-effort policy.
 pub mod process;
 
+/// Bounded ownership and cancellation for fixture worker threads.
+pub mod thread;
+
 /// Bounded private-server shutdown with Linux pidfd fallback authority.
 ///
 /// This is separate from [`process`] because it owns socket-derived server
