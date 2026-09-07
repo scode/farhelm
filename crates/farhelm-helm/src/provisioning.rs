@@ -5580,7 +5580,7 @@ mod tests {
     /// reads to learn which selected directory was protected and which
     /// retired cache still needs to be moved before cleanup can proceed.
     fn assert_legacy_cache_alias_warning(
-        events: &Arc<Mutex<Vec<crate::test_capture::CapturedEvent>>>,
+        events: &farhelm_testtrace::CaptureHandle,
         expected_payload_dir: &Path,
         expected_legacy_cache: &Path,
     ) {
@@ -5611,9 +5611,9 @@ mod tests {
     /// than only totalled at the end (F12, review round 2) — a total count
     /// would not notice fields that were absent, swapped, or stale from an
     /// earlier case.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_payloads_preserves_a_payload_dir_that_aliases_the_legacy_cache() {
-        let events = crate::test_capture::install();
+        let events = crate::test_capture::current();
 
         // Case 1: --payload-dir names the legacy cache directly.
         let state_dir = tempfile::tempdir().unwrap();
@@ -5698,11 +5698,11 @@ mod tests {
     /// missing exactly this case; the lexical check added in round 2
     /// catches it because the SELECTED PATHNAME itself sits beneath
     /// `embedded-payloads/`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_payloads_preserves_an_outward_symlink_selected_inside_the_legacy_cache() {
         use std::os::unix::fs::symlink;
 
-        let events = crate::test_capture::install();
+        let events = crate::test_capture::current();
         let state_dir = tempfile::tempdir().unwrap();
         let legacy = state_dir.path().join("embedded-payloads");
         std::fs::create_dir_all(&legacy).unwrap();
@@ -5803,11 +5803,11 @@ mod tests {
     /// selection followed the inward symlink straight out of the legacy
     /// tree before the two sides were ever compared. Both gaps close only
     /// once the selection is made absolute against `cwd` first.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_payloads_preserves_an_outward_symlink_selected_via_a_relative_path() {
         use std::os::unix::fs::symlink;
 
-        let events = crate::test_capture::install();
+        let events = crate::test_capture::current();
         let state_dir = tempfile::tempdir().unwrap();
         let legacy = state_dir.path().join("embedded-payloads");
         std::fs::create_dir_all(&legacy).unwrap();
@@ -5852,12 +5852,12 @@ mod tests {
     /// path>` compared unequal (and not-a-prefix) to `<legacy path>`'s own
     /// lexical form, even though both name the identical filesystem
     /// location.
-    #[test]
+    #[farhelm_testtrace::test]
     fn production_payloads_preserves_an_outward_symlink_selected_via_an_absolute_dot_dot_spelling()
     {
         use std::os::unix::fs::symlink;
 
-        let events = crate::test_capture::install();
+        let events = crate::test_capture::current();
         let state_dir = tempfile::tempdir().unwrap();
         let legacy = state_dir.path().join("embedded-payloads");
         std::fs::create_dir_all(&legacy).unwrap();

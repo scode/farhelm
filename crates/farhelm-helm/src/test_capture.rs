@@ -1,61 +1,37 @@
-//! One process-global `tracing` capture, shared by every test in this
-//! crate that needs to observe what was LOGGED rather than what was
-//! returned.
+//! Assertion helpers over the test-owned `farhelm-testtrace` capture.
 //!
-//! ## Why this is shared, and why it has to be
-//!
-//! `tracing` has a thread-local subscriber and a process-global one, and
-//! only the global reaches the places this crate does its interesting work:
-//! a `spawn_blocking` closure inside the store, and the spawned connection
-//! actors in the manager. A global can be installed exactly ONCE per
-//! process, and all of this crate's unit tests share one test binary — so
-//! two modules each installing their own capture would mean whichever test
-//! ran first silently won and the other's assertions observed an empty
-//! buffer. One buffer, filtered per test, is the only arrangement that is
-//! not a race.
-//!
-//! Every caller must therefore filter the buffer down to ITS OWN data
-//! (a unique session id, a host id it just created), because tests run
-//! concurrently and the buffer is genuinely everyone's.
-//!
-//! ## What is captured
-//!
-//! Each event's own fields, plus the fields of every span enclosing it —
-//! which is what lets a test assert that the manager's per-host span
-//! context actually reaches the lines SPEC.md's reconnection trail is made
-//! of, rather than only that the messages were emitted.
+//! The `farhelm_testtrace::test` attribute owns both the Tokio runtime and
+//! its scoped tracing dispatcher. That dispatcher follows work submitted to
+//! its worker and blocking threads, so these helpers can observe store
+//! warnings from `spawn_blocking` and manager actor events without a
+//! process-global subscriber. They do not capture child processes or work on
+//! a separately constructed runtime.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::registry::LookupSpan;
+use std::ops::Deref;
 
-/// One captured event: its own fields, and the fields inherited from the
-/// spans it was emitted inside.
+use farhelm_testtrace::{CaptureHandle, EventSnapshot};
+
+/// The assertion-facing event view kept stable while capture ownership moved
+/// into `farhelm-testtrace`.
 ///
-/// The message itself lands under the key `"message"`, matching `tracing`'s
-/// own convention for the format-string argument.
+/// Event fields take precedence over inherited span fields, matching the
+/// collector's structured shadowing semantics and the old test helper's
+/// lookup contract. Deref exposes the target, level, and raw field maps for
+/// assertions that need their exact representation without copying evidence
+/// into another buffer.
 #[derive(Debug, Clone)]
-pub(crate) struct CapturedEvent {
-    pub(crate) fields: HashMap<String, String>,
-    /// Span fields, innermost span last, flattened into one map — this
-    /// crate's spans use distinct field names (`host`, `kind`), so
-    /// flattening loses nothing and spares every caller a nested walk.
-    pub(crate) span_fields: HashMap<String, String>,
-    /// The event's `tracing` target, verbatim. Recorded because some
-    /// targets are load-bearing contracts (`webview_console` is what the
-    /// triage docs tell people to grep for), so a test must be able to
-    /// pin the exact string rather than only the message.
-    pub(crate) target: String,
-    /// The event's level, as `tracing`'s canonical uppercase rendering
-    /// (`"ERROR"`, `"WARN"`, ...), for the same pin-the-contract reason.
-    pub(crate) level: String,
+pub(crate) struct CapturedEvent(EventSnapshot);
+
+impl Deref for CapturedEvent {
+    type Target = EventSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl CapturedEvent {
-    /// One field's value, looked up in the event's own fields first and
-    /// then in its span context — the order a reader of the rendered log
-    /// line would resolve it in.
+    /// Returns an event-owned field, falling back to inherited span context.
     pub(crate) fn field(&self, name: &str) -> Option<&str> {
         self.fields
             .get(name)
@@ -63,116 +39,83 @@ impl CapturedEvent {
             .map(String::as_str)
     }
 
-    /// Whether this event's message contains `needle` — the coarse filter
-    /// every caller starts from.
+    /// Whether the event's message contains `needle`.
     pub(crate) fn message_contains(&self, needle: &str) -> bool {
-        self.field("message").is_some_and(|m| m.contains(needle))
+        self.field("message")
+            .is_some_and(|message| message.contains(needle))
     }
 }
 
-/// A visitor that stringifies every field regardless of its original type.
+/// Returns the capture belonging to the active wrapped test.
 ///
-/// Full typed fidelity would be wasted here: assertions in these tests
-/// compare against text, and a `Debug`-rendered `i64` compares equal to the
-/// number a reader would expect.
-#[derive(Default)]
-struct Fields(HashMap<String, String>);
-
-impl tracing::field::Visit for Fields {
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.0
-            .insert(field.name().to_string(), format!("{value:?}"));
-    }
-    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.0.insert(field.name().to_string(), value.to_string());
-    }
-    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
-        self.0.insert(field.name().to_string(), value.to_string());
-    }
-    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
-        self.0.insert(field.name().to_string(), value.to_string());
-    }
-    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
-        self.0.insert(field.name().to_string(), value.to_string());
-    }
+/// There is deliberately no fallback subscriber or empty capture. A caller
+/// outside `farhelm_testtrace::test` has no attributable evidence, so making
+/// that mistake must fail where the assertion is written.
+pub(crate) fn current() -> CaptureHandle {
+    farhelm_testtrace::current_capture()
+        .expect("test log assertions require #[farhelm_testtrace::test]")
 }
 
-struct Capture(Arc<Mutex<Vec<CapturedEvent>>>);
-
-impl<S> tracing_subscriber::Layer<S> for Capture
-where
-    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
-{
-    /// A span's fields are recorded once, when it is created, and kept in
-    /// the span's own extensions — the registry is what makes them
-    /// reachable later, from an event that names none of them itself.
-    fn on_new_span(
-        &self,
-        attrs: &tracing::span::Attributes<'_>,
-        id: &tracing::span::Id,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        let mut fields = Fields::default();
-        attrs.record(&mut fields);
-        if let Some(span) = ctx.span(id) {
-            span.extensions_mut().insert(SpanFields(fields.0));
-        }
-    }
-
-    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        let mut fields = Fields::default();
-        event.record(&mut fields);
-        let mut span_fields = HashMap::new();
-        if let Some(scope) = ctx.event_scope(event) {
-            // Outermost first, so an inner span naming the same field
-            // wins — the same shadowing a reader of the rendered line
-            // would apply.
-            for span in scope.from_root() {
-                if let Some(SpanFields(recorded)) = span.extensions().get::<SpanFields>() {
-                    span_fields.extend(recorded.clone());
-                }
-            }
-        }
-        self.0.lock().expect("capture mutex").push(CapturedEvent {
-            fields: fields.0,
-            span_fields,
-            target: event.metadata().target().to_string(),
-            level: event.metadata().level().to_string(),
-        });
-    }
-}
-
-/// One span's recorded fields, parked in that span's extensions.
-struct SpanFields(HashMap<String, String>);
-
-/// Install the capture (once per process) and hand back the shared buffer.
-///
-/// `try_init` rather than `init`: a second call must be a harmless no-op
-/// against the SAME buffer rather than a panic, since every test that wants
-/// to observe logs calls this.
-pub(crate) fn install() -> Arc<Mutex<Vec<CapturedEvent>>> {
-    static CAPTURED: OnceLock<Arc<Mutex<Vec<CapturedEvent>>>> = OnceLock::new();
-    let events = CAPTURED
-        .get_or_init(|| Arc::new(Mutex::new(Vec::new())))
-        .clone();
-    let _ = tracing_subscriber::util::SubscriberInitExt::try_init(
-        tracing_subscriber::registry().with(Capture(events.clone())),
-    );
+/// Returns message matches only after the collector proves its evidence is complete.
+pub(crate) fn matching(events: &CaptureHandle, needle: &str) -> Vec<CapturedEvent> {
     events
-}
-
-/// Every captured event whose message contains `needle`, as a snapshot —
-/// so a caller asserts against a stable list rather than holding the
-/// buffer's lock while other tests are still writing to it.
-pub(crate) fn matching(
-    events: &Arc<Mutex<Vec<CapturedEvent>>>,
-    needle: &str,
-) -> Vec<CapturedEvent> {
-    events
-        .lock()
-        .expect("capture mutex")
-        .iter()
-        .filter(|event| event.message_contains(needle))
-        .cloned()
+        .matching(needle)
+        .unwrap_or_else(|error| panic!("test trace evidence is incomplete: {error}"))
+        .into_iter()
+        .map(CapturedEvent)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use farhelm_testtrace::{
+        CaptureConfig, CaptureSession, EventSnapshot, ExpectedPanic, TestMetadata,
+    };
+
+    /// A test without the wrapper must not turn absent evidence into an empty match.
+    #[test]
+    #[should_panic(expected = "test log assertions require #[farhelm_testtrace::test]")]
+    fn current_requires_a_test_owned_capture() {
+        let _ = super::current();
+    }
+
+    /// A lossy collector must fail an assertion even when its retained tail has no match.
+    #[test]
+    #[should_panic(expected = "test trace evidence is incomplete")]
+    fn matching_rejects_incomplete_capture() {
+        let session = CaptureSession::new(
+            TestMetadata::new("incomplete-adapter", ExpectedPanic::None, None),
+            CaptureConfig {
+                max_events: 1,
+                ..CaptureConfig::default()
+            },
+        )
+        .expect("one retained event is a valid explicit test configuration");
+        let capture = session.handle();
+
+        session.thread_context().enter(|| {
+            tracing::info!(message = "first event evicted by the second");
+            tracing::info!(message = "retained event");
+        });
+
+        let _ = super::matching(&capture, "missing event");
+    }
+
+    /// An event's own value remains visible when its enclosing span has the same field name.
+    #[test]
+    fn event_fields_shadow_span_fields() {
+        let event = super::CapturedEvent(EventSnapshot {
+            sequence: 0,
+            elapsed_micros: 0,
+            target: "test".to_string(),
+            level: "INFO".to_string(),
+            fields: BTreeMap::from([("host".to_string(), "event-host".to_string())]),
+            span_fields: BTreeMap::from([("host".to_string(), "span-host".to_string())]),
+            truncated: false,
+        });
+
+        assert_eq!(event.field("host"), Some("event-host"));
+    }
 }

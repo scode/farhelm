@@ -3706,13 +3706,12 @@ mod tests {
     /// so by the time the request resolves the error has already been
     /// handled one way or the other.
     ///
-    /// The capture buffer is process-global (see `test_capture`), hence the
-    /// sentinel: it is what distinguishes this test's event from every
-    /// other test's concurrent noise.
-    #[tokio::test]
+    /// The capture belongs to this test. The sentinel still pins the field
+    /// value the unhandled-message arm must preserve.
+    #[farhelm_testtrace::test]
     async fn an_unsolicited_error_is_logged_rather_than_routed_as_a_reply() {
         const SENTINEL: &str = "unsolicited-error-a41c7f";
-        let events = crate::test_capture::install();
+        let events = crate::test_capture::current();
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
