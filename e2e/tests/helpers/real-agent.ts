@@ -320,12 +320,14 @@ export async function waitUntilAgentReady(
       await page.locator("#terminal").click();
       await page.keyboard.press("Enter");
       dialogDismissals += 1;
+      // sleep-ok: rate-limit repeated dialog dismissal keys; the next marker read still decides readiness.
       await page.waitForTimeout(dialogRetryMs);
       continue;
     }
     if (text.includes(markers.readyMarker) && dialogDismissals >= minDialogDismissals) {
       return { dialogDismissals };
     }
+    // sleep-ok: shared marker polling cadence; the loop checks its deadline between browser operations.
     await page.waitForTimeout(pollMs);
   }
 }
@@ -373,6 +375,7 @@ export async function submitPrompt(
   await page.locator("#terminal").click();
   await page.keyboard.type(text);
   onEvent?.({ event: "type-complete", atMs: Date.now() });
+  // sleep-ok: separate Enter from the text burst for the agent's paste heuristic, not as a readiness oracle.
   await page.waitForTimeout(settleMs);
   onEvent?.({ event: "settle-elapsed", atMs: Date.now() });
   await page.keyboard.press("Enter");
