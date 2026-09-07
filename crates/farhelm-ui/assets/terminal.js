@@ -419,7 +419,7 @@
    * it got.
    */
   function dummyFontWeight() {
-    return { isLoaded: () => false, loaded: new Promise(() => {}), settled: new Promise(() => {}) };
+    return { isLoaded: () => false, isPending: () => false, loaded: new Promise(() => {}), settled: new Promise(() => {}) };
   }
 
   /**
@@ -481,6 +481,9 @@
    */
   function pollFontWeight(descriptor, deadline) {
     let loadedFlag = false;
+    // A retry timer is unsettled too, but has no load in flight. Keep this
+    // distinction observable so the font test proves its hung-request premise.
+    let pendingFlag = false;
     let resolveLoaded;
     const loaded = new Promise((resolve) => {
       resolveLoaded = resolve;
@@ -507,8 +510,10 @@
         finish();
         return;
       }
+      pendingFlag = true;
       request.then(
         (faces) => {
+          pendingFlag = false;
           if (faces && faces.length > 0) {
             loadedFlag = true;
             resolveLoaded();
@@ -526,6 +531,7 @@
           }
         },
         () => {
+          pendingFlag = false;
           // FontFaceSet rejects on a malformed descriptor, not on a
           // merely slow fetch — either way, final, nothing to retry.
           finish();
@@ -534,7 +540,7 @@
     }
     attempt();
 
-    return { isLoaded: () => loadedFlag, loaded, settled };
+    return { isLoaded: () => loadedFlag, isPending: () => pendingFlag, loaded, settled };
   }
 
   /**
@@ -578,6 +584,14 @@
     }
 
     const deadline = Date.now() + FONT_SETTLE_DEADLINE_MS;
+    // Opt-in evidence measures construction from the start of this budget,
+    // even if the controlling test resumes late. Use a monotonic observation
+    // clock; civil-clock corrections must not change the test's elapsed time.
+    // Neither sample participates in font settlement or timer scheduling.
+    if (window.__farhelmTestFontMount) {
+      window.__farhelmTestFontMount.startedAt = performance.now();
+      window.__farhelmTestFontMount.budgetMs = FONT_SETTLE_DEADLINE_MS;
+    }
     // Both weights: regular for the cell metrics `mount()`'s `fit.fit()`
     // depends on, bold because xterm reuses this same family at
     // `font-weight: bold` for SGR-bold text, which a terminal prints
@@ -589,6 +603,14 @@
     // on, over a failure that may have nothing to do with it.
     regularFont = pollFontWeight('14px "JetBrains Mono"', deadline);
     boldFont = pollFontWeight('700 14px "JetBrains Mono"', deadline);
+    if (window.__farhelmTestFontMount) {
+      // Failure diagnostics can sample the current attempt even if no terminal
+      // was ever constructed. Reading this property never advances the load.
+      Object.defineProperty(window.__farhelmTestFontMount, "regularRequestPending", {
+        get: regularFont.isPending,
+        enumerable: true,
+      });
+    }
 
     // `fontSettled` follows REGULAR's `settled` — not `loaded` — alone:
     // a definitive failure (rejected, or a synchronously-throwing `load()`)
@@ -2806,6 +2828,20 @@
         // header for the registration race that makes `check()` alone
         // untrustworthy here (this file's reviewers reproduced it).
         const fontReady = regularFont.isLoaded();
+        // Record constructor attempts rather than a later ready-flag sample:
+        // a premature construction can otherwise finish after the deadline,
+        // and a remount can restore that flag before the test observes it.
+        if (spec.primary && window.__farhelmTestFontMount) {
+          const observation = window.__farhelmTestFontMount;
+          observation.constructions = (observation.constructions || 0) + 1;
+          if (observation.firstConstructionAt === undefined) {
+            observation.firstConstructionAt = performance.now();
+            observation.firstPath = spec.path;
+            // A scheduled empty-result retry is not a held load. Observe the
+            // actual request rather than the broader tracker settlement state.
+            observation.regularPending = regularFont.isPending();
+          }
+        }
         term = new Terminal({
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
