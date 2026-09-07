@@ -124,13 +124,11 @@ async fn session_token(state_dir: &std::path::Path, session: &str) -> String {
 /// Spawn one built `farhelm agent <verb...>` as an agent inside `session`
 /// would, and hand back its raw output without judging success.
 ///
-/// Exists (rather than folding straight into [`agent_command_args`]) so
-/// [`hosts_until_attached`] below can inspect a FAILED attempt's stderr —
-/// something `agent_command_args`'s success-or-panic contract has no way to
-/// hand back — while both still build the exact same child, with the exact
-/// same three environment variables the production launch shim injects and
-/// nothing else (this repo's tests never mutate their own process's
-/// environment).
+/// Refusal tests need a failed command's stderr rather than
+/// [`agent_command_args`]'s success-or-panic contract. The shared builder
+/// also supplies the deadline-bounded attachment probe, so both paths use
+/// the same identity and the three environment variables injected by the
+/// production launch shim. Only the child environment is changed.
 ///
 /// Takes a whole ARGV slice rather than a single verb word, because the
 /// lifecycle verbs need two or three elements (a title positional, a
@@ -143,15 +141,29 @@ async fn spawn_agent_command_args(
     token: &str,
     socket: &std::path::Path,
 ) -> std::process::Output {
-    tokio::process::Command::new(farhelm_bin())
+    tokio::process::Command::from(agent_command_builder(args, session, token, socket))
+        .output()
+        .await
+        .expect("run the agent command")
+}
+
+/// Build the same authenticated child for ordinary invocations and bounded probes.
+/// Keeping launch inputs shared prevents readiness retries from exercising a
+/// different agent identity or environment than the command being tested.
+fn agent_command_builder(
+    args: &[&str],
+    session: &str,
+    token: &str,
+    socket: &std::path::Path,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(farhelm_bin());
+    command
         .arg("agent")
         .args(args)
         .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, session)
         .env(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR, token)
-        .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, socket)
-        .output()
-        .await
-        .expect("run the agent command")
+        .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, socket);
+    command
 }
 
 /// Run one built `farhelm agent <verb...>` as an agent inside `session`
@@ -226,8 +238,16 @@ const NO_HELM_ATTACHED_REFUSAL: &str = "no helm is attached to this session";
 /// the held terminal socket), so nothing later needs to repeat this dance.
 async fn hosts_until_attached(session: &str, token: &str, socket: &std::path::Path) -> String {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut last_refusal = None;
     loop {
-        let output = spawn_agent_command_args(&["hosts"], session, token, socket).await;
+        let output = command_output_before_deadline(
+            agent_command_builder(&["hosts"], session, token, socket),
+            deadline,
+        )
+        .await
+        .unwrap_or_else(|| panic!(
+            "attachment probe for session {session} exhausted its 20s budget; last completed refusal (None means no response): {last_refusal:?}"
+        ));
         if output.status.success() {
             return String::from_utf8(output.stdout).expect("the listing is UTF-8");
         }
@@ -242,6 +262,7 @@ async fn hosts_until_attached(session: &str, token: &str, socket: &std::path::Pa
             "the helm's Attach never reached the supervisor's attachments map within 20s \
              (still refused: {stderr})"
         );
+        last_refusal = Some(stderr);
         // sleep-ok: retry only the attachment-not-yet-present refusal between deadline checks.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

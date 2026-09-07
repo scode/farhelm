@@ -279,6 +279,57 @@ pub(crate) async fn tmux_query(sock: &std::path::Path, args: &[&str]) -> std::pr
         .expect("tmux query")
 }
 
+/// Run a readiness command without blocking the test runtime or abandoning its child.
+///
+/// These tests use the real monotonic clock. Passing the absolute deadline into
+/// the blocking worker includes queue delay in the execution budget; the shared
+/// runner additionally reserves one second to clean up the direct child. The
+/// worker retains child ownership even if the async caller is cancelled.
+/// `None` means its execution budget expired before spawn; the caller still
+/// owns the readiness context needed to explain that failure.
+pub(crate) async fn command_output_before_deadline(
+    command: std::process::Command,
+    deadline: tokio::time::Instant,
+) -> Option<std::process::Output> {
+    tokio::task::spawn_blocking(move || {
+        crate::cli_support::output_before_deadline(command, deadline.into_std())
+    })
+    .await
+    .expect("readiness command worker")
+}
+
+/// A queued probe whose budget is gone must report expiry without starting a child.
+/// The marker distinguishes refusal before spawn from launching a command and
+/// merely discarding its output, which could still mutate the fixture after expiry.
+#[farhelm_testtrace::test]
+async fn an_expired_readiness_command_never_starts_its_child() {
+    let state = farhelm_teststate::tempdir().expect("test state");
+    let marker = state.path().join("command-started");
+    let mut command = std::process::Command::new("touch");
+    command.arg(&marker);
+    let output = command_output_before_deadline(command, tokio::time::Instant::now()).await;
+    assert!(
+        output.is_none(),
+        "expired probe must return its deadline outcome"
+    );
+    assert!(!marker.exists(), "expired probe must not start its child");
+}
+
+/// Query a small tmux readiness observation under the caller's existing budget.
+///
+/// Use this for predicates such as pane death. The bounded runner rejects
+/// incomplete or capped output, so a partial reply cannot establish readiness.
+/// An expired pre-spawn budget returns `None` for the caller's own diagnostics.
+pub(crate) async fn tmux_query_before_deadline(
+    sock: &std::path::Path,
+    args: &[&str],
+    deadline: tokio::time::Instant,
+) -> Option<std::process::Output> {
+    let mut command = std::process::Command::new("tmux");
+    command.arg("-S").arg(sock).args(args);
+    command_output_before_deadline(command, deadline).await
+}
+
 /// Kill the harness's tmux server and wait until it has genuinely died.
 ///
 /// `kill-server` returns before the server finishes tearing down; any
