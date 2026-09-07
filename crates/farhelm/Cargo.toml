@@ -95,3 +95,7 @@ async-trait.workspace = true
 # needed and the workspace's default-feature-less reqwest is enough.
 reqwest.workspace = true
 shell-words.workspace = true
+# The e2e listing-poll tests run on Tokio's virtual clock. Their timeout
+# assertions must not depend on a loaded machine scheduling real sleeps, and
+# `test-util` keeps that test-only support out of the shipped binary.
+tokio = { workspace = true, features = ["test-util"] }

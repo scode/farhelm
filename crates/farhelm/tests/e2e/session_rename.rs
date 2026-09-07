@@ -863,17 +863,17 @@ async fn a_rename_whose_client_vanishes_still_lands() {
         // without a single reply frame ever being read.
     }
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        if listed_title(&h.client, &session.id).await == "renamed-by-a-client-that-left" {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the rename never landed after its client disconnected"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    wait_for_listing(
+        &h.client,
+        30,
+        "the rename landed after its client disconnected",
+        |sessions| {
+            sessions
+                .iter()
+                .any(|row| row.id == session.id && row.title == "renamed-by-a-client-that-left")
+        },
+    )
+    .await;
     assert_eq!(
         stored_title(h.state.path(), &session.id).await,
         "renamed-by-a-client-that-left",
