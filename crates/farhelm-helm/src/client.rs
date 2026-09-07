@@ -6207,6 +6207,7 @@ mod tests {
                 {
                     return;
                 }
+                // sleep-ok: pace non-advancing acknowledgements intended to overlap the sender's stall deadline.
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         });
