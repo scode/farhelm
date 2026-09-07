@@ -2367,23 +2367,21 @@ mod tests {
         assert_eq!(published, "old-secret");
     }
 
-    /// One stalled response must consume the readiness deadline itself rather
-    /// than parking desktop startup forever inside reqwest body handling.
-    #[farhelm_testtrace::test]
+    /// An unanswered request must consume the readiness deadline rather than
+    /// parking desktop startup indefinitely. The listener never accepts or
+    /// replies; the paused clock checks the budget independently of scheduler
+    /// load, without claiming which socket phase timed out.
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn supervisor_readiness_deadline_bounds_a_server_that_never_answers() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (_stream, _) = listener.accept().await.unwrap();
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        });
         let root = tempfile::tempdir().unwrap();
         let state_path = root.path().join(APP_STATE_FILE);
         let mut state = PersistedState {
             native_device_secret: Some("device-secret".to_string()),
             ..PersistedState::default()
         };
-        let started = Instant::now();
+        let started = tokio::time::Instant::now();
         let mut supervisor = None;
 
         let error = await_local_supervisor_until(
@@ -2397,27 +2395,26 @@ mod tests {
         .await
         .unwrap_err();
 
+        assert!(started.elapsed() >= Duration::from_millis(100));
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(
             error
                 .to_string()
                 .contains("did not connect within 30 seconds")
         );
-        server.abort();
+        drop(listener);
     }
 
     /// The first credential exchange shares one absolute startup deadline
-    /// across connection, headers, and body decoding. A loopback listener that
-    /// accepts but never answers must therefore fail instead of freezing launch.
-    #[farhelm_testtrace::test]
+    /// across connection, headers, and body decoding. A bound listener that
+    /// never answers must therefore time out instead of freezing launch.
+    /// This checks deadline expiry on a paused clock, not body decoding or
+    /// socket progress; an unrelated early request error must not pass.
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn initial_native_credential_exchange_has_an_absolute_deadline() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (_stream, _) = listener.accept().await.unwrap();
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        });
-        let started = Instant::now();
+        let started = tokio::time::Instant::now();
 
         let error = native_credential(
             &format!("http://{addr}"),
@@ -2428,13 +2425,14 @@ mod tests {
         .await
         .unwrap_err();
 
+        assert!(started.elapsed() >= Duration::from_millis(100));
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(
             error
                 .to_string()
                 .contains("desktop credential bootstrap did not complete")
         );
-        server.abort();
+        drop(listener);
     }
 
     /// Own the server thread until its protocol result and actual exit have been observed.

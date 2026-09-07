@@ -2804,23 +2804,25 @@ mod tests {
     /// Time spent on the first response and serialized refresh must reduce
     /// the retry's allowance; otherwise one page can consume two advertised
     /// request budgets while claiming to remain bounded by one.
+    ///
+    /// The bound listener never accepts or answers. Only deadline accounting
+    /// matters here, not which socket phase reaches the timeout. Tokio's paused
+    /// clock removes scheduler load from the elapsed-time assertion.
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-    #[farhelm_testtrace::test]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn desktop_refresh_and_retry_share_the_original_deadline() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (_stream, _) = listener.accept().await.unwrap();
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        });
         let started = tokio::time::Instant::now();
         let deadline = started + std::time::Duration::from_millis(150);
+        // sleep-ok: spend part of the original budget on the paused clock before entering refresh and retry.
         tokio::time::sleep(std::time::Duration::from_millis(80)).await;
 
         let result = retry_desktop_request(
             client().get(format!("http://{addr}/stalled-retry")),
             deadline,
             || async {
+                // sleep-ok: the injected refresh consumes another part of the same virtual request budget.
                 tokio::time::sleep(std::time::Duration::from_millis(40)).await;
                 Ok(("replacement".to_string(), false))
             },
@@ -2828,8 +2830,9 @@ mod tests {
         .await;
 
         assert!(matches!(result, Err(SendError::Request(_))));
+        assert!(started.elapsed() >= std::time::Duration::from_millis(150));
         assert!(started.elapsed() < std::time::Duration::from_millis(250));
-        server.abort();
+        drop(listener);
     }
 
     /// A blank install field must reach the wire as ABSENT, and a non-blank
