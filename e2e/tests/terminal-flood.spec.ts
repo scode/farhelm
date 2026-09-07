@@ -353,6 +353,7 @@ function drainFloodOffScreen(
           if (err) reject(err);
           else resolve();
         };
+        // sleep-ok: failure deadline for the raw stream; only FLOOD-DONE establishes completion.
         const timer = setTimeout(
           () => finish(new Error("flood_gated did not reach FLOOD-DONE in 60s")),
           60_000,
@@ -581,6 +582,7 @@ async function waitForFloodStreamComplete(page: Page) {
         };
       }),
       new Promise<never>((_, reject) => {
+        // sleep-ok: cap a read using the last sampled budgets; returned samples recheck elapsed time.
         readTimer = setTimeout(() => {
           const deadline =
             remainingProgress <= remainingAbsolute
@@ -620,6 +622,7 @@ async function waitForFloodStreamComplete(page: Page) {
     }
     if (verify.sawDone) return;
 
+    // sleep-ok: poll verified record progress at a cadence limited by the last sampled budgets.
     await page.waitForTimeout(
       Math.min(
         pollInterval,
@@ -1079,6 +1082,7 @@ test("a terminal socket for an unknown session reports why", async ({
           `ws://${location.host}/api/sessions/no-such-session/term`,
           ["farhelm", `farhelm-device-${secret}`],
         );
+        // sleep-ok: fail if the peer never delivers a detach notice; elapsed time is not success.
         const timer = setTimeout(() => reject(new Error("no message")), 10_000);
         ws.onmessage = (ev) => {
           clearTimeout(timer);
@@ -1245,8 +1249,8 @@ test("real backspace erases; real ctrl-c kills the fake agent", async ({
   await page.keyboard.press("Control+c");
 
   // A mangled ctrl-c leaves `basic` alive and still echoing; only a real
-  // SIGINT kills it. Typing a fresh marker and requiring it to NEVER echo
-  // is the proof — and, being an absence, needs sustained observation
+  // SIGINT kills it. Typing a fresh marker and checking that it does not echo
+  // during the observation window catches that failure; an absence needs repeated observation
   // rather than one poll: the process take-down is not instantaneous, and
   // a single early check could pass before a still-alive process would
   // have replied. The regex (not a plain substring) is deliberate: a
@@ -1261,6 +1265,7 @@ test("real backspace erases; real ctrl-c kills the fake agent", async ({
   const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
     expect(await termText(page)).not.toMatch(/echo:.*post-ctrlc-marker/);
+    // sleep-ok: sample forbidden echo during a finite window; the deadline is checked between reads.
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 });
