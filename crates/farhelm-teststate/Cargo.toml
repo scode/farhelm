@@ -20,3 +20,11 @@ libc.workspace = true
 # tempfile's battle-tested drop-time removal; this crate only adds the
 # naming and the lock on top.
 tempfile.workspace = true
+# Fixture-thread lifecycle diagnostics are tracing events so tests can retain
+# bounded evidence without coupling the owner to a particular logger.
+tracing.workspace = true
+
+[dev-dependencies]
+# Focused owner tests assert lifecycle diagnostics through the bounded capture
+# wrapper; this support crate does not participate in the runtime dependency.
+farhelm-testtrace = { path = "../farhelm-testtrace" }
