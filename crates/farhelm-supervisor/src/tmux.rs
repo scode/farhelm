@@ -3362,7 +3362,7 @@ mod tests {
     /// nowhere else: it clears the buffer it switches to, so emitting it
     /// after the replay would erase the replay. Cursor placement belongs
     /// after the content, because writing content moves the cursor.
-    #[test]
+    #[farhelm_testtrace::test]
     fn alt_screen_switch_precedes_content_and_cursor_follows_it() {
         let modes = PaneModes {
             alternate_on: true,
@@ -3385,7 +3385,7 @@ mod tests {
     /// Every tmux mode field maps to a distinct terminal escape. A
     /// swapped field still produces plausible output, so each branch
     /// needs an independent oracle rather than one all-flags snapshot.
-    #[test]
+    #[farhelm_testtrace::test]
     fn pane_modes_restore_each_mouse_and_cursor_mode() {
         let cases = [
             ("0,0,0,0,1,0,1,0,0,0", "\x1b[?1000h"),
@@ -3408,7 +3408,7 @@ mod tests {
     /// catches a reversion to additive (independent `if`-per-flag)
     /// emission, which would satisfy a presence-only assertion just fine
     /// (see `post_content_sequences`'s historical note).
-    #[test]
+    #[farhelm_testtrace::test]
     fn pane_modes_selects_one_mouse_protocol() {
         // fields: (mouse_all, mouse_button, mouse_standard). expected:
         // the one DECSET code that must appear; the other two mouse
@@ -3452,7 +3452,7 @@ mod tests {
 
     /// A pane on the normal screen must not emit the alt-screen switch —
     /// doing so would blank a perfectly good replay.
-    #[test]
+    #[farhelm_testtrace::test]
     fn normal_screen_emits_no_alt_switch() {
         let modes = PaneModes {
             cursor_visible: true,
@@ -3466,7 +3466,7 @@ mod tests {
     /// collapsed and every later field shifted left — restoring wrong
     /// modes and misplacing the cursor. Comma-delimited fields degrade
     /// one position at a time, which is the documented contract.
-    #[test]
+    #[farhelm_testtrace::test]
     fn unknown_format_degrades_only_its_own_field() {
         // bracket_paste (field 2) unknown; everything after it must keep
         // its own value.
@@ -3487,7 +3487,7 @@ mod tests {
     /// sorts BEFORE its first patch letter (tmux shipped 3.7 then 3.7a),
     /// and the minor number is numeric, not textual, so 3.10 is newer
     /// than 3.9 rather than older.
-    #[test]
+    #[farhelm_testtrace::test]
     fn version_ordering_separates_patch_letters_and_compares_minors_numerically() {
         let parse = |line: &str| parse_tmux_version(line).expect("a well-formed version");
         assert!(parse("tmux 3.7") < parse("tmux 3.7a"));
@@ -3505,7 +3505,7 @@ mod tests {
     /// unaudited substrate. Also pins the round-trip through `Display`,
     /// since the refusal message and the release-pin lockstep test both
     /// compare printed versions.
-    #[test]
+    #[farhelm_testtrace::test]
     fn version_parsing_refuses_everything_it_cannot_read_exactly() {
         for line in ["tmux 3.7b", "tmux 3.7", "tmux 4.0", "tmux 3.10"] {
             let parsed = parse_tmux_version(line).expect("a well-formed version");
@@ -3579,7 +3579,7 @@ mod tests {
     /// Malformed input stays a refusal: an unreadable version is an
     /// unknown version, and the conservative direction is the one that
     /// does not start a server.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_floor_refuses_older_builds_and_admits_newer_ones() {
         let check = |line: &str| require_supported_tmux(Path::new("/usr/bin/tmux"), line);
         assert!(check("tmux 3.7c").is_ok(), "the floor itself is accepted");
@@ -3612,7 +3612,7 @@ mod tests {
     /// an enum is what makes them assertable without installing a
     /// process-global tracing subscriber, which would collide with every
     /// other test in the binary.
-    #[test]
+    #[farhelm_testtrace::test]
     fn classification_is_silent_at_the_pin_and_flags_everything_newer() {
         let at = |line: &str| {
             classify_tmux_version(parse_tmux_version(line).expect("a well-formed version"))
@@ -3631,7 +3631,7 @@ mod tests {
     /// is useless unless it answers "which binary, how old, and how old is
     /// too old" — the actual failure it exists for is "the wrong tmux was
     /// on PATH", which cannot be fixed without knowing which one answered.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_refusal_names_the_binary_the_version_and_the_floor() {
         let error = require_supported_tmux(Path::new("/usr/bin/tmux"), "tmux 3.6\n")
             .expect_err("3.6 is below the floor");
@@ -3650,7 +3650,7 @@ mod tests {
     /// one wording (as the pre-fix `"checking the tmux version of tmux"`
     /// context did) reads like tmux ran and refused rather than like tmux
     /// was never found at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn not_found_wording_differs_for_a_bare_name_and_a_resolved_path() {
         let bare = tmux_not_found_message(Path::new("tmux"));
         assert!(bare.contains("PATH"), "{bare}");
@@ -3671,7 +3671,7 @@ mod tests {
     /// without asserting which one happened: it must never claim
     /// `FARHELM_TMUX unset` for a name that may well have come FROM
     /// `FARHELM_TMUX`, which is what the previous wording did.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_bare_name_from_an_explicit_override_gets_the_same_source_neutral_wording() {
         let default_fallback = tmux_not_found_message(Path::new(DEFAULT_TMUX_PROGRAM));
         let explicit_override = tmux_not_found_message(Path::new("custom-tmux"));
@@ -3689,7 +3689,7 @@ mod tests {
     /// for a target that plain does not exist. A message that flatly said
     /// "not found" would send an operator chasing a reinstall when the
     /// real repair is restoring the interpreter or loader.
-    #[test]
+    #[farhelm_testtrace::test]
     fn not_found_wording_covers_a_missing_interpreter_or_loader_too() {
         for program in [Path::new("tmux"), Path::new("/opt/nonexistent/tmux")] {
             let message = tmux_not_found_message(program);
@@ -3707,7 +3707,7 @@ mod tests {
     /// because the token and the program are contributed by different
     /// `context` layers; a refactor that drops either layer would leave an
     /// `is_err`-only test perfectly green.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_malformed_version_names_the_token_and_the_binary() {
         let error =
             require_supported_tmux(Path::new("/opt/weird/tmux"), "tmux 9.9zzz-vendor-mangled\n")
@@ -3734,7 +3734,7 @@ mod tests {
     /// would leave this test comparing the floor against a version nothing
     /// actually builds — the precise drift it exists to catch, dressed as
     /// a pass.
-    #[test]
+    #[farhelm_testtrace::test]
     fn floor_and_release_pin_cannot_drift() {
         // Reaching outside the crate with a relative `include_str!` is
         // fine here: this is a workspace-only repository, never packaged
@@ -3807,7 +3807,7 @@ mod tests {
     /// refusal rather than wedging or killing the CLI. Both budgets are
     /// exercised with real children.
     #[cfg(unix)]
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_candidate_that_hangs_or_floods_is_refused_within_the_budget() {
         let dir = tempfile::tempdir().expect("fixture dir");
 
@@ -3846,7 +3846,7 @@ mod tests {
     /// overrun kills the group. This proves it: the descendant records its
     /// pid, and after the probe returns that pid is gone.
     #[cfg(unix)]
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_descendant_holding_the_pipes_open_is_killed_with_the_group() {
         let dir = tempfile::tempdir().expect("fixture dir");
         let pidfile = dir.path().join("grandchild.pid");
@@ -3899,7 +3899,7 @@ mod tests {
     /// message needs: which binary answered, what it printed, and where
     /// its version sits against the floor.
     #[cfg(unix)]
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_probe_reports_the_program_version_and_what_a_non_tmux_printed() {
         let dir = tempfile::tempdir().expect("fixture dir");
         let root = dir.path().to_path_buf();
@@ -3944,7 +3944,7 @@ mod tests {
     /// PATH. Empty entries are dropped as well — the current directory is
     /// not something to pin into a unit file.
     #[cfg(unix)]
-    #[test]
+    #[farhelm_testtrace::test]
     fn path_candidates_are_offered_in_order_without_empty_entries() {
         let dir = tempfile::tempdir().expect("fixture dir");
         let first = dir.path().join("first");
@@ -3979,7 +3979,7 @@ mod tests {
     /// is deliberate — this repo's tests never mutate the test process's
     /// environment, and a shared `FARHELM_TMUX` would leak into every
     /// concurrently running harness.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_flag_beats_the_environment_which_beats_path() {
         use std::ffi::OsStr;
 
@@ -4062,7 +4062,7 @@ mod tests {
     /// probe under test is a `-V` exchange: nothing here needs a server,
     /// and a test that needed one could not run where the floor is unmet.
     #[cfg(unix)]
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_overridden_binary_is_the_one_the_floor_probe_checks() {
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = dir.path().join("pretend-tmux");
@@ -4092,7 +4092,7 @@ mod tests {
     /// another — and it does NOT displace the private `-S`/`-f`
     /// arguments, because an override that quietly dropped those would
     /// point Farhelm at the user's own tmux server and configuration.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_overridden_driver_keeps_the_program_and_the_private_arguments() {
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = dir.path().join("pretend-tmux");
@@ -4129,7 +4129,7 @@ mod tests {
     /// reordering that wrote it first would leave a stale file behind on
     /// every failed startup, in a state directory the next supervisor
     /// reads.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_tmux_that_cannot_be_spawned_refuses_by_name() {
         let dir = tempfile::tempdir().expect("tempdir");
         let absent = dir.path().join("no-such-tmux");
@@ -4167,7 +4167,7 @@ mod tests {
     /// environment: `Command` resolves a bare program against whatever
     /// `PATH` this process already has, and a sufficiently unlikely name
     /// fails to resolve the same way a genuinely absent one would.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_missing_bare_program_name_refuses_through_the_same_helper() {
         let dir = tempfile::tempdir().expect("tempdir");
         let bare = PathBuf::from("farhelm-test-nonexistent-tmux-4f19c2");
@@ -4195,7 +4195,7 @@ mod tests {
     /// text leaves "tmux -V failed" and nothing to act on, so the exit
     /// status and the stderr are both pinned.
     #[cfg(unix)]
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failing_version_probe_surfaces_its_status_and_stderr() {
         let dir = tempfile::tempdir().expect("tempdir");
         let broken = dir.path().join("broken-tmux");
@@ -4240,7 +4240,7 @@ mod tests {
     /// Unix-only: the shadow it pins is an execute-bit distinction, which
     /// [`is_executable_file`] cannot make on a platform without one.
     #[cfg(unix)]
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_bare_program_name_is_reported_as_the_path_entry_it_resolves_to() {
         use std::ffi::OsString;
 
@@ -4286,7 +4286,7 @@ mod tests {
     /// Exact lines are the contract here: moving an option to a different
     /// tmux table can silently disable it while leaving a substring test
     /// green.
-    #[test]
+    #[farhelm_testtrace::test]
     fn generated_config_pins_every_load_bearing_option() {
         let cfg = TmuxDriver::config_body();
         assert_eq!(
@@ -4360,7 +4360,7 @@ mod tests {
     /// each side of the floor: a green run that never exercised adoption
     /// would be exactly the false assurance this test exists to remove.
     #[cfg(unix)]
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_adopted_below_floor_server_is_refused_without_being_killed() {
         let binaries = tmux_binaries_on_path();
         let old = binaries
@@ -4444,7 +4444,7 @@ mod tests {
     /// write step must surface through `ensure_server_with_seam`'s
     /// returned error, and — since the failure happens before `rename` —
     /// must never leave a config file behind at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn ensure_server_with_seam_surfaces_an_injected_config_write_failure() {
         #[derive(Clone, Copy)]
         struct FailWrite;
@@ -4475,7 +4475,7 @@ mod tests {
     /// scrolled one row past the content, destroying the alt-screen top
     /// row), so its two transforms are pinned: LF→CRLF, and the trailing
     /// terminator dropped.
-    #[test]
+    #[farhelm_testtrace::test]
     fn capture_normalization_converts_line_endings_and_drops_the_last() {
         assert_eq!(normalize_capture(b"a\nb\n"), b"a\r\nb");
         assert_eq!(normalize_capture(b"a\nb"), b"a\r\nb");
@@ -4496,7 +4496,7 @@ mod tests {
     }
 
     /// A short or empty expansion must not panic or produce garbage.
-    #[test]
+    #[farhelm_testtrace::test]
     fn truncated_format_output_uses_defaults() {
         let modes = PaneModes::parse("");
         assert_eq!(modes, PaneModes::parse("0"));
@@ -4516,7 +4516,7 @@ mod tests {
     /// genuinely empty server, a genuinely ABSENT one (the behavior this
     /// change adds), and one caught mid-teardown (ALSO new) — plus a
     /// plain unclassified failure.
-    #[test]
+    #[farhelm_testtrace::test]
     fn is_tolerated_list_panes_diagnostic_pins_all_three_tolerated_cases() {
         let socket = Path::new("/tmp/fh/tmux.sock");
         assert!(
@@ -4548,7 +4548,7 @@ mod tests {
     /// only means something because the phrase is genuinely present, just
     /// not as the whole, anchored message tmux actually emits for that
     /// diagnostic.
-    #[test]
+    #[farhelm_testtrace::test]
     fn is_tolerated_list_panes_diagnostic_rejects_a_path_that_merely_contains_a_tolerated_phrase() {
         let socket = Path::new("/tmp/no server running/tmux.sock");
         let unrelated_failure = "can't stat socket /tmp/no server running/tmux.sock: \
@@ -4570,7 +4570,7 @@ mod tests {
     /// because the complaint a failing shell makes comes after whatever
     /// noise preceded it, and on a character boundary, because the result
     /// travels as a `String` on the wire.
-    #[test]
+    #[farhelm_testtrace::test]
     fn last_words_trims_padding_and_keeps_the_tail_within_the_cap() {
         assert_eq!(
             last_words("SHELL-REFUSED\n\n\n   \n", 1024),
@@ -4611,7 +4611,7 @@ mod tests {
     /// session", not "exactly this pane". See `pane_in_session`'s docs for
     /// what that costs and which callers must therefore hold their pane
     /// still.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_window_command_is_refused_for_another_sessions_pane() {
         let server = ScratchServer::start().await;
         let mine = server
@@ -4669,7 +4669,7 @@ mod tests {
     ///
     /// Adding `-S` back to the tail capture makes this fail on its first
     /// assertion, which is precisely the regression worth catching.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn capture_pane_tail_reads_the_visible_grid_while_last_words_reaches_scrollback() {
         let server = ScratchServer::start().await;
         // The marker is printed first and then pushed off a 24-row screen
@@ -4719,7 +4719,7 @@ mod tests {
     /// suite. Verified against tmux 3.7b; pinned here so a future version
     /// (or a future switch to a laxer target spelling) cannot change it
     /// quietly.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn capture_pane_tail_refuses_a_dead_pane_rather_than_quoting_a_sibling() {
         let server = ScratchServer::start().await;
         let agent = server

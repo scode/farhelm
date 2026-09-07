@@ -371,7 +371,7 @@ mod tests {
     /// spec (its session id absent from `sessions`) are seeded alongside
     /// it and must both go, proving the sweep does not simply skip the
     /// whole directory.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn sweep_launch_dir_never_removes_a_sentinel() {
         let tmp = tempfile::tempdir().unwrap();
         let launch_dir = tmp.path().join("launch");
@@ -422,7 +422,7 @@ mod tests {
     /// components apart is unambiguous — and anything that does not parse
     /// must come back `None` rather than being guessed at, since the sweep
     /// deletes what it recognizes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn launch_file_names_round_trip_through_the_parser() {
         let state = std::path::Path::new("/state");
         let spec = crate::launch::spec_path_for_launch(state, "sess-1", 7);
@@ -446,7 +446,7 @@ mod tests {
     /// restart does not kill tmux, so the login shell behind that session
     /// can still be mid-flight toward reading this exact spec, arbitrarily
     /// long after the window itself was created.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn sweep_launch_dir_preserves_a_spec_for_a_surviving_session() {
         let tmp = tempfile::tempdir().unwrap();
         let launch_dir = tmp.path().join("launch");
@@ -477,7 +477,7 @@ mod tests {
     /// login shell and the shim but the shell, so an unconsumed spec there
     /// means the user's rc files killed the shell — a pre-existing M2 shape
     /// this build has no new evidence about and must not reclassify.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_wrapper_failure_is_recognized_only_by_its_full_shape() {
         let state = StateDir::new();
         let id = uuid::Uuid::new_v4().to_string();

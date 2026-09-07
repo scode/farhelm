@@ -380,7 +380,7 @@ mod tests {
     /// its meaning: with no sink, the same configuration must
     /// freeze the pane. Without that control, "the pane kept running"
     /// could just mean the filter never took effect.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn only_the_sink_keeps_a_filtered_pane_readable() {
         let server = ScratchServer::start().await;
         let progress = server.dir.path().join("busy-progress");

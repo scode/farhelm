@@ -714,7 +714,7 @@ mod tests {
     /// the contract — each case in isolation looks obvious, and only side
     /// by side do the two inversions stand out (a live pane beating a
     /// recorded outcome, and a recorded outcome beating "no pane found").
-    #[test]
+    #[farhelm_testtrace::test]
     fn classification_precedence_between_live_probing_and_the_recorded_outcome() {
         let live = pane_map(false, None);
         let dead = pane_map(true, Some(3));
@@ -816,7 +816,7 @@ mod tests {
     /// rule gets wrong: tmux publishes `pane_dead` before
     /// `pane_dead_status` is readable, so the poll that first sees the
     /// death routinely has no code while the next one does.
-    #[test]
+    #[farhelm_testtrace::test]
     fn observations_offered_to_the_store_cover_silence_and_enrichment() {
         let dead_with_code = PaneState::for_test("fh-1", "%0", "@0").dead_with(Some(3));
         let dead_without_code = PaneState::for_test("fh-1", "%0", "@0").dead_with(None);
@@ -878,7 +878,7 @@ mod tests {
     /// contract — that the threshold is inclusive, that one silent look
     /// short of it is still `Running`, and that "not watched yet" and
     /// "watched and still" are opposite answers.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_quiet_sample_threshold_decides_running_from_idle_at_both_edges() {
         let live = pane_map(false, None);
 
@@ -927,7 +927,7 @@ mod tests {
     /// exactly the point — the same cell means the same thing at any
     /// cadence, so there is nothing for a population to change. The
     /// matching end-to-end case lives beside the sampler in `ticker`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_session_that_changes_at_every_sample_stays_running_at_any_cadence() {
         let live = pane_map(false, None);
         // Sampled hundreds of times over an arbitrarily long life, and
@@ -954,7 +954,7 @@ mod tests {
     /// Both sub-two counts are pinned, because they are different facts:
     /// zero means the ticker has not reached this session, one means it
     /// has but has nothing to compare against yet.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_session_that_has_not_been_watched_twice_is_running_rather_than_idle() {
         let live = pane_map(false, None);
         for samples in [0, 1] {
@@ -976,7 +976,7 @@ mod tests {
     /// duplicate of `agent_kind`'s own recognition tests: it pins that the
     /// per-kind knowledge is reached THROUGH the snapshot, so a generic
     /// session cannot accidentally inherit another agent's heuristics.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_integrated_sessions_prompt_tail_is_sharpened_to_waiting() {
         let live = pane_map(false, None);
         // Quiet by the baseline rule — a pending approval is exactly the
@@ -1021,7 +1021,7 @@ mod tests {
     /// counts must NOT move (or a run of failures decays a live session to
     /// `Idle` on the strength of no observation at all — the same wrong
     /// inference `sample_pass` refuses to make when tmux answers nothing).
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_failed_capture_stops_sharpening_without_counting_as_a_quiet_look() {
         let live = pane_map(false, None);
         let entry = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
@@ -1061,7 +1061,7 @@ mod tests {
     /// dead status) passes with half the rule implemented — including with
     /// the version that let a sharpener demote `Running` to `Idle`, which
     /// is a wrong answer with no reviewer behind it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn nothing_but_waiting_survives_a_sharpener() {
         for baseline in [SessionStatus::Running, SessionStatus::Idle] {
             for sharpened in [
