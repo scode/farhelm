@@ -2187,6 +2187,7 @@ mod tests {
                 Ok(()) => break,
                 Err(_) if attempts_remaining > 0 => {
                     attempts_remaining -= 1;
+                    // sleep-ok: retry actual lock acquisition with a finite attempt allowance.
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
                 Err(e) => panic!("the incumbent never took the claim: {e}"),

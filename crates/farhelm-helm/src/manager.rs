@@ -5089,6 +5089,7 @@ mod tests {
                 "the newer-survivor advance never finished publishing: still remembers \
                  {remembered:?}, fleet revision {revision} (was {before})"
             );
+            // sleep-ok: let the paused runtime progress while polling both repair publications.
             tokio::time::sleep(REFRESH_INTERVAL / 2).await;
         }
     }
@@ -6904,6 +6905,7 @@ mod tests {
                 "the next refresh tick must replace the whole list, got {:?}",
                 cached_ids(&fixture.store, host).await
             );
+            // sleep-ok: poll exact cache contents under the paused clock; equal counts cannot prove refresh.
             tokio::time::sleep(REFRESH_INTERVAL / 2).await;
         }
     }

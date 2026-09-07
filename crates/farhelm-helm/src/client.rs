@@ -7420,6 +7420,7 @@ mod tests {
         // their slots, rather than racing it.
         timeout(Duration::from_secs(5), async {
             while SUPERVISOR_WRITER_QUEUE - client.writer_tx.capacity() < AGENT_ANSWER_SLOTS - 1 {
+                // sleep-ok: poll queued answers within the outer timeout before testing overflow.
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
