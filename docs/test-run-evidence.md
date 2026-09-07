@@ -8,6 +8,37 @@ the runner's configuration and reported test counts.
 NOTE: The command argv and combined stdout/stderr are retained exactly. Do not put credentials in argv. Output is
 private local evidence, not publication-ready material; review it before copying any part of a run directory elsewhere.
 
+## Finite Rust repetition
+
+For an operator-selected nextest scope, `scripts/hunt-rust-tests.py` runs a finite number of recorder-backed attempts
+and keeps each attempt's evidence under its own private child root. The default is a side-effect-free JSON plan; add
+`--execute` to run it. The command requires a package, target, workspace, or filter scope and accepts the same nextest
+selection allowlist as the recorder:
+
+```console
+python3 scripts/hunt-rust-tests.py --repeat 20 --timeout 60 \
+  -- cargo nextest run -p farhelm-supervisor --lib -E 'test(shutdown_acks)'
+```
+
+`--repeat` accepts 1 through 1000 and `--timeout` is a finite positive number. The plan reports the maximum sum of child
+command time (`repeat * timeout`), four shared nextest slots, zero retries, required tmux validation, and the fact that
+metadata and cleanup time is outside that sum. The hunt does not build or install tmux; a missing or mismatched pinned
+substrate is an explicit recorder refusal. Ordinary failed attempts continue so mixed outcomes remain visible, while a
+later pass cannot make the batch pass. Cancellation stops scheduling and returns `128 + signal`; incomplete recorder or
+evidence state returns 125. The batch index is bounded and contains summaries only; manifests and reports remain the
+source of truth for command, environment, and exact test counts.
+
+Only nextest's ordinary test-failure exit permits another attempt. Runner signals, build/setup failures, incomplete
+cleanup, missing stream EOF, and truncated retained output stop the batch. A complete report can still supply counts for
+an interrupted runner, but it does not prove that cleanup finished. Incomplete or contradictory reports supply no counts
+in the index; their raw evidence remains available for diagnosis.
+
+The command prints the private `index.json` path on stderr when execution starts. The index is written before the first
+attempt and after each state transition. Its states are `running`, `completed`, `failed`, `incomplete`, and `cancelled`;
+`running` after the process disappears means the batch may have been killed before it could publish a terminal state.
+SIGKILL and host loss can leave an in-progress index and do not authorize an automatic resume or retry. The index is a
+bounded summary; use each retained recorder manifest and JUnit report for the exact command status and test counts.
+
 ## Running a command
 
 Use a Unix Python interpreter with `os.waitid` and `WNOWAIT`. On macOS this requires Python 3.13 or newer; older
@@ -169,7 +200,8 @@ The top-level fields are:
 - `source`: Git checkout evidence and its limits.
 - `tmux`: expected and actual substrate evidence, or an explicit `none` record.
 - `output`: retention policy, byte counters, and ordered files. It is null before command output storage starts.
-- `console`: observed, forwarded, rejected, and pending/dropped byte counters for best-effort console streaming.
+- `console`: observed, forwarded, rejected, and pending/dropped byte counters for best-effort console streaming, plus
+  `worker_finished`. In-process repetition requires the forwarding worker to have stopped before another run starts.
 - `test_traces`: private trace-root identity and fixed-layout collection evidence, or null before command setup.
 - `child_status`: Python's raw return code plus normalized `exit_code` or `signal`.
 - `recorder`: recorder exit code, forced-cleanup flag, cleanup limitation, and error text.

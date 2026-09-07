@@ -44,6 +44,18 @@ PATH="$nextest_dir:$tmux_dir:$PATH" python3 scripts/record-test-run.py \
   -- cargo nextest run -p farhelm --test e2e -E 'test(terminal_tabs::)'
 ```
 
+For a finite repetition with one retained batch index, use the hunt wrapper. The default plans without probing or
+creating evidence; `--execute` opts into the selected number of attempts. The command must name a package, target,
+workspace, or filter scope:
+
+```sh
+python3 scripts/hunt-rust-tests.py --repeat 20 --timeout 60 --execute \
+  -- cargo nextest run -p farhelm-supervisor --lib -E 'test(shutdown_acks)'
+```
+
+Each attempt still goes through the recorder, so the pinned tmux binary must already be available. The wrapper does not
+build or install it, and keeps failed attempts when a later attempt passes.
+
 For checks without tmux, use `--tmux none`; a deliberate comparison with another local binary uses `warn`. Record the
 actual selection and four-slot runner budget in `--concurrency`. Do not label a one-test run as a four-test load merely
 because its budget is four. `docs/test-run-evidence.md` describes private retention and incomplete runs. Failed attempts
