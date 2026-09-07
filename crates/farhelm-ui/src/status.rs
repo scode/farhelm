@@ -453,7 +453,7 @@ mod tests {
     /// `StatusBadgeView` turning `visible: false` into a dot plus clipped
     /// text is a browser fact (`.visually-hidden` has to actually clip), and
     /// the terminal spec's live-dot test is what asserts it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn status_badge_matches_text_and_class_for_each_status() {
         assert_eq!(
             status_badge(&SessionStatus::Running, None, None),
@@ -498,7 +498,7 @@ mod tests {
     /// live) badge untouched — including `Running`/`Waiting`, which the
     /// module doc above states ignore the flag entirely, pinned here rather
     /// than left to be inferred from the match arms.
-    #[test]
+    #[farhelm_testtrace::test]
     fn idle_alone_reads_the_unseen_flag() {
         assert_eq!(
             status_badge(&SessionStatus::Idle, None, Some(true)),
@@ -547,7 +547,7 @@ mod tests {
     /// The annotation argument is exercised too: `Unknown` must stay
     /// badgeless even for a session carrying one, since the presence of an
     /// annotation must never be a back door to a badge.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unknown_status_produces_no_badge_at_all() {
         assert_eq!(status_badge(&SessionStatus::Unknown, None, None), None);
         assert_eq!(
@@ -582,7 +582,7 @@ mod tests {
     /// wrong: an annotation describes how a run ENDED, so it must never
     /// leak onto a session that is running — which is exactly what a
     /// stopped-then-restarted session is.
-    #[test]
+    #[farhelm_testtrace::test]
     fn stop_annotation_qualifies_the_exited_badge_without_replacing_it() {
         assert_eq!(
             status_badge(
@@ -618,7 +618,7 @@ mod tests {
     /// result, nor about the SEPARATE title element sitting next to it
     /// (both exercised by the Playwright suite instead, not by anything
     /// callable from this unit test).
-    #[test]
+    #[farhelm_testtrace::test]
     fn confirm_consequence_wording_differs_between_live_and_unknown() {
         for live in [
             SessionStatus::Running,
@@ -645,7 +645,7 @@ mod tests {
     /// wording can be improved without the test having to be rewritten
     /// each time; what must not change is that it stops promising a kill
     /// and starts naming what deleting actually costs.
-    #[test]
+    #[farhelm_testtrace::test]
     fn interrupted_consequence_promises_no_kill() {
         let wording = confirm_consequence(&SessionStatus::Interrupted);
         assert!(
@@ -666,7 +666,7 @@ mod tests {
     /// `Error` is one of the statuses it can have moved to. The wording
     /// must match `Error`'s actual meaning (never started, not merely
     /// "finished"), not borrow `Interrupted`'s reboot-specific phrasing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn error_consequence_promises_no_kill_and_names_no_reboot() {
         let wording = confirm_consequence(&SessionStatus::Error {
             detail: "exec_failed argv0=/nope errno=2".to_string(),
@@ -688,7 +688,7 @@ mod tests {
     /// [`replace_consequence`]'s own version of the no-guessing pin above:
     /// a live status must claim the kill, `Unknown` may only admit
     /// uncertainty, and neither may borrow the other's certainty.
-    #[test]
+    #[farhelm_testtrace::test]
     fn replace_consequence_wording_differs_between_live_and_unknown() {
         for live in [
             SessionStatus::Running,
@@ -715,7 +715,7 @@ mod tests {
     /// to replace's wording instead. `Interrupted` additionally names the
     /// reboot that is why there is nothing left to kill; `Exited` does not,
     /// since an ordinary exit needs no such explanation.
-    #[test]
+    #[farhelm_testtrace::test]
     fn replace_consequence_never_promises_a_kill_for_an_already_ended_session() {
         let exited = replace_consequence(&SessionStatus::Exited { exit_code: Some(0) });
         assert!(
@@ -737,7 +737,7 @@ mod tests {
     /// mirrored for replace: an agent whose exec never succeeded leaves
     /// nothing for replace to kill either, and the wording must not borrow
     /// `Interrupted`'s reboot framing for an unrelated failure.
-    #[test]
+    #[farhelm_testtrace::test]
     fn replace_consequence_error_promises_no_kill_and_names_no_reboot() {
         let wording = replace_consequence(&SessionStatus::Error {
             detail: "exec_failed argv0=/nope errno=2".to_string(),
@@ -760,7 +760,7 @@ mod tests {
     /// warning from every applicable arm. `Error` is the one deliberate
     /// exception: no agent conversation ever started, so there is nothing
     /// for that arm to say was discarded.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_status_but_error_warns_the_conversation_is_discarded() {
         let discards = [
             SessionStatus::Running,
@@ -794,7 +794,7 @@ mod tests {
     /// [`confirm_consequence`]'s. A regression that dropped it from even
     /// one arm would leave that status's prompt reading exactly like
     /// delete's, with nothing telling the user a replacement is coming.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_replace_consequence_arm_promises_a_fresh_replacement() {
         let statuses = [
             SessionStatus::Running,

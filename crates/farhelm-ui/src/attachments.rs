@@ -663,7 +663,7 @@ mod tests {
     /// Exactly ONE flavor comes back for every payload, which is what
     /// makes "one winning interpretation, one insertion" structural rather
     /// than a discipline the caller has to keep.
-    #[test]
+    #[farhelm_testtrace::test]
     fn precedence_is_file_then_image_then_text() {
         assert_eq!(classify(true, true, true), Flavor::File);
         assert_eq!(classify(true, false, true), Flavor::File);
@@ -690,7 +690,7 @@ mod tests {
     /// passes for any consistent pair of bugs, including a transposed bit
     /// order. This is the wire format, so it is asserted the way a wire
     /// format has to be — by writing down what must appear on the wire.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_shipped_table_is_the_exact_eight_entry_wire_array() {
         assert_eq!(
             classification_table(),
@@ -718,7 +718,7 @@ mod tests {
     /// MIME type a clipboard actually produces, plus the three shapes the
     /// derivation exists to handle (structured suffix, vendor tree, `x-`
     /// prefix) and the two that genuinely yield nothing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn extensions_come_from_the_mime_type_for_any_image_subtype() {
         assert_eq!(GENERATED_NAME_PREFIX, "pasted-");
         let expected: &[(&str, &str)] = &[
@@ -764,7 +764,7 @@ mod tests {
     /// bound is the second half of that narrowing and must be generous
     /// enough to survive a loaded machine's clock skew between the page
     /// and the engine's stamp.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_placeholder_rule_is_the_engine_synthesized_name_and_nothing_else() {
         assert_eq!(PLACEHOLDER_NAME_STEM, "image");
         let placeholder = format!(
@@ -787,7 +787,7 @@ mod tests {
     /// cannot derive for itself, so what is shipped has to be exactly the
     /// corrections this module applies — and each entry has to actually
     /// correct something, or it is a row that says nothing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_shipped_aliases_are_the_corrections_the_rule_applies() {
         let policy = attachment_policy("s1");
         let aliases = policy["extensionAliases"].as_object().expect("an object");
@@ -809,7 +809,7 @@ mod tests {
     /// case below is a real path shape: a macOS-style directory with
     /// spaces, an apostrophe in a user's name, and a `$` that a shell
     /// would expand into something else entirely.
-    #[test]
+    #[farhelm_testtrace::test]
     fn paths_a_shell_would_mangle_are_the_ones_that_need_quoting() {
         // The rule terminal.js applies, spelled out here against the same
         // shipped data it reads: a path is bare only if every character of
@@ -847,7 +847,7 @@ mod tests {
     /// not be able to redirect a file upload at another session's endpoint
     /// (the same attack `api::path_segments_cannot_escape_their_segment`
     /// pins for the tab routes).
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_upload_endpoint_encodes_the_session_id() {
         assert_eq!(attachment_upload_path("s1"), "/api/sessions/s1/attachments");
         assert_eq!(
@@ -859,7 +859,7 @@ mod tests {
     /// A status line belongs to exactly one terminal, so its id must be
     /// derived from that terminal's own mount point and must collide with
     /// nothing else the session view renders.
-    #[test]
+    #[farhelm_testtrace::test]
     fn status_element_ids_are_per_terminal() {
         assert_eq!(attachment_status_element_id("terminal"), "attach-terminal");
         assert_ne!(
@@ -875,7 +875,7 @@ mod tests {
     /// silently; wording that omits the name, or that reports a failure
     /// without accounting for the missing path, breaks that while looking
     /// fine.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_message_accounts_for_the_file_and_the_path() {
         assert!(BUSY_ONE_TEXT.contains("{name}"));
         assert!(BUSY_MANY_TEXT.contains("{count}"));
@@ -909,7 +909,7 @@ mod tests {
     /// interception silently disabled (a missing `upload` makes the hooks
     /// no-op) with every Rust test still green. The browser suite is what
     /// would catch it; this test makes the shape itself explicit.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_policy_carries_every_key_the_page_reads() {
         let policy = attachment_policy("s1");
         assert_eq!(policy["upload"], "/api/sessions/s1/attachments");

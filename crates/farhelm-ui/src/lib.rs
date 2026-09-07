@@ -1646,7 +1646,7 @@ mod tests {
     /// compared sets omit it in lockstep. The script cannot notice that. This
     /// walk is the only thing that can, which is why it reads the directory
     /// rather than one `include_str!`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn asset_declarations_stay_inside_the_inventory_macro() {
         let sources = crate_sources();
         // Prove the walk reached the files that make it worth doing before
@@ -1688,7 +1688,7 @@ mod tests {
     /// proves. Includes a fenced declaration and a comment mentioning the
     /// macro, so the fixture exercises the same discrimination the real
     /// source demands.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_scan_reports_an_asset_declared_in_a_desktop_only_module() {
         let needle = asset_macro_needle();
         let lib = format!(
@@ -1719,7 +1719,7 @@ mod tests {
     /// fence rather than inside it.
     ///
     /// The other half of the rule: being in the right FILE is not enough.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_scan_reports_an_asset_declared_beside_the_fence_in_lib_rs() {
         let needle = asset_macro_needle();
         let lib = format!(
@@ -1777,7 +1777,7 @@ mod tests {
     /// deletes a live session with no prompt at all. Neither failure shows
     /// up as a crash or a failed request — the UI just quietly does the
     /// destructive thing — so the table is the only place either is caught.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_status_answers_both_liveness_predicates() {
         for (status, live, ended) in status_truth_table() {
             assert_eq!(
@@ -1804,7 +1804,7 @@ mod tests {
     /// `!other()` would erase exactly that, and would do it silently, since
     /// every other variant agrees. Asserting the gap explicitly is what
     /// makes such a change fail here instead of in a confirmation prompt.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unresolved_status_is_neither_live_nor_ended() {
         assert!(!SessionStatus::Unknown.is_live());
         assert!(!SessionStatus::Unknown.has_ended());
@@ -1825,7 +1825,7 @@ mod tests {
     /// never stopped, and every reply from a helm predating PLAN_M3.md
     /// item 4) must decode as `None` rather than failing the whole
     /// listing — the same decode tolerance `status` carries.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_without_annotation_field_decodes_as_none() {
         let json = serde_json::json!({
             "id": "s1",
@@ -1853,7 +1853,7 @@ mod tests {
     /// Decoded from a whole `Session` object rather than from the status
     /// alone, because the nesting is part of what a drift would break —
     /// the status arrives as a field of a listing row, never on its own.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_live_status_spelling_decodes_through_the_ui_mirror() {
         for (state, expected) in [
             ("running", SessionStatus::Running),
@@ -1903,7 +1903,7 @@ mod tests {
     /// that folded `null` into the outer `None` — which serde's stock
     /// `Option<Option<_>>` handling does — would silently reopen the
     /// new-install-took-over window for identity-less hosts.
-    #[test]
+    #[farhelm_testtrace::test]
     fn host_identity_decodes_absent_null_and_present_distinctly() {
         let body = |host_identity: Option<serde_json::Value>| {
             let mut json = serde_json::json!({
@@ -1937,7 +1937,7 @@ mod tests {
     /// `has_unseen_output()` answer for one of the three shapes (absent and
     /// null both classify unseen), so a test that only asserted the
     /// classification, never the decode, could not tell them apart.
-    #[test]
+    #[farhelm_testtrace::test]
     fn seen_activity_at_decodes_absent_null_and_present_distinctly() {
         let body = |seen_activity_at: Option<serde_json::Value>| {
             let mut json = serde_json::json!({
@@ -1993,7 +1993,7 @@ mod tests {
     /// never be conflated with a current helm's explicit `null` for "no
     /// alias set" (`Some(None)`), or the editor would be silently offered
     /// against a helm with no route to submit to.
-    #[test]
+    #[farhelm_testtrace::test]
     fn host_alias_decodes_absent_null_and_present_distinctly() {
         let body = |alias: Option<serde_json::Value>| {
             let mut json = serde_json::json!({
@@ -2029,7 +2029,7 @@ mod tests {
     /// farhelm-proto's own decode-tolerance contract for
     /// `SessionInfo::status`. A silent default of, say, `Running` would be
     /// a fabricated liveness claim.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_without_status_field_decodes_as_unknown() {
         let json = serde_json::json!({
             "id": "s1",
@@ -2052,7 +2052,7 @@ mod tests {
     /// its `name` would silently start showing the profile's CURRENT label,
     /// which is precisely the promise SPEC.md's snapshot rule makes about
     /// what an edit does not touch.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_sessions_source_profile_decodes_as_a_snapshot_plus_a_derived_existence() {
         let raw_created: Session = serde_json::from_value(serde_json::json!({
             "id": "s1", "title": "demo", "cwd": "/tmp", "invocation": "agent",
@@ -2091,7 +2091,7 @@ mod tests {
     /// agent. Absence matters for the same reason from the other side — an
     /// absent template is a real state (the supervisor derives one per kind),
     /// not an empty list to be sent back as an explicit "no resume".
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_profile_decodes_with_its_kind_verbatim_and_its_template_optional() {
         let profile: Profile = serde_json::from_value(serde_json::json!({
             "id": "p-1", "name": "Claude Code", "invocation": "claude",
@@ -2125,7 +2125,7 @@ mod tests {
     /// that would make this UI offer a resume the supervisor would then
     /// refuse. The same no-fabrication direction `status`'s own default
     /// takes.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_without_restart_offer_decodes_as_fresh_only() {
         let json = serde_json::json!({
             "id": "s1",
@@ -2156,7 +2156,7 @@ mod tests {
     /// impossible here (there is only one empty value), so the risk this
     /// pins is purely the decode ERROR that a missing field would
     /// otherwise be.
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_without_tabs_field_decodes_as_no_tabs() {
         let json = serde_json::json!({
             "id": "s1",
@@ -2190,7 +2190,7 @@ mod tests {
     /// `SessionInfo`, on the reasoning that the caller already knows which
     /// host it asked for. A required `host` would turn every successful
     /// create into a decode failure.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_session_decodes_with_or_without_the_multi_host_fields() {
         let create_reply = serde_json::json!({
             "id": "s1",
@@ -2227,7 +2227,7 @@ mod tests {
     /// each chip (both versions on skew, both identities on a mismatch, the
     /// twin on a duplicate), and a field lost in decoding would leave a
     /// user with a diagnosis and no remedy.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_host_phase_decodes_with_the_evidence_its_chip_renders() {
         let hosts: Vec<Host> = serde_json::from_value(serde_json::json!([
             {
@@ -2281,7 +2281,7 @@ mod tests {
     /// `other` fallback a single host in a newer state would blank the ENTIRE
     /// hosts panel — the one surface SPEC.md requires to always show every
     /// host's connection state.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unknown_phase_costs_one_row_rather_than_the_whole_panel() {
         let hosts: Vec<Host> = serde_json::from_value(serde_json::json!([
             {
@@ -2320,7 +2320,7 @@ mod tests {
     /// phase — and, critically, is not mistaken for `ssh`. Offering edit and
     /// remove for a row whose nature is unknown would be a guess about what
     /// the helm would accept.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unknown_host_kind_decodes_as_unrecognized_rather_than_ssh() {
         let host: Host = serde_json::from_value(serde_json::json!({
             "id": 1, "kind": "quantum", "destination": null, "name": "odd",
@@ -2342,7 +2342,7 @@ mod tests {
     /// surface whose whole job is to be believable. Failing instead makes it
     /// a FAILED READ, which the panel reports as such while keeping the
     /// snapshot it still trusts (`hosts::HostsRead`).
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_missing_required_field_fails_the_decode_rather_than_fabricating_a_value() {
         for incomplete in [
             serde_json::json!({ "phase": "version-skew", "peer_build": "b", "our_protocol": 8,
@@ -2376,7 +2376,7 @@ mod tests {
     /// The `0` row is the compatibility case the whole method exists for: a
     /// helm predating `last_activity_at` sends nothing, `#[serde(default)]`
     /// fills in a zero, and that zero means "unknown", never 1970.
-    #[test]
+    #[farhelm_testtrace::test]
     fn effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |last_activity_at: i64, created_at: i64| Session {
             id: "s1".to_string(),
@@ -2436,7 +2436,7 @@ mod tests {
     /// exact boundary where a stamp equals the current effective activity,
     /// which the auto-mark effect depends on reading as SEEN so it does not
     /// immediately contradict its own write.
-    #[test]
+    #[farhelm_testtrace::test]
     fn has_unseen_output_reads_absence_staleness_and_the_equal_boundary() {
         let at = |seen_activity_at: Option<Option<i64>>, last_activity_at: i64| Session {
             id: "s1".to_string(),

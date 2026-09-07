@@ -2790,7 +2790,7 @@ mod tests {
 
     /// Only the middleware's structured marker means device authentication;
     /// an unrelated 401 must stay with the operation that received it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn device_authentication_requires_its_specific_marker() {
         assert!(device_auth_required(
             r#"{"error":"unauthenticated","code":"device_auth_required"}"#
@@ -2805,7 +2805,7 @@ mod tests {
     /// the retry's allowance; otherwise one page can consume two advertised
     /// request budgets while claiming to remain bounded by one.
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn desktop_refresh_and_retry_share_the_original_deadline() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -2841,7 +2841,7 @@ mod tests {
     /// is a path the user did not type: paths may legally begin or end with
     /// a space, and the entry would dial one thing while the form shows
     /// another.
-    #[test]
+    #[farhelm_testtrace::test]
     fn blank_install_fields_are_absent_while_others_survive_verbatim() {
         assert_eq!(install_field(""), None);
         assert_eq!(install_field("   "), None);
@@ -2861,7 +2861,7 @@ mod tests {
     /// both belong to the helm, and teaching this client every action field
     /// would create a second renderer that can drift. The opaque one-use id
     /// and confirmation text are the complete client contract before POST.
-    #[test]
+    #[farhelm_testtrace::test]
     fn provisioning_replies_decode_without_reimplementing_the_plan() {
         let offered: ProbeResponse = serde_json::from_value(serde_json::json!({
             "result": "provisionable",
@@ -2919,7 +2919,7 @@ mod tests {
     /// the one a client reaches by accident, by keeping a stale invocation
     /// beside a freshly chosen profile. Asserting the ABSENCE of the other
     /// key is therefore the load-bearing half of each case.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_create_body_carries_one_creation_mode_and_not_the_other() {
         let raw = create_body(
             "/tmp",
@@ -2965,7 +2965,7 @@ mod tests {
     /// feeds refuses a create that would otherwise LAUNCH the wrong profile
     /// on a retargeted host; the absent form is what keeps a caller with no
     /// connection to name (a script, an older client) able to create at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_create_names_the_connection_it_was_prepared_against() {
         let body = create_body(
             "/tmp",
@@ -2996,7 +2996,7 @@ mod tests {
     /// The marker is what tells a client "the world moved, re-read" apart
     /// from every other 409, which must NOT be answered by re-reading; and it
     /// is a machine token a user cannot act on, so it never reaches the form.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_stale_create_refusal_is_classified_by_marker_and_shown_without_it() {
         let (stale, prose) = precondition_of(
             "host 1 is not the connection this request was prepared against \
@@ -3019,7 +3019,7 @@ mod tests {
     /// editor that never showed the field would quietly strip a starter
     /// profile's resume command the first time anyone renamed it. The
     /// explicit `null` is how "no template" is stated rather than implied.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_profile_spec_sends_its_whole_definition_including_an_absent_template() {
         let spec = ProfileSpec {
             name: "Claude Code".to_string(),
@@ -3060,7 +3060,7 @@ mod tests {
     /// decoder that dropped it — or that helpfully filtered it against the
     /// catalog — would turn "your last profile is gone, pick another" into a
     /// silent nothing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_catalog_keeps_a_remembered_default_that_no_longer_resolves() {
         let fresh: ProfileCatalog = serde_json::from_value(serde_json::json!({
             "profiles": [],
@@ -3084,7 +3084,7 @@ mod tests {
     /// be the ones farhelm-proto's `RestartMode` decodes — a typo here
     /// would turn every restart into a 400 nothing in this crate could
     /// explain.
-    #[test]
+    #[farhelm_testtrace::test]
     fn each_offer_maps_to_its_one_legal_mode() {
         assert_eq!(restart_mode_for(RestartOffer::FreshOnly), "fresh");
         assert_eq!(restart_mode_for(RestartOffer::Resume), "resume");
@@ -3112,7 +3112,7 @@ mod tests {
     /// let a build one step behind decode today's object, the same
     /// tolerance farhelm-proto's own wire types carry.
     ///
-    #[test]
+    #[farhelm_testtrace::test]
     fn session_list_body_without_total_or_truncated_defaults_both() {
         let json = serde_json::json!({ "sessions": [] });
         let decoded: SessionListBody = serde_json::from_value(json).unwrap();
@@ -3136,7 +3136,7 @@ mod tests {
     /// construction — no filter, so everything matched — and stays an
     /// absence under a filter, where the substituted number would vouch for
     /// a filter that never ran.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_absent_matching_count_becomes_a_number_only_where_it_cannot_lie() {
         let filtered: SessionListBody = serde_json::from_value(serde_json::json!({
             "sessions": [], "total": 700, "matching": 12, "truncated": false,
@@ -3182,7 +3182,7 @@ mod tests {
     /// Turning the switch ON is the mirror case: it widens the view rather
     /// than narrowing it, so the banner stays unfiltered and the reply
     /// becomes fleet-wide.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_archive_switch_is_a_view_rather_than_a_filter() {
         let ordinary = SessionFilter::default();
         assert!(
@@ -3233,7 +3233,7 @@ mod tests {
     /// where the decision is testable at all — the count wording is Dioxus
     /// markup a browser has to render, and the e2e archive spec pins the
     /// rendered half.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_archive_switch_is_clearable_without_being_announced() {
         let widened = SessionFilter {
             include_archived: true,
@@ -3271,7 +3271,7 @@ mod tests {
     /// search would split into a second parameter, and a search for
     /// `a&status=exited` would silently become a status filter the user
     /// never asked for.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_filter_dimension_travels_under_its_own_encoded_parameter() {
         let filter = SessionFilter {
             include_archived: true,
@@ -3300,7 +3300,7 @@ mod tests {
     /// are asserted literally rather than round-tripped through
     /// [`ListSort::from_key`] — a round trip agrees with itself no matter
     /// which words it invented, and an invented one is a 400 at the helm.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_listing_request_names_its_order() {
         assert_eq!(
             list_query(&SessionFilter::default(), ListSort::default()),
@@ -3348,7 +3348,7 @@ mod tests {
     /// surrounding spaces, so trimming would make what is actually there
     /// unfindable — and would turn typing a single space into a silent
     /// clear, which is the one version of this a user can watch happen.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_an_exactly_empty_value_clears_a_dimension() {
         let blank = SessionFilter {
             include_archived: true,
@@ -3394,7 +3394,7 @@ mod tests {
     /// pinned, because either alone is enough: `/` ends the segment, and a
     /// segment that is exactly `..` is resolved away even with no slash in
     /// it at all.
-    #[test]
+    #[farhelm_testtrace::test]
     fn path_segments_cannot_escape_their_segment() {
         assert_eq!(
             encode_path_segment("../../victim"),
@@ -3431,7 +3431,7 @@ mod preference_write_tests {
     /// final true. Treating value equality as acknowledgement loses that
     /// final choice. The resend is needed after either success or failure,
     /// but an unchanged failed resend must not create an automatic retry.
-    #[test]
+    #[farhelm_testtrace::test]
     fn returning_to_an_in_flight_value_still_sends_the_new_choice() {
         for first_succeeded in [false, true] {
             let mut queue = PreferenceWrites::default();
@@ -3457,7 +3457,7 @@ mod preference_write_tests {
     /// spawned requests can finish in reverse order, and the older value
     /// finishing last would win the helm's row while the page showed the
     /// newer one — invisible until a reload or another client read it back.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_newer_value_recorded_mid_flight_is_sent_after_and_wins() {
         let mut queue = PreferenceWrites::default();
         assert!(
@@ -3500,7 +3500,7 @@ mod preference_write_tests {
 
     /// The three fields are independent queues: text and boolean choices
     /// neither wait behind nor reorder one another.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_three_fields_do_not_share_a_writer() {
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(PreferenceValue::Sort("title".to_string())));
@@ -3517,7 +3517,7 @@ mod preference_write_tests {
     /// A failed write leaves the value DIRTY and the field free: no retry
     /// loop (fire-and-forget), but the choice is not forgotten — it is what
     /// the post-reauthentication seed overlays and replays (review F2).
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_failed_write_stays_dirty_and_is_claimed_exactly_once_for_replay() {
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(PreferenceValue::Selected("session-9".to_string())));
@@ -3552,7 +3552,7 @@ mod preference_write_tests {
     /// A cancelled writer releases the field but keeps the value dirty, so
     /// a later write starts a fresh writer instead of queueing forever
     /// behind a task that no longer exists.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_lost_writer_releases_the_field_without_forgetting_the_value() {
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(PreferenceValue::Sort("title".to_string())));
@@ -3569,7 +3569,7 @@ mod preference_write_tests {
 
     /// A clean field yields nothing to replay: after an acknowledged write,
     /// the fetched row (possibly another client's newer choice) wins.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_acknowledged_field_is_not_overlaid_onto_a_fetched_seed() {
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(PreferenceValue::Sort("title".to_string())));
@@ -3619,7 +3619,7 @@ mod seen_write_tests {
     /// outcome is never reported — the guarantee that rules out a slower
     /// automatic "mark seen" landing on the wire after a faster manual
     /// "mark unread" and silently reverting it (SYSTEMS-1).
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_later_value_recorded_mid_flight_is_sent_after_and_the_earlier_outcome_is_dropped() {
         let mut queue = SeenWrites::default();
         let reported: ReportedOutcomes = Rc::new(RefCell::new(Vec::new()));
@@ -3684,7 +3684,7 @@ mod seen_write_tests {
     /// Two independent sessions never share a writer or a report — the
     /// per-session keying that lets an unrelated session's write proceed
     /// without waiting behind this one's.
-    #[test]
+    #[farhelm_testtrace::test]
     fn two_sessions_do_not_share_a_writer() {
         let mut queue = SeenWrites::default();
         assert!(queue.record("sess-1", Some(1), Box::new(|_| {})));
@@ -3698,7 +3698,7 @@ mod seen_write_tests {
     /// A cancelled writer (its task dropped mid-request) releases the id
     /// but a record made before the cancellation is still there to be sent
     /// by whichever later write claims a fresh writer.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_lost_writer_releases_the_id_without_losing_the_queued_value() {
         let mut queue = SeenWrites::default();
         assert!(queue.record("sess-1", Some(1), Box::new(|_| {})));

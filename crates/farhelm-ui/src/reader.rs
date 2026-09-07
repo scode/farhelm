@@ -728,7 +728,7 @@ mod tests {
     /// The stopping half is what keeps this from being a poll. A reader that
     /// looped regardless of what was owed would re-read at the ladder's
     /// cadence forever, which is exactly the periodic loop M6.75 removed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_satisfied_reader_stops() {
         let (reader, decisions) = drive(&[(true, 0)]);
         assert_eq!(decisions, vec![Next::Idle]);
@@ -744,7 +744,7 @@ mod tests {
     /// takes whichever lands last. One follow-up read is both cheaper and
     /// more correct — it is guaranteed to have started after every notice in
     /// the burst.
-    #[test]
+    #[farhelm_testtrace::test]
     fn notices_during_a_read_coalesce_into_one_follow_up() {
         let (reader, decisions) = drive(&[(true, 5), (true, 0)]);
         assert_eq!(
@@ -769,7 +769,7 @@ mod tests {
     /// exposed: the claim is released for the duration of the backoff, and
     /// an undisturbed wait has to end with the SAME reader picking the
     /// surface back up.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_failed_read_retries_and_eventually_settles() {
         let mut reader = fresh();
         assert!(reader.claim(Trigger::Notice));
@@ -795,7 +795,7 @@ mod tests {
     /// of the ladder would leave the surface permanently stale, which is the
     /// failure this whole module answers; one that kept hammering at half a
     /// second would be a poll wearing a retry's name.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_retry_ladder_gives_way_to_low_frequency_probing() {
         let rungs: Vec<u64> = (1..=6).map(retry_delay_ms).collect();
         assert_eq!(rungs, vec![500, 1_000, 2_000, 4_000, 8_000, 15_000]);
@@ -818,7 +818,7 @@ mod tests {
     /// aside wakes holding a stale ticket and must NOT start a read beside
     /// the one that superseded it, or "one read at a time" would hold
     /// everywhere except across a backoff.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_trigger_during_a_retry_wait_reads_at_once() {
         let mut reader = fresh();
         assert!(reader.claim(Trigger::Notice));
@@ -860,7 +860,7 @@ mod tests {
     /// [`FakeTask`]). Without that seam this test could only watch `None` go
     /// past, and an implementation that cancelled nothing at all would pass
     /// it — which is exactly the state it was in before.
-    #[test]
+    #[farhelm_testtrace::test]
     fn repeated_news_during_backoffs_leaves_exactly_one_reader() {
         let mut reader = fresh();
         assert!(reader.claim(Trigger::Explicit));
@@ -923,7 +923,7 @@ mod tests {
     /// the next cycle, or the following claim would cancel a task that has
     /// already ended — harmless today, and exactly the kind of stale handle
     /// that becomes a live bug the moment ids are reused.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_retired_reader_leaves_no_handle_behind() {
         let mut reader = fresh();
         assert!(reader.claim(Trigger::Notice));
@@ -953,7 +953,7 @@ mod tests {
     /// three seconds forever and the ladder might as well not exist. A tick
     /// carries no information the last one did not — it is a clock, not an
     /// event — so the only thing it may do is set a stopped reader going.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_fallback_tick_never_shortens_a_backoff() {
         let mut reader = fresh();
         assert!(
@@ -996,7 +996,7 @@ mod tests {
     /// silently did nothing — and it is the kind of bug that reads as
     /// correct in the diff, because "stop reading" sounds like the safe
     /// direction until it is a person's click that stops working.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_unattended_reads_are_withdrawn_under_skew() {
         for unattended in [Trigger::Notice, Trigger::Scheduled] {
             let mut reader = fresh();
@@ -1035,7 +1035,7 @@ mod tests {
     /// news that arrived during it. Backing the follow-up off would make an
     /// explicit trigger pay for a request it never had anything to do with,
     /// which is the same product bug as the one above with different timing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_trigger_during_a_failed_read_is_not_backed_off() {
         let mut reader = fresh();
         assert!(reader.claim(Trigger::Notice));
@@ -1068,7 +1068,7 @@ mod tests {
     /// under skew. The user's click would then be answered on a helm that
     /// matches and silently dropped on one that does not, which is the worst
     /// kind of intermittent.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_attended_demand_survives_unattended_ones_landing_on_it() {
         let mut reader = fresh();
         assert!(reader.claim(Trigger::Explicit));

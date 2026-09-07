@@ -295,7 +295,7 @@ mod tests {
     /// claim, made with NO render in between — exactly the situation a
     /// render-time boolean cannot see, because the boolean it would have
     /// read was computed before the first claim existed — is refused.
-    #[test]
+    #[farhelm_testtrace::test]
     fn one_claimant_at_a_time_with_no_render_in_between() {
         let mut held = false;
         assert!(claim_in(&mut held), "an idle page grants the token");
@@ -319,7 +319,7 @@ mod tests {
     /// describes the host that was removed. Committing it puts the row back
     /// on screen until the next tick, which reads as the helm ignoring the
     /// removal.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_older_success_never_overwrites_a_newer_one() {
         let mut gate = ReadGate::default();
         let first = gate.start();
@@ -343,7 +343,7 @@ mod tests {
     /// discard this one the moment the next poll began, so a helm that is
     /// down would look merely quiet: rows on screen, no error, nothing to
     /// act on.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_later_failure_is_reported_without_disturbing_the_applied_snapshot() {
         let mut gate = ReadGate::default();
         let first = gate.start();
@@ -367,7 +367,7 @@ mod tests {
     /// describes a moment that has already been superseded by a success, and
     /// reporting it would put a refresh-failed line over rows that were just
     /// refreshed successfully.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_failure_older_than_the_applied_snapshot_is_dropped() {
         let mut gate = ReadGate::default();
         let stale = gate.start();
@@ -380,7 +380,7 @@ mod tests {
     /// GET's eventual body or failure. This pins the catalog race where an
     /// old response could otherwise undo the locally absorbed mutation until
     /// its follow-up refresh completed.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_mutation_fence_rejects_reads_that_started_before_it() {
         let mut gate = ReadGate::default();
         let old_get = gate.start();

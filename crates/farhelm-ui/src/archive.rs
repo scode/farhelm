@@ -86,7 +86,7 @@ mod tests {
 
     /// An ended agent is not sufficient evidence for an immediate archive
     /// when a retained tab still names a shell archive will destroy.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_terminal_tab_keeps_the_archive_confirmation_required() {
         let mut session = specimen(SessionStatus::Exited { exit_code: Some(0) }, 1);
         session.annotation = Some(STOP_ANNOTATION.to_string());
@@ -98,7 +98,7 @@ mod tests {
 
     /// A completed stop is the one tabless exit with authoritative evidence
     /// that its owned process tree was already swept.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_tabless_stopped_session_needs_no_archive_confirmation() {
         let mut session = specimen(SessionStatus::Exited { exit_code: Some(0) }, 0);
         session.annotation = Some(STOP_ANNOTATION.to_string());
@@ -107,7 +107,7 @@ mod tests {
 
     /// A natural exit may have left daemonized children, so archive names
     /// the prior tree even with no tabs left to make the risk obvious.
-    #[test]
+    #[farhelm_testtrace::test]
     fn an_unannotated_exit_confirms_the_prior_process_tree() {
         let session = specimen(SessionStatus::Exited { exit_code: Some(0) }, 0);
         assert!(
@@ -119,7 +119,7 @@ mod tests {
 
     /// Live and unknown agents both confirm with zero and plural tabs; the
     /// latter is conservative because unclassified does not mean dead.
-    #[test]
+    #[farhelm_testtrace::test]
     fn live_and_unknown_agents_name_zero_and_multiple_tabs() {
         for status in [SessionStatus::Running, SessionStatus::Unknown] {
             let session = specimen(status, 3);

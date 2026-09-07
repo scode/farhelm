@@ -239,7 +239,7 @@ mod tests {
 
     /// The ordinary steady state: every answered tick stays healthy and logs
     /// nothing, regardless of how many ticks accumulate.
-    #[test]
+    #[farhelm_testtrace::test]
     fn answered_ticks_stay_healthy_and_silent() {
         let mut state = Health::Healthy;
         for _ in 0..5 {
@@ -253,7 +253,7 @@ mod tests {
     /// A single miss must not itself declare the bridge dead — that would
     /// make an ordinary slow tick indistinguishable from MT-5, exactly the
     /// false positive the two-miss rule exists to prevent.
-    #[test]
+    #[farhelm_testtrace::test]
     fn one_miss_is_only_suspect_and_logs_nothing() {
         let (state, action) = transition(Health::Healthy, TickOutcome::Missed);
         assert_eq!(state, Health::Suspect);
@@ -263,7 +263,7 @@ mod tests {
     /// A miss that clears on the very next tick — one slow response, not a
     /// dead bridge — returns silently to healthy with no log line, so a busy
     /// webview never produces log noise for a transient stall.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_suspect_tick_that_then_answers_recovers_silently() {
         let (suspect, _) = transition(Health::Healthy, TickOutcome::Missed);
         let (state, action) = transition(suspect, TickOutcome::Answered);
@@ -274,7 +274,7 @@ mod tests {
     /// Two CONSECUTIVE misses is the documented threshold: the second one
     /// transitions to `Dead` and is the exact tick that must log the one
     /// loud line.
-    #[test]
+    #[farhelm_testtrace::test]
     fn two_consecutive_misses_declare_death_exactly_once() {
         let (suspect, first_action) = transition(Health::Healthy, TickOutcome::Missed);
         assert_eq!(
@@ -291,7 +291,7 @@ mod tests {
     /// log, never the ticks" is the whole point of the state machine, and a
     /// bricked webview left running overnight must not fill the log with a
     /// line every 15 seconds.
-    #[test]
+    #[farhelm_testtrace::test]
     fn repeated_misses_while_dead_never_log_again() {
         let mut state = Health::Dead;
         for _ in 0..10 {
@@ -306,7 +306,7 @@ mod tests {
     /// must accept a SUBSEQUENT run of ordinary healthy ticks afterward
     /// without logging again — proving the machine is not stuck believing
     /// it is still reporting.
-    #[test]
+    #[farhelm_testtrace::test]
     fn recovery_from_dead_logs_once_then_falls_silent_again() {
         let (healthy, action) = transition(Health::Dead, TickOutcome::Answered);
         assert_eq!(healthy, Health::Healthy);
@@ -322,7 +322,7 @@ mod tests {
     /// logs), and recovery (one more log) — asserting the TOTAL log count
     /// across the whole run is exactly two, which is the property that
     /// actually matters to a human reading the resulting log file.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_realistic_timeline_produces_exactly_two_log_lines() {
         let outcomes = [
             TickOutcome::Answered,
