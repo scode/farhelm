@@ -2,8 +2,8 @@
 
 `scripts/record-test-run.py` runs one command and leaves a private, bounded record of what ran, where it ran, which
 source tree it saw, and how the process ended. It is meant to provide input for later run tracking and flake hunting. It
-is not a test scheduler or retry loop, and a label never makes a run reproducible. Explicit nextest mode also retains
-the runner's configuration and reported test counts.
+is not a test scheduler or retry loop, and a label never makes a run reproducible. Explicit nextest and Playwright modes
+also retain runner policy and reported test counts.
 
 NOTE: The command argv and combined stdout/stderr are retained exactly. Do not put credentials in argv. Output is
 private local evidence, not publication-ready material; review it before copying any part of a run directory elsewhere.
@@ -141,6 +141,44 @@ shortens only its copy of the per-test execution period for that case, retaining
 commands compile a dependency-free fixture and verify that nextest kills a SIGTERM-resistant test and its child in the
 runner-owned test group. These are explicit lifecycle checks, not a per-edit stress requirement or an added CI job.
 
+## Recorded browser runs
+
+Use `--runner playwright` from the checkout's `e2e` directory after explicitly preparing the application builds,
+installed npm dependencies, browser binaries and pinned tmux described in AGENTS.md. Browser builds and runtime checks
+belong on a sandbox when they are expensive. The recorder neither installs prerequisites nor starts a build for you.
+
+```sh
+# From the checkout root, after preparing the required builds and pinned tmux:
+tmux_dir=$(scripts/build-pinned-tmux-ci.sh) && \
+cd e2e && \
+PATH="$tmux_dir:$PATH" python3 ../scripts/record-test-run.py \
+  --runner playwright --kind development --tmux required --timeout 300 \
+  --selection 'feed spec, both engines' --concurrency 'one browser worker; retries 0' \
+  -- npx playwright test 'feed\.spec\.ts'
+```
+
+The requested `npx playwright test` prefix is a selection syntax; execution uses resolved Node and the locally installed
+Playwright CLI directly. Both Playwright packages and their lock entries must match 1.62.0. The maintained config runs
+with one worker, zero retries, one execution per selected case, no focused-only tests and no snapshot updates. Only
+file-pattern and grep selectors are accepted; project, reporter, config and execution-policy overrides are refused. Both
+configured engines must execute cases before a zero child exit can support recorder success. A single-engine debugging
+command can still use generic recording, which does not claim validated browser counts.
+
+Each run owns `playwright.json`, `playwright-policy.json` and `playwright-artifacts/`. The supplementary reporter
+records resolved engine and project policy before execution and atomically replaces its own initial record at
+completion. Collection reconciles the reports, bounds reads and traversal, and keeps actual
+pass/failure/skip/interruption/unstarted counts separate from expected outcomes. An expected failure is an executed
+assertion, not a passing result. Missing or malformed evidence has no inferred zero denominator. The JSON read limit is
+16 MiB and policy read limit is 64 KiB; these are collection limits, not disk quotas on runner output. Raw reports and
+attachments remain private and may contain sensitive application data; no arbitrary attachment path is followed or
+exported.
+
+Timeout or operator interruption delivers SIGINT to Playwright so its teardown and reporters can run. The recorder
+retains the original operator signal or timeout as its own exit status and allows 60 seconds for owned-group cleanup.
+Even an already exited leader can keep the group visible during this interval; that wait preserves group ownership until
+the final signal. A forced kill can leave terminal reports incomplete. Report validation never overwrites an earlier
+nonzero child, timeout or interruption result.
+
 ## Exit status and lifecycle
 
 The manifest's `outcome` is one of:
@@ -150,7 +188,8 @@ The manifest's `outcome` is one of:
 - `completed`: the child exited normally or was signaled without the recorder itself receiving an interrupt.
 - `refused`: a pre-spawn policy check, currently required tmux validation, rejected the run.
 - `timed_out`: the command exceeded `--timeout`.
-- `interrupted`: the recorder received SIGINT or SIGTERM and forwarded it to the command group.
+- `interrupted`: the recorder received SIGINT or SIGTERM and initiated command-group shutdown using the runner's signal
+  policy.
 - `recorder-error`: spawning, evidence IO, or lifecycle management failed, so an ordinary command result would not be
   trustworthy.
 
@@ -189,10 +228,10 @@ The top-level fields are:
 - `started_at` and `finished_at`: UTC RFC 3339 timestamps. `finished_at` is null while running.
 - `duration_seconds`: total monotonic duration, or null while running.
 - `command`: exact string `argv`, actual caller/child `cwd`, requested `timeout_seconds` and
-  `termination_grace_seconds`, `require_complete_console`, and terminal `duration_seconds`. Nextest mode also retains
-  `requested_argv` before resolving the executable and inserting controlled options.
-- `runner`, when nextest mode is selected: preparation status, resolved executable identity, removed environment names,
-  retained configuration paths/hashes, execution policy, and report completeness/counts.
+  `termination_grace_seconds`, `graceful_stop_signal_override`, `require_complete_console`, and terminal
+  `duration_seconds`. Runner modes also retain `requested_argv` before resolving executables and controlled options.
+- `runner`, when a runner mode is selected: preparation status, resolved tool evidence, removed environment names,
+  configuration hashes, execution policy, and report completeness/counts. Nextest also retains its controlled configs.
 - `labels`: caller-supplied `kind`, `selection`, and `concurrency`, plus a reminder that they are descriptive.
 - `environment`: locale identity and FARHELM variable-name handling.
 - `platform`: OS release, machine architecture, logical CPU count, and Python identity. Processor probing is omitted
