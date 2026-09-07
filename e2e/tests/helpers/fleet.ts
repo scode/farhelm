@@ -561,6 +561,7 @@ export async function stubFeed(page: Page): Promise<FeedStub> {
         if (Date.now() > deadline) {
           throw new Error(`the page never opened feed socket #${nth} (saw ${connections})`);
         }
+        // sleep-ok: shared polling cadence for the observed connection count, with a 15s deadline.
         await page.waitForTimeout(50);
       }
     },
