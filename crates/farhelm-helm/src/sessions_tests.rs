@@ -5396,6 +5396,7 @@ async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
         {
             break after;
         }
+        // sleep-ok: poll committed running status after the refresh request, checking time between reads.
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     };
     assert_eq!(

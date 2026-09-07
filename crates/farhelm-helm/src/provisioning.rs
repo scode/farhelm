@@ -3834,6 +3834,7 @@ mod tests {
             if let Err(reason) = watch.observe(steps, tokio::time::Instant::now()) {
                 bail!("real provisioning run did not finish: {reason}");
             }
+            // sleep-ok: poll provisioning progress while the watch enforces stall and overall bounds.
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
@@ -3903,6 +3904,7 @@ mod tests {
                 if let Some(client) = manager.status(host).and_then(|status| status.client) {
                     return client;
                 }
+                // sleep-ok: poll the published client snapshot within the outer connection timeout.
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
@@ -3971,6 +3973,7 @@ mod tests {
                 "{what}: the host never held a connection long enough to answer; last ending: \
                  {error:#}"
             );
+            // sleep-ok: pace connection-loss retries; the deadline is checked after each failed call.
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }

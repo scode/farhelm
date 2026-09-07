@@ -3889,6 +3889,7 @@ mod tests {
                 tokio::time::Instant::now() < deadline,
                 "archive was cancelled with its reply waiter"
             );
+            // sleep-ok: poll durable archive completion after releasing the supervisor-owned task.
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(
