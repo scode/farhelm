@@ -188,7 +188,7 @@ class HuntTest(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             for name in ("hunt-rust-tests.py", "test_hunt.py", "record-test-run.py",
-                         "test_run_nextest.py", "test_run_traces.py"):
+                         "test_run_nextest.py", "test_run_traces.py", "test_run_playwright.py"):
                 shutil.copyfile(ROOT / "scripts" / name, scripts / name)
             environment = dict(os.environ)
             environment.pop("PYTHONDONTWRITEBYTECODE", None)

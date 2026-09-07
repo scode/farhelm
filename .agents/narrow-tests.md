@@ -109,6 +109,11 @@ single supervisor unit test cost ~30s wall (compile of the just-built crate's te
 
 ## Playwright: one spec, one engine
 
+For a selected spec under both engines, use the
+[recorded browser mode](../docs/test-run-evidence.md#recorded-browser-runs) to retain validated per-engine counts and
+fixed runner policy. The single-engine commands below remain useful for the first reproduction step; use generic command
+recording for those, since strict browser mode refuses project overrides.
+
 The browser suite is ~400 tests per engine across 33 spec files, and `e2e/playwright.config.ts` already defines one
 project per (engine, spec file): `chromium-terminal-tabs`, `webkit-feed`, and so on. That makes file-level selection
 first-class:

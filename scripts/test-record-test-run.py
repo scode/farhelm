@@ -842,6 +842,132 @@ class RecorderTest(unittest.TestCase):
         return self.environment(PATH=f"{bin_dir}:{os.environ.get('PATH', '')}",
                                 NEXTEST_TEST_THREADS="99", NEXTEST_PROFILE="ambient", NEXTEST_RETRIES="7")
 
+    def install_playwright_fixture(self, *, missing=False, status=0, wait=False):
+        """Provide installed metadata and a real child that emits synthetic browser reports.
+
+        This drives recorder preparation, environment and publication contracts.
+        It does not claim to exercise browsers or the real policy reporter.
+        """
+        e2e = self.repo / "e2e"
+        packages = {}
+        for name in ("playwright", "@playwright/test"):
+            package = e2e / "node_modules" / name
+            package.mkdir(parents=True, exist_ok=True)
+            (package / "package.json").write_text(json.dumps({"version": "1.62.0"}))
+            packages[f"node_modules/{name}"] = {"version": "1.62.0"}
+        (e2e / "package-lock.json").write_text(json.dumps({"packages": packages}))
+        (e2e / "node_modules/playwright/cli.js").write_text("fixture CLI")
+        (e2e / "playwright.config.ts").write_text("fixture config")
+        (e2e / "recorded-policy-reporter.cjs").write_text("fixture reporter")
+        bin_dir = self.base / "node-bin"
+        bin_dir.mkdir(exist_ok=True)
+        node = bin_dir / "node"
+        node.write_text(
+            f"#!{PYTHON}\n"
+            "import json, os, pathlib, signal, sys, time\n"
+            "if sys.argv[1:] == ['--version']: print('v24.16.0'); sys.exit(0)\n"
+            "if sys.argv[-1:] == ['--version']: print('Version 1.62.0'); sys.exit(0)\n"
+            "output = sys.argv[sys.argv.index('--output') + 1]\n"
+            "projects = [{'id': e, 'name': e, 'retries': 0, 'repeatEach': 1, 'outputDir': output} for e in ('chromium', 'webkit')]\n"
+            "def finish(interrupted=False):\n"
+            "    actual = 'interrupted' if interrupted else 'passed'\n"
+            "    outcome = 'skipped' if interrupted else 'expected'\n"
+            "    report = {'config': {'version': '1.62.0', 'workers': 1, 'forbidOnly': True, 'failOnFlakyTests': True, 'shard': None, 'projects': projects}, 'errors': [],\n"
+            "              'suites': [{'specs': [{'id': 'case', 'file': 'fixture.spec.ts', 'title': 'fixture', 'tests': [{'projectId': e, 'expectedStatus': 'passed', 'status': outcome, 'results': [{'status': actual, 'retry': 0}]} for e in ('chromium', 'webkit')]}]}],\n"
+            "              'stats': {'expected': 0 if interrupted else 2, 'unexpected': 0, 'flaky': 0, 'skipped': 2 if interrupted else 0}}\n"
+            "    policy = {'schema_version': 1, 'completed': True, 'status': 'interrupted' if interrupted else 'passed', 'workers': 1, 'forbidOnly': True, 'failOnFlakyTests': True, 'projects': [{**p, 'engine': p['name']} for p in projects]}\n"
+            f"    if not {missing!r}:\n"
+            "        pathlib.Path(os.environ['PLAYWRIGHT_JSON_OUTPUT_FILE']).write_text(json.dumps(report))\n"
+            "        pathlib.Path(os.environ['FARHELM_PLAYWRIGHT_POLICY_FILE']).write_text(json.dumps(policy))\n"
+            f"    sys.exit(130 if interrupted else {status})\n"
+            f"if {wait!r}:\n"
+            "    signal.signal(signal.SIGINT, lambda *_: finish(True))\n"
+            f"    pathlib.Path({str(self.base / 'browser-ready')!r}).touch()\n"
+            f"    {self.wait_code}\n"
+            "finish()\n"
+        )
+        node.chmod(0o700)
+        return self.environment(PATH=f"{bin_dir}:{os.environ.get('PATH', '')}",
+                                PLAYWRIGHT_SKIP_TEST_OUTPUT="ambient", PWTEST_RETRIES="ambient")
+
+    def test_playwright_mode_preserves_report_and_child_status(self):
+        """Browser report validation cannot erase a nonzero child or accept missing evidence."""
+        for missing, child, expected in ((False, 0, 0), (True, 0, 125), (True, 7, 7)):
+            with self.subTest(missing=missing, child=child):
+                environment = self.install_playwright_fixture(missing=missing, status=child)
+                requested = ["npx", "playwright", "test", "fixture.spec.ts"]
+                result = subprocess.run(self.cli(requested, "--runner", "playwright"),
+                                        cwd=self.repo / "e2e", env=environment,
+                                        capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, expected, result.stderr.decode())
+                _, manifest = self.latest_manifest()
+                self.assertEqual(manifest["child_status"]["raw_returncode"], child)
+                self.assertEqual(manifest["command"]["requested_argv"], requested)
+                self.assertEqual(manifest["command"]["termination_grace_seconds"], 60)
+                self.assertEqual(manifest["command"]["graceful_stop_signal_override"], signal.SIGINT)
+                self.assertEqual(manifest["runner"]["report"]["complete"], not missing)
+                self.assertEqual(manifest["runner"]["removed_environment_names"],
+                                 ["PLAYWRIGHT_SKIP_TEST_OUTPUT", "PWTEST_RETRIES"])
+
+    def test_playwright_sigterm_uses_sigint_cleanup_without_changing_operator_result(self):
+        """The browser runner receives graceful SIGINT while the recorder retains operator SIGTERM.
+
+        Group ownership intentionally retains a zombie leader through the grace
+        period. Use a shorter injected budget in this child-only fixture; the
+        adjacent preparation test verifies the production 60-second policy.
+        """
+        environment = self.install_playwright_fixture(wait=True)
+        arguments = self.cli(["npx", "playwright", "test", "fixture.spec.ts"], "--runner", "playwright")[2:]
+        helper = (
+            "import importlib.util, pathlib, sys\n"
+            "sys.dont_write_bytecode = True\n"
+            f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
+            f"spec = importlib.util.spec_from_file_location('browser_recorder_fixture', {str(SCRIPT)!r})\n"
+            "module = importlib.util.module_from_spec(spec); sys.modules[spec.name] = module\n"
+            "spec.loader.exec_module(module)\n"
+            "module.test_run_playwright.TERMINATION_GRACE = 2.0\n"
+            f"raise SystemExit(module.run({arguments!r}))\n"
+        )
+        process = subprocess.Popen(
+            [PYTHON, "-c", helper],
+            cwd=self.repo / "e2e", env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            wait_for((self.base / "browser-ready").exists)
+            process.send_signal(signal.SIGTERM)
+            _, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 128 + signal.SIGTERM, stderr.decode())
+            _, manifest = self.latest_manifest()
+            self.assertEqual(manifest["outcome"], "interrupted")
+            self.assertEqual(manifest["child_status"]["raw_returncode"], 130)
+            self.assertTrue(manifest["runner"]["report"]["complete"])
+            self.assertEqual(manifest["runner"]["report"]["counts"]["interrupted"], 2)
+        finally:
+            cleanup_direct_child(process)
+            process.stderr.close()
+
+    def test_playwright_policy_and_working_directory_refuse_before_execution(self):
+        """Browser mode cannot bypass the fixed project policy or preparation directory."""
+        environment = self.install_playwright_fixture()
+        for extra, selection in (
+            (["--termination-grace", "5"], []),
+            ([], ["--project=chromium"]),
+            ([], ["--config=foreign.ts"]),
+        ):
+            with self.subTest(extra=extra, selection=selection):
+                result = subprocess.run(
+                    self.cli(["npx", "playwright", "test", *selection], "--runner", "playwright", *extra),
+                    cwd=self.repo / "e2e", env=environment, capture_output=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 125)
+                self.assertEqual(self.run_directories(), [])
+        result = self.invoke(["npx", "playwright", "test"], "--runner", "playwright", env=environment)
+        self.assertEqual(result.returncode, 125)
+        _, manifest = self.latest_manifest()
+        self.assertEqual(manifest["outcome"], "refused")
+        self.assertIsNone(manifest["child_status"]["raw_returncode"])
+
     def test_nextest_mode_records_actual_policy_and_unique_reports(self) -> None:
         """Ambient options cannot change a recorded run or overwrite its predecessor's report."""
 

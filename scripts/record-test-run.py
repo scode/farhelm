@@ -39,12 +39,14 @@ try:
     sys.dont_write_bytecode = True
     import test_run_traces
     import test_run_nextest
+    import test_run_playwright
 finally:
     sys.dont_write_bytecode = _previous_bytecode_setting
     del _previous_bytecode_setting
 
 
 SCHEMA_VERSION = 1
+RUNNER_MODULES = {"nextest": test_run_nextest, "playwright": test_run_playwright}
 PROBE_TIMEOUT_SECONDS = 5.0
 PROBE_SAMPLE_LIMIT = 64 * 1024
 PROBE_KILL_GRACE_SECONDS = 0.5
@@ -222,7 +224,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--concurrency", required=True)
     parser.add_argument("--tmux", choices=("warn", "required", "none"), default="warn")
     parser.add_argument("--timeout", type=finite_positive)
-    parser.add_argument("--runner", choices=("nextest",))
+    parser.add_argument("--runner", choices=tuple(RUNNER_MODULES))
     parser.add_argument(
         "--require-complete-console", action="store_true",
         help="fail an otherwise successful command if console forwarding omitted or still holds output",
@@ -241,22 +243,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         option_argv = argv
         command = []
     parsed = parser.parse_args(option_argv)
+    runner_module = RUNNER_MODULES.get(parsed.runner)
+    required_grace = runner_module.TERMINATION_GRACE if runner_module else CHILD_KILL_GRACE_SECONDS
     if parsed.termination_grace is None:
-        parsed.termination_grace = (
-            test_run_nextest.TERMINATION_GRACE if parsed.runner == "nextest" else CHILD_KILL_GRACE_SECONDS
-        )
+        parsed.termination_grace = required_grace
     if parsed.termination_grace > 60:
         raise UsageRefusal("--termination-grace must be at most 60 seconds")
-    if parsed.runner == "nextest" and parsed.termination_grace < test_run_nextest.TERMINATION_GRACE:
-        raise UsageRefusal("nextest mode requires at least 10 seconds of termination grace")
+    if runner_module and parsed.termination_grace < required_grace:
+        raise UsageRefusal(f"{parsed.runner} mode requires at least {required_grace:g} seconds of termination grace")
+    parsed.graceful_stop_signal = getattr(runner_module, "GRACEFUL_SIGNAL", None)
     if "--" not in argv:
         raise UsageRefusal("missing `--` before the command argv")
     if not command:
         raise UsageRefusal("no command argv follows `--`")
     parsed.command = command
-    if parsed.runner == "nextest":
+    if runner_module:
         try:
-            test_run_nextest.selection_args(command)
+            runner_module.selection_args(command)
         except ValueError as error:
             raise UsageRefusal(str(error)) from error
     return parsed
@@ -1265,6 +1268,7 @@ def run_command(
     console: ConsoleForwarder,
     *,
     termination_grace: float = CHILD_KILL_GRACE_SECONDS,
+    graceful_stop_signal: int | None = None,
 ) -> CommandResult:
     """Own one process group through spawn, stream, termination, and bounded drain.
 
@@ -1272,6 +1276,8 @@ def run_command(
     termination grace before killing the runner, so it can forward signals and
     finish its own cleanup. This does not give us ownership of those groups.
     The ordinary post-exit pipe drain retains its separate fixed allowance.
+    A runner-specific graceful signal changes only what is delivered to the
+    child group. The original operator signal or timeout remains the result.
     """
 
     # Preparation and manifest writes can observe cancellation before this
@@ -1325,12 +1331,12 @@ def run_command(
             if termination_reason is None and intent.received is not None:
                 termination_reason = "interrupted"
                 termination_signal = intent.received
-                terminate_group(process, termination_signal)
+                terminate_group(process, graceful_stop_signal or termination_signal)
                 termination_started = now
             elif termination_reason is None and deadline is not None and now >= deadline:
                 termination_reason = "timed_out"
                 termination_signal = signal.SIGTERM
-                terminate_group(process, signal.SIGTERM)
+                terminate_group(process, graceful_stop_signal or signal.SIGTERM)
                 termination_started = now
 
             if (
@@ -1537,6 +1543,7 @@ def initial_manifest(
         "command": {
             "argv": args.command, "cwd": os.fspath(cwd), "timeout_seconds": args.timeout,
             "termination_grace_seconds": args.termination_grace,
+            "graceful_stop_signal_override": args.graceful_stop_signal,
             "require_complete_console": args.require_complete_console,
         },
         "labels": {
@@ -1689,13 +1696,16 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
                 )
                 return 125
 
-        if args.runner == "nextest":
-            if checkout is None or cwd != checkout:
-                raise UsageRefusal("nextest mode must run from the checkout root")
-            manifest.data["runner"] = {"name": "nextest", "prepared": False}
+        if args.runner is not None:
+            expected_cwd = checkout / "e2e" if checkout and args.runner == "playwright" else checkout
+            if checkout is None or cwd != expected_cwd:
+                location = "checkout e2e directory" if args.runner == "playwright" else "checkout root"
+                raise UsageRefusal(f"{args.runner} mode must run from the {location}")
+            runner_module = RUNNER_MODULES[args.runner]
+            manifest.data["runner"] = {"name": args.runner, "prepared": False}
             manifest.write()
             try:
-                command, runner = test_run_nextest.prepare(
+                command, runner = runner_module.prepare(
                     run_dir, checkout, args.command, child_env,
                     lambda argv: bounded_probe(argv, cwd=cwd, env=child_env, intent=intent),
                 )
@@ -1703,7 +1713,7 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
                 if intent.received is not None:
                     exit_code = 128 + intent.received
                     finalize(manifest, outcome="interrupted", recorder_exit=exit_code,
-                             total_started=total_started, error="interrupted during nextest preparation")
+                             total_started=total_started, error=f"interrupted during {args.runner} preparation")
                     return exit_code
                 raise UsageRefusal(str(error)) from error
             manifest.data["command"]["requested_argv"] = args.command
@@ -1713,8 +1723,11 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
 
         trace_root, trace_fd = test_run_traces.create_run_root(run_dir)
         child_env[test_run_traces.TRACE_ENV] = os.fspath(trace_root)
+        owned_environment = (test_run_traces.TRACE_ENV,)
+        if args.runner == "playwright":
+            owned_environment += ("FARHELM_PLAYWRIGHT_POLICY_FILE",)
         manifest.data["environment"] = environment_evidence(
-            ambient, child_env, args.keep_farhelm_env, recorder_owned=(test_run_traces.TRACE_ENV,)
+            ambient, child_env, args.keep_farhelm_env, recorder_owned=owned_environment,
         )
         trace_identity = os.fstat(trace_fd)
         manifest.data["test_traces"] = {
@@ -1733,6 +1746,7 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
         result = run_command(
             args.command, cwd, child_env, args.timeout, intent, output, console,
             termination_grace=args.termination_grace,
+            graceful_stop_signal=args.graceful_stop_signal,
         )
         output.close()
         manifest.data["output"] = output.evidence()
@@ -1764,9 +1778,9 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
             error="required console forwarding was incomplete" if console_incomplete else result.error,
             cleanup_limit=result.cleanup_limit,
         )
-        if args.runner == "nextest":
+        if args.runner is not None:
             try:
-                report = test_run_nextest.collect(run_dir)
+                report = RUNNER_MODULES[args.runner].collect(run_dir)
             except Exception as error:
                 report = {"complete": False, "reason": f"collection error: {type(error).__name__}"}
             manifest.data["runner"]["report"] = report
@@ -1774,14 +1788,18 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
             # an evidence failure. Preserve its actual child status and never
             # replace an existing nonzero test/timeout/interruption result.
             counts = report.get("counts", {})
-            if final_exit == 0 and (
-                not report["complete"] or counts.get("tests", 0) == counts.get("skipped", 0)
-                or any(counts.get(name, 0) for name in ("failures", "errors", "flaky"))
-            ):
+            if args.runner == "playwright":
+                report_problem = test_run_playwright.success_problem(report)
+            else:
+                report_problem = None
+                if (not report["complete"] or counts.get("tests", 0) == counts.get("skipped", 0)
+                        or any(counts.get(name, 0) for name in ("failures", "errors", "flaky"))):
+                    report_problem = "nextest report missing, incomplete, or inconsistent with success"
+            if final_exit == 0 and report_problem:
                 final_exit = 125
                 manifest.data["outcome"] = "recorder-error"
                 manifest.data["recorder"]["exit_code"] = final_exit
-                manifest.data["recorder"]["error"] = "nextest report missing, incomplete, or inconsistent with success"
+                manifest.data["recorder"]["error"] = report_problem
             try:
                 manifest.write()
             except Exception as error:
@@ -1793,8 +1811,8 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
                     final_exit = 125
                     manifest.data["outcome"] = "recorder-error"
                     manifest.data["recorder"]["exit_code"] = final_exit
-                    manifest.data["recorder"]["error"] = "nextest report publication failed"
-                best_effort_write(2, b"nextest report publication failed; actual child status retained\n")
+                    manifest.data["recorder"]["error"] = f"{args.runner} report publication failed"
+                best_effort_write(2, f"{args.runner} report publication failed; actual child status retained\n".encode())
         try:
             collected = test_run_traces.collect(trace_fd, run_dir / "traces.tar")
         except Exception as error:
