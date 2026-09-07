@@ -270,6 +270,7 @@ async fn wait_for_socket_client(
             "the supervisor at {} never started accepting connections",
             state_dir.display()
         );
+        // sleep-ok: poll a successful supervisor handshake, with serve failures checked on each attempt.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

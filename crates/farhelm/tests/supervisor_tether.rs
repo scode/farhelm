@@ -33,6 +33,7 @@ fn supervisor_startup_failure_is_not_held_open_by_the_stdin_tether() {
             let _ = child.wait();
             panic!("supervisor startup failure remained blocked on its open stdin tether");
         }
+        // sleep-ok: observe child exit while retaining open stdin, which is the regression's premise.
         std::thread::sleep(Duration::from_millis(20));
     }
 }

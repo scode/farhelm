@@ -116,6 +116,7 @@ async fn session_token(state_dir: &std::path::Path, session: &str) -> String {
             tokio::time::Instant::now() < deadline,
             "the supervisor never published a credential for session {session}"
         );
+        // sleep-ok: poll the session's stored credential, checking the deadline between reads.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -241,6 +242,7 @@ async fn hosts_until_attached(session: &str, token: &str, socket: &std::path::Pa
             "the helm's Attach never reached the supervisor's attachments map within 20s \
              (still refused: {stderr})"
         );
+        // sleep-ok: retry only the attachment-not-yet-present refusal between deadline checks.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
@@ -278,6 +280,7 @@ async fn await_local_host(client: &reqwest::Client, base: &str) {
             tokio::time::Instant::now() < deadline,
             "the helm's own host never connected; last seen {hosts}"
         );
+        // sleep-ok: poll the actual local-host connection state before routing requests to it.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }

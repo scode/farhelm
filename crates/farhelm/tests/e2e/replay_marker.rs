@@ -734,6 +734,7 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
             tokio::time::Instant::now() < deadline,
             "the agent never exited after quit"
         );
+        // sleep-ok: poll pane death before attach; the last output bytes alone do not prove exit.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 

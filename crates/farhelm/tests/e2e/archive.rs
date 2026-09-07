@@ -147,6 +147,7 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
             tokio::time::Instant::now() < deadline,
             "the launch shim never consumed its real spec"
         );
+        // sleep-ok: observe spec consumption before planting artifacts that archive must remove.
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     std::fs::write(&spec_path, b"credential-bearing launch spec").expect("plant launch spec");

@@ -58,6 +58,7 @@ async fn await_fleet_connected(client: &reqwest::Client, base: &str) -> serde_js
             tokio::time::Instant::now() < deadline,
             "the fleet never reached two connected hosts; last seen {hosts}"
         );
+        // sleep-ok: poll the two hosts' connection states before exercising the merged fleet.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
@@ -84,6 +85,7 @@ async fn await_listed(client: &reqwest::Client, base: &str, ids: &[&str]) -> ser
             tokio::time::Instant::now() < deadline,
             "the merged list never carried {ids:?}; last seen {listing}"
         );
+        // sleep-ok: observe the cached merged listing until it contains every requested session.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
