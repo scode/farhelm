@@ -37,7 +37,7 @@
 // contracts: the former defines "the feed is healthy"; the latter owns
 // `window.__farhelmTerm`, `term.buffer.active`, and readiness globals. A
 // genuinely one-off snippet still stays local with the test that needs it.
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator } from "@playwright/test";
 import {
   createSession,
   listSessions,
@@ -48,7 +48,7 @@ import {
   stubFeed,
 } from "./helpers/fleet";
 import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
-import { waitForSessionReady } from "./helpers/terminal-readiness";
+import { waitForIslandMounted, waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   FAKE_AGENT_INVOCATION,
   findSessionIdByTitle,
@@ -61,6 +61,19 @@ import {
   rowByTitle,
   sharedSessionRow,
 } from "./helpers/terminal-suite";
+
+/**
+ * Read a visible fixture row's session id for a readiness oracle.
+ *
+ * The bounded locator observation ties the id to the row this test chose;
+ * cleanup's best-effort title lookup is deliberately not a setup oracle.
+ * Give row publication its attachment allowance rather than the shorter
+ * default assertion timeout; attachment readiness is observed afterward.
+ */
+async function sessionIdFor(row: Locator, timeout = 20_000): Promise<string> {
+  await expect(row).toHaveAttribute("data-session-id", /.+/, { timeout });
+  return (await row.getAttribute("data-session-id"))!;
+}
 
 installTerminalSuiteHooks();
 
@@ -236,8 +249,10 @@ test("keyboard activation opens the session, matching a real click", async ({
     // Focusing the open button before that mount means the steal moves
     // focus off it again and the Enter below goes to the terminal — the
     // title then never changes, which is how this test failed on two
-    // loaded CI runs. Wait for the mount, then prove the focus held.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    // loaded CI runs. Wait until that known attachment has revealed, then
+    // prove the button focus held. Reveal settles the mount's synchronous
+    // focus decision without requiring focus to remain in xterm.
+    await waitForSessionRevealed(page, bounce.id);
     // That wait only rules out the FIRST steal, and the window between the
     // focus and the keypress is stealable by the same mechanism: `reveal()`
     // in terminal.js takes focus whenever a replay lands, and its
@@ -273,7 +288,9 @@ test("keyboard activation opens the session, matching a real click", async ({
         timeout: 5_000,
       });
     }).toPass({ timeout: 30_000 });
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    // The keypress proved selection. Record the resulting attachment too,
+    // using the row identity rather than the previous mount-wide global.
+    await waitForSessionRevealed(page, await sessionIdFor(sharedSessionRow(page)));
   } finally {
     await cleanupSession(request, bounce.id);
   }
@@ -369,8 +386,10 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
 
   await expect(page.locator(".session-list")).toBeVisible();
 
-  await sharedSessionRow(page).click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  const shared = sharedSessionRow(page);
+  const sharedId = await sessionIdFor(shared);
+  await shared.click();
+  await waitForSessionRevealed(page, sharedId);
   await waitForTermText(page, "FAKE-AGENT READY");
 
   const isFreshInstance = await page.evaluate(
@@ -478,9 +497,29 @@ test("switching sessions before the first terminal is ready mounts the second se
   expect(created.status()).toBe(200);
   const { id: idB } = await created.json();
 
+  // Failed assertions must not leave sabotage active during API cleanup or
+  // failure capture. The same restoration is safe before and after the race.
+  const restoreMountGlobals = () => page.evaluate(() => {
+    const state = window as any;
+    if (Object.hasOwn(state, "__testStashedTerminal")) {
+      state.Terminal = state.__testStashedTerminal;
+      delete state.__testStashedTerminal;
+    }
+    if (state.__testOriginalMountWhenReady) {
+      state.farhelmTerm.mountWhenReady = state.__testOriginalMountWhenReady;
+      delete state.__testOriginalMountWhenReady;
+    }
+    delete state.__testLastMountPath;
+  });
+
   try {
+    // B must already own the view: selecting A below then creates a fresh
+    // pending mount instead of clicking an already-mounted A again.
+    await pinAutoSelect(page, idB);
     await page.goto("/");
     await expect(sharedSessionRow(page)).toBeVisible();
+    const idA = await sessionIdFor(sharedSessionRow(page));
+    await waitForSessionRevealed(page, idB);
 
     // Freeze the page's timers. `install()` alone does NOT pause time —
     // it only swaps in fake implementations, which by themselves keep
@@ -506,30 +545,45 @@ test("switching sessions before the first terminal is ready mounts the second se
     await page.evaluate(() => {
       (window as any).__testStashedTerminal = (window as any).Terminal;
       delete (window as any).Terminal;
+      const bridge = (window as any).farhelmTerm;
+      const original = bridge.mountWhenReady;
+      (window as any).__testOriginalMountWhenReady = original;
+      bridge.mountWhenReady = function (...args: any[]) {
+        (window as any).__testLastMountPath = new URL(args[0].path, location.href).pathname;
+        return original.apply(this, args);
+      };
     });
 
     await sharedSessionRow(page).click();
+    // Seeing the call return while Terminal is absent proves A entered the
+    // pending retry path. The clock stays fixed through both selections.
+    await expect.poll(() => page.evaluate(() => (window as any).__testLastMountPath))
+      .toBe(`/api/sessions/${idA}/term`);
+    expect(await page.evaluate(() => !!(window as any).__farhelmIslands?.terminal)).toBe(false);
     // Direct switch — the keyed remount tears the shared view down.
     await page.locator(`[data-session-id="${idB}"]`).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__testLastMountPath))
+      .toBe(`/api/sessions/${idB}/term`);
 
     // Restore the withheld global, THEN advance the frozen clock: both
     // session A's original retry (if a regression left it running) and
     // session B's fresh one were scheduled for the same virtual instant
     // (nothing advanced the clock between the two clicks), so this is
     // what actually exercises the race described above.
-    await page.evaluate(() => {
-      (window as any).Terminal = (window as any).__testStashedTerminal;
-      delete (window as any).__testStashedTerminal;
-    });
+    await restoreMountGlobals();
     await page.clock.runFor(500);
 
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    // Replay parsing may arrive after this final advance and queue work on
+    // the stopped clock. This test checks mount cancellation, so observe
+    // the constructed socket now, before any later replay or reconnect.
+    await waitForIslandMounted(page, "terminal");
     const wsUrl = await page.evaluate(() => (window as any).__farhelmWs.url);
     expect(wsUrl).toContain(idB);
     await expect(page.locator(".titlebar .title")).toHaveText(
       "regression-session-b",
     );
   } finally {
+    await restoreMountGlobals().catch(() => {});
     await request.post(`/api/sessions/${idB}/stop`).catch(() => {});
     await request.delete(`/api/sessions/${idB}`).catch(() => {});
   }
@@ -642,8 +696,10 @@ test("a failed mount rolls back cleanly; the same session can be mounted again",
   // left `active` (or the old `__farhelmMounted` flag) stuck would make
   // this mount silently no-op instead.
   await page.locator(`[data-session-id="${bounce.id}"]`).click();
-  await sharedSessionRow(page).click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  const shared = sharedSessionRow(page);
+  const sharedId = await sessionIdFor(shared);
+  await shared.click();
+  await waitForSessionRevealed(page, sharedId);
   await waitForTermText(page, "FAKE-AGENT READY");
   } finally {
     // The sabotage must not outlive the test even on failure — a broken
@@ -792,15 +848,9 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible();
     await row.click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    // `__farhelmTermReady` means the terminal MOUNTED, not that its
-    // socket reached OPEN — and terminal.js drops input sent before OPEN.
-    // Under WebKit's slower startup that gap is wide enough to eat the
-    // first characters of the probe command, so wait for the socket
-    // itself, the way sendFloodGateByte does.
-    await page.waitForFunction(
-      () => (window as any).__farhelmWs?.readyState === WebSocket.OPEN,
-    );
+    // The parser probe's own terminal click supplies input focus. Its setup
+    // needs only this requested attachment's revealed, open socket.
+    await waitForSessionRevealed(page, id);
 
     await page.locator("#terminal").click();
     // Two queries go out together. DSR-6 is wrapped in tmux passthrough so
@@ -1045,8 +1095,9 @@ test("reload reattaches with replayed scrollback", async ({ page }) => {
   // clicked again, same as openTerminal's own first attach.
   const row = sharedSessionRow(page);
   await expect(row).toBeVisible();
+  const id = await sessionIdFor(row);
   await row.click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await waitForSessionRevealed(page, id);
   // Replay must bring back output produced before this attachment
   // existed — the reconnect-with-replay acceptance criterion.
   await waitForTermText(page, "echo:before-reload");
@@ -1346,6 +1397,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
 }) => {
   const titleA = `multi-a-${Date.now()}`;
   const titleB = `multi-b-${Date.now()}`;
+  let releaseDeleteB: () => void = () => {};
 
   try {
     // Create session A through the dialog; success navigates straight
@@ -1358,7 +1410,8 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
       title: titleA,
     });
     await formA.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    const idA = await sessionIdFor(rowByTitle(page, titleA));
+    await waitForSessionRevealed(page, idA);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(page.locator(".titlebar .title")).toHaveText(titleA);
 
@@ -1375,7 +1428,8 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
       title: titleB,
     });
     await formB.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    const idB = await sessionIdFor(rowByTitle(page, titleB));
+    await waitForSessionRevealed(page, idB);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(page.locator(".titlebar .title")).toHaveText(titleB);
 
@@ -1425,8 +1479,6 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     // post-click absence check cannot tell "never appeared" from
     // "appeared and vanished before this check ran", and holding the
     // DELETE open is what closes that gap.
-    const idB = await findSessionIdByTitle(request, titleB);
-    let releaseDeleteB: () => void = () => {};
     const deleteBHeld = new Promise<void>((resolve) => {
       releaseDeleteB = resolve;
     });
@@ -1464,6 +1516,9 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
       .click();
     await expect(rowByTitle(page, titleA)).toHaveCount(0, { timeout: 10_000 });
   } finally {
+    // unrouteAll waits for active handlers; an assertion failure before
+    // the normal release must not strand the DELETE handler in teardown.
+    releaseDeleteB();
     // Best-effort: both sessions should already be gone via the happy
     // path above, but a failed assertion partway through must not leak a
     // long-running fake-agent process into every later test.
@@ -1558,7 +1613,7 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
     // failed attempt).
     await form.locator('input[type="text"]').nth(0).fill("/tmp");
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await expect(page.locator(".titlebar .title")).toHaveText(title);
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
@@ -1628,9 +1683,7 @@ test("create dialog disables the submit control while a create is in flight", as
 
     // Let the delayed response land: success navigates into the new
     // session's terminal, same as the multi-session flow above.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
-      timeout: 15_000,
-    });
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await expect(page.locator(".titlebar .title")).toHaveText(title);
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
@@ -1671,7 +1724,7 @@ test("alive delete opens an inline confirming state with the is-still-running wo
       title,
     });
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
 
     const row = rowByTitle(page, title);
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
@@ -1751,7 +1804,7 @@ test("confirming an inline delete prompt deletes the session with exactly one DE
       title,
     });
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
 
     const row = rowByTitle(page, title);
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {

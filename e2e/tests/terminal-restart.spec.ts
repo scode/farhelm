@@ -8,9 +8,10 @@
 // previous run, with the new run drawing below it. All four are below.
 // ---------------------------------------------------------------------
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { hideSeenState, SESSION_LISTING } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   FAKE_AGENT_INVOCATION,
   findSessionIdByTitle,
@@ -21,6 +22,19 @@ import {
   rowByTitle,
   sharedSessionRow,
 } from "./helpers/terminal-suite";
+
+/**
+ * Read a visible fixture row's session id for a readiness oracle.
+ *
+ * The bounded locator observation ties the id to the row this test chose;
+ * cleanup's best-effort title lookup is deliberately not a setup oracle.
+ * Give row publication its attachment allowance rather than the shorter
+ * default assertion timeout; attachment readiness is observed afterward.
+ */
+async function sessionIdFor(row: Locator, timeout = 20_000): Promise<string> {
+  await expect(row).toHaveAttribute("data-session-id", /.+/, { timeout });
+  return (await row.getAttribute("data-session-id"))!;
+}
 
 installTerminalSuiteHooks();
 
@@ -311,7 +325,7 @@ test("restarting a live session confirms first, and only then sends the request 
       title,
     });
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await waitForTermText(page, "FAKE-AGENT READY");
 
     // The >= 2 banner count at the end needs the FIRST run's banner to
@@ -424,7 +438,7 @@ test("a restarted session's terminal still shows the previous run's scrollback a
       title,
     });
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await waitForTermText(page, "FAKE-AGENT READY");
 
     await page.locator("#terminal").click();
@@ -514,7 +528,7 @@ test("a restart whose response is lost still recovers the terminal", async ({
       title,
     });
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await waitForTermText(page, "FAKE-AGENT READY");
 
     await page.locator("#terminal").click();
@@ -639,7 +653,7 @@ test("a restarted session's banner clears once the new attachment is live", asyn
     });
     await form.locator('button[type="submit"]').click();
     await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 15_000 });
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await waitForTermText(page, "FAKE-AGENT READY");
 
     // The count-of-two anchor at the end needs the FIRST run's banner in
