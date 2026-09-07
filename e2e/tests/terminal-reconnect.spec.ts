@@ -29,7 +29,7 @@
 
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { openFilterBar, stubFeed } from "./helpers/fleet";
-import { cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
   addTab,
   createTabSession,
@@ -39,6 +39,7 @@ import {
   waitForReplayReveal,
   installTerminalSuiteHooks,
 } from "./helpers/terminal-suite";
+import { waitForIslandMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 installTerminalSuiteHooks({ tabSweep: true });
 
@@ -74,8 +75,15 @@ async function openOwnTerminal(
   title: string,
 ): Promise<{ id: string; cwd: string }> {
   const session = await createTabSession(request, title);
-  await openSessionTerminal(page, session.id);
-  return session;
+  try {
+    await openSessionTerminal(page, session.id);
+    return session;
+  } catch (error) {
+    // The caller receives the cleanup handle only after setup succeeds.
+    // Until then this helper owns failures in navigation, readiness or output.
+    await cleanupSession(request, session.id);
+    throw error;
+  }
 }
 
 /**
@@ -85,10 +93,7 @@ async function openOwnTerminal(
  */
 async function openSessionTerminal(page: Page, id: string) {
   await page.goto("/");
-  const row = page.locator(`[data-session-id="${id}"]`);
-  await expect(row).toBeVisible();
-  await row.click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await attachSession(page, id);
   await waitForTermText(page, "FAKE-AGENT READY");
 }
 
@@ -763,7 +768,7 @@ test("leaving-a-session-cancels-a-pending-reconnect", async ({ page, request }) 
     // a stale timer remounting under a lease nothing on screen is using.
     await sharedSessionRow(page).click();
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForIslandMounted(page, "terminal");
     // Past the pending rung, with room to spare.
     await page.waitForTimeout(2_500);
     const islands = await page.evaluate(() => {
@@ -1066,7 +1071,7 @@ test("a-non-decision-detach-keeps-the-ladder-climbing", async ({ page, request }
     });
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, id);
 
     // Attempts are aimed at a tab id no supervisor has ever heard of, so
     // each one is REFUSED with the supervisor's own words — a detach
@@ -1338,7 +1343,7 @@ test("view-changes-do-not-postpone-a-recovery", async ({ page, request }) => {
     id = session.id;
     await page.goto("/");
     await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, id);
     // A second terminal, so selecting between them produces real
     // desired-set changes — the syncs this test is about.
     const tabId = await addTab(page, 0);
@@ -1392,8 +1397,7 @@ try {
   const session = await createTabSession(request, title);
   id = session.id;
   await page.goto("/");
-  await page.locator(`[data-session-id="${id}"]`).click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await attachSession(page, id);
   await waitForTermText(page, "FAKE-AGENT READY");
 
   // Something on screen, so "kept its screen" is a claim about content.
@@ -1472,7 +1476,7 @@ try {
   await sharedSessionRow(page).click();
   await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
   await page.locator(`[data-session-id="${id}"]`).click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await waitForSessionRevealed(page, id);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   expect(
     await page.evaluate(() => document.querySelectorAll("#terminal .xterm-rows").length),

@@ -5,13 +5,18 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import path from "node:path";
 import { DEVICE_SECRET_KEY, requireProductPageAuth } from "./helpers/device-auth";
-import { cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
   installTerminalSuiteHooks,
   openTerminal,
   reconnectTimingsFromNextLoad,
   sharedSessionRow,
 } from "./helpers/terminal-suite";
+import {
+  waitForIslandMounted,
+  waitForSessionRevealed,
+  waitForSessionSocketOpen,
+} from "./helpers/terminal-readiness";
 
 installTerminalSuiteHooks();
 
@@ -161,9 +166,9 @@ async function holdTermWrites(page: Page) {
 
 /**
  * Send exactly one byte of terminal input over the raw WebSocket — the
- * gate byte `flood_gated` (fake_agent.rs) blocks on before emitting
- * anything, so that every test using it controls precisely when the
- * producer starts rather than racing its own attach against an unpaced
+ * gate byte `flood_gated` (fake_agent.rs) blocks on before emitting its
+ * flood records, so that every test using it controls when that burst
+ * starts rather than racing its own attach against an unpaced
  * fixture that can otherwise outrun a fast host's attach sequence (see
  * `FLOOD_GATED_AGENT_INVOCATION`'s own docs).
  *
@@ -174,11 +179,15 @@ async function holdTermWrites(page: Page) {
  * `readyState` first because `mount()` publishes `__farhelmWs` (and sets
  * `__farhelmTermReady`) before the socket has necessarily finished its
  * handshake — `WebSocket.send()` throws on a socket that is not yet OPEN.
+ *
+ * This is deliberately only a matching socket-open wait, rather than normal
+ * session readiness. `holdWrites` and the stall-detach test can prevent
+ * xterm's writes from completing, so their replay may never reveal before the
+ * gate byte is due. The producer emits READY before reading the byte, but
+ * these callers may hold that output too; its visibility is not a usable gate.
  */
-async function sendFloodGateByte(page: Page) {
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__farhelmWs?.readyState))
-    .toBe(1); // WebSocket.OPEN
+async function sendFloodGateByte(page: Page, id: string) {
+  await waitForSessionSocketOpen(page, id);
   await page.evaluate(() => {
     // The value is arbitrary — `flood_gated` only counts bytes, in raw
     // mode, so nothing downstream interprets or echoes it.
@@ -212,8 +221,8 @@ async function createFloodGatedSession(
  * Create a session running `flood_gated` and open its terminal in `page`,
  * returning its id for the caller's own cleanup. Sends the gate byte
  * (`sendFloodGateByte`) as the last step, once the terminal is mounted and
- * every patch a caller installed is already active — the producer starts
- * only once this function returns.
+ * every patch a caller installed is already active. The burst can begin
+ * as soon as that byte arrives, including before this function returns.
  *
  * Every PLAN_M2_5.md watermark test below needs its OWN session running
  * this producer, distinct from the shared "e2e-session" the rest of the
@@ -255,10 +264,10 @@ async function openFloodSession(
     // NOT `waitForTermText(page, "FAKE-AGENT READY")`: a `holdWrites`
     // caller (or the stall-detach test, which patches `term.write()` to a
     // no-op outright) may never render that banner text at all.
-    // `termReady` alone (mount succeeded, socket opening) is the one
-    // readiness signal every caller of this helper can rely on.
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await sendFloodGateByte(page);
+    // A matching socket-open wait is the boundary every caller can rely on:
+    // write completion and banner rendering may be held by the test even
+    // though the producer emits READY before reading the gate byte.
+    await sendFloodGateByte(page, id);
     return id;
   } catch (err) {
     await cleanupSession(request, id);
@@ -791,8 +800,7 @@ test("a client that stops draining is detached with the stall reason after the f
     });
 
     await row.click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await sendFloodGateByte(page);
+    await sendFloodGateByte(page, id);
 
     // The pause must actually happen, and promptly — this is the moment
     // the 60s stall-detach clock (STALL_DETACH_TIMEOUT) starts counting.
@@ -888,7 +896,7 @@ test("a client that stops draining is detached with the stall reason after the f
     await sharedSessionRow(page).click();
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
     await row.click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, id);
     await waitForTermText(page, "FLOOD-DONE", 15_000);
   } finally {
     if (id) await cleanupSession(request, id);
@@ -970,8 +978,7 @@ test("reconnecting within the same page resets flow-control state; the new attac
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible();
     await row.click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await sendFloodGateByte(page);
+    await sendFloodGateByte(page, id);
 
     await expect
       .poll(() => page.evaluate(() => (window as any).__farhelmTest.pauseCount), {
@@ -1012,7 +1019,7 @@ test("reconnecting within the same page resets flow-control state; the new attac
     // here only the DETACH matters).
     await sharedSessionRow(page).click();
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForIslandMounted(page, "terminal");
 
     // The flood session has no attachment now — the page holds the shared
     // session's — so the flood can finish without any of it landing on
@@ -1020,7 +1027,7 @@ test("reconnecting within the same page resets flow-control state; the new attac
     await drainFloodOffScreen(page, id, geometry);
 
     await row.click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForSessionRevealed(page, id);
     // No second gate byte: `flood_gated` reads its gate exactly once, and
     // the drain above already carried that one run to its end. What this
     // attachment waits for is the marker coming back out of tmux's
@@ -1204,8 +1211,11 @@ test("real backspace erases; real ctrl-c kills the fake agent", async ({
   // a fresh marker instead of the banner. Still has to go through the
   // list view to get there, same as openTerminal does.
   await page.goto("/");
-  await sharedSessionRow(page).click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  const row = sharedSessionRow(page);
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  const id = await row.getAttribute("data-session-id");
+  expect(id, "the shared session row must identify the terminal it opens").toBeTruthy();
+  await attachSession(page, id!);
   await page.locator("#terminal").click();
 
   // Backspace: type a two-character marker, erase the second character,
