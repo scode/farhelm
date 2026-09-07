@@ -9,6 +9,21 @@ use crate::conversation_identity_capture::{
     snapshot_of, test_capture_bounds, wait_for_capture,
 };
 
+/// Release connection-owned supervisor references before reopening its durable state.
+///
+/// The caller must first stop any accept loop and drop its clients, leaving
+/// only the supervisor reference borrowed here. This observes connection
+/// cleanup; the caller still owns dropping the supervisor and killing tmux
+/// when the scenario models a reboot.
+async fn wait_for_resume_connections_to_drain(sup: &Arc<Supervisor>) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while Arc::strong_count(sup) > 1 {
+        assert!(tokio::time::Instant::now() < deadline, "connection drain");
+        // sleep-ok: clients and accept loops have stopped; wait for their asynchronous connection tasks to release this supervisor.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 // ---------------------------------------------------------------------
 // Restart with resume (PLAN_M3.md item 9; M3 acceptance 9, plus the
 // restart clauses of acceptance 4 and 5)
@@ -34,6 +49,88 @@ pub(crate) async fn pane_capture(sock: &std::path::Path, tmux_name: &str) -> Str
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Observe the new banner after retained history, without using attachment replay as evidence.
+///
+/// The fixture emits only a bounded set of lines before this observation.
+/// Both markers must appear in order in tmux's own history; the caller then
+/// checks that the old visible grid was discarded. One deadline covers
+/// commands and polling, and a timed-out tmux query is killed on drop.
+async fn wait_for_new_run_below_history(sock: &std::path::Path, tmux_name: &str) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut capture = String::new();
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the new run never appeared below the prior run's output; capture:\n{capture}"
+        );
+        let output = tokio::time::timeout_at(
+            deadline,
+            tokio::process::Command::new("tmux")
+                .arg("-S")
+                .arg(sock)
+                .args(["capture-pane", "-p", "-S", "-", "-t", tmux_name])
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("tmux stopped answering; last capture:\n{capture}"))
+        .expect("capture query");
+        assert!(
+            output.status.success(),
+            "capture failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        capture = String::from_utf8_lossy(&output.stdout).into_owned();
+        if let Some(marker) = capture.find("PRIOR-RUN-MARKER")
+            && capture[marker..].contains("FAKE-AGENT READY")
+        {
+            return capture;
+        }
+        // sleep-ok: the relaunched agent prints asynchronously; observe its banner after the retained marker in the same pane history.
+        tokio::time::sleep(
+            Duration::from_millis(200)
+                .min(deadline.saturating_duration_since(tokio::time::Instant::now())),
+        )
+        .await;
+    }
+}
+
+/// Establish that a reboot can recover the exact conversation from durable supervisor state.
+///
+/// The record-writing fixture's output proves publication of its own record,
+/// not completion of capture. List requests drive capture; the store snapshot
+/// is the boundary the successor relies on. The caller separately checks the
+/// template saved at creation. Requests share the polling deadline.
+async fn wait_for_durable_resume_capture(
+    sup: &Supervisor,
+    client: &SupervisorClient,
+    session_id: &str,
+    conversation: &str,
+) -> SessionSnapshot {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut last = None;
+    let result = tokio::time::timeout_at(deadline, async {
+        loop {
+            client.list_sessions().await.expect("list drives capture");
+            let snapshot = sup
+                .session_snapshot(session_id)
+                .await
+                .expect("snapshot")
+                .expect("present");
+            if snapshot.captured_conversation.as_deref() == Some(conversation) {
+                return snapshot;
+            }
+            last = Some(snapshot);
+            // sleep-ok: record publication precedes durable capture; poll the owning supervisor's snapshot before destroying it for reboot.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    result.unwrap_or_else(|_| {
+        panic!("capture never became durable; expected={conversation:?}, last snapshot={last:?}")
+    })
 }
 
 /// M3 acceptance 9, first clause: a restart on a LIVE session confirms
@@ -245,20 +342,7 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     // wait for the new run's own banner to appear in the capture: the
     // relaunched agent starts asynchronously, so a single read can land
     // before it has printed anything.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    let capture = loop {
-        let capture = pane_capture(&sock, &tmux_name).await;
-        if let Some(marker) = capture.find("PRIOR-RUN-MARKER")
-            && capture[marker..].contains("FAKE-AGENT READY")
-        {
-            break capture;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the new run never appeared below the prior run's output; capture:\n{capture}"
-        );
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    };
+    let capture = wait_for_new_run_below_history(&sock, &tmux_name).await;
     assert!(
         capture.contains("PRIOR-RUN-MARKER"),
         "the prior run's retained scrollback must survive the respawn: {capture}"
@@ -734,35 +818,15 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         // was stored at creation and is asserted here as setup, not treated as
         // a later lifecycle barrier: `resume_argv` is derived synchronously
         // from these same two columns whenever a snapshot is constructed.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            client.list_sessions().await.expect("list drives capture");
-            let snapshot = sup
-                .session_snapshot(&session.id)
-                .await
-                .expect("snapshot")
-                .expect("present");
-            if snapshot.captured_conversation.as_deref() == Some(conversation.as_str()) {
-                assert_eq!(
-                    snapshot.resume_template.as_deref(),
-                    Some(resume_template.as_slice()),
-                    "the resume template stored at creation must survive until capture"
-                );
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the captured conversation never became durable; expected={conversation:?}, \
-                 snapshot={snapshot:?}"
-            );
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
+        let snapshot =
+            wait_for_durable_resume_capture(&sup, &client, &session.id, &conversation).await;
+        assert_eq!(
+            snapshot.resume_template.as_deref(),
+            Some(resume_template.as_slice()),
+            "the resume template stored at creation must survive until capture"
+        );
         drop(client);
-        let drain = tokio::time::Instant::now() + Duration::from_secs(10);
-        while Arc::strong_count(&sup) > 1 {
-            assert!(tokio::time::Instant::now() < drain, "connection drain");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        wait_for_resume_connections_to_drain(&sup).await;
         drop(sup);
         (conversation, session)
     };
@@ -1011,11 +1075,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         // client would spin until its deadline.
         accepting.stop().await;
         drop(client);
-        let drain = tokio::time::Instant::now() + Duration::from_secs(10);
-        while Arc::strong_count(&sup) > 1 {
-            assert!(tokio::time::Instant::now() < drain, "connection drain");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        wait_for_resume_connections_to_drain(&sup).await;
         drop(sup);
         session
     };
