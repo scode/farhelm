@@ -5186,7 +5186,7 @@ mod tests {
     /// files in) — the same isolation shape `lib.rs`'s env-wiring child
     /// tests use, applied here to a different piece of ambient process
     /// state.
-    #[test]
+    #[farhelm_testtrace::test]
     fn directory_payloads_extracted_dir_is_mode_0700_under_a_permissive_umask() {
         if std::env::var_os(EXTRACTED_MODE_CHILD).is_some() {
             // SAFETY: this process exists only to run this one test in
@@ -5208,16 +5208,29 @@ mod tests {
                 b"bytes",
             );
             let payloads = DirectoryPayloads::new(payload_dir.clone());
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            runtime
-                .block_on(payloads.path(PayloadKind::Farhelm, PayloadArch::X86_64))
+            // The child still needs its own capture: runtime workers and
+            // teardown belong to this re-executed libtest invocation.
+            let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+            context
+                .with_runtime(
+                    farhelm_testtrace::RuntimeConfig {
+                        flavor: farhelm_testtrace::RuntimeFlavor::MultiThread,
+                        worker_threads: None,
+                        start_paused: false,
+                    },
+                    |runtime| {
+                        runtime
+                            .block_on(payloads.path(PayloadKind::Farhelm, PayloadArch::X86_64))
+                            .unwrap();
+                        let mode = std::fs::metadata(payload_dir.join(".extracted"))
+                            .unwrap()
+                            .permissions()
+                            .mode()
+                            & 0o777;
+                        println!("MODE={mode:o}");
+                    },
+                )
                 .unwrap();
-            let mode = std::fs::metadata(payload_dir.join(".extracted"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777;
-            println!("MODE={mode:o}");
             return;
         }
 
@@ -5903,7 +5916,7 @@ mod tests {
     /// provisioning error; this proves both concurrent first calls now
     /// succeed and leave behind an ordinary mode-0700 directory rather than
     /// a spurious failure or a permissions mismatch.
-    #[test]
+    #[farhelm_testtrace::test]
     fn directory_payloads_concurrent_first_use_both_succeed() {
         use std::os::unix::fs::PermissionsExt as _;
 
@@ -5917,44 +5930,56 @@ mod tests {
             b"race-bytes",
         );
         let payloads = Arc::new(DirectoryPayloads::new(dir.path().to_path_buf()));
-        let runtime = tokio::runtime::Runtime::new().unwrap();
+        // The two tasks share a fixture-owned multithread runtime; carrying
+        // the context through its drop keeps workers and teardown attributed.
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        context
+            .with_runtime(
+                farhelm_testtrace::RuntimeConfig {
+                    flavor: farhelm_testtrace::RuntimeFlavor::MultiThread,
+                    worker_threads: None,
+                    start_paused: false,
+                },
+                |runtime| {
+                    // Both tasks await the SAME barrier immediately before their first
+                    // call, so neither task's `.extracted`-absent observation can be
+                    // sequenced strictly after the other task has already finished
+                    // creating the directory — the exact interleaving this fix must
+                    // survive.
+                    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+                    let tasks: Vec<_> = (0..2)
+                        .map(|_| {
+                            let payloads = Arc::clone(&payloads);
+                            let barrier = Arc::clone(&barrier);
+                            runtime.spawn(async move {
+                                barrier.wait().await;
+                                payloads
+                                    .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                                    .await
+                            })
+                        })
+                        .collect();
 
-        // Both tasks await the SAME barrier immediately before their first
-        // call, so neither task's `.extracted`-absent observation can be
-        // sequenced strictly after the other task has already finished
-        // creating the directory — the exact interleaving this fix must
-        // survive.
-        let barrier = Arc::new(tokio::sync::Barrier::new(2));
-        let tasks: Vec<_> = (0..2)
-            .map(|_| {
-                let payloads = Arc::clone(&payloads);
-                let barrier = Arc::clone(&barrier);
-                runtime.spawn(async move {
-                    barrier.wait().await;
-                    payloads
-                        .path(PayloadKind::Farhelm, PayloadArch::X86_64)
-                        .await
-                })
-            })
-            .collect();
+                    for task in tasks {
+                        runtime.block_on(task).unwrap().expect(
+                            "both concurrent first calls must succeed; a loser observing AlreadyExists must \
+                             not turn a harmless race into a provisioning failure",
+                        );
+                    }
 
-        for task in tasks {
-            runtime.block_on(task).unwrap().expect(
-                "both concurrent first calls must succeed; a loser observing AlreadyExists must \
-                 not turn a harmless race into a provisioning failure",
-            );
-        }
-
-        let metadata = std::fs::symlink_metadata(dir.path().join(".extracted")).unwrap();
-        assert!(
-            metadata.file_type().is_dir(),
-            "the extraction cache must end up a plain directory, not a symlink or other object"
-        );
-        assert_eq!(
-            metadata.permissions().mode() & 0o777,
-            0o700,
-            "the extraction cache must end up mode 0700 regardless of which call actually \
-             created it"
-        );
+                    let metadata = std::fs::symlink_metadata(dir.path().join(".extracted")).unwrap();
+                    assert!(
+                        metadata.file_type().is_dir(),
+                        "the extraction cache must end up a plain directory, not a symlink or other object"
+                    );
+                    assert_eq!(
+                        metadata.permissions().mode() & 0o777,
+                        0o700,
+                        "the extraction cache must end up mode 0700 regardless of which call actually \
+                         created it"
+                    );
+                },
+            )
+            .unwrap();
     }
 }
