@@ -799,9 +799,10 @@ async fn a_forced_tmux_pause_restores_modes_and_cursor_state() {
 /// Timing is swept rather than blocked on a barrier: the window is
 /// between two lock acquisitions inside the supervisor and nothing
 /// outside it can synchronize on that. Each iteration aims the takeover
-/// at a slightly different offset around the stall deadline, so the sweep
-/// covers before, during, and after. Any iteration that lands in the
-/// window and gets this wrong fails the test.
+/// at a slightly different offset near the nominal stall deadline. This
+/// is a best-effort race attempt, not proof that an iteration reached the
+/// stale-teardown window. An iteration that reaches it and detaches the
+/// winner fails the test.
 #[farhelm_testtrace::test]
 async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
     let stall = Duration::from_millis(800);
@@ -838,6 +839,7 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
 
         // Aim the takeover at the moment the stall teardown fires.
         let aim = stall + Duration::from_millis(offset_ms as u64);
+        // sleep-ok: attempt takeovers near the nominal stall deadline; awaiting teardown would remove the intended race.
         tokio::time::sleep(aim).await;
 
         let winner = h.second_client().await;
@@ -965,6 +967,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
     // distinguish producer startup from a completed output batch; this wait
     // gives the stalled output path time to settle before its growth is
     // sampled.
+    // sleep-ok: place RSS sampling beyond the five-second pause allowance while the gated producer applies pressure.
     tokio::time::sleep(Duration::from_secs(7)).await;
     let progress_before_sampling: u64 = std::fs::read_to_string(&progress)
         .expect("read flood progress before RSS sampling")
@@ -995,6 +998,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
     let mut tmux_peak = tmux_baseline;
     let mut own_peak = own_baseline;
     for index in 1..=6 {
+        // sleep-ok: sample owned-process RSS over sustained pressure, not repeatedly at one point in time.
         tokio::time::sleep(Duration::from_secs(1)).await;
         let producer_records = std::fs::read_to_string(&progress)
             .expect("read producer progress during sampling")

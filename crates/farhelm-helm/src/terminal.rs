@@ -780,6 +780,7 @@ mod tests {
         // Finishes on its own inside the grace: the ordinary navigation
         // case, and the one the old code panicked on.
         let handle = tokio::spawn(async {
+            // sleep-ok: make the drain initially pending, with completion intended to fall within teardown's grace.
             tokio::time::sleep(Duration::from_millis(20)).await;
         });
         super::settle_outbound(handle, false, Duration::from_secs(5)).await;
