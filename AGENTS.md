@@ -166,9 +166,8 @@ merge, is what triggers the release workflow, so an RC can be cut from the tip o
 normal move here, not a trick (v0.2.1-rc.1 and rc.2 shipped this way on 2026-09-01, trialing the Farhelm.app bundle and
 the clipboard fix before either landed).
 
-When asked for an RC, settle TWO choices first, and ASK about each unless the request states it explicitly — a bare "cut
-an rc" states neither, and guessing wrong publishes the wrong binaries, or the wrong version number, to a real, public
-prerelease:
+When asked for an RC, settle TWO choices first. Ask about each unless the request states it explicitly or the version
+default below applies; guessing wrong publishes the wrong binaries or version to a real, public prerelease:
 
 - The BASE: cut from main, or from the current in-flight PR stack's tip? "cut an rc with this stack" is explicit; "cut
   an rc" is not.
@@ -177,6 +176,13 @@ prerelease:
   component bumps is the maintainer's semantic call, not something to infer from the diff: patch (`X.Y.Z+1-rc.1`), minor
   (`X.Y+1.0-rc.1`), or major. Name the exact resulting version string when asking, so the answer is a version, not a
   category.
+
+An explicit request for an RC release without a version means `X.Y.Z-rc.N+1` IF AND ONLY IF the most recently published
+release is `X.Y.Z-rc.N`. Check published releases including prereleases, ordered by publication time; GitHub's
+`releases/latest` endpoint excludes prereleases and cannot answer this question. Announce the exact next version and
+proceed without asking about it. If the most recent release is stable, a dev release, or anything other than an RC — or
+there is no published release — still ask about the version. Do not fall back to an older RC. An explicit version always
+wins, the base still needs to be stated or confirmed, and an existing tag must never be reused.
 
 With both settled, the process is:
 
@@ -219,9 +225,10 @@ A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`,
 name is never reused, the workflow runs from the tag and marks the release a prerelease (any semver prerelease suffix
 does; `releases/latest` still points at the last stable), and `scripts/install.sh` accepts
 `FARHELM_VERSION=vX.Y.Z-dev.N` the same way it accepts an `-rc.N`. Settle the same two choices first, base and version,
-and ask when the request does not state them; the `-dev.N` and `-rc.N` counters are independent, so `0.3.0-dev.2` and
-`0.3.0-rc.1` can both exist. The name is the whole difference: it tells whoever reads the tag list later that the build
-was a trial of work in progress, not a claim that this is what will ship as `X.Y.Z`.
+and ask when the request does not state them; the RC version default above does not apply to dev releases. The `-dev.N`
+and `-rc.N` counters are independent, so `0.3.0-dev.2` and `0.3.0-rc.1` can both exist. The name is the whole
+difference: it tells whoever reads the tag list later that the build was a trial of work in progress, not a claim that
+this is what will ship as `X.Y.Z`.
 
 The browser end-to-end suite is deliberately NOT in that per-change list, and its CI job is disabled (`if: false` in
 ci.yml): it is far too slow to pay on every PR. It gates MERGING instead — before landing a PR stack on main, run
