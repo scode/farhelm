@@ -448,6 +448,8 @@ async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversatio
 /// tree that is NOT partitioned by working directory at all, so the
 /// recorded-cwd filter carries all the weight here, and the scan cache is
 /// keyed on a root every Codex session on the host shares.
+/// The resume preview must keep the fixture's original launch arguments
+/// before appending Codex's subcommand and this session's captured ID.
 #[farhelm_testtrace::test]
 async fn two_codex_sessions_in_one_directory_each_capture_their_own_conversation() {
     let (h, fixtures) = capture_harness().await;
@@ -469,11 +471,26 @@ async fn two_codex_sessions_in_one_directory_each_capture_their_own_conversation
     assert_eq!(wait_for_capture(&h, &second.id, 30).await, id_b);
 
     let snapshot = snapshot_of(&h, &first.id).await;
-    let template = snapshot.resume_template.as_deref().unwrap();
     assert_eq!(
         snapshot.resume_argv.as_deref().unwrap(),
-        // The audited codex shape: a subcommand, not a flag.
-        [template[0].clone(), "resume".to_string(), id_a.clone()]
+        // Built from fixture inputs, not the stored template: dropping the
+        // original arguments must fail even if template and preview agree.
+        [
+            fixtures
+                .bin
+                .path()
+                .join("codex")
+                .to_string_lossy()
+                .into_owned(),
+            "internal".to_string(),
+            "fake-agent".to_string(),
+            "--script".to_string(),
+            "codex-record".to_string(),
+            "--record-home".to_string(),
+            fixtures.home.path().to_string_lossy().into_owned(),
+            "resume".to_string(),
+            id_a.clone(),
+        ]
     );
 }
 
