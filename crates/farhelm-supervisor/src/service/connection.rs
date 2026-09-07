@@ -2448,6 +2448,7 @@ mod tests {
         let completed_flag = Arc::clone(&completed);
         let mut task = tokio::spawn(async move {
             for _ in 0..10 {
+                // sleep-ok: renew progress across several virtual drain windows before allowing natural completion.
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 writer_counter.fetch_add(1, Ordering::Relaxed);
             }

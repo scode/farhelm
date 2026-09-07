@@ -2286,6 +2286,7 @@ mod tests {
     #[crate::test(flavor = "current_thread", start_paused = true)]
     async fn current_thread_runtime_preserves_paused_time() {
         let before = tokio::time::Instant::now();
+        // sleep-ok: directly verify virtual timer advancement under the tracing test attribute.
         tokio::time::sleep(Duration::from_secs(60)).await;
         assert_eq!(
             tokio::time::Instant::now() - before,

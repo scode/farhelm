@@ -1583,6 +1583,7 @@ mod tests {
             if n >= 300 {
                 return None;
             }
+            // sleep-ok: deliver empty chunks across virtual deadline windows to distinguish activity from upload progress.
             tokio::time::sleep(Duration::from_secs(1)).await;
             Some((Ok::<Vec<u8>, std::io::Error>(Vec::new()), n + 1))
         });
