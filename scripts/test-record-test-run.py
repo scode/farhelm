@@ -1445,6 +1445,61 @@ class RecorderTest(unittest.TestCase):
         finally:
             release_fixture_processes(group_pid)
 
+    def test_declared_termination_grace_controls_runner_cleanup(self) -> None:
+        """A runner's cleanup may finish in its declared window, or be forcibly bounded.
+
+        Readiness is explicit before interruption. The short case cannot exit
+        voluntarily before the parent releases its private lease, so scheduler
+        delays cannot turn forced cleanup into a successful child exit. The
+        long case needs more than the recorder's old two-second allowance.
+        """
+
+        for grace, clean in [("0.05", False), ("5", True)]:
+            with self.subTest(grace=grace):
+                ready = self.base / f"grace-{grace}.ready"
+                completed = self.base / f"grace-{grace}.completed"
+                code = (
+                    "import pathlib, signal, sys, time\n"
+                    "def cleanup(signum, frame):\n"
+                    + ("    time.sleep(2.5)\n" if clean else f"    {self.wait_code}\n")
+                    + f"    pathlib.Path({str(completed)!r}).touch()\n"
+                    "    sys.exit(0)\n"
+                    "signal.signal(signal.SIGTERM, cleanup)\n"
+                    f"pathlib.Path({str(ready)!r}).touch()\n"
+                    f"{self.wait_code}\n"
+                )
+                recorder = subprocess.Popen(
+                    self.cli([PYTHON, "-c", code], "--termination-grace", grace),
+                    cwd=self.repo, env=self.environment(),
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    start_new_session=True,
+                )
+                try:
+                    wait_for(ready.exists)
+                    recorder.send_signal(signal.SIGTERM)
+                    _, stderr = recorder.communicate(timeout=10)
+                    self.assertEqual(recorder.returncode, 128 + signal.SIGTERM, stderr.decode())
+                    manifest = self.latest_manifest()[1]
+                    self.assertEqual(manifest["outcome"], "interrupted")
+                    self.assertEqual(manifest["command"]["termination_grace_seconds"], float(grace))
+                    self.assertEqual(completed.exists(), clean)
+                    self.assertEqual(
+                        manifest["child_status"]["raw_returncode"], 0 if clean else -signal.SIGKILL,
+                    )
+                finally:
+                    cleanup_direct_child(recorder)
+
+    def test_invalid_termination_grace_refuses_before_spawning(self) -> None:
+        """Invalid or unbounded cleanup allowances must not start a command."""
+
+        marker = self.base / "invalid-grace-ran"
+        command = [PYTHON, "-c", f"import pathlib; pathlib.Path({str(marker)!r}).touch()"]
+        for grace in ["0", "-1", "nan", "inf", "61"]:
+            with self.subTest(grace=grace):
+                result = self.invoke(command, "--termination-grace", grace)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(marker.exists())
+
     def test_interrupt_is_forwarded_and_cleans_owned_group(self) -> None:
         """SIGINT to the recorder becomes an interrupted record and reaches descendants."""
 
