@@ -1298,7 +1298,7 @@ class RecorderTest(unittest.TestCase):
     def test_local_helper_import_leaves_committed_source_unchanged(self) -> None:
         """The observer must not fingerprint bytecode that its own import just created.
 
-        Put both production scripts inside the measured checkout: running the
+        Put the recorder and its helpers inside the measured checkout: running the
         original script with a different cwd would miss this contamination.
         Ordinary bytecode settings and an empty excludes file prevent ambient
         operator configuration from hiding a regression.
@@ -1306,7 +1306,10 @@ class RecorderTest(unittest.TestCase):
 
         scripts = self.repo / "scripts"
         scripts.mkdir()
-        for name in ("record-test-run.py", "test_run_traces.py"):
+        for name in (
+            "record-test-run.py", "test_run_traces.py", "test_run_nextest.py",
+            "test_run_playwright.py",
+        ):
             shutil.copyfile(SCRIPT.with_name(name), scripts / name)
         run_checked(["git", "config", "core.excludesFile", os.devnull], self.repo)
         run_checked(["git", "add", "scripts"], self.repo)
@@ -1613,13 +1616,11 @@ class RecorderTest(unittest.TestCase):
                         wait_for(ready.exists)
                         pid = int(descendant_pid.read_text())
                         intent = RECORDER.SignalIntent()
-                        if cancellation == "interrupt" and phase == "command":
-                            intent.handle(signal.SIGINT, None)
-
                         def ready_child(*_args, **_kwargs):
-                            # Probe interruption after spawn must clean its child;
-                            # interruption before spawn intentionally starts none.
-                            if cancellation == "interrupt" and phase == "probe":
+                            # Both paths refuse to spawn after cancellation.
+                            # Deliver this interrupt at the successful spawn seam
+                            # so the recorder owns the ready child's cleanup.
+                            if cancellation == "interrupt":
                                 intent.handle(signal.SIGINT, None)
                             return process
 
