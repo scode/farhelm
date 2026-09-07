@@ -98,6 +98,7 @@ web = ["dioxus/web"]
 desktop = ["dioxus/desktop", "dep:arboard"]
 
 [dev-dependencies]
+farhelm-teststate.workspace = true
 # Per-test tracing capture stays out of every shipped UI feature. The attribute
 # owns an isolated dispatcher and, for async tests, a Tokio runtime.
 farhelm-testtrace.workspace = true

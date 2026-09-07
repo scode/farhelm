@@ -212,12 +212,6 @@ problems before turning out to be invalid premises. That is why the scale factor
 deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
 than behind it.
 
-- Evidence on first failure, effort medium. Per-test `tracing` capture dumped on failure (the existing capture layer is
-  process-global via `try_init`; use `with_default` around the test body or partition by thread) reaches four of the
-  five unknowns, whose next steps are supervisor-internal, and reaches unit-test binaries. A harness `Drop` that runs
-  when `std::thread::panicking()` adds the tmux side: client and pane listings with flags, pane capture with dead state
-  and dimensions, the harness event timeline. About 34 sites build `TmuxServerGuard` by hand and need a shared
-  constructor. Browser helpers emit timestamped console events so retained traces answer ordering questions.
 - Process-per-test with cargo-nextest, workspace-wide, effort medium. Retires cross-test interference as a class (the
   one confirmed instance, #384, is in `farhelm-teststate`'s unit binary, not e2e) and supplies per-test timeouts, JUnit
   for the ledger, and retries that report "flaky." nextest interleaves binaries where `cargo test` runs them

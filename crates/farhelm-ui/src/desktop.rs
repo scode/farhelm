@@ -1636,7 +1636,6 @@ mod tests {
     use super::*;
     use std::io::Read as _;
     use std::net::TcpListener;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
     const PROXY_CHILD_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_CHILD";
@@ -2438,6 +2437,286 @@ mod tests {
         server.abort();
     }
 
+    /// Own the server thread until its protocol result and actual exit have been observed.
+    ///
+    /// Dropping this fixture requests cancellation even when an assertion unwinds. The
+    /// result distinguishes cancellation from either a served request or an unused proxy.
+    struct ProxyTestServer {
+        owner: farhelm_teststate::thread::FixtureThread,
+        result: std::sync::mpsc::Receiver<Result<bool, &'static str>>,
+        /// First read evidence lets cleanup tests keep a partially read request alive.
+        request_started: std::sync::mpsc::Receiver<()>,
+    }
+
+    /// Check cancellation and the shared transaction deadline between nonblocking operations.
+    ///
+    /// Waiting is reserved for WouldBlock: successful reads and writes must also revisit
+    /// the deadline, so a continuously active peer cannot extend the fixture lifetime.
+    fn proxy_fixture_checkpoint(
+        stop: &std::sync::mpsc::Receiver<()>,
+        deadline: Instant,
+        wait: bool,
+    ) -> Result<(), &'static str> {
+        use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+        match stop.try_recv() {
+            Ok(()) | Err(TryRecvError::Disconnected) => return Err("fixture cancelled"),
+            Err(TryRecvError::Empty) => {}
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("fixture deadline");
+        }
+        if wait {
+            match stop.recv_timeout(remaining.min(Duration::from_millis(10))) {
+                Ok(()) | Err(RecvTimeoutError::Disconnected) => return Err("fixture cancelled"),
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Serve one bounded request, or observe whether a supposed proxy receives a connection.
+    ///
+    /// Both roles retain their listener until completion. The proxy's ordinary path observes
+    /// its whole three-second window; cancelling it as soon as the child exits could miss a
+    /// connection already queued by that child. Cancellation is only the unwind fallback.
+    fn spawn_proxy_test_server(listener: TcpListener, serve: bool) -> ProxyTestServer {
+        listener.set_nonblocking(true).unwrap();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+        let (result_tx, result) = std::sync::mpsc::channel();
+        let (request_tx, request_started) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            context.enter(|| {
+                let role = if serve { "target" } else { "proxy" };
+                // Kind and errno preserve the underlying failure without retaining arbitrary
+                // error strings. Record here: a child assertion can discard the result channel.
+                let io_failure = |stage: &'static str, error: std::io::Error| {
+                    tracing::error!(role, stage, kind = ?error.kind(), errno = ?error.raw_os_error(),
+                        "desktop proxy fixture I/O failed");
+                    stage
+                };
+                let deadline = Instant::now() + Duration::from_secs(3);
+                let transaction = || -> Result<bool, &'static str> {
+                    let mut stream = loop {
+                        proxy_fixture_checkpoint(&stop_rx, deadline, false)?;
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                proxy_fixture_checkpoint(&stop_rx, deadline, true)?;
+                            }
+                            Err(error) => return Err(io_failure("fixture accept failed", error)),
+                        }
+                    };
+                    if !serve {
+                        return Ok(true);
+                    }
+                    // Linux and BSD differ in whether accepted sockets inherit O_NONBLOCK.
+                    // Set it explicitly and handle WouldBlock throughout, including writes.
+                    stream
+                        .set_nonblocking(true)
+                        .map_err(|error| io_failure("fixture nonblocking failed", error))?;
+                    let mut request = Vec::new();
+                    let mut chunk = [0_u8; 1024];
+                    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        proxy_fixture_checkpoint(&stop_rx, deadline, false)?;
+                        if request.len() == 16 * 1024 {
+                            return Err("fixture request head too large");
+                        }
+                        let available = chunk.len().min(16 * 1024 - request.len());
+                        match stream.read(&mut chunk[..available]) {
+                            Ok(0) => return Err("fixture request ended before headers"),
+                            Ok(n) => {
+                                if request.is_empty() {
+                                    let _ = request_tx.send(());
+                                }
+                                request.extend_from_slice(&chunk[..n]);
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                proxy_fixture_checkpoint(&stop_rx, deadline, true)?;
+                            }
+                            Err(error) => return Err(io_failure("fixture read failed", error)),
+                        }
+                    }
+                    // A response before the complete request head can make hyper reject it
+                    // as UnexpectedMessage. EOF and oversized headers never earn a 200.
+                    let response =
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect";
+                    let mut written = 0;
+                    while written < response.len() {
+                        proxy_fixture_checkpoint(&stop_rx, deadline, false)?;
+                        match stream.write(&response[written..]) {
+                            Ok(0) => return Err("fixture write made no progress"),
+                            Ok(n) => written += n,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                proxy_fixture_checkpoint(&stop_rx, deadline, true)?;
+                            }
+                            Err(error) => return Err(io_failure("fixture write failed", error)),
+                        }
+                    }
+                    Ok(true)
+                };
+                let outcome = match transaction() {
+                    // The observation window ending without an accepted connection is
+                    // the proxy's normal result, including expiry during an accept poll.
+                    Err("fixture deadline") if !serve => Ok(false),
+                    outcome => outcome,
+                };
+                // Release the listening socket inside the captured context, before publishing
+                // the result. Actual thread completion is still observed by the owner.
+                drop(listener);
+                tracing::info!(role, outcome = ?outcome, "desktop proxy fixture finished");
+                let _ = result_tx.send(outcome);
+            });
+        });
+        let owner = farhelm_teststate::thread::FixtureThread::new(
+            "desktop-proxy-fixture",
+            worker,
+            move || {
+                let _ = stop_tx.send(());
+            },
+        )
+        .expect("start fixture join observer");
+        ProxyTestServer {
+            owner,
+            result,
+            request_started,
+        }
+    }
+
+    /// A child failure can discard the result receiver; the fixture error must survive in capture.
+    #[farhelm_testtrace::test]
+    fn proxy_fixture_records_an_error_without_a_result_receiver() {
+        let capture = farhelm_testtrace::current_capture().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ProxyTestServer { owner, result, .. } = spawn_proxy_test_server(listener, true);
+        drop(result);
+        let peer = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).unwrap();
+        peer.shutdown(std::net::Shutdown::Write).unwrap();
+        owner.finish(Duration::from_secs(4)).unwrap();
+        let events = capture.matching("desktop proxy fixture finished").unwrap();
+        assert!(
+            events.iter().any(|event| event
+                .fields
+                .get("role")
+                .is_some_and(|role| role == "target")
+                && event.fields.get("outcome").is_some_and(
+                    |outcome| outcome.contains("fixture request ended before headers")
+                )),
+            "fixture failure missing from capture: {events:?}"
+        );
+    }
+
+    /// Neither server role may retain its listener after an assertion unwinds before accept.
+    #[farhelm_testtrace::test]
+    fn proxy_fixture_cancels_before_accept_on_unwind() {
+        for serve in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let ProxyTestServer { owner, result, .. } = spawn_proxy_test_server(listener, serve);
+            let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _owner = owner;
+                panic!("exercise pre-accept cleanup");
+            }));
+            assert!(unwind.is_err());
+            assert_eq!(
+                result.recv_timeout(Duration::from_secs(1)).unwrap(),
+                Err("fixture cancelled")
+            );
+            assert!(std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err());
+        }
+    }
+
+    /// A peer that sends only part of its headers must not trap unwind cleanup in a read.
+    #[farhelm_testtrace::test]
+    fn proxy_fixture_cancels_a_partial_request_on_unwind() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ProxyTestServer {
+            owner,
+            result,
+            request_started,
+        } = spawn_proxy_test_server(listener, true);
+        let mut peer = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).unwrap();
+        peer.set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        peer.write_all(b"GET / HTTP/1.1\r\n").unwrap();
+        request_started
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _owner = owner;
+            panic!("exercise incomplete request cleanup");
+        }));
+        assert!(unwind.is_err());
+        assert_eq!(
+            result.recv_timeout(Duration::from_secs(1)).unwrap(),
+            Err("fixture cancelled")
+        );
+        assert_eq!(peer.read(&mut [0; 1]).unwrap(), 0);
+    }
+
+    /// EOF and an overlarge header cannot earn the success response used by the proxy test.
+    #[farhelm_testtrace::test]
+    fn proxy_fixture_rejects_incomplete_and_oversized_headers() {
+        for (request, expected) in [
+            (
+                b"GET / HTTP/1.1\r\n".to_vec(),
+                "fixture request ended before headers",
+            ),
+            (vec![b'x'; 16 * 1024], "fixture request head too large"),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = spawn_proxy_test_server(listener, true);
+            let mut peer =
+                std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).unwrap();
+            peer.set_write_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            peer.write_all(&request).unwrap();
+            peer.shutdown(std::net::Shutdown::Write).unwrap();
+            assert_eq!(
+                server.result.recv_timeout(Duration::from_secs(4)).unwrap(),
+                Err(expected)
+            );
+            server.owner.finish(Duration::from_secs(1)).unwrap();
+            assert_eq!(peer.read(&mut [0; 1]).unwrap(), 0);
+        }
+    }
+
+    /// A completed request receives the full response, and a contacted proxy reports that contact.
+    #[farhelm_testtrace::test]
+    fn proxy_fixture_reports_served_requests_and_proxy_connections() {
+        for serve in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = spawn_proxy_test_server(listener, serve);
+            let mut peer =
+                std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).unwrap();
+            if serve {
+                peer.set_write_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+                peer.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    .unwrap();
+                let mut response = String::new();
+                peer.read_to_string(&mut response).unwrap();
+                assert_eq!(
+                    response,
+                    "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect"
+                );
+            }
+            assert_eq!(
+                server.result.recv_timeout(Duration::from_secs(4)).unwrap(),
+                Ok(true)
+            );
+            server.owner.finish(Duration::from_secs(1)).unwrap();
+        }
+    }
+
     /// Ambient proxy variables belong only to the child. The parent owns both
     /// listeners so it can prove the loopback request reached its destination
     /// and never opened a connection to the proxy.
@@ -2476,85 +2755,15 @@ mod tests {
             return;
         }
 
-        // Both fake servers poll a non-blocking LISTENER so the deadline loop
-        // can give up, but each accepted stream is put back into blocking
-        // mode explicitly. Linux hands out blocking sockets from a
-        // non-blocking listener; macOS (BSD semantics) makes the accepted
-        // socket inherit O_NONBLOCK, so a read on it returns WouldBlock
-        // straight away, the 200 goes out before the request has arrived,
-        // and hyper refuses a response that precedes its request
-        // (`UnexpectedMessage`). That is exactly how this test failed the
-        // first Mac release gate while every Linux run stayed green — the
-        // release workflow is the only place this test runs on macOS.
         let target = TcpListener::bind("127.0.0.1:0").unwrap();
         let target_addr = target.local_addr().unwrap();
-        target.set_nonblocking(true).unwrap();
-        // Capture immediately before each spawn: raw threads do not inherit
-        // the wrapper's thread-local dispatcher or test attribution.
-        let target_context = farhelm_testtrace::current_thread_context()
-            .expect("the test wrapper installs a thread context");
-        let target_thread = std::thread::spawn(move || {
-            target_context.enter(|| {
-                let deadline = Instant::now() + Duration::from_secs(3);
-                while Instant::now() < deadline {
-                    match target.accept() {
-                        Ok((mut stream, _)) => {
-                            stream.set_nonblocking(false).unwrap();
-                            stream
-                                .set_read_timeout(Some(Duration::from_secs(3)))
-                                .unwrap();
-                            // Read the whole request head before answering, so
-                            // the response can never overtake the request even
-                            // on a platform that delivers it in several reads.
-                            let mut request = Vec::new();
-                            let mut chunk = [0_u8; 1024];
-                            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
-                                match stream.read(&mut chunk) {
-                                    Ok(0) => break,
-                                    Ok(n) => request.extend_from_slice(&chunk[..n]),
-                                    Err(error) => panic!("target read failed: {error}"),
-                                }
-                            }
-                            stream
-                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect")
-                                .unwrap();
-                            return;
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(error) => panic!("target accept failed: {error}"),
-                    }
-                }
-                panic!("proxy child never reached the loopback target");
-            });
-        });
+        let target_server = spawn_proxy_test_server(target, true);
         let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
         let proxy_addr = proxy.local_addr().unwrap();
-        proxy.set_nonblocking(true).unwrap();
-        let proxy_reached = Arc::new(AtomicBool::new(false));
-        let proxy_witness = Arc::clone(&proxy_reached);
-        let proxy_context = farhelm_testtrace::current_thread_context()
-            .expect("the test wrapper installs a thread context");
-        let proxy_thread = std::thread::spawn(move || {
-            proxy_context.enter(|| {
-                let deadline = Instant::now() + Duration::from_secs(3);
-                while Instant::now() < deadline {
-                    match proxy.accept() {
-                        Ok((_stream, _)) => {
-                            proxy_witness.store(true, Ordering::Release);
-                            return;
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(error) => panic!("proxy accept failed: {error}"),
-                    }
-                }
-            });
-        });
+        let proxy_server = spawn_proxy_test_server(proxy, false);
 
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child
             .args([
                 "--exact",
                 "desktop::tests::desktop_loopback_client_ignores_an_ambient_proxy",
@@ -2565,17 +2774,42 @@ mod tests {
             .env("HTTP_PROXY", format!("http://{proxy_addr}"))
             .env("HTTPS_PROXY", format!("http://{proxy_addr}"))
             .env("ALL_PROXY", format!("http://{proxy_addr}"))
-            .env("NO_PROXY", "")
-            .output()
-            .unwrap();
-
-        target_thread.join().unwrap();
-        proxy_thread.join().unwrap();
+            .env("NO_PROXY", "");
+        let limits = farhelm_teststate::process::CommandRunLimits::new(
+            Duration::from_secs(10),
+            Duration::from_secs(1),
+            16 * 1024,
+            16 * 1024,
+            32 * 1024,
+        )
+        .unwrap();
+        let output = farhelm_teststate::process::run_bounded(&mut child, &limits).unwrap();
         assert!(
-            output.status.success(),
-            "proxy child failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
+            output.direct_child_reaped
+                && !output.timed_out
+                && output.status.is_some_and(|status| status.success())
+                && output.errors.is_empty(),
+            "proxy child failed: {output:?}"
         );
-        assert!(!proxy_reached.load(Ordering::Acquire));
+        assert!(
+            String::from_utf8_lossy(&output.stdout.prefix).contains("1 passed"),
+            "the selected child test must actually run: {output:?}"
+        );
+        assert_eq!(
+            target_server
+                .result
+                .recv_timeout(Duration::from_secs(4))
+                .unwrap(),
+            Ok(true)
+        );
+        target_server.owner.finish(Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            proxy_server
+                .result
+                .recv_timeout(Duration::from_secs(4))
+                .unwrap(),
+            Ok(false)
+        );
+        proxy_server.owner.finish(Duration::from_secs(1)).unwrap();
     }
 }
