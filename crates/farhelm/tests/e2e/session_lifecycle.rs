@@ -83,6 +83,7 @@ async fn wait_for_geometry(h: &Harness, expected: &str) {
             tokio::time::Instant::now() < deadline,
             "window geometry never reached {expected} (last: {got})"
         );
+        // sleep-ok: tmux applies the requested geometry asynchronously; poll the window until the caller's target is visible.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -105,6 +106,7 @@ async fn assert_geometry_stays(h: &Harness, expected: &str, why: &str) {
             expected,
             "{why}"
         );
+        // sleep-ok: this helper observes a forbidden resize for the full window; an immediate check could precede the in-flight request.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -276,31 +278,7 @@ async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let advanced = loop {
-        h.client.send_input(chan, b"nudge\r".to_vec()).await;
-        let listed = h.client.list_sessions().await.expect("list");
-        let found = listed
-            .sessions
-            .iter()
-            .find(|s| s.id == session.id)
-            .expect("the created session is listed");
-        assert!(
-            found.last_activity_at >= session.created_at,
-            "the activity stamp may never move backwards past creation (was {}, created {})",
-            found.last_activity_at,
-            session.created_at
-        );
-        if found.last_activity_at > session.created_at {
-            break found.last_activity_at;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "a pane echoing input every poll never had its activity dated ({})",
-            why()
-        );
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    };
+    let advanced = wait_for_echo_activity(&h, &session, chan, &why).await;
 
     // The row, read through a second connection to the live supervisor's
     // own database — the same thing a restart would reload. Polled rather
@@ -311,10 +289,32 @@ async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("open the supervisor's database read-side");
+    wait_for_persisted_activity(&store, &session.id, advanced, &why).await;
+
+    // Aborted rather than left detached: `serve` never returns on its own,
+    // so a spawned loop would otherwise hold this state directory and its
+    // supervisor alive for the rest of the test binary. Awaited so the
+    // abort has actually taken effect before the harness's own teardown
+    // starts pulling the directory out from under it.
+    serve_task.abort();
+    let _ = serve_task.await;
+}
+
+/// Observe the durable activity value through a separate database connection.
+///
+/// Listing state is updated before persistence completes. Require the exact
+/// value observed by the caller, preserving the test's restart contract and
+/// its diagnostic distinction between a stalled server and a missing write.
+async fn wait_for_persisted_activity(
+    store: &SessionStore,
+    session_id: &str,
+    advanced: i64,
+    why: &impl Fn() -> String,
+) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let stored = store
-            .session(&session.id)
+            .session(session_id)
             .await
             .expect("read the session row")
             .expect("the created session has a row")
@@ -329,16 +329,48 @@ async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
              to answer across ({})",
             why()
         );
+        // sleep-ok: the in-memory timestamp advances before its database write; observe the separate durable row at the original cadence.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
 
-    // Aborted rather than left detached: `serve` never returns on its own,
-    // so a spawned loop would otherwise hold this state directory and its
-    // supervisor alive for the rest of the test binary. Awaited so the
-    // abort has actually taken effect before the harness's own teardown
-    // starts pulling the directory out from under it.
-    serve_task.abort();
-    let _ = serve_task.await;
+/// Drive echoing input until the live ticker reports activity newer than creation.
+///
+/// The initial timestamp remains a lower bound on every observation. Keep
+/// the serve-loop failure available in diagnostics so startup failures are
+/// distinguishable from a ticker that never observes the fixture's output.
+async fn wait_for_echo_activity(
+    h: &Harness,
+    session: &SessionInfo,
+    chan: u32,
+    why: &impl Fn() -> String,
+) -> i64 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        h.client.send_input(chan, b"nudge\r".to_vec()).await;
+        let listed = h.client.list_sessions().await.expect("list");
+        let found = listed
+            .sessions
+            .iter()
+            .find(|s| s.id == session.id)
+            .expect("the created session is listed");
+        assert!(
+            found.last_activity_at >= session.created_at,
+            "the activity stamp may never move backwards past creation (was {}, created {})",
+            found.last_activity_at,
+            session.created_at
+        );
+        if found.last_activity_at > session.created_at {
+            return found.last_activity_at;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a pane echoing input every poll never had its activity dated ({})",
+            why()
+        );
+        // sleep-ok: keep producing bounded input while the live ticker observes activity; return only when the listing advances.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 /// tmux's OWN view of a session's agent pane, out of band from anything
@@ -1528,22 +1560,12 @@ async fn create_with_tilde_cwd_expands_against_the_supervisors_home() {
         "the default title derives from the EXPANDED path's basename"
     );
     let marker = workdir.join("where-i-ran.txt");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        if let Ok(contents) = std::fs::read_to_string(&marker) {
-            assert_eq!(
-                contents.trim(),
-                workdir.to_string_lossy(),
-                "the agent's own $PWD must be the expanded directory"
-            );
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the launch never ran in the expanded directory (no marker at {marker:?})"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let contents = wait_for_launch_directory_report(&marker).await;
+    assert_eq!(
+        contents.trim(),
+        workdir.to_string_lossy(),
+        "the agent's own $PWD must be the expanded directory"
+    );
 
     let bare = h
         .client
@@ -1990,6 +2012,26 @@ async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
     .await;
 }
 
+/// Read the launched shell's directory witness before checking cwd expansion.
+///
+/// A correct stored directory does not prove the process used it. Preserve
+/// this fixture's file-read boundary and let the caller compare the witness
+/// with the expanded path independently.
+async fn wait_for_launch_directory_report(marker: &std::path::Path) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Ok(contents) = std::fs::read_to_string(marker) {
+            return contents;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the launch never ran in the expanded directory (no marker at {marker:?})"
+        );
+        // sleep-ok: the launched shell publishes the directory witness asynchronously; retain the original readability polling boundary.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// A session whose agent exits stays viewable and replayable.
 ///
 /// This is what `remain-on-exit on` buys (SPEC.md: a stopped or exited
@@ -2009,6 +2051,32 @@ async fn exited_agent_leaves_a_viewable_terminal() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"quit\r".to_vec()).await;
 
+    quit_until_pane_dead(&h, chan, &rx).await;
+    h.client.detach(chan).await;
+
+    // The attach succeeding IS the contract: without `remain-on-exit on`
+    // the window closes when the process exits, taking the only-window
+    // session with it, and every tmux call in the attach path then fails.
+    // (The replayed content is deliberately not asserted — a dead pane's
+    // captured screen depends on what the exiting program left behind.)
+    //
+    // Retried while the failure looks transient, because the contract is
+    // "an exited session's terminal is still attachable", not "attachable
+    // on the first try". An attach is several bounded tmux exchanges (the
+    // replay command group among them), and a machine loaded enough to
+    // blow one of those budgets says nothing about whether the window
+    // survived the exit. Anything that does NOT look like a timeout fails
+    // at once: a closed window is a permanent, differently-shaped error
+    // and must not be retried into a slow pass.
+    let (_chan2, _rx2) = attach_exited_pane(&h, &session.id).await;
+}
+
+/// Drive the basic fixture to pane death while observing attachment loss.
+///
+/// The caller is testing retained terminal state after exit. Farewell text
+/// alone is not the exit boundary, and a detached peer cannot receive the
+/// idempotent quit stimulus this helper repeats while waiting for tmux.
+async fn quit_until_pane_dead(h: &Harness, chan: u32, rx: &TermStream) {
     // Wait for the pane to actually be dead by asking tmux, not by
     // watching for the agent's farewell text. Output-watching would race
     // the process teardown this test deliberately provokes; `pane_dead`
@@ -2058,31 +2126,24 @@ async fn exited_agent_leaves_a_viewable_terminal() {
                      quit can reach the pane"
                 ),
             },
+            // sleep-ok: pace the idempotent quit stimulus and pane-death polls while the other select arm watches peer loss.
             () = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
     }
-    h.client.detach(chan).await;
+}
 
-    // The attach succeeding IS the contract: without `remain-on-exit on`
-    // the window closes when the process exits, taking the only-window
-    // session with it, and every tmux call in the attach path then fails.
-    // (The replayed content is deliberately not asserted — a dead pane's
-    // captured screen depends on what the exiting program left behind.)
-    //
-    // Retried while the failure looks transient, because the contract is
-    // "an exited session's terminal is still attachable", not "attachable
-    // on the first try". An attach is several bounded tmux exchanges (the
-    // replay command group among them), and a machine loaded enough to
-    // blow one of those budgets says nothing about whether the window
-    // survived the exit. Anything that does NOT look like a timeout fails
-    // at once: a closed window is a permanent, differently-shaped error
-    // and must not be retried into a slow pass.
+/// Require an exited pane to remain attachable without consuming replay.
+///
+/// Keep the existing retry policy limited to recognized tmux timeouts.
+/// A permanent refusal must fail immediately, because hiding a removed
+/// terminal would defeat the caller's remain-on-exit assertion.
+async fn attach_exited_pane(h: &Harness, session_id: &str) -> (u32, TermStream) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    let (_chan2, _rx2) = loop {
+    loop {
         // This retry observes whether a dead pane remains attachable; consuming
         // catch-up would turn a successful attach into a replay-read test.
-        match h.client.attach_at_boundary(&session.id, 80, 24).await {
-            Ok(attached) => break attached,
+        match h.client.attach_at_boundary(session_id, 80, 24).await {
+            Ok(attached) => return attached,
             Err(e) => {
                 assert!(
                     looks_like_a_tmux_timeout(&e),
@@ -2094,10 +2155,11 @@ async fn exited_agent_leaves_a_viewable_terminal() {
                     "a session whose agent exited never became attachable within 60s; last \
                      error: {e:#}"
                 );
+                // sleep-ok: only recognized tmux timeouts are retried; a permanent attachment refusal still fails immediately.
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
-    };
+    }
 }
 
 /// Whether a failed request failed because a tmux exchange ran out of
@@ -3165,14 +3227,21 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
     tokio::spawn(async move {
         let _ = serving.serve().await;
     });
+    wait_for_stale_socket_replacement(state2.path()).await;
+}
+
+/// Prove a replacement supervisor accepts connections despite a stale path.
+///
+/// Path existence cannot distinguish the planted stale socket file from
+/// a bound listener. Keep the ten-second cancellation bound around the
+/// complete connection attempt, as in the original ownership test.
+async fn wait_for_stale_socket_replacement(state: &std::path::Path) {
     let connected = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            if farhelm_supervisor::service::connect(state2.path())
-                .await
-                .is_ok()
-            {
+            if farhelm_supervisor::service::connect(state).await.is_ok() {
                 return;
             }
+            // sleep-ok: observe an accepted connection after the replacement server binds; the planted path alone is not readiness.
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
@@ -4416,6 +4485,13 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
+    let child_pid = extract_pid(&seen, "CHILD-PID:");
+
+    assert!(
+        observed_process_can_run(child_pid).await,
+        "test setup: the published spawner child must be alive before stop"
+    );
+
     // Kick off the slow stop without awaiting it yet.
     let stop_client = Arc::clone(&h.client);
     let stop_session_id = session.id.clone();
@@ -4429,12 +4505,12 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         stop_done_writer.store(true, Ordering::SeqCst);
     });
 
-    // Give the stop request time to actually be dispatched and its kill
-    // sweep started (well inside its 500ms grace period) before firing
-    // the cheap request — otherwise this could race the connection's own
-    // read loop picking up the stop frame at all, rather than exercising
-    // the "already in flight" scenario this test is about.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // The fixture's long-lived child cannot exit normally during this
+    // test. Its death proves the server has started teardown, whereas
+    // spawning the client task proves nothing about server dispatch.
+    // Keep both completion assertions: death alone does not prove that
+    // stop remains in flight while the cheap request is handled.
+    wait_for_observed_process_exit(child_pid).await;
     assert!(
         !stop_done.load(Ordering::SeqCst),
         "test setup: the slow stop must still be in flight at this point"
@@ -4454,6 +4530,71 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
     );
 
     stop_task.await.expect("stop task panicked");
+}
+
+/// Observe one fixture PID without interpreting unreadable process data as exit.
+///
+/// Both supported platforms provide `ps`; macOS has no `/proc`. Zombies
+/// count as exited because they cannot execute, even when an orphan's new
+/// parent has not reaped it. An empty process selection is accepted only
+/// when a kernel existence probe also confirms absence. Other observation
+/// failures are setup failures, never evidence that stop was dispatched.
+async fn observed_process_can_run(pid: u32) -> bool {
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .env("LC_ALL", "C")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("process-state observation timed out")
+    .expect("run ps for the fixture PID");
+    let state = std::str::from_utf8(&output.stdout)
+        .expect("ps state must be UTF-8")
+        .trim();
+    if state.is_empty() && output.status.code() == Some(1) && output.stderr.is_empty() {
+        // SAFETY: signal zero does not signal the process; it asks the
+        // kernel whether this positive, fixture-owned PID still exists.
+        assert!(pid > 0 && pid <= i32::MAX as u32);
+        let result = unsafe { libc::kill(pid as i32, 0) };
+        let error = std::io::Error::last_os_error();
+        assert!(
+            result == -1 && error.raw_os_error() == Some(libc::ESRCH),
+            "ps omitted fixture pid {pid} without confirmed kernel absence: {result}, {error}"
+        );
+        return false;
+    }
+    assert!(
+        output.status.success()
+            && output.stderr.is_empty()
+            && state.split_whitespace().count() == 1,
+        "cannot observe fixture pid {pid}: {output:?}"
+    );
+    let status = state.as_bytes()[0];
+    assert!(
+        b"RSDTtIWUZ".contains(&status),
+        "unexpected process state for fixture pid {pid}: {state:?}"
+    );
+    status != b'Z'
+}
+
+/// Wait for the child observed alive before stop to become unable to execute.
+///
+/// This supplies a server-side teardown witness for the dispatch test;
+/// the caller must still prove that stop has not completed when the cheap
+/// request returns. Missing inspection facilities must fail this wait.
+async fn wait_for_observed_process_exit(pid: u32) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while observed_process_can_run(pid).await {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "fixture pid {pid} never exited"
+        );
+        // sleep-ok: poll the previously live child for teardown while preserving the caller's separate in-flight completion checks.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// Stop must be idempotent both in the ordinary sense (calling it twice on
@@ -4850,18 +4991,42 @@ async fn startup_removes_an_older_builds_snapshots_directory() {
 
     let supervisor = supervisor_process_on_state(state, std::iter::empty()).await;
 
+    wait_for_obsolete_snapshots_removed(&snapshots).await;
+    assert!(
+        supervisor.state.path().join("launch").exists(),
+        "the startup sweep must touch nothing but the snapshots directory"
+    );
+}
+
+/// Observe startup's removal of the obsolete snapshot directory.
+///
+/// The process fixture only promises that its socket path exists. The
+/// caller separately checks that current launch artifacts survived the
+/// sweep, so this waiter must stay scoped to the obsolete directory.
+async fn wait_for_obsolete_snapshots_removed(snapshots: &std::path::Path) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while snapshots.exists() {
         assert!(
             tokio::time::Instant::now() < deadline,
             "startup never removed the older build's snapshots directory"
         );
+        // sleep-ok: startup removes the obsolete directory asynchronously; observe that exact path before checking preserved artifacts.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(
-        supervisor.state.path().join("launch").exists(),
-        "the startup sweep must touch nothing but the snapshots directory"
-    );
+}
+
+/// Release connection-owned supervisor references before a restart fixture.
+///
+/// Dropping the client starts asynchronous connection cleanup. The caller
+/// retains the one reference this helper permits, then drops it before
+/// constructing the replacement supervisor against the same state.
+async fn wait_for_supervisor_connections_to_drain(sup: &Arc<Supervisor>) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while Arc::strong_count(sup) > 1 {
+        assert!(tokio::time::Instant::now() < deadline, "connection drain");
+        // sleep-ok: the dropped client's connection tasks must release their references before the fixture can restart the supervisor.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 /// Delete must tolerate a tmux session that disappeared out from under a
@@ -5387,11 +5552,7 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
         _slot,
     } = h;
     drop(client);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while Arc::strong_count(&sup) > 1 {
-        assert!(tokio::time::Instant::now() < deadline, "connection drain");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_for_supervisor_connections_to_drain(&sup).await;
     drop(sup);
 
     // The SAME probed manager, not a fresh `ScopeManager::systemd()`: the
@@ -5653,6 +5814,7 @@ async fn wait_for_shim_to_consume_spec(spec_path: &std::path::Path) {
             tokio::time::Instant::now() < deadline,
             "the real launch spec was never consumed by the shim"
         );
+        // sleep-ok: the shim removes its spec after reading it; observe removal before a test replaces that artifact.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -5890,7 +6052,7 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
 
 /// The acceptance test for `kill_process_tree`'s SIGSTOP-quiesce phase: a
 /// child that continuously forks new marked grandchildren — each one
-/// deliberately long-lived (`sleep 3600`, never exiting on its own) —
+/// deliberately long-lived (`sleep 120`, outlasting the stop window) —
 /// must leave NONE alive after stop, including ones that forked in the
 /// narrow gap between SIGTERM and the sweep's later signals — the exact
 /// race quiesce exists to close (see that function's docs and
@@ -5949,13 +6111,14 @@ async fn stop_quiesce_survives_no_marked_process() {
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
-    // Let the storm actually produce a few generations before stopping,
-    // so there is something for the sweep to race against rather than a
-    // trivially-empty tree.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // READY publishes the storm shell's PID, but does not promise that
+    // it has forked yet. Observe its next generation before stopping;
+    // the marker scan alone could see only the agent and storm shell.
+    let storm_pid = extract_pid(&seen, "CHILD-PID:");
+    wait_for_child(storm_pid, 10).await;
     assert!(
         !marked_pids(&session.id).is_empty(),
-        "test setup: the fork storm must have produced at least one live marked process by now"
+        "test setup: the running fixture must carry its session marker"
     );
 
     h.client.stop_session(&session.id).await.expect("stop");
