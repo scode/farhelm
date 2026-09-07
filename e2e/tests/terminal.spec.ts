@@ -2480,6 +2480,7 @@ test("a failed listing read while confirming does not clear the confirming state
 test("create-shows-no-badge-until-a-status-is-classified", async ({ page }) => {
   const sessionId = "unclassified-create-session";
   let classified = false;
+  let listingCwd = "/tmp";
   await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -2493,7 +2494,7 @@ test("create-shows-no-badge-until-a-status-is-classified", async ({ page }) => {
           {
             id: sessionId,
             title: sessionId,
-            cwd: "/tmp",
+            cwd: listingCwd,
             invocation: "agent",
             // No "status" key at all until `classified` flips — exactly
             // what a session nothing has looked at yet decodes as.
@@ -2521,10 +2522,12 @@ test("create-shows-no-badge-until-a-status-is-classified", async ({ page }) => {
   await expect(row.locator(".session-title")).toHaveText(sessionId);
   await expect(row.locator(".session-cwd")).toHaveText("/tmp");
   await expect(row.locator(".status-badge")).toHaveCount(0);
-  // Held across a listing refresh, so this is "no badge for as long as the
-  // status is unknown" rather than "no badge in the instant we looked".
+  // A distinct directory witnesses rendering of the refreshed reply while
+  // status remains absent. Waiting for a request or a delay could still
+  // leave the assertion looking at the original row.
+  listingCwd = "/tmp/refreshed";
   feed.notify(2);
-  await page.waitForTimeout(3_000);
+  await expect(row.locator(".session-cwd")).toHaveText(listingCwd);
   await expect(row.locator(".status-badge")).toHaveCount(0);
 
   classified = true;
