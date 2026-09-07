@@ -104,6 +104,70 @@ class NextestEvidenceTest(unittest.TestCase):
                 nextest.read_regular(real, 4)
             self.assertEqual(nextest.read_regular(real, 5), b"12345")
 
+    def test_export_retains_fixed_files_and_malformed_report_bytes(self):
+        """A parser failure remains inspectable without exporting arbitrary sibling test state."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory) / "run"
+            report = root / "nextest" / "default" / "junit.xml"
+            report.parent.mkdir(parents=True)
+            report.write_bytes(b"<unfinished")
+            (root / "nextest.toml").write_bytes(b"policy")
+            (root / "nextest-store.toml").write_bytes(b"store")
+            (report.parent / "unrelated-secret").write_bytes(b"not exported")
+            destination = pathlib.Path(directory) / "export"
+            result = nextest.export_evidence(root, destination)
+            self.assertTrue(result["complete"], result)
+            self.assertEqual({file.name for file in destination.iterdir()},
+                             {"nextest.toml", "nextest-store.toml", "nextest-junit.xml"})
+            self.assertEqual((destination / "nextest-junit.xml").read_bytes(), b"<unfinished")
+            self.assertEqual(result["files"][2]["sha256"], nextest.hashlib.sha256(b"<unfinished").hexdigest())
+            again = nextest.export_evidence(root, destination)
+            self.assertFalse(again["complete"])
+            self.assertEqual(len(again["errors"]), 3)
+
+    def test_export_refuses_linked_directories_and_records_missing_files(self):
+        """Intermediate links cannot expose another run's report; absent inputs stay explicitly incomplete."""
+        for linked in ("nextest", "default"):
+            with self.subTest(linked=linked), tempfile.TemporaryDirectory() as directory:
+                base = pathlib.Path(directory)
+                root = base / "run"
+                root.mkdir()
+                elsewhere = base / "elsewhere"
+                elsewhere.mkdir()
+                (elsewhere / "junit.xml").write_bytes(b"not this run")
+                if linked == "nextest":
+                    (elsewhere / "default").mkdir()
+                    (elsewhere / "default" / "junit.xml").write_bytes(b"not this run either")
+                    (root / "nextest").symlink_to(elsewhere, target_is_directory=True)
+                else:
+                    (root / "nextest").mkdir()
+                    (root / "nextest" / "default").symlink_to(elsewhere, target_is_directory=True)
+                destination = base / "export"
+                result = nextest.export_evidence(root, destination)
+                self.assertFalse(result["complete"])
+                self.assertEqual(len(result["errors"]), 3)
+                self.assertEqual(list(destination.iterdir()), [])
+
+    def test_export_caps_files_and_refuses_destination_links(self):
+        """Oversize files and output symlinks are omissions, never unchecked copies or overwritten targets."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            root = base / "run"
+            root.mkdir()
+            (root / "nextest.toml").write_bytes(b"12345")
+            destination = base / "export"
+            with mock.patch.object(nextest, "CONFIG_LIMIT", 4):
+                result = nextest.export_evidence(root, destination)
+            self.assertFalse(result["complete"])
+            self.assertEqual(list(destination.iterdir()), [])
+            other = base / "other"
+            other.mkdir()
+            link = base / "linked-export"
+            link.symlink_to(other, target_is_directory=True)
+            result = nextest.export_evidence(root, link)
+            self.assertFalse(result["complete"])
+            self.assertEqual(list(other.iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

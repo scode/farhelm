@@ -821,10 +821,11 @@ class RecorderTest(unittest.TestCase):
         env = self.install_nextest_fixture(report)
         requested = ["cargo", "nextest", "run", "-p", "fixture", "-E", "test(=pass)"]
         observed_roots = []
-        for _ in range(2):
-            result = self.invoke(requested, "--runner", "nextest", env=env)
+        for options in ([], ["--require-complete-console"]):
+            result = self.invoke(requested, "--runner", "nextest", *options, env=env)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             run_dir, manifest = self.latest_manifest()
+            self.assertTrue(manifest["output"]["eof_observed"])
             observed_roots.append(run_dir)
             observed = json.loads((run_dir / "nextest" / "observed.json").read_text())
             self.assertEqual(observed["nextest_env"], [])
@@ -853,6 +854,41 @@ class RecorderTest(unittest.TestCase):
                 self.assertEqual(manifest["child_status"]["raw_returncode"], child)
                 self.assertFalse(manifest["runner"]["report"]["complete"])
 
+    def test_required_console_loss_cannot_be_a_success(self) -> None:
+        """A caller parsing console witnesses must fail closed on loss, without erasing child status.
+
+        Inject the forwarding observation at the command boundary: actual
+        backpressure timing is outside this policy test. Generic recording
+        keeps its existing tolerance, and an already-failed child stays failed
+        with its original code rather than being relabelled as a console fault.
+        """
+        for required in (False, True):
+            for dropped, eof in ((0, True), (4, True), (0, False)):
+                for code in (0, 7):
+                    with self.subTest(required=required, dropped=dropped, eof=eof, code=code):
+                        console = mock.Mock()
+                        console.finish.return_value = {
+                            "observed_bytes": 8, "forwarded_bytes": 8 - dropped,
+                            "dropped_or_pending_bytes": dropped, "queue_rejected_bytes": dropped,
+                        }
+                        command_result = RECORDER.CommandResult(
+                            "completed", code, code, 0.125, False, output_eof_observed=eof,
+                        )
+                        options = ["--require-complete-console"] if required else []
+                        with mock.patch.object(RECORDER.pathlib.Path, "cwd", return_value=self.repo), \
+                                mock.patch.object(RECORDER, "ConsoleForwarder", return_value=console), \
+                                mock.patch.object(RECORDER, "run_command", return_value=command_result):
+                            returned = RECORDER.run(self.cli([PYTHON, "-c", "pass"], *options)[2:])
+                        rejected = required and (dropped > 0 or not eof) and code == 0
+                        self.assertEqual(returned, 125 if rejected else code)
+                        manifest = self.latest_manifest()[1]
+                        self.assertEqual(manifest["child_status"]["raw_returncode"], code)
+                        self.assertEqual(manifest["command"]["require_complete_console"], required)
+                        self.assertEqual(manifest["command"]["duration_seconds"], 0.125)
+                        self.assertEqual(manifest["outcome"], "recorder-error" if rejected else "completed")
+                        self.assertEqual(manifest["console"]["dropped_or_pending_bytes"], dropped)
+                        self.assertEqual(manifest["output"]["eof_observed"], eof)
+
     def test_nextest_post_run_io_failure_preserves_observed_status(self) -> None:
         """Report IO faults cannot erase a command result already published by finalize.
 
@@ -862,9 +898,12 @@ class RecorderTest(unittest.TestCase):
         """
 
         for phase in ("collection", "publication"):
-            for outcome, code, child in [("completed", 0, 0), ("completed", 100, 100),
-                                         ("timed_out", 124, -9), ("interrupted", 130, -15)]:
-                with self.subTest(phase=phase, outcome=outcome, code=code):
+            for outcome, code, child, strict in [
+                ("completed", 0, 0, False), ("completed", 100, 100, False),
+                ("timed_out", 124, -9, False), ("interrupted", 130, -15, False),
+                ("completed", 0, 0, True),
+            ]:
+                with self.subTest(phase=phase, outcome=outcome, code=code, strict=strict):
                     actual_write = RECORDER.Manifest.write
                     injected = False
 
@@ -882,14 +921,18 @@ class RecorderTest(unittest.TestCase):
                         return {"complete": True, "counts": {"tests": 1, "skipped": 0, "failures": 0}}
 
                     command_result = RECORDER.CommandResult(outcome, code, child, 9.5, True,
-                                                           cleanup_limit="fixture cleanup limit")
+                                                           cleanup_limit="fixture cleanup limit",
+                                                           output_eof_observed=not strict)
+                    options = ["--require-complete-console"] if strict else []
                     with mock.patch.object(RECORDER.pathlib.Path, "cwd", return_value=self.repo), \
                             mock.patch.object(RECORDER.test_run_nextest, "prepare", side_effect=lambda *args: (
                                 [PYTHON, "-c", "pass"], {"report": {"complete": False}})), \
                             mock.patch.object(RECORDER, "run_command", return_value=command_result), \
                             mock.patch.object(RECORDER.test_run_nextest, "collect", side_effect=collect), \
                             mock.patch.object(RECORDER.Manifest, "write", write_with_one_fault):
-                        returned = RECORDER.run(self.cli(["cargo", "nextest", "run"], "--runner", "nextest")[2:])
+                        returned = RECORDER.run(self.cli(
+                            ["cargo", "nextest", "run"], "--runner", "nextest", *options,
+                        )[2:])
                     self.assertEqual(returned, code if code else 125)
                     manifest = self.latest_manifest()[1]
                     self.assertEqual(manifest["child_status"]["raw_returncode"], child)
@@ -897,6 +940,9 @@ class RecorderTest(unittest.TestCase):
                     self.assertTrue(manifest["recorder"]["forced_cleanup"])
                     self.assertEqual(manifest["recorder"]["cleanup_limit"], "fixture cleanup limit")
                     self.assertEqual(manifest["outcome"], outcome if code else "recorder-error")
+                    self.assertEqual(manifest["output"]["eof_observed"], not strict)
+                    if strict:
+                        self.assertEqual(manifest["recorder"]["error"], "required console forwarding was incomplete")
                     self.assertEqual(injected, phase == "publication")
 
     def test_nextest_policy_refusal_happens_before_spawn(self) -> None:
@@ -1724,6 +1770,37 @@ class RecorderTest(unittest.TestCase):
             self.assertTrue(process_is_alive(pid))
             limit = self.latest_manifest()[1]["recorder"]["cleanup_limit"]
             self.assertIn("escaped descendants may remain", limit)
+        finally:
+            release_fixture_processes(descendant_pid)
+
+    def test_required_console_refuses_a_forced_pipe_close(self) -> None:
+        """A zero-exit leader cannot certify output still held by an escaped descendant.
+
+        All observed bytes reach the console, including a plausible pass
+        witness. Only the missing EOF reveals that later output could still
+        contradict it. The private fixture lease releases the escaped holder
+        without granting the recorder authority over that process.
+        """
+        descendant_pid = self.base / "strict-escaped-pipe-child.pid"
+        command = [
+            PYTHON, "-c",
+            (
+                "import pathlib, subprocess, sys; "
+                f"p=subprocess.Popen([sys.executable, {str(self.waiter)!r}], start_new_session=True); "
+                f"pathlib.Path({str(descendant_pid)!r}).write_text(str(p.pid)); "
+                "print('test result: ok. 1 passed', flush=True)"
+            ),
+        ]
+        try:
+            result = self.invoke(command, "--require-complete-console")
+            self.assertEqual(result.returncode, 125, result.stderr.decode())
+            self.assertIn(b"test result: ok. 1 passed", result.stdout)
+            manifest = self.latest_manifest()[1]
+            self.assertEqual(manifest["child_status"]["raw_returncode"], 0)
+            self.assertEqual(manifest["outcome"], "recorder-error")
+            self.assertFalse(manifest["output"]["eof_observed"])
+            self.assertEqual(manifest["console"]["dropped_or_pending_bytes"], 0)
+            self.assertTrue(process_is_alive(int(descendant_pid.read_text())))
         finally:
             release_fixture_processes(descendant_pid)
 

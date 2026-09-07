@@ -46,6 +46,17 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+record_args=(--kind development)
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --kind|--output-root)
+      [ "$#" -ge 2 ] || { echo "missing value for $1" >&2; exit 2; }
+      record_args+=("$1" "$2")
+      shift 2
+      ;;
+    *) echo "usage: $0 [--kind development|repetition|release] [--output-root PATH]" >&2; exit 2 ;;
+  esac
+done
 target_triple=x86_64-unknown-linux-musl
 # Respect an external CARGO_TARGET_DIR: CI and local runs both override it,
 # and guessing `$repo/target` would look for a payload that was built
@@ -64,7 +75,7 @@ ssh_alias=farhelm-centos-target
 # filter would pull in the localhost and direct-local cases, which correctly
 # SKIP where no local user manager exists — and this script treats a skip as a
 # failure, since a leg that skipped covered nothing.
-test_filter=provisioning_and_update_over_ssh_preserve_an_operable_session
+test_filter=provisioning::tests::provisioning_and_update_over_ssh_preserve_an_operable_session
 
 ssh_config="$HOME/.ssh/config"
 config_begin="# BEGIN farhelm-centos-ci (scripts/test-provision-centos.sh)"
@@ -302,14 +313,18 @@ fi
 # --------------------------------------------------------------------------
 
 echo "== provisioning $ssh_alias from this workspace's helm"
-output="$run_dir/cargo-test.log"
+output="$run_dir/nextest.log"
 set +e
 (
   cd "$repo" &&
     FARHELM_TEST_SSH_DESTINATION="$ssh_alias" \
       FARHELM_TEST_BINARY="$farhelm_payload" \
       FARHELM_TEST_TMUX="$tmux_payload" \
-      cargo test -p farhelm-helm "$test_filter" -- --show-output
+      python3 scripts/record-test-run.py --runner nextest --require-complete-console "${record_args[@]}" \
+        --selection 'CentOS provisioning over ssh' --concurrency '4 nextest slots; one selected test' \
+        --tmux none --keep-farhelm-env FARHELM_TEST_SSH_DESTINATION \
+        --keep-farhelm-env FARHELM_TEST_BINARY --keep-farhelm-env FARHELM_TEST_TMUX \
+        -- cargo nextest run -p farhelm-helm --lib -E "test(=$test_filter)"
 ) 2>&1 | tee "$output"
 test_status=${PIPESTATUS[0]}
 set -e
@@ -321,13 +336,17 @@ fi
 # A skip is a failure here. The whole point of this leg is coverage that RAN,
 # and every reason the test skips itself (no reachable destination, no
 # payload) is something this script was supposed to have provided.
-if grep -q '^SKIPPED ' "$output"; then
+if grep -q '^[[:space:]]*SKIPPED ' "$output"; then
   echo "the provisioning test SKIPPED instead of running:" >&2
-  grep '^SKIPPED ' "$output" >&2
+  grep '^[[:space:]]*SKIPPED ' "$output" >&2
   exit 1
 fi
-# And a filter that matches nothing also "passes". Require the test to have
-# been selected at all, so a rename cannot quietly empty this gate.
+# Complete console forwarding is required above: a missing SKIPPED line
+# cannot be treated as evidence that provisioning ran. Nextest indents its
+# captured output, hence the whitespace allowance in the skip witness.
+# Nextest refuses an empty exact selection. Its immediate success output
+# also retains the underlying test process's one-pass witness and SKIPPED
+# explanation, so a substrate skip cannot quietly turn this gate green.
 if ! grep -q 'test result: ok\. 1 passed' "$output"; then
   echo "expected exactly one test to run and pass; the filter matched something else:" >&2
   grep 'test result:' "$output" >&2

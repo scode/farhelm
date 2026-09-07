@@ -374,8 +374,9 @@ given. Build the web UI with `(cd crates/farhelm-ui && dx build --package farhel
 `cargo build`, then run the supervisor and helm manually when working on the browser surface. The desktop smoke harness
 supplies those development paths while testing the app-owned bootstrap.
 
-`AGENTS.md` has the conventions and the finish-work checks. End-to-end tests: `cargo test -- --show-output` (Rust,
-including real-tmux integration; `--show-output` is what surfaces the skip reasons from tests that need a systemd user
-manager), and `cd e2e && npx playwright test` (browser against a real stack, Chromium and WebKit both — needs
-`npm install` and `npx playwright install chromium webkit` once). `lore/` holds historical decision records; read
-`lore/AGENTS.md` before touching it.
+`AGENTS.md` has the conventions and the finish-work checks. Rust tests use pinned nextest through the
+[run recorder](docs/test-run-evidence.md), including real-tmux integration; doctests run separately with cargo. Read
+retained output for runtime skip reasons from tests that need a systemd user manager. Browser tests use
+`cd e2e && npx playwright test` (against a real stack, Chromium and WebKit both — needs `npm install` and
+`npx playwright install chromium webkit` once). `lore/` holds historical decision records; read `lore/AGENTS.md` before
+touching it.

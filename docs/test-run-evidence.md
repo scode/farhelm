@@ -17,13 +17,13 @@ process identity. Release setup selects a compatible interpreter explicitly.
 The recorder requires a run kind, selection label, concurrency label, and an explicit `--` before the one command argv:
 
 ```console
-PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" python3 scripts/record-test-run.py \
-  --kind repetition \
-  --selection 'session_lifecycle::create_attach_and_roundtrip_input' \
-  --concurrency 'one test process' \
-  --timeout 600 \
-  --tmux required \
-  -- cargo test -p farhelm --test e2e session_lifecycle::create_attach_and_roundtrip_input -- --exact --show-output
+python3 scripts/record-test-run.py \
+  --kind development \
+  --selection 'asset JavaScript unit harness' \
+  --concurrency 'node default discovery' \
+  --timeout 60 \
+  --tmux none \
+  -- bash -c 'cd crates/farhelm-ui/js-tests && node --test'
 ```
 
 The labels are recorded verbatim; coverage is never inferred from them. Generic mode invokes the argv directly with the
@@ -74,11 +74,11 @@ required version and runner config.
 
 This mode accepts package, target, feature and filter selection; it refuses options that replace the runner policy. It
 invokes the resolved cargo-nextest binary directly with four global slots, zero retries, failure on a flaky outcome, and
-failure on an empty selection. `.config/nextest.toml` adds the e2e group's four-slot cap, per-test timeout and
-five-second signal grace. The recorder allows ten seconds for runner cleanup by default and refuses a shorter allowance.
-Ambient `NEXTEST_*` settings are removed from the child environment, and nextest's user config is disabled. The names
-removed are retained, never their values. Generic recording remains available for explicit experiments with other
-policies, but such a command does not acquire these controlled-run claims.
+failure on an empty selection. `.config/nextest.toml` adds the e2e group's four-slot cap, the supervisor tmux modules'
+two-slot cap, per-test timeout and five-second signal grace. The recorder allows ten seconds for runner cleanup by
+default and refuses a shorter allowance. Ambient `NEXTEST_*` settings are removed from the child environment, and
+nextest's user config is disabled. The names removed are retained, never their values. Generic recording remains
+available for explicit experiments with other policies, but such a command does not acquire these controlled-run claims.
 
 Each run retains `nextest.toml`, `nextest-store.toml`, the actual executable path/hash/version probe, the requested
 argv, and the actual argv. The tool config directs output to that run's `nextest/default/junit.xml`; it cannot overwrite
@@ -86,7 +86,16 @@ an earlier run. The [JUnit report](https://nexte.st/docs/machine-readable/junit/
 tests, so skipped cases stay separate from passes. Standard output remains in the recorder's bounded log and per-test
 traces, without duplicating it into XML. XML inspection has a 16 MiB cap; missing, partial, oversized or contradictory
 reports are recorded as incomplete. The raw runner-written report is retained in place; the inspection cap is not a
-quota on nextest's writes. Review that file before exporting it, like other raw run evidence.
+quota on nextest's writes. Review that file before exporting it, like other raw run evidence. Runtime skips that print
+`SKIPPED` and return success remain passed cases in JUnit; their retained console output is required to interpret which
+substrates were actually exercised.
+
+Release failure collection uses `python3 scripts/test_run_nextest.py RUN_DIR EXPORT_DIR` to copy only the two runner
+configs and `nextest/default/junit.xml` (exported as `nextest-junit.xml`). Configs are capped at 64 KiB each and the
+report at 16 MiB; symlink components, nonregular files and existing output files are refused. Its JSON stdout names
+copied files, hashes and omissions. Missing or malformed report content remains evidence, never a zero-test pass:
+malformed bytes may be exported, while absent or oversized files make collection incomplete. This command does not walk
+arbitrary test state.
 
 `runner.report.complete` concerns report structure and totals, not source identity, test coverage or an assertion that
 the process exited successfully. The command status remains separate. A zero command exit with incomplete evidence, no
@@ -149,8 +158,8 @@ The top-level fields are:
 - `started_at` and `finished_at`: UTC RFC 3339 timestamps. `finished_at` is null while running.
 - `duration_seconds`: total monotonic duration, or null while running.
 - `command`: exact string `argv`, actual caller/child `cwd`, requested `timeout_seconds` and
-  `termination_grace_seconds`, and terminal `duration_seconds`. Nextest mode also retains `requested_argv` before
-  resolving the executable and inserting controlled options.
+  `termination_grace_seconds`, `require_complete_console`, and terminal `duration_seconds`. Nextest mode also retains
+  `requested_argv` before resolving the executable and inserting controlled options.
 - `runner`, when nextest mode is selected: preparation status, resolved executable identity, removed environment names,
   retained configuration paths/hashes, execution policy, and report completeness/counts.
 - `labels`: caller-supplied `kind`, `selection`, and `concurrency`, plus a reminder that they are descriptive.
@@ -344,4 +353,11 @@ payload cap but its samples and problem lists are independently bounded.
 
 Console output is not authoritative. A bounded queue and raw-descriptor daemon writer keep a slow or broken consumer
 from disabling timeout and evidence retention. `console.dropped_or_pending_bytes` can therefore be nonzero even when all
-bytes are present in the private output chunks.
+bytes are present in the private output chunks. A caller that must parse the forwarded stream can request
+`--require-complete-console`: an otherwise successful command becomes recorder error 125 if any observed bytes were
+dropped or still pending when forwarding finished, or the combined child output never reached EOF. The manifest's
+`output.eof_observed` distinguishes an actual stream end from forced closure at the drain deadline; forwarding every
+observed byte cannot prove that no later output was lost. The actual child status is preserved, and an existing nonzero
+result is never replaced by this policy. The CentOS provisioning gate uses this option because missing output could hide
+its runtime `SKIPPED` witness. This flag does not make an output line proof of behavior; the caller must still validate
+its test-specific witnesses.

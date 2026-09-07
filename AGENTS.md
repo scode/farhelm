@@ -53,18 +53,27 @@ exercised behavior may have changed, and rerun when there is real uncertainty ab
 stale, or poorly identified run is not reusable. Report checks run now; checks reused, with the covered revision and why
 the intervening diff leaves their coverage intact; and checks skipped, with the reason.
 
+For Rust execution, first put the pinned nextest and tmux on PATH using the guarded setup in
+`docs/test-run-evidence.md`. Run from the checkout root with Python 3.11+ (Python 3.13+ on macOS). Use owned sandboxes
+for expensive, slow or memory-heavy checks; small focused checks can run locally. The recorder's nextest mode enforces
+four global slots, zero retries and failure on empty selection, and retains each run's configuration and JUnit report.
+Runtime `SKIPPED` messages still require reading the retained output: an early-return test is a JUnit pass, not proof
+that its required systemd or SSH substrate ran.
+
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
-- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" cargo test -- --show-output` — the suite drives the pinned tmux from
-  `.github/release/source-pins.env`, which the build script makes available under `.ci-tmux/` (one-time build, then
-  cached); a run against whatever tmux is on your PATH exercises a different substrate than CI does. `--show-output` is
-  what makes a loudly-skipped test's reason visible; the cgroup tests skip themselves where no systemd user manager
-  exists, and libtest hides a passing test's output otherwise. The x86_64 Linux release gate uses `--test-threads=4` for
-  its retained Rust targets; ordinary CI does not run this full suite. A beefier local machine does not need the cap.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'workspace Rust targets' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run --workspace --exclude farhelm-desktop`
+  — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
+  starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux
+  modules share two, the two-host fixture reserves two, and RSS reserves all four. The release gate retains its narrower
+  package/target selections; ordinary CI does not run this suite. Do not also run the old full libtest battery.
+- `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
+  — preserves doctest coverage separately because nextest does not execute it.
 - `scripts/test-tmux-pinned-shutdown.sh` — the x86_64 Linux release gate builds the exact checksummed release named by
   `.github/release/source-pins.env` on cache miss, then runs every focused output-client teardown regression in its own
-  test process. It remains separate from the full suite so each scenario gets a fresh process; silently substituting a
-  distro tmux loses the affected-version coverage.
+  test process with its own recorded nextest report. Keep this explicit release subset while the full e2e target remains
+  excluded there. A successful local workspace nextest run already covers these tests on the same pinned substrate; do
+  not duplicate them merely because this script is listed. A distro tmux loses the affected-version coverage.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
@@ -72,8 +81,10 @@ the intervening diff leaves their coverage intact; and checks skipped, with the 
   CI pins no node version.
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
-- `cargo test -p farhelm-ui --features desktop` — exercises the desktop-only persistence and IPC seams; needs the same
-  webkit2gtk/gtk dev packages as the desktop compile check. It runs in the x86_64 Linux release gate, not ordinary CI.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop Rust targets' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-ui --features desktop`
+  — exercises desktop-only persistence and IPC seams with the same system dependencies as the compile check.
+- `python3 scripts/record-test-run.py --kind development --selection 'desktop doctests' --concurrency '4 doctest threads' --tmux none -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4`
+  — preserves the desktop feature's separate doctest coverage. Desktop execution remains release-only in hosted CI.
 - `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
   compile WebKit), which means `-p` is the only thing that ever compiles it.
 - `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
@@ -163,8 +174,9 @@ With both settled, the process is:
   suffices). The release commit is exactly those three files with the message `chore: release X.Y.Z-rc.N` — the shape
   every release commit here has (#304, #311, #314).
 - Before tagging, sanity-check the announce: the version-parity tests
-  (`cargo test -p farhelm-helm --lib provisioning::assets`) and `dist plan` naming the rc version with BOTH packages
-  under it — a version mismatch makes the desktop archive silently vanish from the release.
+  (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through the recorder) and `dist plan`
+  naming the rc version with BOTH packages under it — a version mismatch makes the desktop archive silently vanish from
+  the release.
 - Give the bump its own PR like any other commit (stacked on the stack tip, or based on main), but do not merge anything
   for the release's sake: push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
   gate runs the retained Rust targets, pinned shutdown regression, JS, CentOS, and native desktop checks while excluding

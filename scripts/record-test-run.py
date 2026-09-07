@@ -224,6 +224,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout", type=finite_positive)
     parser.add_argument("--runner", choices=("nextest",))
     parser.add_argument(
+        "--require-complete-console", action="store_true",
+        help="fail an otherwise successful command if console forwarding omitted or still holds output",
+    )
+    parser.add_argument(
         "--termination-grace", type=finite_positive,
         help="seconds allowed for command-owned cleanup after interruption or timeout (maximum 60)",
     )
@@ -1239,6 +1243,9 @@ class CommandResult:
     forced_cleanup: bool
     error: str | None = None
     cleanup_limit: str | None = None
+    # Only an actual zero-byte read proves the combined child stream ended.
+    # Closing it at a cleanup deadline cannot establish complete output.
+    output_eof_observed: bool = False
 
 
 def run_command(
@@ -1282,6 +1289,7 @@ def run_command(
     termination_started: float | None = None
     leader_exited_at: float | None = None
     pipe_open = True
+    output_eof_observed = False
     forced_cleanup = False
     cleanup_attempted_at: float | None = None
     cleanup_limit: str | None = None
@@ -1370,6 +1378,7 @@ def run_command(
                         output.write(chunk)
                         console.offer(chunk)
                     else:
+                        output_eof_observed = True
                         selector.unregister(stream)
                         stream.close()
                         pipe_open = False
@@ -1426,11 +1435,13 @@ def run_command(
     duration = time.monotonic() - started
     if error is not None:
         return CommandResult(
-            "recorder-error", 125, returncode, duration, forced_cleanup, error, cleanup_limit
+            "recorder-error", 125, returncode, duration, forced_cleanup, error, cleanup_limit,
+            output_eof_observed=output_eof_observed,
         )
     if termination_reason == "timed_out":
         return CommandResult(
-            "timed_out", 124, returncode, duration, forced_cleanup, cleanup_limit=cleanup_limit
+            "timed_out", 124, returncode, duration, forced_cleanup, cleanup_limit=cleanup_limit,
+            output_eof_observed=output_eof_observed,
         )
     if termination_reason == "interrupted":
         assert termination_signal is not None
@@ -1441,11 +1452,13 @@ def run_command(
             duration,
             forced_cleanup,
             cleanup_limit=cleanup_limit,
+            output_eof_observed=output_eof_observed,
         )
     assert returncode is not None
     recorder_exit = returncode if returncode >= 0 else 128 + -returncode
     return CommandResult(
-        "completed", recorder_exit, returncode, duration, forced_cleanup, cleanup_limit=cleanup_limit
+        "completed", recorder_exit, returncode, duration, forced_cleanup, cleanup_limit=cleanup_limit,
+        output_eof_observed=output_eof_observed,
     )
 
 
@@ -1513,6 +1526,7 @@ def initial_manifest(
         "command": {
             "argv": args.command, "cwd": os.fspath(cwd), "timeout_seconds": args.timeout,
             "termination_grace_seconds": args.termination_grace,
+            "require_complete_console": args.require_complete_console,
         },
         "labels": {
             "kind": args.kind,
@@ -1705,22 +1719,34 @@ def run(argv: list[str]) -> int:
         )
         output.close()
         manifest.data["output"] = output.evidence()
+        manifest.data["output"]["eof_observed"] = result.output_eof_observed
         manifest.data["console"] = console.finish()
+        # Most callers consume retained evidence and can tolerate a slow
+        # console. A caller parsing the forwarded stream must opt into a
+        # fail-closed result: missing output could hide a runtime SKIPPED
+        # witness even though the underlying test process returned success.
+        console_incomplete = (
+            args.require_complete_console and result.recorder_exit == 0
+            and (
+                not result.output_eof_observed
+                or manifest.data["console"]["dropped_or_pending_bytes"] != 0
+            )
+        )
+        final_exit = 125 if console_incomplete else result.recorder_exit
         # Commit the command result while storage is still available. Optional
         # archive output can consume the remaining space; neither that failure
         # nor a later manifest-write failure may replace this observed result.
         finalize(
             manifest,
-            outcome=result.outcome,
-            recorder_exit=result.recorder_exit,
+            outcome="recorder-error" if console_incomplete else result.outcome,
+            recorder_exit=final_exit,
             total_started=total_started,
             child_returncode=result.child_returncode,
             command_duration=result.command_duration,
             forced_cleanup=result.forced_cleanup,
-            error=result.error,
+            error="required console forwarding was incomplete" if console_incomplete else result.error,
             cleanup_limit=result.cleanup_limit,
         )
-        final_exit = result.recorder_exit
         if args.runner == "nextest":
             try:
                 report = test_run_nextest.collect(run_dir)

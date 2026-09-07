@@ -406,14 +406,13 @@ pub(crate) fn agent_cmd(args: &str) -> String {
     format!("{} {args}", shell_words::quote(farhelm_bin()))
 }
 
-/// Caps how many harnesses run at once.
+/// Caps harnesses inside one process; nextest's shared budget lives in `.config/nextest.toml`.
 ///
-/// Each one is a tmux server plus a login shell plus a fake agent, and
-/// libtest runs every test in this binary concurrently. Unbounded, the
-/// machine gets loaded enough that agent startup exceeds the waits and
-/// tests fail for reasons that have nothing to do with the code — a
-/// flakiness source worth removing rather than papering over with longer
-/// timeouts.
+/// The maintained runner starts a process per test, so this semaphore cannot
+/// coordinate those processes. Retain it for explicit libtest diagnosis and
+/// tests that construct multiple harnesses: each harness owns a tmux server,
+/// shell, and agent. Callers must never treat this permit as proof that another
+/// nextest test is idle; runner groups and slot reservations establish that.
 pub(crate) static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 // ---------------------------------------------------------------
