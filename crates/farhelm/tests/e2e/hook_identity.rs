@@ -41,6 +41,7 @@ use crate::conversation_identity_capture::{
     test_capture_bounds, wait_for_first_input, wait_until_window_disjoint_from,
 };
 use crate::harness::*;
+use farhelm_teststate::thread::FixtureThread;
 
 // ---------------------------------------------------------------------
 // Fixtures
@@ -1401,6 +1402,73 @@ async fn hooks_can_be_disabled_by_kind() {
 /// time us out.
 const SILENCE_DEADLINE: Duration = Duration::from_secs(4);
 
+/// Owns a silent supervisor fixture and witnesses its connection and release edges.
+struct SilentSupervisor {
+    owner: FixtureThread,
+    stop: std::sync::mpsc::Sender<()>,
+    accepted: std::sync::mpsc::Receiver<()>,
+    released: std::sync::mpsc::Receiver<()>,
+}
+
+/// Keep an accepted peer silent until cancellation or the safety deadline.
+///
+/// The listener must be nonblocking so cancellation also works before a connection arrives.
+/// Keeping the accepted peer open makes the hook wait for a handshake; closing it would
+/// turn the test into the connection-failure case covered by its sibling. The captured
+/// trace remains owned through the holder thread's cleanup.
+fn spawn_silent_supervisor(
+    listener: std::os::unix::net::UnixListener,
+    context: farhelm_testtrace::ThreadContext,
+) -> SilentSupervisor {
+    let (stop, stop_rx) = std::sync::mpsc::channel();
+    let (accepted_tx, accepted) = std::sync::mpsc::channel();
+    let (released_tx, released) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        context.enter(|| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            let mut held = None;
+            while std::time::Instant::now() < deadline {
+                // Cancellation can arrive before the hook dials. Poll it before
+                // every accept attempt so cleanup does not wait for the deadline.
+                match stop_rx.try_recv() {
+                    Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        drop(listener);
+                        let _ = released_tx.send(());
+                        return;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let _ = accepted_tx.send(());
+                        held = Some(stream);
+                        break;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept failed: {error}"),
+                }
+            }
+            let _ = stop_rx.recv_timeout(Duration::from_secs(30));
+            drop(held);
+            drop(listener);
+            let _ = released_tx.send(());
+        });
+    });
+    let cancellation = stop.clone();
+    let owner = FixtureThread::new("hook-silent-supervisor", holder, move || {
+        let _ = cancellation.send(());
+    })
+    .expect("start fixture join observer");
+    SilentSupervisor {
+        owner,
+        stop,
+        accepted,
+        released,
+    }
+}
+
 /// Kills and reaps the hook child on the way out, however the test leaves.
 ///
 /// The whole point of the tests below is that the hook might NOT exit —
@@ -1584,36 +1652,15 @@ fn a_hook_talking_to_a_silent_supervisor_still_finishes_in_budget() {
     listener
         .set_nonblocking(true)
         .expect("a bounded accept loop needs a non-blocking listener");
-    let (dialled_tx, dialled_rx) = std::sync::mpsc::channel();
-    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
     // The holder is a raw thread, so the wrapped test explicitly gives it
     // ownership of this test's trace while it keeps the peer alive.
     let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-    let holder = std::thread::spawn(move || {
-        context.enter(|| {
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
-            let mut held = None;
-            while std::time::Instant::now() < deadline {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let _ = dialled_tx.send(());
-                        held = Some(stream);
-                        break;
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(_) => return,
-                }
-            }
-            // Held, not dropped: the peer must see an established connection
-            // that simply never speaks. Dropping it would close the socket and
-            // turn this into the ordinary connect-failure case, which the
-            // sibling test above already covers.
-            let _ = stop_rx.recv_timeout(Duration::from_secs(30));
-            drop(held);
-        });
-    });
+    let SilentSupervisor {
+        owner: holder,
+        stop: stop_tx,
+        accepted: dialled_rx,
+        released,
+    } = spawn_silent_supervisor(listener, context);
 
     let payload =
         br#"{"session_id":"conv-hung","hook_event_name":"SessionStart","source":"startup"}"#;
@@ -1630,7 +1677,83 @@ fn a_hook_talking_to_a_silent_supervisor_still_finishes_in_budget() {
     );
 
     let _ = stop_tx.send(());
-    holder.join().expect("the holding thread must not panic");
+    holder
+        .finish(Duration::from_secs(1))
+        .expect("the holding thread must not panic");
+    released
+        .recv_timeout(Duration::from_secs(1))
+        .expect("the holding thread released its listener and peer");
+}
+
+/// Assertion unwind before accept must release the real-binary fixture listener.
+#[farhelm_testtrace::test]
+fn a_silent_supervisor_cancels_before_accept_on_unwind() {
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let socket = state.path().join("supervisor.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+    let SilentSupervisor {
+        owner,
+        stop,
+        accepted,
+        released,
+    } = spawn_silent_supervisor(listener, context);
+    drop(stop);
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _owner = owner;
+        panic!("exercise cancellation before accept");
+    }));
+    assert!(unwind.is_err());
+    assert!(accepted.try_recv().is_err());
+    released
+        .recv_timeout(Duration::from_secs(1))
+        .expect("cancellation released the pre-accept listener");
+    // Unlinking would permit rebinding even while the original listener remained alive.
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_err(),
+        "the original listener must refuse new connections"
+    );
+}
+
+/// Assertion unwind while a peer is held must close that peer and listener.
+#[farhelm_testtrace::test]
+fn a_silent_supervisor_cancels_while_holding_a_peer_on_unwind() {
+    use std::io::Read as _;
+
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let socket = state.path().join("supervisor.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+    let SilentSupervisor {
+        owner,
+        stop,
+        accepted,
+        released,
+    } = spawn_silent_supervisor(listener, context);
+    let mut peer = std::os::unix::net::UnixStream::connect(&socket).expect("connect peer");
+    accepted
+        .recv_timeout(Duration::from_secs(1))
+        .expect("fixture accepted the peer");
+    peer.set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("bound peer read");
+    drop(stop);
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _owner = owner;
+        panic!("exercise cancellation while holding a peer");
+    }));
+    assert!(unwind.is_err());
+    released
+        .recv_timeout(Duration::from_secs(1))
+        .expect("cancellation released the held peer");
+    let mut byte = [0; 1];
+    assert_eq!(peer.read(&mut byte).expect("peer EOF"), 0);
+    // Unlinking would permit rebinding even while the original listener remained alive.
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_err(),
+        "the original listener must refuse new connections"
+    );
 }
 
 /// A vendor that never closes the hook's stdin cannot hold it past its
