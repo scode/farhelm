@@ -1191,6 +1191,18 @@ mod tests {
     /// surprising fraction of a second, not for the tick cadence.
     const TEST_DEADLINE: Duration = Duration::from_secs(30);
 
+    /// The retry cadence for a local state transition that does not depend
+    /// on tmux completing another command.
+    const TEST_READY_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+    /// The retry cadence for observations whose answer comes from tmux or
+    /// from a process that tmux just asked to stop.
+    const TEST_TMUX_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+    /// The cadence used while proving that the rotating busy-pane fixture
+    /// produced a new visible screen before its next sample.
+    const TEST_BUSY_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(80);
+
     /// A supervisor whose ticker cadence is [`TEST_INTERVAL`], with the
     /// caller's other seams folded in.
     ///
@@ -1335,9 +1347,9 @@ mod tests {
 
     /// Poll `condition` until it holds or [`TEST_DEADLINE`] passes.
     ///
-    /// Hand-rolled rather than borrowed: this crate has no shared waiter,
-    /// and the deadline loops already scattered through `service::core`'s
-    /// tests are the local convention.
+    /// Kept local to this module because the condition is synchronous;
+    /// the async waiters below name their tmux, process, and sampling
+    /// boundaries directly so their evidence remains visible at the call.
     async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         loop {
@@ -1345,8 +1357,195 @@ mod tests {
                 return;
             }
             assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            // sleep-ok: retry the synchronous readiness condition at its original bounded test cadence until the deadline.
+            tokio::time::sleep(TEST_READY_POLL_INTERVAL).await;
         }
+    }
+
+    /// Wait until tmux reports that this pane is dead.
+    ///
+    /// A tab's shell exits independently of the command that created its
+    /// window. The reap tests therefore establish this state before asking
+    /// the ticker to remove it; a successful `new_window` alone would make
+    /// the cleanup assertion vacuous.
+    async fn wait_for_dead_pane(sup: &Arc<Supervisor>, pane: &str) {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            if states.get(pane).is_some_and(|state| state.dead) {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the tab's shell never exited into a dead pane"
+            );
+            // sleep-ok: tmux has not yet reported the shell's exit; retain the original bounded observation cadence.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+    }
+
+    /// Read the daemon's self-reported PID once its detached child exists.
+    ///
+    /// The child writes this file after the parent pane can die, so this
+    /// waits for the fixture's own evidence rather than treating the shell
+    /// command having returned as proof that there is a process to reap.
+    async fn wait_for_daemon_pid(path: &std::path::Path) -> u32 {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            if let Ok(pid) = std::fs::read_to_string(path)
+                .map_err(|_| ())
+                .and_then(|contents| contents.trim().parse().map_err(|_| ()))
+            {
+                return pid;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the dead tab's command never wrote its daemon's pid"
+            );
+            // sleep-ok: the detached process writes this fixture file on a scheduler beat, so retry at the original bounded cadence.
+            tokio::time::sleep(TEST_READY_POLL_INTERVAL).await;
+        }
+    }
+
+    /// Wait for the reaped tab's detached child to disappear from procfs.
+    ///
+    /// This observes the marker sweep's process result, after the pane has
+    /// already disappeared, so the test distinguishes a real tab close from
+    /// a bare tmux window kill.
+    async fn wait_for_process_absence(pid: u32) {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        while std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the reaped tab's daemonized child (pid {pid}) must be swept"
+            );
+            // sleep-ok: poll process disappearance while the asynchronous marker sweep completes.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+    }
+
+    /// Wait for the busy fixture to expose a screen different from its last
+    /// sampled screen before the next budget-one pass looks at it.
+    ///
+    /// This is deliberately a pane observation rather than another
+    /// [`sample_pass`]: the test below owns exactly twelve rotation passes,
+    /// and an extra sample would change the cursor and the quiet panes'
+    /// counts. A missing baseline still needs a `tick <integer>` producer
+    /// line, otherwise startup text could satisfy a comparison that
+    /// establishes nothing about the busy fixture.
+    async fn wait_for_busy_pane_to_change(sup: &Arc<Supervisor>, id: &str) {
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .expect("the busy session is in the map");
+        let terminal = entry
+            .terminal
+            .clone()
+            .expect("the busy session has an owned terminal");
+        let baseline = entry.activity.lock().expect("activity mutex").tail.clone();
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        let last_captured = loop {
+            let capture = sup
+                .tmux
+                .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
+                .await;
+            let changed = capture.as_ref().is_ok_and(|captured| {
+                baseline.as_ref().map_or_else(
+                    || {
+                        captured.lines().any(|line| {
+                            line.strip_prefix("tick ")
+                                .is_some_and(|number| number.parse::<u64>().is_ok())
+                        })
+                    },
+                    |previous| previous != captured,
+                )
+            });
+            if changed {
+                return;
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                break match capture {
+                    Ok(captured) => captured,
+                    Err(error) => format!("capture failed: {error:#}"),
+                };
+            }
+            // sleep-ok: preserve the fixture's original 80ms observation cadence while waiting for an actual producer screen change.
+            tokio::time::sleep(TEST_BUSY_OUTPUT_POLL_INTERVAL).await;
+        };
+        let pane_live = sup.tmux.pane_states().await.ok().and_then(|states| {
+            states
+                .get(&terminal.pane)
+                .map(|state| state.session_name == terminal.tmux_name && !state.dead)
+        });
+        panic!(
+            "busy pane never produced a changed screen before its next rotation sample; \
+             last sampled tail: {baseline:?}; last capture: {last_captured:?}; \
+             pane live: {pane_live:?}"
+        );
+    }
+
+    /// Drive the existing sampler until one session receives a newer
+    /// activity stamp, keeping the caller's sampling budget and stop signal.
+    async fn sample_until_activity_stamp_advances(
+        sup: &Arc<Supervisor>,
+        id: &str,
+        before: i64,
+        cursor: &mut SampleCursor,
+        stop: &mut oneshot::Receiver<()>,
+        timeout: &str,
+    ) {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            sample_pass(sup, cursor, SAMPLE_TAIL_BUDGET, stop).await;
+            if stamp_of(sup, id).await > before {
+                return;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "{timeout}");
+            // sleep-ok: retain the original tmux-paced retry interval between the sampler passes that are this helper's stimulus.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+    }
+
+    /// Wait until no installed agent pane remains live before sampling the
+    /// dead-tab-only fixture.
+    async fn wait_for_no_live_agent_pane(sup: &Arc<Supervisor>) {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            let entries: Vec<Arc<SessionEntry>> =
+                sup.sessions.lock().await.values().cloned().collect();
+            let any_live_agent = entries.iter().any(|entry| {
+                entry.terminal.as_ref().is_some_and(|terminal| {
+                    states.get(&terminal.pane).is_some_and(|state| {
+                        state.session_name == terminal.tmux_name && !state.dead
+                    })
+                })
+            });
+            if !any_live_agent {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the agent pane never went dead"
+            );
+            // sleep-ok: wait for tmux's liveness report at the original bounded cadence before exercising the all-dead pass.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+    }
+
+    /// Hold a negative observation window for a state that must stay put.
+    ///
+    /// The caller chooses the full existing duration and keeps the
+    /// assertion after this wait. This must not become an early-success
+    /// poll: the elapsed window is the evidence that a prohibited event did
+    /// not occur.
+    async fn observe_unchanged_for(window: Duration) {
+        // sleep-ok: a negative observation is defined by the whole caller-supplied window, so an early-success poll would weaken the test.
+        tokio::time::sleep(window).await;
     }
 
     /// A shared fixture for the reap tests: a tmux window on `tmux_name`,
@@ -1392,18 +1591,7 @@ mod tests {
             .mark_window(tmux_name, &pane, crate::tmux::TAB_WINDOW_OPTION, &tab_id)
             .await
             .expect("mark the tab window");
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            if states.get(&pane).is_some_and(|state| state.dead) {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the tab's shell never exited into a dead pane"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        wait_for_dead_pane(sup, &pane).await;
         (pane, tab_id)
     }
 
@@ -1506,22 +1694,7 @@ mod tests {
         // silently failed would let the swept-daemon assertion below pass
         // vacuously. The pid file is written by the daemon itself, so it
         // can trail the pane's death by a scheduler beat — hence the poll.
-        let daemon_pid: u32 = {
-            let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-            loop {
-                if let Ok(pid) = std::fs::read_to_string(&daemon_pid_file)
-                    .map_err(|_| ())
-                    .and_then(|contents| contents.trim().parse().map_err(|_| ()))
-                {
-                    break pid;
-                }
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "the dead tab's command never wrote its daemon's pid"
-                );
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        };
+        let daemon_pid = wait_for_daemon_pid(&daemon_pid_file).await;
         assert!(
             std::path::Path::new(&format!("/proc/{daemon_pid}")).exists(),
             "the daemonized child must be alive before the reap for its death to mean anything"
@@ -1548,14 +1721,7 @@ mod tests {
 
         // The daemonized child went with its tab: the reap ran the real
         // close (marker sweep included), not a bare window kill.
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        while std::path::Path::new(&format!("/proc/{daemon_pid}")).exists() {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the reaped tab's daemonized child (pid {daemon_pid}) must be swept"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        wait_for_process_absence(daemon_pid).await;
     }
 
     /// The per-tick reap budget defers, never drops: a burst of dead tabs
@@ -1648,23 +1814,17 @@ mod tests {
 
         // Two passes minimum: the first establishes each pane's baseline
         // and can date nothing, so only the second can observe a change.
-        // A deadline loop rather than a fixed pass count because the busy
-        // pane's first line may not have been written yet when the
-        // baseline is taken.
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-            if stamp_of(&sup, "busy").await > busy_before {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "a pane printing a new line every 50ms never had a change dated"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        sample_until_activity_stamp_advances(
+            &sup,
+            "busy",
+            busy_before,
+            &mut cursor,
+            &mut stop,
+            "a pane printing a new line every 50ms never had a change dated",
+        )
+        .await;
 
         assert_eq!(
             stamp_of(&sup, "still").await,
@@ -1694,27 +1854,7 @@ mod tests {
         let tab_pane = dead_tab_in(&sup, tmux_name).await;
 
         // The premise the test exists for: no live agent pane anywhere.
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            let entries: Vec<Arc<SessionEntry>> =
-                sup.sessions.lock().await.values().cloned().collect();
-            let any_live_agent = entries.iter().any(|entry| {
-                entry.terminal.as_ref().is_some_and(|terminal| {
-                    states.get(&terminal.pane).is_some_and(|state| {
-                        state.session_name == terminal.tmux_name && !state.dead
-                    })
-                })
-            });
-            if !any_live_agent {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the agent pane never went dead"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        wait_for_no_live_agent_pane(&sup).await;
 
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
@@ -1826,26 +1966,38 @@ mod tests {
         );
 
         let ticker = start_ticker(&sup);
-        let mut captured = None;
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        while tokio::time::Instant::now() < deadline {
-            captured = sup
-                .session_snapshot(&created.id)
-                .await
-                .expect("snapshot")
-                .expect("present")
-                .captured_conversation;
-            if captured.is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let captured = wait_for_captured_conversation(&sup, &created.id).await;
         ticker.shutdown().await;
         assert_eq!(
             captured.as_deref(),
             Some("ticker-captured-conversation"),
             "no list, no poll, no manual pass — the ticker is what captured this"
         );
+    }
+
+    /// Observe ticker-driven conversation capture without making a list
+    /// request that could itself advance capture.
+    ///
+    /// `None` means the original deadline elapsed. Callers still shut down
+    /// their ticker before asserting that result, because leaving it alive
+    /// would let a late pass race the final observation and leak into the
+    /// next test's fixture cleanup.
+    async fn wait_for_captured_conversation(sup: &Arc<Supervisor>, id: &str) -> Option<String> {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        while tokio::time::Instant::now() < deadline {
+            let captured = sup
+                .session_snapshot(id)
+                .await
+                .expect("snapshot")
+                .expect("present")
+                .captured_conversation;
+            if captured.is_some() {
+                return captured;
+            }
+            // sleep-ok: wait for ticker-owned capture at the original bounded tmux observation cadence.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+        None
     }
 
     /// Poll until the first-input anchor has reached the database, which
@@ -1868,7 +2020,8 @@ mod tests {
                 tokio::time::Instant::now() < deadline,
                 "the first-input anchor never landed"
             );
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            // sleep-ok: the spawned first-input write races this read, so retry at the original bounded cadence.
+            tokio::time::sleep(TEST_READY_POLL_INTERVAL).await;
         }
     }
 
@@ -1976,7 +2129,9 @@ mod tests {
         ticker.shutdown().await;
 
         let settled = sample.lock().expect("activity mutex").samples;
-        tokio::time::sleep(TEST_INTERVAL * 6).await;
+        // This full window proves shutdown prevents later ticks rather than
+        // merely waiting for the one already in flight.
+        observe_unchanged_for(TEST_INTERVAL * 6).await;
         assert_eq!(
             sample.lock().expect("activity mutex").samples,
             settled,
@@ -2380,21 +2535,17 @@ mod tests {
         let before = stamp_of(&sup, "busy").await;
         let mut cursor = None;
         let (_stop_tx, mut stop) = never_stopped();
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            // A pass that propagated the write's failure would never
-            // return, so reaching the next iteration at all is half the
-            // assertion.
-            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-            if stamp_of(&sup, "busy").await > before {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "a failing durable write must not stop the in-memory stamp from moving"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        // A pass that propagated the write's failure would never return,
+        // so reaching the helper's next iteration is half the assertion.
+        sample_until_activity_stamp_advances(
+            &sup,
+            "busy",
+            before,
+            &mut cursor,
+            &mut stop,
+            "a failing durable write must not stop the in-memory stamp from moving",
+        )
+        .await;
     }
 
     /// The scheduling rule, exhaustively, with no clock and no runtime:
@@ -2512,9 +2663,9 @@ mod tests {
         let sample = sample_of(&sup, "one").await;
 
         let ticker = start_ticker(&sup);
-        // Longer than the production interval a hardcoded loop would use,
-        // by enough that a loaded runner cannot explain the difference.
-        tokio::time::sleep(TICKER_INTERVAL * 2).await;
+        // This negative observation outlasts production cadence while
+        // remaining below the injected interval.
+        observe_unchanged_for(TICKER_INTERVAL * 2).await;
         let samples = sample.lock().expect("activity mutex").samples;
         ticker.shutdown().await;
         assert_eq!(
@@ -2578,6 +2729,7 @@ mod tests {
         // below is skipped only if the probe failure stopped it — the
         // thing this asserts — rather than because the supervisor's
         // construction-time pass was still recent (`CaptureReason::Tick`).
+        // sleep-ok: this ages the construction-time capture past the tick suppression window before the test drives its own tick.
         tokio::time::sleep(TEST_INTERVAL * 3).await;
         let baseline = sup.capture_passes_completed();
         tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
@@ -3398,6 +3550,7 @@ mod tests {
         // counted its own predecessor would suppress and one that does not
         // will sweep.
         let window = Duration::from_millis(200);
+        // sleep-ok: reply-driven passes must age out while the tick under test remains inside its own suppression window.
         tokio::time::sleep(window * 2).await;
         let aged = sup.capture_passes_completed();
         sup.capture_pass_for(CaptureReason::Tick {
@@ -3614,9 +3767,7 @@ mod tests {
         // more than the quiet sessions need to cross the threshold.
         for _ in 0..12 {
             sample_pass(&sup, &mut cursor, 1, &mut stop).await;
-            // Longer than the busy pane's own 50ms print interval, so each
-            // of its samples genuinely differs from the previous one.
-            tokio::time::sleep(Duration::from_millis(80)).await;
+            wait_for_busy_pane_to_change(&sup, "busy").await;
         }
 
         assert_eq!(
