@@ -617,7 +617,7 @@ mod tests {
     /// this message), and the message the peer is sent is byte-identical
     /// to that value's `Display` — the property that let the payload be
     /// introduced without changing a single rendered diagnostic.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn handshake_refuses_protocol_mismatch() {
         for wrong_version in [PROTOCOL_VERSION + 1, PROTOCOL_VERSION - 1] {
             let (a, b) = tokio::io::duplex(64 * 1024);
@@ -703,7 +703,7 @@ mod tests {
     /// session id shares the protocol-wide id cap, while its opaque bearer
     /// token has its own encoding-sized cap; both must be checked before a
     /// future item-4 connection keeps either value as connection state.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn handshake_refuses_over_long_hello_fields() {
         let cases = [
             (
@@ -777,7 +777,7 @@ mod tests {
     /// authentication fields exactly at their limits pass. This is the
     /// half of the refusal test that keeps each bound honest rather than
     /// merely strict.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn handshake_accepts_ordinary_hello_field_lengths() {
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
@@ -813,7 +813,7 @@ mod tests {
     /// shutdown: both the helm's demux loop and the supervisor's
     /// connection loop treat clean EOF as "the peer is done", which
     /// would silently swallow a killed ssh or a crashed supervisor.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn eof_mid_frame_is_an_error_but_clean_eof_is_not() {
         // NOTE: the peer half must be dropped WHOLE. Holding either half
         // of a split duplex keeps the stream open, and the reader below
@@ -847,7 +847,7 @@ mod tests {
     /// on [`ClosedBeforeHello::is_cause_of`] and pins that the kind alone
     /// does NOT discriminate — a caller tempted back to kind-matching
     /// fails here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn handshake_marks_a_clean_close_but_not_a_mid_frame_death() {
         // The peer half is kept alive (it lives to the end of this scope)
         // and only its WRITE direction is shut down. Dropping it whole
@@ -882,7 +882,7 @@ mod tests {
     }
 
     /// Matching versions succeed and surface the peer's hello.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn handshake_accepts_matching_versions() {
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);

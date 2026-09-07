@@ -1822,6 +1822,7 @@ dependencies = [
 name = "farhelm-proto"
 version = "0.5.0-rc.2"
 dependencies = [
+ "farhelm-testtrace",
  "serde",
  "serde_json",
  "shell-words",
