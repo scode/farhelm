@@ -308,7 +308,7 @@ mod tests {
     /// Spec: a subscriber that misses N bumps observes ONE change carrying
     /// the LATEST revision — never N wakeups, and never an intermediate
     /// value that would send it re-reading a state that is already gone.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_lagged_subscriber_collapses_every_missed_bump_into_one_re_read() {
         let events = FleetEvents::new();
         let mut subscriber = events.subscribe();
@@ -345,7 +345,7 @@ mod tests {
     /// client to arrive afterwards would be handed a revision that
     /// under-counts what already happened, then sit still until the next
     /// change. Every helm spends most of its life with nobody watching.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_bump_with_nobody_listening_still_advances_the_revision() {
         let events = FleetEvents::new();
         events.bump();
@@ -364,7 +364,7 @@ mod tests {
     /// Spec: a committed session-cache change (here, one session's status
     /// changing between two drains of the same host) advances the revision,
     /// so a client re-reading on that notification sees the new status.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_status_flip_on_a_host_bumps_the_revision() {
         let harness =
             rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
@@ -399,7 +399,7 @@ mod tests {
     /// test that waited a fixed moment after the request was SENT would pass
     /// just as happily against a slow refresh whose bump landed afterwards.
     /// See `Harness::refresh_to_completion`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_no_op_refresh_does_not_bump_the_revision() {
         let harness =
             rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
@@ -428,7 +428,7 @@ mod tests {
     /// test because the two paths share no code: one compares stored rows
     /// inside a SQLite transaction, the other compares published values in
     /// the actor's status.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_identity_less_host_publishes_under_the_same_changed_only_rule() {
         let harness = rest_harness::FleetBuilder::new()
             .await
@@ -479,7 +479,7 @@ mod tests {
     /// one collision resolving as another appears — is the case a
     /// length-or-emptiness comparison misses entirely, which is why it is
     /// the case this test stages.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_same_size_contested_swap_invalidates() {
         // The local host caches both ids FIRST, so the rival registered
         // afterwards is deterministically the one that finds them taken —
@@ -559,7 +559,7 @@ mod tests {
     /// A pure permutation is staged rather than a reorder alongside some
     /// other edit, because anything else would also change the set and prove
     /// nothing about the ordering.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_order_only_contested_permutation_does_not_bump() {
         // The local host claims both ids first, so the rival registered
         // afterwards deterministically contests both of them.
@@ -614,7 +614,7 @@ mod tests {
 
     /// A refresh that leaves the contested set alone publishes nothing, so
     /// the fix above is a comparison rather than a bump-on-every-drain.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unchanged_contested_set_does_not_bump() {
         let harness =
             rest_harness::helm_listing(vec![rest_harness::session("shared-a", 200)]).await;
@@ -654,7 +654,7 @@ mod tests {
     /// INCLUDING the ones that failed or were no-ops, so a bump per call
     /// would turn the idempotent-reconcile habit into a stream of spurious
     /// wakeups.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn registry_shape_changes_invalidate_and_no_op_reconciles_do_not() {
         let harness = rest_harness::idle_helm().await;
         let events = std::sync::Arc::clone(harness.manager.events());
@@ -701,7 +701,7 @@ mod tests {
     /// its fallback poll has already stopped — so the change is invisible
     /// to both mechanisms. This asserts the number arrives AND that it is
     /// the current one rather than a zero placeholder.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn subscribing_is_answered_with_the_current_revision_immediately() {
         let mut harness = rest_harness::idle_helm().await;
         let events = std::sync::Arc::clone(harness.manager.events());
@@ -730,7 +730,7 @@ mod tests {
     /// (that collapse is pinned separately, on the counter itself). What is
     /// asserted here is delivery, and that the number delivered is the
     /// current one.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_bump_notifies_an_already_subscribed_client() {
         let mut harness = rest_harness::idle_helm().await;
         let events = std::sync::Arc::clone(harness.manager.events());
@@ -751,7 +751,7 @@ mod tests {
     /// would otherwise appear to work while being silently dropped, and an
     /// admitted peer could keep a task alive by talking to a protocol that
     /// has no listener.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_subscriber_that_sends_data_is_disconnected() {
         let mut harness = rest_harness::idle_helm().await;
         let addr = harness.serve().await;
@@ -780,7 +780,7 @@ mod tests {
     /// subscription ended. The ENDPOINT's use of it is a separate question
     /// with its own test below — this one cannot see whether the route
     /// admits at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_subscriber_counter_refuses_at_capacity_and_frees_on_drop() {
         use crate::manager::FleetEvents;
 
@@ -815,7 +815,7 @@ mod tests {
     /// by dropping a guard, because the release rides a destructor on a
     /// spawned task and the interesting question is whether the task
     /// actually ends.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_events_endpoint_refuses_past_its_cap_and_admits_again_after_a_close() {
         let mut harness = rest_harness::FleetBuilder::new()
             .await
@@ -884,7 +884,7 @@ mod tests {
     ///
     /// The client is hand-rolled precisely so it can emit what no real client
     /// library will — see `WsTestClient::send_frame_header`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_oversized_frame_or_message_is_refused_before_its_bytes_arrive() {
         let mut harness = rest_harness::idle_helm().await;
         let addr = harness.serve().await;
@@ -945,7 +945,7 @@ mod tests {
     /// The writable control beside it is what makes this a deadline rather
     /// than a function that always fails: without it, a `notify` that
     /// returned `false` unconditionally would pass.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn a_subscriber_that_never_accepts_a_write_is_dropped_at_the_deadline() {
         use axum::extract::ws;
         use std::pin::Pin;
@@ -1004,7 +1004,7 @@ mod tests {
     /// A revocation already waiting wins even against an immediately writable
     /// sink. Since the handshake and every later revision share `notify`, this
     /// pins the no-send-after-rotation boundary for the whole feed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn revocation_wins_every_feed_send() {
         let harness = rest_harness::idle_helm().await;
         let auth = harness.state.auth.socket_session();
@@ -1021,7 +1021,7 @@ mod tests {
     /// never seen, and the handshake is what delivers it. A server that
     /// only spoke on CHANGE would leave the reconnected client waiting for
     /// an unrelated future event before it noticed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_reconnecting_client_is_re_handshaked_with_what_it_missed() {
         let mut harness = rest_harness::idle_helm().await;
         let events = std::sync::Arc::clone(harness.manager.events());

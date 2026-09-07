@@ -317,7 +317,7 @@ mod tests {
     /// preserved — the ordinary cases every real batch from the shim hits.
     /// Order is asserted on the retained messages, not just the length,
     /// because the drop contract is "the FIRST N are kept".
-    #[test]
+    #[farhelm_testtrace::test]
     fn cap_entry_count_keeps_everything_at_or_under_the_cap_in_order() {
         let below: Vec<_> = (0..3).map(|i| entry(&format!("m{i}"))).collect();
         let (kept, dropped) = cap_entry_count(below, super::MAX_ENTRIES_PER_REQUEST);
@@ -338,7 +338,7 @@ mod tests {
     /// Surplus beyond the cap is dropped from the TAIL, and the count of
     /// what was dropped is exact — both halves of the contract the drop
     /// warn depends on.
-    #[test]
+    #[farhelm_testtrace::test]
     fn cap_entry_count_drops_the_surplus_and_counts_it() {
         let entries: Vec<_> = (0..super::MAX_ENTRIES_PER_REQUEST + 5)
             .map(|i| entry(&format!("m{i}")))
@@ -357,7 +357,7 @@ mod tests {
     /// budget is charged, and a request that would exceed what remains is
     /// PARTIALLY admitted — an entry that fits must never be dropped just
     /// because it arrived beside entries that do not.
-    #[test]
+    #[farhelm_testtrace::test]
     fn rate_window_admits_within_budget_and_partially_at_the_edge() {
         let start = Instant::now();
         let mut window = RateWindow::new(start);
@@ -375,7 +375,7 @@ mod tests {
     /// window with the full budget restored — proven with `Instant`
     /// arithmetic rather than a real sleep, per this repo's rule against
     /// wall-clock-dependent tests.
-    #[test]
+    #[farhelm_testtrace::test]
     fn rate_window_refills_after_the_window_elapses() {
         let start = Instant::now();
         let mut window = RateWindow::new(start);
@@ -407,7 +407,7 @@ mod tests {
     /// that drops anything, with the correct combined count — and is
     /// re-armed by a window rollover. This is the bound that keeps the
     /// drop REPORT from becoming the flood the caps exist to stop.
-    #[test]
+    #[farhelm_testtrace::test]
     fn rate_window_warns_about_drops_once_per_window() {
         let start = Instant::now();
         let mut window = RateWindow::new(start);
@@ -461,7 +461,7 @@ mod tests {
         /// part specific to this route's CORS layering — a desktop-webview
         /// origin can still READ that refusal rather than seeing an opaque
         /// fetch failure.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn unauthenticated_post_is_a_structured_401_readable_by_the_desktop_webview() {
             let harness = rest_harness::idle_helm().await;
             let mut request = post(serde_json::json!({"entries": []}));
@@ -493,7 +493,7 @@ mod tests {
         /// preflight that 401s or 405s silently kills every console report.
         /// Unauthenticated on purpose — preflights carry no credentials —
         /// and mirrored from the attachment route's preflight contract.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn preflight_answers_the_desktop_webview_origin_without_auth() {
             let harness = rest_harness::idle_helm().await;
             let request = axum::http::Request::builder()
@@ -726,7 +726,7 @@ mod tests {
         /// levels of the request shape — `deny_unknown_fields` sits on the
         /// envelope and on each entry, and either attribute could be
         /// dropped independently without the other test noticing.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn unknown_fields_are_refused_at_both_levels() {
             let harness = rest_harness::idle_helm().await;
             let nested = post(serde_json::json!({
@@ -743,7 +743,7 @@ mod tests {
         /// Levels outside the deliberate error/warn pair are refused: the
         /// pipe carries the failure signal, and silently accepting `info`
         /// would let ordinary chatter spend the small shared budget.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn unsupported_console_levels_are_refused() {
             let harness = rest_harness::idle_helm().await;
             let response = harness
@@ -763,7 +763,7 @@ mod tests {
         /// A body past the route's own limit is refused before the JSON is
         /// parsed — the cap that bounds the endpoint's WORK, where the
         /// entry cap only bounds its output.
-        #[tokio::test]
+        #[farhelm_testtrace::test]
         async fn an_oversized_body_is_refused_outright() {
             let harness = rest_harness::idle_helm().await;
             let huge = "x".repeat(super::super::MAX_BODY_BYTES + 1024);

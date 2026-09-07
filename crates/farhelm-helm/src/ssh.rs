@@ -227,7 +227,7 @@ mod tests {
     /// ssh tokenizes `-o` values like config-file lines, so a local
     /// state dir containing a space must arrive quoted — otherwise every
     /// `--ssh` connection from that state dir dies at startup.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ssh_args_quote_a_control_path_containing_spaces() {
         let args = super::ssh_stdio_args(
             "user@host",
@@ -246,7 +246,7 @@ mod tests {
     /// directory containing `%d` must stay literal while Farhelm's final
     /// `%C` remains active. Quotes and backslashes exercise the separate
     /// config-tokenization layer; shell quoting would not protect them.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ssh_args_escape_control_path_config_syntax() {
         let args = super::ssh_stdio_args(
             "user@host",
@@ -281,7 +281,7 @@ mod tests {
     /// bug is entirely in argument order and the exploit would otherwise
     /// need a real ssh, a real shell, and an observable side effect to
     /// detect.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ssh_args_terminate_options_before_the_destination() {
         let hostile = "-oProxyCommand=touch /tmp/pwned";
         let args = super::ssh_stdio_args(
@@ -318,7 +318,7 @@ mod tests {
     /// The executable is part of ssh's reconstructed remote command too,
     /// not a local argv passed directly to exec. It needs the same POSIX
     /// quoting as the remote state directory.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ssh_args_quote_the_remote_executable_for_the_remote_shell() {
         let args = super::ssh_stdio_args(
             "user@host",
@@ -333,7 +333,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[farhelm_testtrace::test]
     fn ssh_args_quote_the_remote_state_dir_for_the_remote_shell() {
         let args = super::ssh_stdio_args(
             "user@host",
@@ -367,7 +367,7 @@ mod tests {
     /// call site, or degrading the error to something generic, fails this
     /// test. A valid-UTF-8 control path (covered by the quoting tests
     /// above) must keep passing through unchanged.
-    #[test]
+    #[farhelm_testtrace::test]
     fn ssh_args_rejects_a_non_utf8_control_path_naming_it_in_the_error() {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
@@ -413,7 +413,7 @@ mod tests {
     /// tell "no supervisor there" from "ssh never connected" — they arrive
     /// identically — so naming only the first would state a guess as a
     /// diagnosis and send the operator to the wrong host to fix it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn annotate_ssh_handshake_eof_names_host_and_remedy_on_clean_close() {
         let err = super::annotate_ssh_handshake_eof(
             handshake_failure_against(&[]).await,
@@ -441,7 +441,7 @@ mod tests {
     /// bound under the remote's DEFAULT state dir, which the proxy — told
     /// to use the given one — still will not find, so the operator
     /// "fixes" the problem and sees the identical error again.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn annotate_ssh_handshake_eof_remedy_carries_the_remote_state_dir() {
         let err = super::annotate_ssh_handshake_eof(
             handshake_failure_against(&[]).await,
@@ -461,7 +461,7 @@ mod tests {
     /// start a supervisor would point them away from the real problem, so
     /// the mid-frame diagnostic must reach them unedited. Guards against
     /// the matcher regressing to a kind check.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn annotate_ssh_handshake_eof_leaves_a_mid_frame_death_untouched() {
         let mut hello = Vec::new();
         Frame::control(&ControlMsg::hello("supervisor"))
@@ -488,7 +488,7 @@ mod tests {
     /// string: an annotator that wrapped every error in a vaguer context
     /// while only appending the remedy conditionally would pass the weaker
     /// check and still bury the real diagnosis.
-    #[test]
+    #[farhelm_testtrace::test]
     fn annotate_ssh_handshake_eof_leaves_other_errors_untouched() {
         let mismatch = std::io::Error::other("protocol version mismatch: peer speaks v1...");
         let err = super::annotate_ssh_handshake_eof(

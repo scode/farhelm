@@ -4862,7 +4862,7 @@ mod tests {
     /// cut list as the whole one, and a helm restart serves every host's
     /// stale cache before any host has been re-drained. A flag that lived
     /// only in an actor's memory would be false for exactly that window.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_cut_lists_flag_is_kept_with_the_cache_and_survives_a_reopen() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -4927,7 +4927,7 @@ mod tests {
     /// unreachable host a "could not read to the end" notice no refresh
     /// could clear. Read back through `HostRow`, which is the read the
     /// merge actually uses.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn migration_initializes_the_cap_flag_to_false_for_existing_hosts() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -4962,7 +4962,7 @@ mod tests {
     /// deletes; carried over, an empty successor cache would show "could
     /// not read to the end" until a refresh succeeded — indefinitely, for a
     /// host whose first post-adoption refresh fails.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adoption_clears_the_cap_flag_with_the_cache() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "adopt@host", "old-identity").await;
@@ -5001,7 +5001,7 @@ mod tests {
     /// just told exists unroutable — so the cap holds by eviction, and the
     /// flag is what tells every client the cache no longer carries
     /// everything known.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_seed_past_the_cap_evicts_the_oldest_row_and_records_the_cut() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "full@host", "full-identity").await;
@@ -5047,7 +5047,7 @@ mod tests {
     /// just clicked — is invisible until someone relaunches and lands on
     /// the wrong session; the clear, conversely, must really clear, or a
     /// harness asking for "nothing remembered" inherits the last test's row.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_preference_row_merges_per_field_and_null_clears() {
         let (_dir, store) = fresh_store().await;
         assert_eq!(
@@ -5140,7 +5140,7 @@ mod tests {
     /// — deliberately, since `session_seen` carries no foreign key to that
     /// table (see the table's own doc comment) and this test would
     /// otherwise imply a dependency that does not exist.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn mark_seen_and_clear_seen_round_trip() {
         let (_dir, store) = fresh_store().await;
 
@@ -5181,7 +5181,7 @@ mod tests {
     /// marked and unmarked ids in one call — the shape
     /// `aggregate::session_list_staged` actually uses it in, joining a
     /// whole page of rows at once rather than one id at a time.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn seen_activity_joins_a_mixed_id_list() {
         let (_dir, store) = fresh_store().await;
         store.mark_seen("has-a-row", 42).await.unwrap();
@@ -5202,7 +5202,7 @@ mod tests {
     /// `PUT /api/sessions/{id}/seen` handler decides whether to bump off
     /// this return value, so it has to be right in both directions and at
     /// the boundary between them.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn mark_seen_and_clear_seen_report_whether_anything_changed() {
         let (_dir, store) = fresh_store().await;
 
@@ -5238,7 +5238,7 @@ mod tests {
     /// A fresh database must come up on the current schema with the reserved
     /// local row already present — the two invariants every other test in
     /// this module assumes without re-checking.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn fresh_open_creates_the_current_schema_with_the_local_row_present() {
         let (_dir, store) = fresh_store().await;
         let conn = Arc::clone(&store.conn);
@@ -5261,7 +5261,7 @@ mod tests {
     /// Reopening an already-current database must be a no-op on the schema
     /// and must not mint a second local row — the sequential counterpart to
     /// the genuine-race test below.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn reopen_is_stable() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -5290,7 +5290,7 @@ mod tests {
     /// behind it, so every version above `SCHEMA_VERSION` takes the exact
     /// same path — a second value would pin the identical assertion twice,
     /// not a distinct behavior.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn open_refuses_an_unrecognized_schema_version() {
         let version = SCHEMA_VERSION + 1;
         let dir = tempfile::tempdir().expect("tempdir");
@@ -5409,7 +5409,7 @@ mod tests {
     /// be talked into that shape — the demoted row's next contact is
     /// refused as a collision naming the survivor, which is a visible,
     /// resolvable duplicate rather than a mutual standoff.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn migrating_from_v1_resolves_duplicated_identity_claims() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -5528,7 +5528,7 @@ mod tests {
     /// `cached_sessions` (the per-host stale list), `cached_rows` (the
     /// merged-list backing read), and `cached_session` (the stale detail view
     /// behind an unreachable-host notice).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn migrating_from_v3_rewrites_pre_split_cached_statuses() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -5639,7 +5639,7 @@ mod tests {
     /// Driven through a genuinely planted OLD database, like the version-4
     /// test above, so the whole ladder runs over the fixture a real user's
     /// file would have been.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn migrating_to_v10_backfills_the_archive_flag_from_each_payload() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -5761,7 +5761,7 @@ mod tests {
     /// forgot an index would leave upgraded installs subtly different from
     /// new ones, and every later test would pass on whichever of the two
     /// the CI machine happened to create.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_migrated_database_matches_a_freshly_created_one() {
         let dir = tempfile::tempdir().expect("tempdir");
         let migrated_path = dir.path().join("migrated.db");
@@ -5790,7 +5790,7 @@ mod tests {
     /// database: the compact column is absent, sort and selection are both
     /// populated, and opening through [`HelmStore`] must preserve them while
     /// exposing compact as the old-client default.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_18_preserves_the_version_17_preference_row() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
@@ -5828,7 +5828,7 @@ mod tests {
     /// current one, so the row sits in the schema the old release actually shipped)
     /// migrates cleanly to the empty singleton, and that forgetting the preference
     /// never costs the registry.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_version_5_bare_default_is_dropped_by_schema_15() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
@@ -5903,7 +5903,7 @@ mod tests {
     ///
     /// This fixture plants a fully populated legacy row and verifies that the
     /// v14 -> v15 step drops it while retaining the host registry.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_version_11_remembered_rows_are_dropped_by_schema_15() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -5981,7 +5981,7 @@ mod tests {
     /// singleton, so migration discards it. The first completed
     /// profile-backed drain may establish that empty preference; a later
     /// direct create then advances it through ordinary provenance ordering.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn version_7_remembered_default_is_dropped_by_schema_15() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
@@ -6071,7 +6071,7 @@ mod tests {
     /// version 17 added the seen table, and version 18 added compactness.
     /// Both must be absent before assigning version 16, or the migration
     /// would run against a shape no released version could have created.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_version_16_database_gains_the_session_seen_table() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
@@ -6111,7 +6111,7 @@ mod tests {
 
     /// First need mints one recoverable token, and later callers read that
     /// committed value rather than replacing it with their own candidate.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn web_token_is_recoverable_and_stable_after_first_need() {
         let (_dir, store) = fresh_store().await;
         assert_eq!(
@@ -6147,7 +6147,7 @@ mod tests {
 
     /// Rotation's user-visible meaning is one database commit: the new token
     /// and the absence of every old device row become visible together.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rotation_replaces_the_token_and_deletes_every_device_session() {
         let (_dir, store) = fresh_store().await;
         store
@@ -6176,7 +6176,7 @@ mod tests {
 
     /// A failure deleting device rows must roll the token replacement back
     /// too; this is the transaction boundary rotation promises.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rotation_rolls_back_both_halves_when_device_deletion_fails() {
         let (_dir, store) = fresh_store().await;
         store
@@ -6222,7 +6222,7 @@ mod tests {
     /// repair path to actually run: a runner whose ambient umask already
     /// narrows new files to 0600 would pass this vacuously otherwise,
     /// without ever exercising `set_permissions`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn open_restricts_a_pre_existing_database_files_mode() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -6253,7 +6253,7 @@ mod tests {
     /// batch) must not survive either, so both the version and the
     /// planted table's exclusive claim on the name are checked after the
     /// failed open.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn open_fails_atomically_on_an_incompatible_preexisting_table() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -6317,7 +6317,7 @@ mod tests {
     /// verifies, on every run regardless of how the two opens happened to
     /// interleave: two `HelmStore`s legitimately opened against the same
     /// file both see exactly one local row.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn concurrent_double_open_mints_exactly_one_local_row() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -6342,7 +6342,7 @@ mod tests {
     /// alias is editable (a separate, narrower exception; see
     /// `update_alias_accepts_the_local_row`), but its existence is not up
     /// for removal the way an ssh row's is.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn remove_ssh_host_refuses_the_local_row() {
         let (_dir, store) = fresh_store().await;
         let local_id = store.list_hosts().await.unwrap()[0].id;
@@ -6365,7 +6365,7 @@ mod tests {
     /// unique index and this crate's lifecycle tests already own that
     /// story; a dedicated "adding ssh hosts never touches the local row
     /// count" test would only restate it.)
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_ssh_destination_refuses_the_local_row() {
         let (_dir, store) = fresh_store().await;
         let local_id = store.list_hosts().await.unwrap()[0].id;
@@ -6401,7 +6401,7 @@ mod tests {
     /// destination, or an ssh row without one) must reject both malformed
     /// shapes at the SQL level, not merely go unexercised by the API's own
     /// well-formed inserts.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_check_rejects_a_malformed_row_shape() {
         let (_dir, store) = fresh_store().await;
         let conn = Arc::clone(&store.conn);
@@ -6423,7 +6423,7 @@ mod tests {
     /// that never goes through `add_ssh_host`'s conditional
     /// `ON CONFLICT ... DO NOTHING` — the index, not the API's conditional
     /// query, is the actual invariant enforcement per the module docs.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_index_rejects_a_duplicate_destination_bypassing_the_api() {
         let (_dir, store) = fresh_store().await;
         let conn = Arc::clone(&store.conn);
@@ -6452,7 +6452,7 @@ mod tests {
     /// docs' claim is that at-most-one-row-per-identity is a schema
     /// invariant, which is only true if a writer that never goes through
     /// this module's API is refused too.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn schema_index_rejects_a_duplicate_identity_bypassing_the_api() {
         let (_dir, store) = fresh_store().await;
         let conn = Arc::clone(&store.conn);
@@ -6497,7 +6497,7 @@ mod tests {
     /// this one connection so the test can plant the row `HostKind::
     /// from_column` must still refuse, standing in for a hand-edited or
     /// downgraded database file the CHECK never got a chance to guard.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn list_hosts_fails_loudly_on_a_corrupt_kind_bypassing_the_check() {
         let (_dir, store) = fresh_store().await;
         {
@@ -6531,7 +6531,7 @@ mod tests {
     /// The ordinary lifecycle: add, see it listed, update its destination,
     /// remove it, see it gone — the round trip PLAN_M6.md item 3's API
     /// surface exists to serve.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn ssh_host_add_list_update_remove_round_trips() {
         let (_dir, store) = fresh_store().await;
         let id = store
@@ -6570,7 +6570,7 @@ mod tests {
     /// cleanly, with nothing written — the caller's retry (a different
     /// destination, or editing the existing entry) has a real error to act
     /// on instead of a generic constraint failure.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn add_ssh_host_rejects_a_duplicate_destination() {
         let (_dir, store) = fresh_store().await;
         store
@@ -6611,7 +6611,7 @@ mod tests {
     ///
     /// Both entry points, because an edit introduces a destination exactly
     /// as an add does.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn option_shaped_destinations_are_refused_at_both_entry_points() {
         let (_dir, store) = fresh_store().await;
         let existing = store.add_ssh_host("real@host", None, None).await.unwrap();
@@ -6667,7 +6667,7 @@ mod tests {
     /// (re-read after the error, not merely inferred from the error type)
     /// — `UPDATE OR IGNORE` rolling back its own partial effects is the
     /// property this pins, distinct from the error being returned at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_ssh_destination_rejects_a_collision_with_another_host() {
         let (_dir, store) = fresh_store().await;
         let a = store.add_ssh_host("a@host", None, None).await.unwrap();
@@ -6713,7 +6713,7 @@ mod tests {
     /// pinned with all three seeded so an implementation that rewrote the
     /// whole row (rather than just the `destination` column) would be
     /// caught.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_ssh_destination_preserves_everything_else() {
         let (_dir, store) = fresh_store().await;
         let host = store
@@ -6755,7 +6755,7 @@ mod tests {
     /// alongside the ghost id specifically so "no mutation" has something
     /// concrete to check: its row, re-read after the error, must be
     /// byte-for-byte what it was before the failed call touched anything.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_ssh_destination_reports_typed_host_not_found() {
         let (_dir, store) = fresh_store().await;
         let live = store
@@ -6788,7 +6788,7 @@ mod tests {
 
     /// The same typed-error coverage on the remove path, with the same
     /// live-host control for "no mutation".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn remove_ssh_host_reports_typed_host_not_found() {
         let (_dir, store) = fresh_store().await;
         let live = store.add_ssh_host("live2@host", None, None).await.unwrap();
@@ -6821,7 +6821,7 @@ mod tests {
     /// pinned here by removing the currently-HIGHEST id and confirming the
     /// next insert still lands strictly above it rather than recycling the
     /// gap a plain `INTEGER PRIMARY KEY` would happily reuse.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn removed_ids_are_never_recycled() {
         let (_dir, store) = fresh_store().await;
         let first = store
@@ -6848,7 +6848,7 @@ mod tests {
     /// Removing a host must purge exactly its own cached sessions via the
     /// schema's `ON DELETE CASCADE` — SPEC.md's disposal rule, pinned at
     /// the store level ahead of any REST surface that will trigger it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn remove_ssh_host_cascades_its_session_cache() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "cascade@host", "cascade-identity").await;
@@ -6882,7 +6882,7 @@ mod tests {
     /// store round trip, the same way `the_session_filter_matches_by_the_documented_rules`
     /// pins `SessionFilter::matches` — no database needed to prove a string
     /// transform.
-    #[test]
+    #[farhelm_testtrace::test]
     fn validate_alias_trims_and_empty_clears() {
         assert_eq!(
             validate_alias(Some("  My Box  ")).unwrap(),
@@ -6911,7 +6911,7 @@ mod tests {
     /// smuggled newline there forges a second line the same way an
     /// unsanitized session id would (SPEC_impl.md makes the identical
     /// argument for session ids).
-    #[test]
+    #[farhelm_testtrace::test]
     fn validate_alias_refuses_control_characters() {
         let err = validate_alias(Some("bad\u{0007}name")).unwrap_err();
         assert!(
@@ -6929,7 +6929,7 @@ mod tests {
     /// multi-byte string whose byte length exceeds 64 while its char count
     /// is exactly the limit, which only passes if the check reads
     /// `.chars().count()` rather than `.len()`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn validate_alias_caps_at_64_characters() {
         let sixty_five = "a".repeat(65);
         let err = validate_alias(Some(&sixty_five)).unwrap_err();
@@ -6964,7 +6964,7 @@ mod tests {
     /// revision for a no-op. The trimmed value round-trips through
     /// `list_hosts`, closing the loop `validate_alias_trims_and_empty_clears`
     /// only proves in isolation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_reports_changed_and_stores_the_trimmed_value() {
         let (_dir, store) = fresh_store().await;
         let host = store
@@ -7007,7 +7007,7 @@ mod tests {
 
     /// Aliasing a host onto a string another host's ALIAS already holds is
     /// refused, naming the taken host's current display name.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_rejects_a_collision_with_another_hosts_alias() {
         let (_dir, store) = fresh_store().await;
         let taken = store.add_ssh_host("taken@host", None, None).await.unwrap();
@@ -7055,7 +7055,7 @@ mod tests {
     /// machine", and either would make `farhelm agent`'s name resolution
     /// ambiguous the instant a real host happened to derive to that same
     /// string.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_rejects_a_collision_with_another_hosts_derived_name() {
         let (_dir, store) = fresh_store().await;
         store.add_ssh_host("plain@host", None, None).await.unwrap();
@@ -7097,7 +7097,7 @@ mod tests {
     /// the row being written is never compared against itself), but the
     /// behavior is worth pinning directly: renaming a host to exactly what
     /// it already displays as must not be mistaken for a collision.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_allows_a_host_to_alias_itself_to_its_own_derived_name() {
         let (_dir, store) = fresh_store().await;
         let host = store
@@ -7129,7 +7129,7 @@ mod tests {
     /// not special-case `HostKind::Local` at all, per
     /// `plans/host-aliases.md`'s decisions section ("the local host can be
     /// aliased too").
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_accepts_the_local_row() {
         let (_dir, store) = fresh_store().await;
         let local_id = store.list_hosts().await.unwrap()[0].id;
@@ -7155,7 +7155,7 @@ mod tests {
     /// or the display-name uniqueness invariant would only hold in one
     /// direction — a destination edit could silently steal an alias out
     /// from under the host wearing it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_ssh_destination_rejects_a_collision_with_another_hosts_alias() {
         let (_dir, store) = fresh_store().await;
         let aliased = store
@@ -7205,7 +7205,7 @@ mod tests {
     /// migration under test. Removing the later seen table and compact
     /// preference restores that historical shape before reversing schema
     /// 16's alias addition.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_version_15_database_migrates_hosts_to_a_null_alias() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
@@ -7269,7 +7269,7 @@ mod tests {
     /// catch it, since the index knows only about destinations — and
     /// `resolve_host` would then correctly refuse the now-ambiguous name,
     /// silently breaking the alias as an agent target.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn add_ssh_host_rejects_a_destination_matching_another_hosts_alias() {
         let (_dir, store) = fresh_store().await;
         let aliased = store
@@ -7305,7 +7305,7 @@ mod tests {
     /// `provisioning/service.rs` calls after a successful probe —
     /// independently, because `register_probed_ssh_host` shares no code
     /// with `add_ssh_host`; fixing one would not fix the other.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn register_probed_ssh_host_rejects_a_destination_matching_another_hosts_alias() {
         let (_dir, store) = fresh_store().await;
         let aliased = store
@@ -7343,7 +7343,7 @@ mod tests {
     /// reconnects to a host that happens to already collide with something
     /// (a pre-existing state this call did not create and is not
     /// responsible for policing).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn register_probed_ssh_host_converging_an_existing_row_skips_the_alias_check() {
         let (_dir, store) = fresh_store().await;
         let existing = store
@@ -7388,7 +7388,7 @@ mod tests {
     /// WHOLE batch — the entries before the colliding one must not have
     /// committed either, preserving the method's documented all-or-nothing
     /// guarantee.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn ensure_ssh_hosts_rejects_a_batch_entry_matching_another_hosts_alias_atomically() {
         let (_dir, store) = fresh_store().await;
         let aliased = store
@@ -7439,7 +7439,7 @@ mod tests {
     /// pre-existing state the additive, startup-time call did not create
     /// and must not fail an otherwise ordinary boot over. Only entries this
     /// call would actually INSERT are checked.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn ensure_ssh_hosts_does_not_refuse_an_already_registered_entry_over_a_pre_existing_collision()
      {
         let (_dir, store) = fresh_store().await;
@@ -7490,7 +7490,7 @@ mod tests {
     /// alias `builder` while A displays as `workstation`; clearing A's
     /// alias would otherwise silently restore the ambiguous `builder` name
     /// on two hosts at once.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_clearing_rejects_a_collision_with_another_hosts_alias() {
         let (_dir, store) = fresh_store().await;
         let a = store.add_ssh_host("builder", None, None).await.unwrap();
@@ -7533,7 +7533,7 @@ mod tests {
     /// always "this machine" rather than a destination, but the check is
     /// identical — restoring it must not collide with another host's
     /// current alias either.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_clearing_the_local_row_rejects_a_collision_with_another_hosts_alias() {
         let (_dir, store) = fresh_store().await;
         let local_id = store.list_hosts().await.unwrap()[0].id;
@@ -7567,7 +7567,7 @@ mod tests {
     /// committed against a registry this function could not fully
     /// interpret would leave the later manager sync to fail on a durable
     /// change nothing could roll back.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn update_alias_refuses_when_a_comparison_row_has_a_corrupt_kind() {
         let (_dir, store) = fresh_store().await;
         let host = store
@@ -7645,7 +7645,7 @@ mod tests {
     /// below both use). `record_first_contact` must never purge — only
     /// [`HelmStore::adopt_identity`] does that, and only for a genuine
     /// identity CHANGE.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_first_contact_preserves_a_pre_identity_cache() {
         let (_dir, store) = fresh_store().await;
         let host = store.add_ssh_host("id@host", None, None).await.unwrap();
@@ -7687,7 +7687,7 @@ mod tests {
     /// left untouched. Distinct from the previous test: this one exercises
     /// the branch where `host_identity` is already `Some` and matches,
     /// not `NULL`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_first_contact_is_idempotent_for_a_matching_identity() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stable@host", "identity-x").await;
@@ -7716,7 +7716,7 @@ mod tests {
     /// caller can surface SPEC.md's adopt-or-fix-destination choice. Only
     /// [`HelmStore::adopt_identity`], called with the user's explicit
     /// go-ahead, may ever perform that write.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn record_first_contact_leaves_a_conflicting_identity_unchanged() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "mismatch@host", "identity-old").await;
@@ -7768,7 +7768,7 @@ mod tests {
     /// database would then hold the very state that makes BOTH entries
     /// freeze as duplicates at the next start, hiding a live host
     /// completely.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn concurrent_first_contact_on_one_identity_has_exactly_one_winner() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -7825,7 +7825,7 @@ mod tests {
     /// claim check inside the same transaction is what refuses it, leaving
     /// the user with a duplicate to resolve instead of two rows claiming
     /// one host.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adopt_identity_refuses_an_identity_a_rival_already_claimed() {
         let (_dir, store) = fresh_store().await;
         let mismatched = host_with_identity(&store, "mismatched@host", "identity-old").await;
@@ -7879,7 +7879,7 @@ mod tests {
     /// from opposite directions: first contact learns an identity, adoption
     /// accepts one, and neither is meaningful once the row points somewhere
     /// else.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn identity_writes_are_refused_after_the_row_is_retargeted() {
         let (_dir, store) = fresh_store().await;
         let host = store.add_ssh_host("dialed@host", None, None).await.unwrap();
@@ -7958,7 +7958,7 @@ mod tests {
     /// with a second host present specifically so a buggy unconditional
     /// `DELETE FROM session_cache` (no `WHERE host_id`) would be caught
     /// rather than accidentally passing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adopt_identity_purges_only_that_hosts_cache() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "adopt@host", "identity-old").await;
@@ -8011,7 +8011,7 @@ mod tests {
     /// rather than a value, since a stale CAS from the connection manager's
     /// point of view genuinely IS a failure to act on, not an expected
     /// steady state.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adopt_identity_rejects_a_stale_expected_old() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stale-adopt@host", "identity-x").await;
@@ -8065,7 +8065,7 @@ mod tests {
     /// "no mutation" means something: both failed calls target the ghost
     /// only, and the live host's identity/cache must come through
     /// untouched.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn identity_operations_report_typed_host_not_found() {
         let (_dir, store) = fresh_store().await;
         let live = host_with_identity(&store, "live3@host", "live-identity").await;
@@ -8132,7 +8132,7 @@ mod tests {
     /// it only ever affects this one test's `HelmStore` — no seam had to
     /// be added to `adopt_identity` itself to make the failure
     /// injectable.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn adopt_identity_rolls_back_wholly_if_the_purge_fails() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "atomic@host", "identity-before").await;
@@ -8195,7 +8195,7 @@ mod tests {
     /// entries sharing a `session_id` within one `entries` batch) rather
     /// than an injected fault — see `replace_host_sessions`'s own docs for
     /// why that is the more honest seam available here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn replace_host_sessions_rolls_back_a_mid_batch_failure() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "rollback@host", "rollback-identity").await;
@@ -8240,7 +8240,7 @@ mod tests {
     /// succeeded silently (delete zero rows, insert zero rows, no error),
     /// indistinguishable from "this host truly has zero sessions." Both
     /// shapes are pinned here so neither regresses independently.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn replace_host_sessions_reports_typed_host_not_found() {
         let (_dir, store) = fresh_store().await;
         let ghost = store.add_ssh_host("ghost4@host", None, None).await.unwrap();
@@ -8268,7 +8268,7 @@ mod tests {
     /// session-list fetch that was in flight under the OLD identity landing
     /// AFTER a user adopts a new one must not repopulate the cache the
     /// adoption just purged with sessions belonging to the dead install.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn replace_host_sessions_rejects_a_stale_identity() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stale-refresh@host", "identity-before").await;
@@ -8343,7 +8343,7 @@ mod tests {
     /// order follows the tampered column. A reader that re-derived order
     /// from the JSON would report the ORIGINAL order and fail this
     /// assertion.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn read_order_follows_the_extracted_columns_not_the_json() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "order@host", "order-identity").await;
@@ -8389,7 +8389,7 @@ mod tests {
     /// A session reappearing in a later refresh under the SAME id replaces
     /// its older cached self entirely — the wholesale-replacement contract
     /// applied to one overlapping row rather than the whole set.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_later_refresh_replaces_an_overlapping_sessions_older_self() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "overlap@host", "overlap-identity").await;
@@ -8419,7 +8419,7 @@ mod tests {
     /// rows behind; only the empty-set step at the end actually catches
     /// that, since a shrink-to-empty has no new rows to point an upsert-only
     /// diff at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn wholesale_replacement_handles_shrinking_to_empty() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "shrink@host", "shrink-identity").await;
@@ -8474,7 +8474,7 @@ mod tests {
     /// `crate::aggregate`'s concern now (the list is sorted in memory from
     /// whatever [`HelmStore::cached_rows`] hands back), so it has its own
     /// coverage there rather than pinned a second time against this store.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn equal_created_at_ties_break_ascending_by_session_id() {
         let (_dir, store) = fresh_store().await;
         let a = host_with_identity(&store, "tie-a@host", "tie-a-identity").await;
@@ -8651,7 +8651,7 @@ mod tests {
     /// Everything above must survive a full close-and-reopen of the
     /// database file — helm.db's entire reason to exist (SPEC.md: the
     /// stale list survives a helm restart).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn everything_survives_a_store_reopen() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
@@ -8739,7 +8739,7 @@ mod tests {
     /// was there. Both directions are asserted from ONE store, because
     /// "reports no change" is only meaningful beside a comparable write that
     /// does.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_replacement_reports_a_change_only_when_a_row_actually_differs() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "user@host", "identity-1").await;
@@ -8797,7 +8797,7 @@ mod tests {
     /// so comparing payloads only would report the repair as "nothing
     /// changed" and the feed would starve: the row would stay missing with
     /// no client ever told to look again.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_repaired_ordering_column_counts_as_a_change() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "user@host", "identity-1").await;
@@ -8862,7 +8862,7 @@ mod tests {
     /// — a value a reader cannot tell from a genuine one, since the
     /// `created_at` fallback is applied at read time and never written
     /// down.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_mutation_reply_never_walks_the_activity_stamp_backwards() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "user@host", "identity-1").await;
@@ -8922,7 +8922,7 @@ mod tests {
     /// The case this exists for is a RETRIED create under an idempotency
     /// key: the supervisor replays the same session, the helm re-records it,
     /// and nothing about the fleet is different than it was.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn single_row_writes_report_change_the_same_way() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "user@host", "identity-1").await;
@@ -8996,7 +8996,7 @@ mod tests {
     /// hand exactly when they had just established a habit. Host removal is
     /// included to prove registry lifecycle cannot erase unrelated singleton
     /// state; it does not claim profile ids are portable across host catalogs.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_remembered_default_is_helm_wide_replaceable_and_durable() {
         let (dir, store) = fresh_store().await;
         let ssh = store.add_ssh_host("user@host", None, None).await.unwrap();
@@ -9043,7 +9043,7 @@ mod tests {
     /// retargeting one registry row can change that host and its cache, but
     /// none owns the singleton. This pins non-interference without claiming
     /// the remembered id already names the same definition on every host.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn host_lifecycle_changes_do_not_touch_the_helm_wide_default() {
         let (_dir, store) = fresh_store().await;
         let host = store
@@ -9107,7 +9107,7 @@ mod tests {
 
     /// The helm-wide remembered default accepts a raw id even without a
     /// matching host or catalog row.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn remembering_a_default_is_independent_of_host_registry_rows() {
         let (_dir, store) = fresh_store().await;
         assert!(store.remember_profile_default("p-1").await.unwrap());
@@ -9219,7 +9219,7 @@ mod tests {
     /// with no way back short of deleting the cache — a wrong answer that
     /// survives every refresh is the worst kind for a denormalized column to
     /// give.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_session_that_comes_back_unarchived_rejoins_the_default_view() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "flip@host", "flip-identity").await;
@@ -9272,7 +9272,7 @@ mod tests {
     /// fleet where a second host has rows too; scoping to a host with no
     /// cached sessions returns an empty `Vec` rather than every host's rows
     /// (what an unguarded empty `IN`-list would quietly mean).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn cached_rows_scopes_to_exactly_the_requested_hosts() {
         let (_dir, store) = fresh_store().await;
         let alpha = host_with_identity(&store, "user@alpha", "identity-alpha").await;
@@ -9338,7 +9338,7 @@ mod tests {
     /// likely to get wrong when touching it: substring versus exact per
     /// dimension, the profile filter's id-OR-snapshotted-name reading, and
     /// the fact that dimensions AND together.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_session_filter_matches_by_the_documented_rules() {
         use farhelm_proto::{ProfileExistence, SessionStatus, SourceProfile};
 
@@ -9419,7 +9419,7 @@ mod tests {
 
     /// Completed drains converge the remembered default to their newest
     /// profile-backed source and never let an older snapshot roll it back.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn drain_convergence_advances_only_to_newer_profile_provenance() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "profiles@host", "profile-identity").await;
@@ -9550,7 +9550,7 @@ mod tests {
     /// restarts sequences low). So: the id survives, the provenance is
     /// cleared, survivors do not advance it, and a direct create with a
     /// RESET sequence does.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_retarget_shaped_drain_keeps_the_bare_default() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "moving@host", "moving-identity").await;
@@ -9613,7 +9613,7 @@ mod tests {
 
     /// Old supervisors omit creation sequences, so equal-second drains keep
     /// the pre-upgrade ascending-id tiebreak.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn drain_provenance_falls_back_to_timestamp_and_id_when_sequence_is_absent() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "fallback@host", "fallback-identity").await;
@@ -9638,7 +9638,7 @@ mod tests {
     /// A caller without the source host cannot assign a domain to supervisor
     /// sequences. The shared timestamp/id fallback must therefore decide
     /// between unattributed observations instead of comparing local counters.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn unattributed_remembered_sources_use_the_fleet_wide_fallback() {
         let (_dir, store) = fresh_store().await;
         assert!(
@@ -9664,7 +9664,7 @@ mod tests {
     /// local number. This drives the production refresh path rather than the
     /// singleton writer directly, pinning both persisted domain provenance
     /// and the cross-host timestamp fallback.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn cross_host_drains_do_not_compare_local_sequences() {
         let (_dir, store) = fresh_store().await;
         let host_a = host_with_identity(&store, "a@host", "a-identity").await;
@@ -9703,7 +9703,7 @@ mod tests {
     /// Refreshing host B cannot establish that host A's remembered source
     /// disappeared. Keeping the provenance prevents an unrelated refresh
     /// from reopening ordering to a delayed, older observation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unrelated_host_refresh_keeps_remembered_provenance() {
         let (_dir, store) = fresh_store().await;
         let host_a = host_with_identity(&store, "a@host", "a-identity").await;
@@ -9744,7 +9744,7 @@ mod tests {
     /// The round trip is what matters: a status whose key could not be
     /// parsed back would make those sessions unfilterable, and a word
     /// accepted that no status produces would silently match nothing.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_status_key_round_trips_and_unknown_words_are_refused() {
         use farhelm_proto::SessionStatus;
 
@@ -9783,7 +9783,7 @@ mod tests {
     /// a word accepted that names no order would serve a list in a sequence
     /// the caller did not ask for — which, unlike an empty result, looks
     /// entirely plausible.
-    #[test]
+    #[farhelm_testtrace::test]
     fn every_sort_key_round_trips_and_unknown_words_are_refused() {
         for (word, sort) in [
             ("created", ListSort::Created),
@@ -9819,7 +9819,7 @@ mod tests {
     /// way `cached_sessions` still saw correctly but `cached_rows` did not
     /// (a stale join, a forgotten column in its `SELECT`) would otherwise
     /// have no test that could see it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn cached_rows_reflects_every_cache_write_path() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "reflect@host", "reflect-identity").await;
@@ -9865,7 +9865,7 @@ mod tests {
     /// or resume template to ship. Reopening after mutations also pins that
     /// schema setup is initialization, not a startup repair that resurrects
     /// or overwrites a starter the user changed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn starter_profiles_are_complete_and_seeded_only_once() {
         let (dir, store) = fresh_store().await;
         let starters = vec![
@@ -9938,7 +9938,7 @@ mod tests {
     /// boundary as a damaged or hand-edited database would. Silently skipping
     /// or normalizing one would turn corruption into a plausible catalog with
     /// a different meaning.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn malformed_profile_rows_fail_single_and_catalog_reads() {
         let cases = [
             (
@@ -9995,7 +9995,7 @@ mod tests {
 
     /// The helm catalog owns durable CRUD, rejects invalid replacements
     /// without a write, and enforces the exact shared catalog bound.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn helm_profile_catalog_crud_is_bounded_and_validated() {
         let (_dir, store) = fresh_store().await;
         assert_eq!(store.profiles().await.unwrap().len(), 4);

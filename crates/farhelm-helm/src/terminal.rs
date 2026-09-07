@@ -769,7 +769,7 @@ mod tests {
     /// already-driven-to-completion by the caller, completing inside the
     /// grace, and never completing at all (the wedged browser the grace
     /// exists for).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn outbound_teardown_never_polls_a_finished_join_handle() {
         // Driven to completion by the caller, exactly as the `select!`
         // arm does before reporting `already_finished`.
@@ -799,7 +799,7 @@ mod tests {
 
     /// Rotation during supervisor admission never starts browser I/O and
     /// still detaches an attachment whose late reply crossed the revocation.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn rotation_during_terminal_admission_closes_before_cleanup() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let (attach_seen_tx, attach_seen_rx) = tokio::sync::oneshot::channel();
@@ -863,7 +863,7 @@ mod tests {
     /// interpreting. Any of those silently breaking would leave the
     /// browser's watermark wired to nothing — a failure whose only symptom
     /// is memory growth under load.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn browser_pause_and_resume_reach_the_supervisor_for_this_channel() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
@@ -914,7 +914,7 @@ mod tests {
     /// drop the marker on the way to a real `WsTestClient`, and that it
     /// arrives as the documented `{"type":"replay_complete"}` text frame
     /// rather than, say, folded into the binary stream.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn term_ws_delivers_the_replay_complete_marker_between_replay_and_live_bytes() {
         use farhelm_proto::ControlMsg;
 
@@ -991,7 +991,7 @@ mod tests {
     /// `serve_term` returned, which can only happen after the blocked send
     /// was abandoned — so a regression that restores the in-band-only
     /// detach hangs here instead of passing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_wedged_browser_is_torn_down_by_the_stall_detach() {
         let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
         let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
@@ -1103,7 +1103,7 @@ mod tests {
     /// absence: a `pause` follows the ping, and the first control frame the
     /// supervisor sees must be that pause. A relayed ping would be sitting
     /// in front of it, in the same order this one socket wrote them.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn term_ws_answers_a_heartbeat_ping_without_relaying_it() {
         use farhelm_proto::ControlMsg;
 
@@ -1156,7 +1156,7 @@ mod tests {
     /// the flag the supervisor reads. A regression that dropped the flag
     /// would leave every automatic reconnect displacing again — silently,
     /// and only observably in a two-client race.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_unowned_route_asks_the_supervisor_not_to_displace() {
         for (path, expected) in [
             ("/api/sessions/sess-1/term", false),
@@ -1205,7 +1205,7 @@ mod tests {
     /// started — was absent from exactly the reply a confused client is
     /// most likely to receive. A skewed UI whose requests are being refused
     /// would have been told nothing at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn every_reply_carries_the_helms_build_stamp() {
         let harness = rest_harness::helm_listing(vec![]).await;
         for (uri, origin, expected) in [
@@ -1254,7 +1254,7 @@ mod tests {
     /// below is deliberately NOT folded in here: it is the one case whose
     /// entire point is that two fields combine on the SAME frame, which a
     /// shared loop body would only obscure.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn term_ws_selector_and_lease_reach_the_attach_frame() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, TerminalSelector};
@@ -1311,7 +1311,7 @@ mod tests {
     /// regression where handling one query param clobbers the other
     /// (e.g. an extractor path that overwrites `terminal` and forgets to
     /// also thread `lease`, or vice versa).
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn term_ws_with_tab_and_lease_together_carries_both_on_one_attach() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, TerminalSelector};
@@ -1364,7 +1364,7 @@ mod tests {
     /// somewhere in the WS plumbing this PR adds. Both the notice recv
     /// AND the close recv are wrapped in a bounded timeout: a regression
     /// that left either one pending must fail this test, not hang it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn term_ws_with_unknown_tab_id_surfaces_the_supervisors_not_found_error() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind, TerminalSelector};
@@ -1449,7 +1449,7 @@ mod tests {
     /// `serve_term` has already returned, so anything it was ever going
     /// to send to the supervisor has already been sent, and checking for
     /// it needs no guess at how long "long enough" is.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn term_ws_with_empty_lease_is_refused_locally_without_contacting_the_supervisor() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
 

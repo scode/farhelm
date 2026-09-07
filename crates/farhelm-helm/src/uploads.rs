@@ -353,7 +353,7 @@ mod tests {
     /// chunking" in the one-giant-chunk direction; the opposite direction
     /// (many small body chunks coalescing into full frames) is
     /// `upload_attachment_rechunks_irregular_streaming_body_chunks`.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_happy_path_streams_chunks_and_returns_the_path() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
@@ -465,7 +465,7 @@ mod tests {
     /// The sizes deliberately do not line up with the chunk boundary, so
     /// frames end mid-piece and a coalescing bug that only worked for
     /// aligned inputs fails here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_rechunks_irregular_streaming_body_chunks() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
@@ -571,7 +571,7 @@ mod tests {
     /// Pinned per header rather than "some CORS headers exist": each one is
     /// separately load-bearing. The POST rejection also proves CORS remains
     /// outside device authentication, where the webview can read its 401.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn attachment_preflight_answers_the_desktop_webview_origin() {
         use tower::ServiceExt;
 
@@ -640,7 +640,7 @@ mod tests {
     /// origin must come back READABLE, or the page is told nothing while
     /// the file sits published on the host — the worst available failure,
     /// since the user is shown an error for an attachment that exists.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_successful_upload_is_readable_by_the_desktop_webview() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -719,7 +719,7 @@ mod tests {
     /// the browser reports a generic network error and the supervisor's
     /// own words (the whole point of the pinned contract's verbatim error
     /// body) never reach the user.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_refused_upload_is_readable_by_the_desktop_webview_too() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
@@ -798,7 +798,7 @@ mod tests {
     /// `Access-Control-Allow-Origin`, so the attacker's page cannot even
     /// read the 403. Handing one back would turn a refusal into a probe
     /// that confirms a helm is listening.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_foreign_origin_is_refused_without_cors_headers() {
         use tower::ServiceExt;
 
@@ -830,7 +830,7 @@ mod tests {
     /// data frames follow, and the commit publishes — the shape a relay
     /// that treated "no bytes to send" as "nothing to do" would break by
     /// never committing at all.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_zero_byte_body_publishes() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -907,7 +907,7 @@ mod tests {
     /// own framing was wrong. The peer proves the excess never reached the
     /// wire: after the in-bounds prefix it must see `AbortUpload`, not
     /// more data and not a commit.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_body_longer_than_content_length_is_refused() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
@@ -996,7 +996,7 @@ mod tests {
     /// Both mismatch directions are exercised because their sentinels are
     /// the only difference: the relay must be equally transparent to a
     /// commit refusal whichever way the counts disagreed.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_commit_mismatch_passes_the_sentinel_through() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
@@ -1082,7 +1082,7 @@ mod tests {
     /// "window respected" requirement. The scripted peer withholds every
     /// ack until it has proven the sender stalled at the window, then acks
     /// and proves progress resumes and the transfer still completes.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_respects_the_credit_window_then_progresses_after_an_ack() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES};
@@ -1198,7 +1198,7 @@ mod tests {
     /// simply dropped — flushing bytes for a transfer that is being
     /// abandoned would only make the supervisor write more of a file it
     /// is about to delete.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_client_disconnect_mid_body_sends_abort_upload() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
@@ -1279,7 +1279,7 @@ mod tests {
     /// reach the browser as the mapped error carrying the reason text —
     /// the pinned REST contract's "500-class with the reason text", never
     /// a bare disconnect or a success.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_aborted_mid_stream_maps_to_an_error_with_the_reason() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES};
@@ -1366,7 +1366,7 @@ mod tests {
     /// while sending would sit until the browser's stall timeout and then
     /// report a stall instead of the storage failure that actually ended
     /// the upload.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_abort_while_awaiting_the_body_ends_the_request() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -1458,7 +1458,7 @@ mod tests {
     /// implementation which dropped the abort — or which waited on the
     /// commit reply without watching for one — hangs instead of quietly
     /// reporting something plausible.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_abort_racing_the_commit_surfaces_the_abort_reason() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -1539,7 +1539,7 @@ mod tests {
     /// implementation that rearms per item never gives up, exhausts the
     /// (bounded) stream, and fails on the wrong outcome instead of
     /// hanging.
-    #[tokio::test(start_paused = true)]
+    #[farhelm_testtrace::test(start_paused = true)]
     async fn upload_attachment_endless_empty_body_chunks_stall_out() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -1621,7 +1621,7 @@ mod tests {
     /// the upload's owner and fire from its destructor — and this test
     /// drops the handler at the worst moment, parked on a closed credit
     /// window, to prove it does.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_cancelled_handler_still_aborts_upstream() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES};
@@ -1707,7 +1707,7 @@ mod tests {
     /// helm's own owner lookup before any host is contacted, so pointing
     /// this at one would test the helm's 404 rather than the passthrough it
     /// exists to pin.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_begin_error_reply_passes_through_the_sentinel_message() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
@@ -1768,7 +1768,7 @@ mod tests {
     /// refusal. A present-but-empty `?filename=` shares the same decode
     /// (see `UploadQuery`'s own docs), so only the absent case needs its
     /// own test.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_absent_filename_forwards_as_the_empty_proposal() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
@@ -1829,7 +1829,7 @@ mod tests {
     /// without ever contacting the supervisor — mirroring
     /// `term_ws_with_empty_lease_is_refused_locally_without_contacting_the_supervisor`'s
     /// pattern for the one shape check the helm makes on its own behalf.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn upload_attachment_missing_content_length_is_refused_locally() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
         use tower::ServiceExt;

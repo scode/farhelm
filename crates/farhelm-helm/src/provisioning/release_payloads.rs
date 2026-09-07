@@ -1686,7 +1686,7 @@ mod tests {
     /// This is the whole reason the module exists, and it runs against real
     /// signed bytes over a real socket: a stubbed verifier here would leave
     /// the one security-relevant path in provisioning untested.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn downloads_verifies_and_extracts_every_payload_kind_and_arch() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -1735,7 +1735,7 @@ mod tests {
     /// test, so they could rot, drift, or be silently truncated while the
     /// suite stayed green and the comments went on calling this a complete
     /// release.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_committed_fixture_release_is_internally_consistent() {
         let sums_bytes = fixture_bytes("SHA256SUMS");
         verify_sums(
@@ -1792,7 +1792,7 @@ mod tests {
     /// Uses a FRESH source over the same cache directory, because the
     /// interesting case is a restarted helm rather than a second call
     /// through one process's in-memory state.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_cached_payload_is_reused_without_any_request() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -1830,7 +1830,7 @@ mod tests {
     /// own account. Without this test, deleting the re-check would leave
     /// every cache test green while a process restart silently stopped
     /// re-checking the signature and the version binding.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_cached_payload_whose_signature_no_longer_verifies_is_refetched() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -1869,7 +1869,7 @@ mod tests {
     /// This is the per-asset mutex's reason to exist: without it both
     /// callers would write the same `.part` file concurrently, and the
     /// loser's rename would publish bytes the winner had already replaced.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn concurrent_requests_for_one_asset_download_it_once() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -1895,7 +1895,7 @@ mod tests {
     /// exactly the latency this design set out to avoid. Proven by holding
     /// both responses open at the server and requiring both requests to have
     /// ARRIVED before either is released — no sleeps, no timing guesses.
-    #[tokio::test(flavor = "multi_thread")]
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn requests_for_different_assets_overlap() {
         let farhelm_asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
         let tmux_asset = assets::tmux_name(PayloadArch::X86_64);
@@ -1964,7 +1964,7 @@ mod tests {
     /// Attempt COUNT is the contract, and it is invisible from outside
     /// without the transport seam: a test against a closed port cannot tell
     /// one attempt from three.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_connect_failure_is_retried_once_and_then_succeeds() {
         let cache = tempfile::tempdir().unwrap();
         let asset = assets::tmux_name(PayloadArch::X86_64);
@@ -1999,7 +1999,7 @@ mod tests {
     /// Retrying a mid-body failure would re-pay a multi-megabyte download
     /// for a failure that is rarely transient, and an unbounded retry loop
     /// would turn an outage into a hammering client.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn retries_stop_after_one_attempt_and_never_start_for_other_failures() {
         for (script, expected_attempts, label) in [
             (vec![Scripted::Connect, Scripted::Connect], 2, "connect"),
@@ -2039,7 +2039,7 @@ mod tests {
     /// window in which anything else on the machine could claim it — turning
     /// the test into a request to an unrelated service or a wait for the
     /// 60-second read timeout. Holding the port removes the race entirely.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unreachable_release_server_names_the_base_url() {
         let dead = ClosingListener::start().await;
         let base_url = dead.base_url();
@@ -2073,7 +2073,7 @@ mod tests {
     /// that does not exist and a release still uploading its assets look
     /// identical to one request, so this deliberately does not guess which
     /// one it is.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_missing_sha256sums_reports_the_not_published_or_still_publishing_message() {
         let release = FixtureRelease::start(vec![("SHA256SUMS", Override::NotFound)]).await;
         let cache = tempfile::tempdir().unwrap();
@@ -2099,7 +2099,7 @@ mod tests {
     /// in the suite would notice if it became `get_or_init`: every other
     /// refusal test stops after one call, so a helm poisoned for the rest of
     /// its uptime by one transient 500 would look perfectly healthy here.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failed_checksum_fetch_is_retried_by_the_next_request() {
         let release = FixtureRelease::start(vec![(
             "SHA256SUMS",
@@ -2134,7 +2134,7 @@ mod tests {
     /// Spec: a `SHA256SUMS` whose signature does not verify is refused
     /// outright — the single check that stands between "some server served
     /// bytes" and "these are farhelm's release binaries".
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_sha256sums_that_does_not_verify_is_refused() {
         // One flipped hex digit: still well-formed sha256sum output, so the
         // refusal can only come from the signature check.
@@ -2165,7 +2165,7 @@ mod tests {
     /// format — so without a committed legacy signature, flipping that flag
     /// to `true` would broaden what farhelm accepts with the suite still
     /// green.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_legacy_format_signature_is_refused() {
         let release = FixtureRelease::start(vec![(
             "SHA256SUMS.minisig",
@@ -2199,7 +2199,7 @@ mod tests {
     /// whoever controls that URL. Nothing in the signed BYTES distinguishes
     /// them, so if this test ever passes for the wrong reason the version
     /// binding has been lost.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_sha256sums_signed_for_another_version_is_refused() {
         let release = FixtureRelease::start(vec![
             (
@@ -2235,7 +2235,7 @@ mod tests {
     /// If it only checked the signature, a helm that cached a replayed
     /// manifest once would keep serving its binaries from cache forever,
     /// with the network check that would have caught it never running again.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_cached_manifest_from_another_version_is_not_a_cache_hit() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -2275,7 +2275,7 @@ mod tests {
     /// asset's own name. Covers the case the signature alone cannot: a
     /// genuine, correctly signed checksum file with a substituted asset
     /// behind it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_asset_whose_bytes_do_not_match_sha256sums_is_refused() {
         let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
         let tampered = b"not the release archive".to_vec();
@@ -2313,7 +2313,7 @@ mod tests {
     /// Driven by `variants/without-tmux`, a separately signed checksum file,
     /// because serving an edited one would fail the signature check first
     /// and never reach this path.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_asset_absent_from_sha256sums_is_refused() {
         let release = FixtureRelease::start(vec![
             (
@@ -2346,7 +2346,7 @@ mod tests {
     /// distinct from D17's "no SHA256SUMS" message, because a signed
     /// checksum file with a missing asset behind it is a broken release, not
     /// an unpublished one.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_missing_release_asset_names_the_asset() {
         let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::Aarch64));
         let release = FixtureRelease::start(vec![(asset.as_str(), Override::NotFound)]).await;
@@ -2370,7 +2370,7 @@ mod tests {
     /// with a redirect to its object store, so a client built without
     /// redirect following would fail every real download while passing every
     /// direct-response test in this file.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_redirected_asset_is_followed_and_still_verified() {
         let asset = assets::tmux_name(PayloadArch::Aarch64);
         let release = FixtureRelease::start(vec![
@@ -2406,7 +2406,7 @@ mod tests {
     /// Needs `variants/two-member`'s own signed `SHA256SUMS`: an archive
     /// substituted without one would be rejected for its checksum long
     /// before anything opened it.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_archive_without_exactly_one_matching_member_is_refused() {
         let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
         let release = FixtureRelease::start(vec![
@@ -2446,7 +2446,7 @@ mod tests {
     /// buffers this body, so axum announces its length and the refusal comes
     /// from the header check. The streaming check below is what covers a
     /// server that announces nothing.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_oversized_sha256sums_is_refused_from_its_content_length() {
         let release = FixtureRelease::start(vec![(
             "SHA256SUMS",
@@ -2484,7 +2484,7 @@ mod tests {
     /// regression to read-until-EOF would block on the withheld tail
     /// forever, and a hanging test reports nothing useful. Expiry is a
     /// failure, not a skip.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_oversized_chunked_sha256sums_stops_reading_at_the_cap() {
         let gate = Arc::new(tokio::sync::Notify::new());
         let released = Arc::new(AtomicBool::new(false));
@@ -2525,7 +2525,7 @@ mod tests {
     /// never enter the buffer — which an implementation that appended first
     /// and checked afterwards would fail while still passing every network
     /// test in this file.
-    #[test]
+    #[farhelm_testtrace::test]
     fn append_capped_refuses_a_chunk_before_copying_it() {
         let mut body = Vec::new();
         assert!(append_capped(&mut body, b"under", 16));
@@ -2555,7 +2555,7 @@ mod tests {
     /// This is the recovery path for a helm killed mid-extraction, which is
     /// otherwise a permanently broken "add host" that only a manual `rm -rf`
     /// of helm state would clear.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_corrupt_extraction_marker_is_discarded_and_the_asset_refetched() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -2597,7 +2597,7 @@ mod tests {
     /// changed, an ACL, a damaged filesystem. Propagating the I/O error
     /// instead would leave "add host" broken until somebody deleted helm
     /// state by hand.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn an_unhashable_cached_binary_is_discarded_and_refetched() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -2630,7 +2630,7 @@ mod tests {
     /// matter of deleting known patterns rather than guessing at random
     /// temporary names — which is exactly why the cache does not use random
     /// ones. The published files beside them must be left alone.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn abandoned_staging_files_are_removed_on_first_use() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -2677,7 +2677,7 @@ mod tests {
     /// belong to other base URLs a running helm may still be using, and the
     /// name-shape check is what keeps this from becoming an arbitrary
     /// recursive delete inside helm state.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn payload_cache_generations_from_older_versions_are_pruned() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -2736,7 +2736,7 @@ mod tests {
     /// serves the previous release's binaries out of a shared cache, and the
     /// URL hash so a fixture server, a mirror, or a prerelease URL cannot
     /// read or poison what the real GitHub release wrote.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn the_cache_directory_is_keyed_by_version_and_base_url() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache_root = tempfile::tempdir().unwrap();
@@ -2765,7 +2765,7 @@ mod tests {
     /// otherwise silently replace the last path segment — turning
     /// `…/download/v1.2.3` into `…/download/farhelm-….tar.gz` and fetching
     /// from the wrong place with no error to explain it.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_base_url_without_a_trailing_slash_is_normalised() {
         let normalised =
             normalise_base_url(Url::parse("https://example.invalid/releases/v1.2.3").unwrap());
@@ -2782,7 +2782,7 @@ mod tests {
     /// truncated or HTML-wrapped file that parsed to a partial entry set
     /// would surface downstream as "no entry for {asset}", pointing the
     /// operator at a missing asset instead of at a broken download.
-    #[test]
+    #[farhelm_testtrace::test]
     fn parse_sums_accepts_sha256sum_output_and_rejects_everything_else() {
         let digest = "0".repeat(64);
         let parsed = parse_sums(&format!(
@@ -2828,7 +2828,7 @@ mod tests {
     /// made `v0.0.1-rc.1-<digest>` unparseable so `-rc.N` generations were
     /// never pruned, while happily accepting `v-<digest>`, whose version is
     /// the empty string, as something to delete recursively.
-    #[test]
+    #[farhelm_testtrace::test]
     fn only_foreign_version_generation_names_are_prunable() {
         // A fixed stand-in for "current", deliberately NOT the crate's own
         // `VERSION`: this predicate takes its notion of current from the
@@ -2888,7 +2888,7 @@ mod tests {
     /// otherwise surface only on a real "add host" against a real release.
     /// The maintainer cross-checks the same line against the key held as
     /// `MINISIGN_SECRET_KEY`.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_built_in_public_key_matches_the_committed_release_key_file() {
         const KEY_FILE: &str = include_str!("farhelm-release.pub");
         assert_eq!(
@@ -2915,7 +2915,7 @@ mod tests {
     /// notice, because both halves were only ever described in prose. Here
     /// the producer's rendering is reconstructed from a realistic tag and
     /// compared against the string verification actually demands.
-    #[test]
+    #[farhelm_testtrace::test]
     fn signing_and_verification_agree_on_the_tag_convention() {
         // Deliberately the real production constant, not `FIXTURE_VERSION`:
         // this test pins the tag convention CI's `sign-sums` job and this
@@ -2946,7 +2946,7 @@ mod tests {
     /// inside committed binary data, where no reviewer will see it. The
     /// regeneration recipe's ownership flags are easy to drop; this is what
     /// makes dropping them fail the suite instead of shipping a name.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_committed_archives_record_no_account_identity() {
         let mut checked = 0;
         for relative in [
@@ -2992,7 +2992,7 @@ mod tests {
     /// staging file has to be creatable for a download to reach a checksum
     /// comparison at all, so no planted directory or permission can produce
     /// a mismatch AND a failed removal in one run.
-    #[test]
+    #[farhelm_testtrace::test]
     fn a_checksum_refusal_carries_a_cleanup_failure_when_there_is_one() {
         let clean = checksum_refusal("asset.tar.gz", "aaaa", "bbbb", Ok(()));
         assert_eq!(
@@ -3028,7 +3028,7 @@ mod tests {
     /// directory is the portable way to make `unlink` fail as an ordinary
     /// user; root ignores directory permissions, so this asserts nothing
     /// there and says so.
-    #[test]
+    #[farhelm_testtrace::test]
     fn remove_if_present_reports_a_removal_it_could_not_perform() {
         if unsafe { libc::geteuid() } == 0 {
             println!("skipping: root is not subject to directory permissions");
@@ -3063,7 +3063,7 @@ mod tests {
     /// found it — so every later lookup in the same process misses again for
     /// the same reason. The second half of this test, the cache hit with
     /// zero requests, is what a non-repairing implementation fails.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_corrupt_cached_control_file_is_repaired_from_memory() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
@@ -3117,7 +3117,7 @@ mod tests {
     /// symlink to `/dev/zero` never reaches end-of-file. Either one pins a
     /// blocking worker and leaves "add host" waiting with nothing to report,
     /// so the timeout here is the assertion — its expiry IS the bug.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_cached_binary_that_is_not_a_regular_file_is_discarded() {
         for plant in ["fifo", "symlink"] {
             let release = FixtureRelease::start(Vec::new()).await;
@@ -3165,7 +3165,7 @@ mod tests {
     /// unauthenticated as a response body, and reading it to find out how big
     /// it is defeats the bound. Recovery, not failure, because a cache entry
     /// is never worth ending an "add host" over.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn oversized_cached_control_files_and_markers_are_a_miss() {
         let asset = assets::tmux_name(PayloadArch::X86_64);
         for oversized in ["SHA256SUMS", "SHA256SUMS.minisig", "marker"] {
@@ -3213,7 +3213,7 @@ mod tests {
     /// on and the cache grew without bound — with nothing anywhere saying
     /// why. Root ignores directory permissions, so this asserts nothing
     /// there and says so.
-    #[test]
+    #[farhelm_testtrace::test]
     fn housekeeping_reports_a_filesystem_fault_it_cannot_work_around() {
         if unsafe { libc::geteuid() } == 0 {
             println!("skipping: root is not subject to directory permissions");
@@ -3255,7 +3255,7 @@ mod tests {
     /// Tested as a pure decision because `reqwest::redirect::Attempt` has no
     /// public constructor: nothing outside reqwest can drive
     /// `Policy::redirect`. The loopback redirect test covers the wiring.
-    #[test]
+    #[farhelm_testtrace::test]
     fn the_redirect_policy_allows_object_stores_and_refuses_downgrades() {
         use super::super::payloads::{RedirectDecision, release_redirect_decision};
 
@@ -3300,7 +3300,7 @@ mod tests {
     /// that URL, and these errors are rendered into provisioning progress
     /// the browser shows — so the URL is stripped before wrapping. The
     /// sentinel here would appear verbatim without that.
-    #[tokio::test]
+    #[farhelm_testtrace::test]
     async fn a_failing_redirect_never_renders_its_target_url() {
         let dead = ClosingListener::start().await;
         let asset = assets::tmux_name(PayloadArch::X86_64);
