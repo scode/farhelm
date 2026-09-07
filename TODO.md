@@ -18,6 +18,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
+  combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.
+
 - Investigate Codex resuming the existing conversation after using "Replace" on a session. Reported in ordinary use: the
   replacement retained the previous conversation and could summarize the earlier work, instead of starting a fresh
   conversation. Replace should preserve the session's directory, title, and agent choice while starting fresh. Cause and
