@@ -10,31 +10,10 @@ use farhelm_proto::{ControlMsg, RestartOffer, SessionInfo, SessionStatus, Source
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::process::{Command, Output};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// Run a child with a hard deadline so a protocol regression fails instead
-/// of pinning the test process forever.
-fn output_with_timeout(mut command: Command) -> Output {
-    command
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = command.spawn().expect("spawn farhelm");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if child.try_wait().expect("poll farhelm").is_some() {
-            return child.wait_with_output().expect("collect farhelm output");
-        }
-        if Instant::now() >= deadline {
-            child.kill().expect("kill wedged farhelm");
-            let output = child.wait_with_output().expect("collect killed farhelm");
-            panic!(
-                "farhelm spawn exceeded its 10-second test deadline: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
+mod cli_support;
+use cli_support::output_with_timeout;
 
 /// Serve one authenticated request with cancellation across the entire exchange.
 ///
