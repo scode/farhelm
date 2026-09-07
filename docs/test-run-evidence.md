@@ -32,7 +32,9 @@ scheduling layer.
 `--kind` accepts `development`, `repetition`, or `release`. `--timeout` is an optional finite positive number of seconds
 and starts after the command is spawned; metadata probe time is separate. `--tmux` accepts `warn` (the default),
 `required`, or `none`. `--output-root` overrides evidence storage. `--keep-farhelm-env NAME` may be repeated, but each
-name must begin with `FARHELM_` and must not contain a value.
+name must begin with `FARHELM_` and must not contain a value. `--termination-grace` sets the finite positive cleanup
+allowance after interruption or timeout, in seconds (default 2, maximum 60). A runner that forwards signals to its own
+test process groups needs an allowance longer than its internal termination grace.
 
 `--help` and `-h` work without the required labels or a command. Help after the `--` boundary belongs to the child argv.
 
@@ -64,11 +66,12 @@ Normal child exit statuses pass through unchanged. A child killed by signal `N` 
 error return 125; timeout returns 124; recorder interruption returns `128 +` the received signal.
 
 The command starts in a new POSIX process group. On recorder interruption or timeout, the recorder forwards the signal,
-waits two seconds, then sends SIGKILL to its owned group. Pipe EOF never substitutes for child exit. If the group leader
-exits while descendants retain the output pipe, draining ends after two seconds and owned remnants are killed. A final
-half-second drain follows cleanup. The `recorder.forced_cleanup` and `recorder.cleanup_limit` fields say what happened.
-A descendant that creates another session has escaped the owned group; the recorder bounds its pipe drain and discloses
-that such a process may remain, but cannot claim to clean it up.
+waits the declared termination grace, then sends SIGKILL to its owned group. Pipe EOF never substitutes for child exit.
+The grace and command timeout are recorded separately; termination grace is additional time after the execution
+deadline. If the group leader exits while descendants retain the output pipe, draining ends after two seconds and owned
+remnants are killed. A final half-second drain follows cleanup. The `recorder.forced_cleanup` and
+`recorder.cleanup_limit` fields say what happened. A descendant that creates another session has escaped the owned
+group; the recorder bounds its pipe drain and discloses that such a process may remain, but cannot claim to clean it up.
 
 The post-kill deadline also bounds waiting for a leader that remains alive: a runnable recorder closes its pipes,
 attempts a bounded final wait, and records incomplete cleanup instead of polling forever. It cannot force a process out
@@ -93,8 +96,8 @@ The top-level fields are:
 - `outcome`: one of the lifecycle states above.
 - `started_at` and `finished_at`: UTC RFC 3339 timestamps. `finished_at` is null while running.
 - `duration_seconds`: total monotonic duration, or null while running.
-- `command`: exact string `argv`, actual caller/child `cwd`, requested `timeout_seconds`, and terminal
-  `duration_seconds`.
+- `command`: exact string `argv`, actual caller/child `cwd`, requested `timeout_seconds` and
+  `termination_grace_seconds`, and terminal `duration_seconds`.
 - `labels`: caller-supplied `kind`, `selection`, and `concurrency`, plus a reminder that they are descriptive.
 - `environment`: locale identity and FARHELM variable-name handling.
 - `platform`: OS release, machine architecture, logical CPU count, and Python identity. Processor probing is omitted
