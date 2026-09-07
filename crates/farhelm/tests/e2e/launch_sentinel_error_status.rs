@@ -26,7 +26,7 @@ use crate::boot_id_durable_outcome::{
 /// [`a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error`]
 /// below covers the harder case — a reboot landing before any list ever
 /// consumed the sentinel, with the row still `Running` in the store.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     let h = harness_believing_boot("boot-a").await;
     let sock = h.state.path().join("tmux.sock");
@@ -104,7 +104,7 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
 /// is already terminal and immune to reclassification by the time
 /// anything looks for its sentinel — exactly the bug this test exists to
 /// catch.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error() {
     let h = harness_believing_boot("boot-a").await;
     let sock = h.state.path().join("tmux.sock");
@@ -147,7 +147,7 @@ async fn a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error() {
 /// failure since they LOOK like one), must classify exited, never error.
 /// Exit codes alone never carry classification weight; only the
 /// sentinel's presence does.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn exec_that_succeeds_and_exits_126_or_127_is_exited_never_error() {
     let h = harness().await;
     for code in [126, 127] {
@@ -202,7 +202,7 @@ async fn exec_that_succeeds_and_exits_126_or_127_is_exited_never_error() {
 /// checks unconditionally — the list path only checks a dead-or-absent
 /// pane's sentinel (`service.rs`'s `ListSessions` handler docs) — so a
 /// supervisor restart is what exercises the stronger check.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -242,7 +242,7 @@ async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
 /// tmux session). Attach must succeed (the dead pane is viewable, exactly
 /// like any other exited session), and delete must actually tear the real
 /// tmux session down, not merely drop the row.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_delete() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
@@ -313,7 +313,7 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
 /// stale `Exited` a degraded pass used to fall back to by skipping the
 /// sentinel read entirely. Once a LATER supervisor's boot id read succeeds,
 /// the same classification lands durably, with the file consumed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_readable() {
     let h = harness_believing_boot("boot-a").await;
     let sock = h.state.path().join("tmux.sock");
@@ -384,7 +384,7 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
 /// is how this supervisor would ordinarily witness the sentinel first, and
 /// this test is specifically about the row still being `Running` (no
 /// intervening observer at all) when the stop lands.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
@@ -426,7 +426,7 @@ async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
 /// fix batch calls out as returning `Internal` for the request; the file
 /// must survive the failed attempt, and a later pass with it repaired
 /// (removed, here) must classify correctly.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -480,7 +480,7 @@ async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
 /// exactly the scenario that must NOT retroactively classify it error.
 /// Once the pane goes dead, the SAME planted file is read on the very next
 /// list and classifies error.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;

@@ -142,7 +142,7 @@ pub(crate) async fn listed(client: &SupervisorClient, id: &str) -> SessionInfo {
 /// The exits deliberately happen without any intervening `list_sessions`:
 /// a list is how this supervisor witnesses an exit, so listing first would
 /// test the recording path rather than the reload path this test is about.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn same_boot_classification_is_per_session_and_never_interrupted() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
@@ -241,7 +241,7 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
 /// and the tmux pane that stop happened in no longer exists by the time it
 /// is read back here — so this proves the annotation comes from the
 /// supervisor's own durable record and nowhere else.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     let h = harness_believing_boot("boot-a").await;
     let (live, _live_work) = basic_session(&h).await;
@@ -411,7 +411,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
 /// stores nothing, leaving the database in exactly the state a pre-M3 one
 /// is in. The second half proves the id really is adopted from then on:
 /// once a boot id HAS been stored, a later differing one does interrupt.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -474,7 +474,7 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
 /// it an error or item 6's reservation can retry it. Never alive (nothing
 /// is running), never interrupted (no reboot happened), and never exited
 /// (nothing was observed to run).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -556,7 +556,7 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
 /// and is pinned where it can be provoked deterministically, against the
 /// reload itself (`service.rs`'s
 /// `reload_reconciles_a_stop_intent_against_the_pane_it_left_behind`).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
@@ -620,7 +620,7 @@ async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere()
 /// when the session never ran at all (observed 2026-08-18 under
 /// full-suite load; see `wait_for_agent_ready`). The barrier turns that
 /// upstream failure into a setup failure with its own name.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_list_polling_through_a_stop_never_erases_the_annotation() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -666,7 +666,7 @@ async fn a_list_polling_through_a_stop_never_erases_the_annotation() {
 ///
 /// Read back through a fresh supervisor because the claim is about the
 /// durable record, not about what one process happens to be holding.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stopping_an_already_exited_session_records_no_annotation() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -718,7 +718,7 @@ async fn stopping_an_already_exited_session_records_no_annotation() {
 /// LATER successful read of a different id must still see the original
 /// stored value and interrupt exactly as it would have without the
 /// failure in between.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_unreadable_boot_id_defers_rather_than_deciding() {
     let h = harness_believing_boot("boot-a").await;
     let (session, _work) = basic_session(&h).await;

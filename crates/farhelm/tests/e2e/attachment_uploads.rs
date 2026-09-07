@@ -348,7 +348,7 @@ async fn wait_for_attachments(
 /// rather than against a formatting rule, and pins the location against
 /// SPEC.md's "a per-session attachments directory under the supervisor's
 /// own data area, never in the working directory".
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_upload_lands_in_the_sessions_attachments_directory_at_the_reported_path() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -391,7 +391,7 @@ async fn an_upload_lands_in_the_sessions_attachments_directory_at_the_reported_p
 /// ride a stream with no length framing of their own, so a truncated
 /// transfer that published anyway would hand the agent a silently
 /// half-written file.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_upload_shorter_than_it_declared_publishes_nothing() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -439,7 +439,7 @@ async fn an_upload_shorter_than_it_declared_publishes_nothing() {
 /// would otherwise grow a staging file that the commit's exact size check
 /// guarantees can never publish — unbounded bytes for a file with no
 /// possible future.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_upload_past_its_declared_size_is_aborted_before_the_bytes_land() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -472,7 +472,7 @@ async fn an_upload_past_its_declared_size_is_aborted_before_the_bytes_land() {
 /// another's file. The concurrent half is the real test: both transfers
 /// stage their temp files before either commits, so both resolve the same
 /// free name and the publication itself is what has to keep them apart.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_uploads_of_one_name_both_publish_under_distinct_paths() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -548,7 +548,7 @@ async fn two_uploads_of_one_name_both_publish_under_distinct_paths() {
 /// the flow attachments exist for; and SPEC.md rejects only directories,
 /// never a file for what it is called, so "no usable name" must still
 /// produce a file.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn hostile_and_empty_filenames_publish_under_safe_generated_names() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -599,7 +599,7 @@ async fn hostile_and_empty_filenames_publish_under_safe_generated_names() {
 /// route is what ends the transfer either way), and the failure they
 /// prevent is a state directory that accumulates a half-written temp file
 /// for every cancelled drop and every browser tab that closed mid-paste.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_abandoned_transfer_leaves_no_temp_file_behind() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -629,7 +629,7 @@ async fn an_abandoned_transfer_leaves_no_temp_file_behind() {
 /// else in the system would ever notice. Without it the paste never
 /// resolves, the temp file never goes away, and the user is told nothing
 /// at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_transfer_that_stops_progressing_is_aborted_as_stalled() {
     let h = harness_with_timeouts(SupervisorTimeouts {
         upload_progress: Duration::from_millis(300),
@@ -664,7 +664,7 @@ async fn a_transfer_that_stops_progressing_is_aborted_as_stalled() {
 /// is why `UPLOAD_CHUNK_BYTES`'s own contract names `UploadAborted` as the
 /// answer. Failing the transfer rather than dropping the chunk is the
 /// other half: a file missing the middle of itself must never publish.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_oversized_chunk_aborts_the_transfer() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -701,7 +701,7 @@ async fn an_oversized_chunk_aborts_the_transfer() {
 /// Injected through the write seam because a genuine ENOSPC around a temp
 /// directory is neither portable nor deterministic, and because what needs
 /// exercising is the supervisor's reaction rather than the kernel's.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_storage_failure_mid_stream_aborts_the_transfer_and_publishes_nothing() {
     use farhelm_supervisor::files::{FaultSeam, RealFs};
 
@@ -754,7 +754,7 @@ async fn a_storage_failure_mid_stream_aborts_the_transfer_and_publishes_nothing(
 /// Deleting a session removes its attachments directory outright —
 /// SPEC.md's "attachment files are removed when their session is
 /// deleted", including the directory itself.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn deleting_a_session_removes_its_attachments_directory() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -788,7 +788,7 @@ async fn deleting_a_session_removes_its_attachments_directory() {
 ///
 /// Both winners are acceptable outcomes; what is not is a survivor on
 /// disk or a commit that claims success without one.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_delete_racing_an_upload_leaves_no_file_and_no_directory() {
     for commit_first in [false, true] {
         let h = harness().await;
@@ -885,7 +885,7 @@ async fn a_delete_racing_an_upload_leaves_no_file_and_no_directory() {
 
 /// Archive cancels and joins a stalled transfer without calling the
 /// retained session deleted or allowing a partial file to publish.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn archive_cancels_a_stalled_upload_truthfully_and_cleans_its_stage() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -930,7 +930,7 @@ async fn archive_cancels_a_stalled_upload_truthfully_and_cleans_its_stage() {
 /// The archive reply says nothing was archived at these boundaries. That
 /// must cover the upload too: cancelling it before a pane, tab, scope, or
 /// sweep check fails would make the refusal itself a destructive result.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn archive_preflight_failures_do_not_discard_uploads() {
     for stage in [
         ArchiveStage::PaneProbe,
@@ -985,7 +985,7 @@ async fn archive_preflight_failures_do_not_discard_uploads() {
 /// check. The transfer must re-read `archived` under the same claim archive
 /// held through publication, otherwise it recreates writable attachment
 /// state behind the completed archive.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_upload_waiting_behind_archive_is_refused_after_publication() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -1054,7 +1054,7 @@ async fn an_upload_waiting_behind_archive_is_refused_after_publication() {
 /// admission bound is what keeps a client from opening transfers without
 /// end — each one costing a staged temp file, a task, and a credit
 /// window's worth of queue.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn begin_upload_refuses_a_bad_channel_and_an_over_full_connection() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1155,7 +1155,7 @@ async fn begin_upload_refuses_a_bad_channel_and_an_over_full_connection() {
 /// a user's perfectly ordinary filename would be deleted on every
 /// restart. That is data loss, and no other test in this suite would see
 /// it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -1243,7 +1243,7 @@ async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments()
 /// uses channel 1 and one request at a time, and would misroute every
 /// concurrent paste for one that does not. Non-default values on both is
 /// the only way to tell the two apart.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn upload_started_echoes_the_request_id_and_channel_it_was_given() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1270,7 +1270,7 @@ async fn upload_started_echoes_the_request_id_and_channel_it_was_given() {
 /// has to be right at the boundary: the commit's exact size check must
 /// accept 0 == 0, and publication must happen for a stream nothing was
 /// ever written to.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_zero_byte_upload_publishes_an_empty_file() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1298,7 +1298,7 @@ async fn a_zero_byte_upload_publishes_an_empty_file() {
 /// the client's whole use for it is to paste it into a terminal whose
 /// working directory is the SESSION's — not the supervisor's. A relative
 /// path would resolve against the wrong directory, or nothing at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_relative_state_directory_still_reports_an_absolute_path() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -1363,7 +1363,7 @@ fn pathdiff_to_current(dir: &std::path::Path) -> std::path::PathBuf {
 /// were safe before they were — and the sender's credit, its progress
 /// timeout, and its own idea of what has to be resent all rest on that
 /// claim.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
     let h = upload_harness(
         SlowFs::seam("write", Duration::from_millis(250)),
@@ -1484,7 +1484,7 @@ async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
 /// headroom on it. The failure mode if it is ever exceeded is a clean,
 /// legible one — the ack simply reports as arriving at the end of the
 /// backlog — rather than a silent weakening.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     // How long the reader stays silent while the supervisor produces each
     // of the two upload messages. See this test's docs for the margin
@@ -1713,7 +1713,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
 /// progressing nor timing out — and, at commit time, holding the
 /// session's lifecycle claim while it does. The disk-stage bound is what
 /// turns "wedged forever" into "failed visibly".
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_write_that_outlives_its_bound_fails_the_transfer() {
     let h = upload_harness(
         SlowFs::seam("write", Duration::from_secs(5)),
@@ -1754,7 +1754,7 @@ async fn a_write_that_outlives_its_bound_fails_the_transfer() {
 /// transfer nobody can finish. The delete at the end is the assertion:
 /// it has to complete promptly, not after the wedged filesystem
 /// eventually answers.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_publication_that_outlives_its_bound_frees_the_session() {
     let h = upload_harness(
         SlowFs::seam("link", Duration::from_secs(10)),
@@ -1794,7 +1794,7 @@ async fn a_publication_that_outlives_its_bound_frees_the_session() {
 /// post-start failures with nothing to correlate against become channel
 /// events. A client that received both would have to guess which one its
 /// paste failed under.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_commit_time_filesystem_fault_is_a_correlated_error_with_no_debris() {
     let h = upload_harness(
         FailingFs::seam("fsync_file", 0),
@@ -1837,7 +1837,7 @@ async fn a_commit_time_filesystem_fault_is_a_correlated_error_with_no_debris() {
 /// (with `UploadAborted`) would leave that request pending forever, so
 /// the paste would hang rather than fail — the one outcome SPEC.md's
 /// "upload failures must be visible" rules out.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_commit_queued_behind_a_failing_chunk_is_still_answered() {
     let h = upload_harness(FailingFs::seam("write", 1), SupervisorTimeouts::default()).await;
     let (session, _work) = basic_session(&h).await;
@@ -1881,7 +1881,7 @@ async fn a_commit_queued_behind_a_failing_chunk_is_still_answered() {
 /// on a session delete, writes into a directory that is being taken
 /// away. Measured by counting the acks that keep arriving after the
 /// abort: each one is a chunk that was written anyway.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_abort_stops_a_transfer_with_chunks_still_queued() {
     let h = upload_harness(
         SlowFs::seam("write", Duration::from_millis(200)),
@@ -1938,7 +1938,7 @@ async fn an_abort_stops_a_transfer_with_chunks_still_queued() {
 /// the NEXT transfer be started on a number the previous one is still
 /// enqueueing events for, so an ack or an abort for a finished upload
 /// lands on a live one.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_commit_frees_neither_the_channel_nor_the_slot_until_the_transfer_ends() {
     let h = upload_harness(
         SlowFs::seam("link", Duration::from_millis(800)),
@@ -2028,7 +2028,7 @@ async fn a_commit_frees_neither_the_channel_nor_the_slot_until_the_transfer_ends
 /// client's pastes, which is a denial of service by accident. Pinned
 /// with two connections against one supervisor, which is exactly the
 /// shape two helm-side clients take.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_upload_admission_bound_is_per_connection() {
     let h = upload_harness(
         SlowFs::seam("write", Duration::from_millis(400)),
@@ -2068,7 +2068,7 @@ async fn the_upload_admission_bound_is_per_connection() {
 /// forever — a transfer that never advances, never times out, and holds
 /// its staging file indefinitely, which is precisely the forever-pending
 /// upload the timeout exists to prevent.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_empty_chunk_flood_does_not_defeat_the_stall_timeout() {
     let h = harness_with_timeouts(SupervisorTimeouts {
         upload_progress: Duration::from_millis(300),
@@ -2106,7 +2106,7 @@ async fn an_empty_chunk_flood_does_not_defeat_the_stall_timeout() {
 /// written as a PROGRESS bound rather than a duration cap: a large
 /// attachment on a slow link legitimately outlives any total-duration
 /// bound, and "no size cap" would be a lie if it did not.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_transfer_that_keeps_progressing_is_never_stalled() {
     let h = harness_with_timeouts(SupervisorTimeouts {
         upload_progress: Duration::from_millis(300),
@@ -2147,7 +2147,7 @@ async fn a_transfer_that_keeps_progressing_is_never_stalled() {
 /// signals the first and moves on, leaving the second writing into a
 /// directory the delete is removing. Both are blocked on a slow
 /// filesystem so they are genuinely mid-write when the delete lands.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_delete_cancels_and_waits_for_every_upload_of_its_session() {
     let h = upload_harness(
         SlowFs::seam("write", Duration::from_millis(300)),
@@ -2198,7 +2198,7 @@ async fn a_delete_cancels_and_waits_for_every_upload_of_its_session() {
 /// must never have to reason about who won a race, so neither a repeat
 /// nor a stray abort may produce an error, and neither may disturb the
 /// connection.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn duplicate_and_unknown_upload_aborts_are_harmless() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2238,7 +2238,7 @@ async fn duplicate_and_unknown_upload_aborts_are_harmless() {
 /// begin that failed before creating anything must not leave the channel
 /// looking permanently in use, or a client hitting one transient failure
 /// would lose that channel number for the life of its connection.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_begin_that_cannot_stage_refuses_and_leaves_its_channel_usable() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2289,7 +2289,7 @@ async fn a_begin_that_cannot_stage_refuses_and_leaves_its_channel_usable() {
 /// is reporting a delete that left the user's files on disk with nothing
 /// left to find them by. The row surviving is what makes a retry
 /// meaningful.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_delete_fails_closed_when_attachments_cannot_be_detached() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -2337,7 +2337,7 @@ async fn a_delete_fails_closed_when_attachments_cannot_be_detached() {
 /// staging file was still around would be racing this transfer's own
 /// debris. Observed by making the removal itself slow: if the notice
 /// were sent first, it would arrive well before the removal finished.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_staging_file_is_gone_before_the_abort_is_announced() {
     let h = upload_harness(
         SlowFs::seam("remove_temp", Duration::from_millis(700)),
@@ -2495,7 +2495,7 @@ async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
 /// defence in depth — see `stage_upload` — and this test is what records
 /// that the check is unreachable through a real session rather than
 /// merely untested.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_non_utf8_state_directory_is_refused_before_any_session_can_exist() {
     use std::os::unix::ffi::OsStringExt;
 

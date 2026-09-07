@@ -169,7 +169,7 @@ async fn collect_counter_through(rx: &mut TermStream, target: u64) -> Vec<u8> {
 /// output arrive over the attach stream, and round-trip input. This is
 /// PLAN_M1.md acceptance criterion 5's "create, output rendering, input
 /// round-trip" at the Rust layer.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_attach_and_roundtrip_input() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -230,7 +230,7 @@ async fn create_attach_and_roundtrip_input() {
 /// question. A version that advanced only the in-memory cell would satisfy
 /// every assertion above and lose the field's entire point at the next
 /// restart, silently.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
     let h = harness_with_seams(
         suite_timeouts(),
@@ -441,7 +441,7 @@ async fn pane_forensics(h: &Harness, session_id: &str) -> String {
 /// hundred CI runs failing on the ready line's absence from the replay,
 /// and the cause was this test typing into a pane the fixture was still
 /// mid-write on.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn reattach_replays_history_and_modes() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -546,7 +546,7 @@ async fn reattach_replays_history_and_modes() {
 /// consecutive range with no duplicate. Capturing before opening the
 /// control client loses records here; enabling a second client before
 /// capture duplicates them or triggers the frozen-stream regression.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn reattach_cutover_has_no_missing_or_duplicated_output() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -591,7 +591,7 @@ async fn reattach_cutover_has_no_missing_or_duplicated_output() {
 /// Invalid UTF-8 is legitimate terminal output and must cross the live
 /// control-mode stream byte-for-byte. Any conversion through `String`
 /// would replace 0xff while ordinary TUI tests continued to pass.
-#[tokio::test]
+#[farhelm_testtrace::test]
 #[ignore = "load flake: the request byte's reply never arrives on a loaded runner (3 of 9 GitHub runs on 2026-09-03), localized to the input path; TODO.md has the evidence"]
 async fn non_utf8_terminal_output_survives_live_stream() {
     let h = harness().await;
@@ -636,7 +636,7 @@ async fn non_utf8_terminal_output_survives_live_stream() {
 /// Last attach wins (SPEC.md): a second attach visibly detaches the
 /// first — the old stream gets a Detached event, and input keeps working
 /// on the new attachment.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn second_attach_detaches_first() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -687,7 +687,7 @@ async fn second_attach_detaches_first() {
 /// because the lease check is what decides the first half and the
 /// per-terminal cutover is what decides the second — a lease sweep that
 /// forgot to remove the attachment would still send the notice.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -750,7 +750,7 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
 /// LIVE afterwards: a refusal that swept first and refused second would
 /// leave the winner detached by an attach that was itself rejected, which
 /// is strictly worse than the displacement it was meant to prevent.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -832,7 +832,7 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
 /// who does not exist. A client that renders detach reasons verbatim
 /// makes that difference visible to the user, which is why it is pinned
 /// here rather than left to the supervisor's internal accounting.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
     const LEASE: &str = "one-client-reconnecting";
     let h = harness().await;
@@ -885,7 +885,7 @@ async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
 /// treating empty as a shared identity and two unrelated legacy clients
 /// silently share a session; get it wrong in the other direction and a
 /// legacy client can never reclaim a session a leased client holds.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_empty_lease_takes_over_everything_and_is_taken_over_by_anything() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -936,7 +936,7 @@ async fn the_empty_lease_takes_over_everything_and_is_taken_over_by_anything() {
 /// halves matter: the refusal itself, and its placement ahead of the
 /// takeover, because a check that ran after the lease sweep would let any
 /// client detach any other by sending garbage it knows will be rejected.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -996,7 +996,7 @@ async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
 /// exact-cap case is the other half of the same boundary: an off-by-one
 /// that refused it would break any client that sizes its ids to the
 /// documented limit.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_lease_cap_counts_bytes_not_characters() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1071,7 +1071,7 @@ async fn the_lease_cap_counts_bytes_not_characters() {
 /// takeover, so an attach nobody can honor must never cost the session's
 /// current client its attachment. Get that order wrong and any client
 /// could detach any other by naming a tab that does not exist.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1134,7 +1134,7 @@ async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
 /// forwarders emitted onto the same data channel. The raw client is
 /// intentional: `SupervisorClient` normally allocates unique channels
 /// and cannot express the hostile protocol sequence this validates.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn attachment_channels_must_be_nonzero_and_unique() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1254,7 +1254,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
 /// remediation the panel renders), and the teardown is what stops the
 /// connection from limping on in a state where attaches would be honored
 /// with the wrong semantics.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
     let h = harness().await;
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
@@ -1339,7 +1339,7 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
 /// parse error inside the connection loop — silently converting
 /// "connection-fatal" into "ignored", and with it invalidating the whole
 /// version-bump rationale — fails a test instead of going unnoticed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn unknown_control_message_tears_down_the_connection() {
     let h = harness().await;
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
@@ -1392,7 +1392,7 @@ async fn unknown_control_message_tears_down_the_connection() {
 /// through IT is what actually proves nothing was persisted — a row
 /// present only in SQLite, invisible to the original process's map, would
 /// still surface here.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_in_missing_directory_errors() {
     let h = harness().await;
     let err = h
@@ -1434,7 +1434,7 @@ async fn create_in_missing_directory_errors() {
 /// `ensure_cwd_usable`, shared by create and restart, closes the create
 /// path and also makes a pre-existing stored relative cwd refuse to
 /// restart with a clear error instead of mis-resolving.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_with_relative_cwd_is_rejected() {
     let h = harness().await;
     let err = h
@@ -1495,7 +1495,7 @@ async fn create_with_relative_cwd_is_rejected() {
 /// point: a title of `ws` (not `~`) means the basename came off the
 /// expanded path. The home comes from the `user_home` seam because this
 /// repo's tests never mutate the test process's environment.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_with_tilde_cwd_expands_against_the_supervisors_home() {
     let home = farhelm_teststate::tempdir().unwrap();
     let workdir = home.path().join("ws");
@@ -1583,7 +1583,7 @@ async fn create_with_tilde_cwd_expands_against_the_supervisors_home() {
 /// A `~user` cwd is refused with a message naming the supported forms —
 /// not mangled into a bogus expansion, and not the generic "not absolute"
 /// refusal that would send the user hunting for a typo.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_with_tilde_user_cwd_is_rejected() {
     let h = harness().await;
     let err = h
@@ -1612,7 +1612,7 @@ async fn create_with_tilde_user_cwd_is_rejected() {
 /// An existing file is a different caller error from a missing path.
 /// Keeping that distinction visible prevents a correct path from being
 /// misdiagnosed as a typo.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_in_a_regular_file_reports_not_a_directory() {
     let h = harness().await;
     let file = tempfile::NamedTempFile::new().unwrap();
@@ -1639,7 +1639,7 @@ async fn create_in_a_regular_file_reports_not_a_directory() {
 /// mistake — a typo'd path segment, most likely — so it must classify the
 /// same way as the sibling cases above, not fall through to the
 /// catch-all `Internal` default.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_under_a_regular_file_is_invalid_request() {
     let h = harness().await;
     let file = tempfile::NamedTempFile::new().unwrap();
@@ -1664,7 +1664,7 @@ async fn create_under_a_regular_file_is_invalid_request() {
 /// syscall that could distinguish "missing" from "exists". This surfaces
 /// as `io::ErrorKind::InvalidInput`, the same caller-fault bucket as the
 /// other malformed-path cases.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_with_nul_byte_in_cwd_is_invalid_request() {
     let h = harness().await;
     let cwd = "/tmp/has-a-\u{0}-nul-byte";
@@ -1693,7 +1693,7 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
 /// register into it. The ordering rule is the same one, and it is asserted
 /// against the strongest observable there is — the database file must not
 /// exist at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn helm_bind_failure_happens_before_any_durable_setup() {
     let state = farhelm_teststate::tempdir().expect("state");
     let ensure = state.path().join("ensure-hosts.json5");
@@ -1738,7 +1738,7 @@ async fn helm_bind_failure_happens_before_any_durable_setup() {
 /// range were dropped: the earlier assertions all fit inside one 24-row
 /// viewport, so a screen-only capture would pass them while silently
 /// violating SPEC.md's replay floor.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn reattach_replays_content_scrolled_off_screen() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1773,7 +1773,7 @@ async fn reattach_replays_content_scrolled_off_screen() {
 /// to a *cleared* alternate buffer, so emitting it after the content
 /// prefill erases the replay. Ordering is the whole point, which is why
 /// the assertion checks the switch precedes the content.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn reattach_to_alt_screen_app_preserves_content() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -1822,7 +1822,7 @@ async fn reattach_to_alt_screen_app_preserves_content() {
 /// Asserting "typing still works after a resize" would pass even if
 /// every resize message were dropped; this checks the window geometry
 /// tmux actually holds.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn resize_reaches_tmux() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1847,7 +1847,7 @@ async fn resize_reaches_tmux() {
 /// geometry. A fresh agent echo is the replay-completion barrier: unlike
 /// bracketed-paste restoration, it is available on every supported tmux
 /// version, and it cannot arrive before the replay queued ahead of it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn attach_replay_uses_the_requested_geometry() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1899,7 +1899,7 @@ async fn attach_replay_uses_the_requested_geometry() {
 /// only connection identity rejects it. Delete the `same_channel` half
 /// and this fails. (The channel-id half is pinned separately by
 /// `resize_from_a_stale_channel_on_the_same_connection_is_ignored`.)
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn resize_from_a_kicked_connection_is_ignored() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1948,7 +1948,7 @@ async fn resize_from_a_kicked_connection_is_ignored() {
 /// tab's in-flight resize, and only the channel-id comparison rejects
 /// it. Delete that comparison and this fails. The sibling test above
 /// pins the connection-identity half.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -1996,7 +1996,7 @@ async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
 /// session's terminal stays viewable while its host is up). Without that
 /// config line the tmux session disappears on exit and the reattach
 /// below fails outright.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn exited_agent_leaves_a_viewable_terminal() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2147,7 +2147,7 @@ fn looks_like_a_tmux_timeout(error: &anyhow::Error) -> bool {
 /// uses `show-options -s` to match — a `-g` query would rely on tmux's
 /// scope inference rather than pinning the same table the fix itself
 /// names explicitly.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state");
@@ -2207,7 +2207,7 @@ async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config()
 /// terminal itself survives; this proves the status field tracks the same
 /// event. The basic fake agent's own `quit` path exits 0, which is what
 /// makes this an easy code to pin exactly (unlike a signal death).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn exited_agent_lists_as_exited_with_its_exit_code() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2237,7 +2237,7 @@ async fn exited_agent_lists_as_exited_with_its_exit_code() {
 /// exits before its terminal even finishes materializing is not the
 /// behavior this test pins, so the fixture deliberately outlives pane
 /// setup instead.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn nonzero_exit_lists_with_its_precise_code() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -2259,7 +2259,7 @@ async fn nonzero_exit_lists_with_its_precise_code() {
 
 /// Invocations that cannot become an argv fail the create outright, with
 /// no session left behind — the same contract as a missing directory.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn unparseable_invocations_error_without_creating_a_session() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -2318,7 +2318,7 @@ async fn unparseable_invocations_error_without_creating_a_session() {
 ///
 /// A plain `#[test]`: everything here is synchronous process spawning,
 /// and it needs no tmux, no supervisor, and no runtime.
-#[test]
+#[farhelm_testtrace::test]
 fn launch_shim_records_exec_failure_only_on_failure() {
     let dir = farhelm_teststate::tempdir().unwrap();
 
@@ -2390,7 +2390,7 @@ fn launch_shim_records_exec_failure_only_on_failure() {
 ///
 /// The supervisor enforces this rather than trusting clients to stop, so
 /// deleting that check must fail a test — before this one, it did not.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn kicked_client_cannot_still_send_input() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2434,7 +2434,7 @@ async fn kicked_client_cannot_still_send_input() {
 /// half (`same_channel`) drops it. The single-connection test above
 /// cannot see that half, and before this test, deleting it failed
 /// nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn input_from_a_kicked_connection_is_dropped() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2486,7 +2486,7 @@ async fn input_from_a_kicked_connection_is_dropped() {
 /// carries a deliberate lock-ordering invariant for exactly this
 /// (`fail_all`), and nothing else exercises it. Every wait is under a
 /// timeout because a hang is precisely the failure under test.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn connection_loss_detaches_terminals_and_fails_requests() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -2592,7 +2592,7 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
 /// supervisor's writer failure must terminate `handle_connection`
 /// without waiting for read EOF, or that half-broken connection retains
 /// its attachment state indefinitely.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn supervisor_writer_failure_ends_a_half_broken_connection() {
     let h = harness().await;
     let (client_side, server_inner) = tokio::io::duplex(64 * 1024);
@@ -2663,7 +2663,7 @@ async fn supervisor_writer_failure_ends_a_half_broken_connection() {
 /// minute — and the request count is now sized to fit comfortably inside
 /// the transport buffer either way, so the half-close is reachable
 /// whether or not the read loop is still draining when it happens.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
     let h = harness_with_timeouts(SupervisorTimeouts {
         writer_stall: Duration::from_secs(2),
@@ -2727,7 +2727,7 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
 /// protocol has — dropping either mode-setting call silently yields
 /// world-readable defaults under umask 022), and the startup sweep of
 /// orphaned launch specs.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stdio_proxy_carries_a_real_session() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
@@ -2831,7 +2831,7 @@ async fn stdio_proxy_carries_a_real_session() {
 /// line at MAX_CANON (4095 bytes on Linux) and silently discards the
 /// excess — a single >32 KiB line can never round-trip, no matter how
 /// correct the chunking is.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn large_input_survives_chunking() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -2897,7 +2897,7 @@ async fn large_input_survives_chunking() {
 /// the clamped geometry — without the second assertion, deleting the
 /// clamp passes this test, because a failed resize during attach is
 /// deliberately warn-only.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn attach_with_degenerate_size_still_works() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -2931,7 +2931,7 @@ async fn attach_with_degenerate_size_still_works() {
 /// attach reported success and discarded tmux's reason. Nothing else
 /// reaches this path: the service layer rejects unknown session ids
 /// before tmux is ever asked, so only a driver-level test can regress it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
     use farhelm_supervisor::tmux::TmuxDriver;
 
@@ -2968,7 +2968,7 @@ async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
 /// An untitled session takes its title from the working directory, and a
 /// created session actually appears in the list — the positive form of
 /// the assertion the error tests only make negatively.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn created_sessions_are_listed_with_a_derived_title() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -3024,7 +3024,7 @@ async fn created_sessions_are_listed_with_a_derived_title() {
 /// message, never by killing the shared connection. This also exercises
 /// the client's attach-failure cleanup (the pre-registered terminal
 /// channel must be released, not leaked).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn attach_to_unknown_session_errors_and_connection_survives() {
     let h = harness().await;
 
@@ -3063,7 +3063,7 @@ async fn attach_to_unknown_session_errors_and_connection_survives() {
 /// tmux session is killed behind the supervisor's back. That creates a
 /// known session whose resize and control-mode attach both fail, reaching
 /// the post-takeover error path rather than the early unknown-id check.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn cutover_failure_is_request_local() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -3119,7 +3119,7 @@ async fn cutover_failure_is_request_local() {
 /// probe-then-remove dance, is what prevents the TOCTOU where the loser
 /// unlinks the winner's freshly bound socket), and a stale socket file
 /// left by a dead supervisor must not block the next one from binding.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
@@ -3191,7 +3191,7 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
 /// keeps the channel open and turns a supervisor crash into a silently
 /// frozen terminal). The wait_with_output timeout pins the exit; the
 /// reply assertion pins the half-close.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stdio_proxy_half_close_delivers_in_flight_replies() {
     use tokio::io::AsyncWriteExt;
 
@@ -3261,7 +3261,7 @@ async fn stdio_proxy_half_close_delivers_in_flight_replies() {
 /// stands between that cleanup and the winner's live attachment. Its
 /// siblings (input, resize) have this exact test; before this one,
 /// deleting `same_channel` from the Detach arm failed nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn detach_from_a_kicked_connection_does_not_kill_the_winner() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -3301,7 +3301,7 @@ async fn detach_from_a_kicked_connection_does_not_kill_the_winner() {
 /// like the resize path: `new-session -x 0` is a hard tmux error, so
 /// without the clamp the create fails outright — and every other test
 /// creates at sane sizes, so deleting the clamp used to fail nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn create_with_degenerate_size_clamps_to_1x1() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -3358,7 +3358,7 @@ fn hex_tokens(text: &str) -> Vec<u8> {
 /// that flaked under load: a replay's trailing cursor address glued to the
 /// first hex token, with the acknowledgement on its own line. A whitespace
 /// split alone reads this as seven bytes, not eight.
-#[test]
+#[farhelm_testtrace::test]
 fn hex_tokens_survive_a_cursor_address_glued_to_the_first_token() {
     let transcript = "FAKE-AGENT READY\r\n\x1b[2;1H61 7f 62 1b 5b 41 03\r\n7a\r\n\x1b(B\x1b[0m";
     assert_eq!(
@@ -3379,7 +3379,7 @@ fn hex_tokens_survive_a_cursor_address_glued_to_the_first_token() {
 /// difference. `hexecho` reads its stdin in raw mode specifically so
 /// nothing between the wire and this assertion can paper over a mangled
 /// byte.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn input_bytes_survive_verbatim_through_hexecho() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -3457,7 +3457,7 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
 /// outliving a supervisor restart. Listing alone would not catch a bug
 /// that persists metadata but loses the live reconnect, so this also
 /// attaches and round-trips input through the reloaded entry.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn persisted_sessions_survive_a_supervisor_restart() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -3525,7 +3525,7 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
 /// consequence of `ensure_server`'s idempotent-adopt-or-start behavior),
 /// so `has_session` genuinely finds nothing for the reloaded row's
 /// `tmux_name` — this is not a mocked failure.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -3615,7 +3615,7 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
 /// terminal-less (the ordinary restart-gap case), still `Exited`, not
 /// "recovered" — there is no plain-restart path back to a live status for a
 /// session whose tmux is actually gone.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn list_sessions_survives_when_the_tmux_server_is_gone() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
@@ -3689,7 +3689,7 @@ async fn list_sessions_survives_when_the_tmux_server_is_gone() {
 /// liveness; `session_status`'s `session_name` cross-check
 /// (`TmuxDriver::pane_states`'s `#{session_name}` field) is what tells
 /// these two same-numbered panes apart.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_status() {
     let h = harness().await;
     let (old_session, _work1) = basic_session(&h).await;
@@ -3836,7 +3836,7 @@ async fn recycled_pane_wedge() -> RecycledPaneWedge {
 /// falls back to the marker sweep and the session's cgroup scopes — which
 /// is why the bystander's process tree is untouched: nothing here ever
 /// reads the stranger's pid.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
     let w = recycled_pane_wedge().await;
 
@@ -3905,7 +3905,7 @@ async fn delete_succeeds_when_the_recorded_pane_was_recycled_onto_another_sessio
 /// survive, so `terminal_survives` must be false and the relaunch must
 /// build its own terminal rather than attempt a reuse tmux would reject
 /// outright (`relaunch_in_pane` targets session and pane together).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restart_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
     let w = recycled_pane_wedge().await;
     let sock = w.h.state.path().join("tmux.sock");
@@ -3956,7 +3956,7 @@ async fn restart_succeeds_when_the_recorded_pane_was_recycled_onto_another_sessi
 /// pane, so "I cannot tell you" was never the honest answer. `Exited` is
 /// — and the marker sweep that runs on the same path is what still
 /// collects any survivor of the pre-crash run.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
     let w = recycled_pane_wedge().await;
 
@@ -3998,7 +3998,7 @@ async fn stop_succeeds_when_the_recorded_pane_was_recycled_onto_another_session(
 /// flag is committed only after every process and terminal artifact is
 /// gone, which means a probe refusal left the session neither archived
 /// nor cleanly deletable.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn archive_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
     let w = recycled_pane_wedge().await;
 
@@ -4061,7 +4061,7 @@ async fn archive_succeeds_when_the_recorded_pane_was_recycled_onto_another_sessi
 /// Built on the recycled-pane wedge only because it is the cheapest way
 /// to get a pane owned by a session other than the one being asked about;
 /// nothing here depends on the recycle itself.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn the_pane_probe_reports_a_spaced_owner_name_whole() {
     let w = recycled_pane_wedge().await;
     let sock = w.h.state.path().join("tmux.sock");
@@ -4114,7 +4114,7 @@ async fn the_pane_probe_reports_a_spaced_owner_name_whole() {
 /// wrongly keep the dead one attachable; this test fails either way,
 /// which is exactly the coverage gap a single-session restart-gap test
 /// cannot close.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn restart_gap_is_decided_per_session() {
     let h = harness().await;
     let (alive_session, _work1) = basic_session(&h).await;
@@ -4244,7 +4244,7 @@ async fn restart_gap_is_decided_per_session() {
 /// in-memory map), and a fresh attach still works and replays the
 /// pre-stop scrollback — stop leaves the terminal viewable, it does not
 /// tear anything down.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_kills_the_whole_process_tree() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -4347,7 +4347,7 @@ async fn stop_kills_the_whole_process_tree() {
 /// racing the child's own startup could catch it before `trap ''` has
 /// run, and SIGTERM would kill it the ordinary way, silently defeating
 /// the point of this test.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_kills_a_child_that_ignores_sigterm() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -4393,7 +4393,7 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
 /// connection's single serial read loop would not even read the attach
 /// request's frame off the wire until the stop request ahead of it had
 /// been handled to completion, let alone reply to it first.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -4460,7 +4460,7 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
 /// a live session) and across the restart gap (a session whose terminal
 /// never came back has nothing running, so "make sure nothing is running"
 /// already holds).
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_is_idempotent() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -4496,7 +4496,7 @@ async fn stop_is_idempotent() {
 
 /// Unknown ids are the one failure mode stop and delete share, and both
 /// must report it the same way `Attach` does.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_unknown_session_is_not_found() {
     let h = harness().await;
     let err = h
@@ -4513,7 +4513,7 @@ async fn stop_unknown_session_is_not_found() {
 }
 
 /// See `stop_unknown_session_is_not_found`.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_unknown_session_is_not_found() {
     let h = harness().await;
     let err = h
@@ -4535,7 +4535,7 @@ async fn delete_unknown_session_is_not_found() {
 /// state dir, exactly like `create_in_missing_directory_errors` does for
 /// creation, since only that proves the row is really gone rather than
 /// merely absent from this one process's map.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_removes_session_terminal_and_row() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -4569,7 +4569,7 @@ async fn delete_removes_session_terminal_and_row() {
 /// with an explicit notice rather than leaving its stream hanging —
 /// mirroring how `second_attach_detaches_first` asserts a takeover's
 /// `Detached` event.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_while_attached_detaches_the_client() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -4607,7 +4607,7 @@ async fn delete_while_attached_detaches_the_client() {
 /// Delete must work on a restart-gap (terminal-less) session too — SPEC.md
 /// promises delete "in any state" — mirroring the restart-gap setup in
 /// `restart_gap_lists_sessions_without_a_terminal_and_attach_fails`.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_works_on_a_terminal_less_session() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -4636,7 +4636,7 @@ async fn delete_works_on_a_terminal_less_session() {
 /// (agent, its `sh` child, that child's own `sleep`) must actually be
 /// gone once delete returns, not merely the tmux session removed around
 /// them.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_kills_the_whole_process_tree() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -4675,7 +4675,7 @@ async fn delete_kills_the_whole_process_tree() {
 /// — a second client attaching afterwards must produce the ordinary
 /// takeover notice on the first, proving stop did not itself already
 /// tear the attachment down or leave it in some half-detached state.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_does_not_disturb_the_existing_attachment() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -4742,7 +4742,7 @@ async fn stop_does_not_disturb_the_existing_attachment() {
 /// delete's own pane query must see the (by-then-dead) pane and skip
 /// straight to tmux teardown rather than erroring on an already-stopped
 /// agent.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_then_delete_both_succeed() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -4772,7 +4772,7 @@ async fn stop_then_delete_both_succeed() {
 /// drained to its replay-complete marker, not to any needle or tmux
 /// placeholder text, so the absence assertions cannot race an
 /// still-arriving replay.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_takes_no_screen_capture_and_replays_none() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -4838,7 +4838,7 @@ async fn stop_takes_no_screen_capture_and_replays_none() {
 /// Polled rather than asserted once: the sweep runs after the socket
 /// binds, so "the socket exists" — which is all the spawn helper waits
 /// for — does not yet mean "the sweep ran".
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn startup_removes_an_older_builds_snapshots_directory() {
     let state = farhelm_teststate::tempdir().expect("state dir");
     let snapshots = state.path().join("snapshots");
@@ -4872,7 +4872,7 @@ async fn startup_removes_an_older_builds_snapshots_directory() {
 /// tolerated-absence path (the same tmux diagnostics `has_session`/
 /// `kill_session` already treat as "not there") is what makes this
 /// succeed rather than fail-closed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_after_externally_killed_tmux_session_succeeds() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -4927,7 +4927,7 @@ async fn delete_after_externally_killed_tmux_session_succeeds() {
 /// survives whole; a parser that split on whitespace would truncate this
 /// to `renamed`, and the owner the policy compares against would be a
 /// name that never existed.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_after_renamed_tmux_session_fails_closed() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -5023,7 +5023,7 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
 /// launch (`launch.rs`'s `SESSION_ID_ENV_VAR`) or marker enumeration
 /// during the sweep (`environ_has_marker`/`enumerate_tree`) — a bare PPID
 /// closure from the pane root would never reach this pid at all.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_kills_a_reparented_marked_daemon() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -5072,7 +5072,7 @@ async fn stop_kills_a_reparented_marked_daemon() {
 /// pane path and prove nothing about the dead-pane path specifically).
 /// `remain-on-exit` keeps the pane around to report `pane_dead`, exactly
 /// like `exited_agent_leaves_a_viewable_terminal` relies on elsewhere.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -5121,7 +5121,7 @@ async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
 /// `enumerate_tree`'s docs. This must fail if that seeding is ever
 /// demoted back to appending marker pids as closure LEAVES instead of
 /// roots.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding() {
     /// Read the live parent edge this test is about without treating an
     /// unreadable or zombie process as successful setup.
@@ -5234,7 +5234,7 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
 /// present but the launch fell back would kill the decoy and leave the
 /// daemon, and reading the column is what turns that into a clear failure
 /// rather than a puzzling one.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep() {
     let Some((h, _scopes)) = scope_gated_harness(
         "a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep",
@@ -5335,7 +5335,7 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep
 /// `available` does. Leaving the restart unseamed would reopen, on the
 /// SECOND supervisor, the exact divergence this file's `scope_gated_harness`
 /// exists to close on the first.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
     let Some((h, scopes)) =
         scope_gated_harness("a_recorded_scope_survives_a_supervisor_restart_and_still_kills").await
@@ -5453,7 +5453,7 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
 /// would mean sabotaging the host's user manager. What is planted is only
 /// the evidence — an unconsumed spec on a dead pane — while the scope
 /// selection under it is the real one this host's real probe made.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
     let Some((h, _scopes)) =
         scope_gated_harness("a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit")
@@ -5530,7 +5530,7 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
 /// The cloaked daemon is deliberately NOT part of this test: with no
 /// cgroup, nothing can reach it, and asserting its survival would pin a
 /// known gap as if it were a feature.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn without_a_user_manager_a_launch_records_the_fallback_and_stops_like_m2() {
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
@@ -5616,7 +5616,7 @@ async fn stored_launch_scope(state_dir: &std::path::Path, session_id: &str) -> O
 /// what makes this easy to leave untested: this plants both files by hand
 /// (standing in for a delete that outraces the shim, or a spec that was
 /// never launched at all) so the removal path actually runs.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_removes_launch_artifacts() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -5675,7 +5675,7 @@ async fn wait_for_shim_to_consume_spec(spec_path: &std::path::Path) {
 /// Skipped under euid 0: root bypasses directory permission checks
 /// entirely, which would make this test pass trivially without
 /// exercising the fail-closed path it exists to pin.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
     // SAFETY: geteuid takes no arguments and cannot fail.
     if unsafe { libc::geteuid() } == 0 {
@@ -5802,7 +5802,7 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
 /// phase caught it) — never a hang, and never a "succeeded and stayed
 /// attached forever" outcome once delete has actually finished. The
 /// session must be gone by the end either way.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn attach_during_delete_race_ends_in_a_consistent_state() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -5924,7 +5924,7 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
 /// could matter. That is why the fixture ignores both `TERM` and `HUP`.)
 /// The disabling change was reverted before this test was committed; it
 /// must never be left disabled in the source.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn stop_quiesce_survives_no_marked_process() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();

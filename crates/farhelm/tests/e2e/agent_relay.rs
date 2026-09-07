@@ -338,7 +338,7 @@ async fn credential_for(h: &Harness, session: &str) -> String {
 /// must NOT be the one asked, because it holds no attachment. The two
 /// request-id namespaces get their own test below, where two peers can
 /// collide on the same local number.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -396,7 +396,7 @@ async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
 /// The harness's client is connected throughout: a relay that picked "any
 /// full-authority connection" instead of "the one holding the attachment"
 /// would answer here and pass nothing.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_no_helm_is_attached_to_is_told_so() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -432,7 +432,7 @@ async fn a_session_no_helm_is_attached_to_is_told_so() {
 /// shell command blocked forever. `Timeout` rather than `Unavailable`
 /// because the request WAS delivered: the far side may still be working,
 /// which is exactly the distinction that decides whether a retry is free.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_helm_that_never_answers_times_the_request_out() {
     let h = harness_with_timeouts(SupervisorTimeouts {
         // Short enough to wait out in a test, long enough that a merely
@@ -471,7 +471,7 @@ async fn a_helm_that_never_answers_times_the_request_out() {
 /// only claim about who is asking — so a supervisor that forwarded an
 /// unchecked id would hand the helm a lie it has no way to detect, and
 /// every later verb (rename, stop, archive) would act on it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_peer_may_not_ask_as_another_session() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -526,7 +526,7 @@ async fn a_peer_may_not_ask_as_another_session() {
 /// identical there. Reverse-order release covers the other half: two
 /// answers arriving out of order must still be matched by id rather than by
 /// arrival.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn two_peers_using_the_same_request_id_are_relayed_and_answered_apart() {
     let h = harness().await;
     let (first, _first_work) = basic_session(&h).await;
@@ -609,7 +609,7 @@ async fn two_peers_using_the_same_request_id_are_relayed_and_answered_apart() {
 /// The KIND matters as much as the speed. `Unavailable` says nobody has the
 /// request any more, which is safe to retry; `Timeout` would say the helm
 /// may still be working on it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_helm_that_dies_mid_upcall_ends_the_request_at_once() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -670,7 +670,7 @@ async fn a_helm_that_dies_mid_upcall_ends_the_request_at_once() {
 /// "No request reached the helm" is asserted separately because a refusal
 /// AFTER the relay would still exit non-zero while having already leaked
 /// the fleet listing to whatever forwarded it.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_deleted_session_cannot_ask_on_a_connection_it_already_opened() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -717,7 +717,7 @@ async fn a_deleted_session_cannot_ask_on_a_connection_it_already_opened() {
 /// which ordinary agent-facing listings intentionally redact. The same wire
 /// verb remains available to the supervisor's internal named-spawn path; the
 /// sibling test below proves that path still reaches the scripted helm.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_session_cannot_call_the_internal_profile_resolver_directly() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
@@ -768,7 +768,7 @@ async fn a_session_cannot_call_the_internal_profile_resolver_directly() {
 /// supervisor sends an internal `ResolveProfile` up the attachment-owning
 /// connection, and the resulting invocation, integration settings, resume
 /// template, and immutable snapshot become the child's durable launch data.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
@@ -856,7 +856,7 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
 /// spawn CLI never constructs this hostile shape. Refusal must happen before
 /// reservation or launch work, leaving no child behind under the supplied
 /// key.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn a_restricted_create_cannot_supply_source_profile() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;

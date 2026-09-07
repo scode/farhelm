@@ -67,7 +67,7 @@ async fn create_profile_child(
 /// whose relaunched command can still read that attachment. Splitting those
 /// assertions across isolated fixtures would miss the preservation boundary
 /// between teardown and relaunch.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -299,7 +299,7 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
 /// This keeps terminal teardown available after a checkout or scratch
 /// directory has already disappeared. Refusing here would strand exactly
 /// the dead sessions archive exists to retire.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn archive_succeeds_after_the_working_directory_disappears() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -339,7 +339,7 @@ async fn archive_succeeds_after_the_working_directory_disappears() {
 /// portable process-tree sweep in this end-to-end path; deterministic PID
 /// reuse coverage belongs beside the closure itself in `sweep.rs` rather than
 /// making this lifecycle test race the host allocator.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn deleting_an_archived_session_removes_its_row_and_attachments() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -388,7 +388,7 @@ async fn deleting_an_archived_session_removes_its_row_and_attachments() {
 
 /// Every uncertain teardown boundary fails closed: no archive flag is
 /// published when the supervisor cannot prove the session is terminal-less.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn archive_seam_failures_leave_the_session_unarchived() {
     for stage in [
         ArchiveStage::PaneProbe,
@@ -445,7 +445,7 @@ async fn archive_seam_failures_leave_the_session_unarchived() {
 
 /// Startup never rediscovers a same-named tmux husk as the terminal of an
 /// archived row; only restart may clear the durable archive boundary.
-#[tokio::test]
+#[farhelm_testtrace::test]
 async fn reopening_an_archived_row_ignores_a_same_named_tmux_husk() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
