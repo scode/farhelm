@@ -12,6 +12,7 @@ dist = false
 [dependencies]
 farhelm-testtrace-macros = { path = "../farhelm-testtrace-macros" }
 futures-util = { workspace = true, features = ["std"] }
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
@@ -19,4 +20,4 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-libc.workspace = true
+tempfile.workspace = true

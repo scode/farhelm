@@ -6,6 +6,9 @@
 
 #![cfg(unix)]
 
+use std::fs;
+use std::os::unix::process::ExitStatusExt as _;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Termination};
 use std::time::Duration;
 
@@ -15,6 +18,18 @@ use farhelm_testtrace::TestOutcome;
 mod process;
 
 const CHILD_ENV: &str = "FARHELM_TESTTRACE_CONTRACT_CHILD";
+const TRACE_ROOT_ENV: &str = "FARHELM_TEST_TRACE_DIR";
+
+/// Creates an owner-only root so child fixtures exercise persistence under any ordinary umask.
+fn private_tempdir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt as _;
+    tempfile::Builder::new()
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .unwrap()
+}
+const TEARDOWN_MARKER_ENV: &str = "FARHELM_TESTTRACE_TEARDOWN_MARKER";
+const APPEND_READY: &[u8] = b"FARHELM_PERSISTENCE_APPEND_READY\n";
 const OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
 const CHILD_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -45,18 +60,32 @@ impl ChildResult {
 
 /// Re-executes this one test binary without inheriting ambient test configuration.
 fn run_child(exact_name: &str) -> ChildResult {
+    run_child_with(exact_name, &[])
+}
+
+/// Builds one exact child command with only explicitly supplied fixture inputs.
+fn child_command(exact_name: &str, environment: &[(&str, &Path)]) -> Command {
     let mut command = Command::new(std::env::current_exe().expect("resolve current test binary"));
+    command.args([
+        "--exact",
+        exact_name,
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
     command
-        .args([
-            "--exact",
-            exact_name,
-            "--ignored",
-            "--nocapture",
-            "--test-threads=1",
-        ])
         .env_clear()
         .env(CHILD_ENV, exact_name)
         .env("RUST_BACKTRACE", "0");
+    for &(name, value) in environment {
+        command.env(name, value);
+    }
+    command
+}
+
+/// Runs an exact child with command-local environment, leaving the parent process untouched.
+fn run_child_with(exact_name: &str, environment: &[(&str, &Path)]) -> ChildResult {
+    let command = child_command(exact_name, environment);
     let result = process::run_bounded(command, CHILD_TIMEOUT, OUTPUT_LIMIT)
         .unwrap_or_else(|failure| panic!("child fixture {exact_name}: {failure}"));
     let stdout = String::from_utf8_lossy(&result.output.stdout).into_owned();
@@ -71,6 +100,48 @@ fn run_child(exact_name: &str) -> ChildResult {
         stdout,
         stderr,
     }
+}
+
+/// Finds the one slot retained by a process-isolated persistence fixture.
+fn only_slot(root: &Path) -> PathBuf {
+    let entries = root
+        .read_dir()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(entries.len(), 1, "fixture must retain exactly one slot");
+    entries[0].path()
+}
+
+/// Parses retained metadata as the reader-visible outcome contract.
+fn persisted_metadata(root: &Path) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(only_slot(root).join("metadata.json")).unwrap()).unwrap()
+}
+
+/// Parses all complete retained event lines and restores their sequence order.
+fn persisted_events(root: &Path) -> Vec<serde_json::Value> {
+    let slot = only_slot(root);
+    let mut events = ["head.jsonl", "tail-0.jsonl", "tail-1.jsonl", "tail-2.jsonl"]
+        .into_iter()
+        .flat_map(|name| inspect_jsonl(&fs::read(slot.join(name)).unwrap()).0)
+        .collect::<Vec<_>>();
+    events.sort_by_key(|event| event["sequence"].as_u64().unwrap());
+    events
+}
+
+/// Returns complete JSONL records plus whether EOF cut a final record short.
+fn inspect_jsonl(bytes: &[u8]) -> (Vec<serde_json::Value>, bool) {
+    let incomplete = !bytes.is_empty() && !bytes.ends_with(b"\n");
+    let complete_len = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let records = bytes[..complete_len]
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).expect("newline-terminated record is valid JSON"))
+        .collect();
+    (records, incomplete)
 }
 
 /// Lists the compiled fixture names under the same bounded child supervision as exact runs.
@@ -102,8 +173,16 @@ fn require_child(expected_name: &str) {
 
 mod child_cases {
     use std::future::pending;
+    use std::io::Write as _;
 
     use super::*;
+
+    /// Resolves only command-supplied persistence state inside isolated child fixtures.
+    fn trace_root() -> PathBuf {
+        std::env::var_os(TRACE_ROOT_ENV)
+            .map(PathBuf::from)
+            .expect("parent supplied a trace root")
+    }
 
     /// Emits from task cancellation so the parent can prove capture outlives runtime teardown.
     struct TeardownTrace(&'static str);
@@ -496,6 +575,107 @@ mod child_cases {
     fn cfg_disabled_fixture_is_absent() {
         let _: () = 1;
     }
+
+    /// Direct construction remains memory-only even when the child environment enables wrappers.
+    #[test]
+    #[ignore = "subprocess fixture asserted by persistent_wrapper_contract_matrix"]
+    fn explicit_session_ignores_ambient_root() {
+        require_child("child_cases::explicit_session_ignores_ambient_root");
+        let session = farhelm_testtrace::CaptureSession::new(
+            farhelm_testtrace::TestMetadata::new(
+                "explicit-memory-only",
+                farhelm_testtrace::ExpectedPanic::None,
+                None,
+            ),
+            farhelm_testtrace::CaptureConfig::default(),
+        )
+        .unwrap();
+        session
+            .thread_context()
+            .enter(|| tracing::info!("memory-only explicit event"));
+        session.complete(farhelm_testtrace::ObservedOutcome::ReturnedSuccess);
+        assert_eq!(trace_root().read_dir().unwrap().count(), 0);
+    }
+
+    /// A caught subtask panic does not become the wrapper's observed top-level outcome.
+    #[ignore = "subprocess fixture asserted by persistent_wrapper_contract_matrix"]
+    #[farhelm_testtrace::test]
+    fn asserted_subtask_panic_returns_success() {
+        require_child("child_cases::asserted_subtask_panic_returns_success");
+        assert!(std::panic::catch_unwind(|| panic!("asserted subtask panic")).is_err());
+        tracing::info!("ordinary success after asserted subtask panic");
+    }
+
+    /// Ordinary in-memory field loss does not turn a successful wrapper into a diagnostic failure.
+    #[ignore = "subprocess fixture asserted beside ambient persistence setup failure"]
+    #[farhelm_testtrace::test]
+    fn memory_only_loss_remains_silent_on_success() {
+        require_child("child_cases::memory_only_loss_remains_silent_on_success");
+        tracing::info!(oversized = %"x".repeat(farhelm_testtrace::MAX_FIELD_BYTES + 1));
+    }
+
+    /// Proves the slot still exists with unfinished metadata while runtime teardown is executing.
+    struct PersistentTeardownProbe;
+
+    impl Drop for PersistentTeardownProbe {
+        fn drop(&mut self) {
+            let root = trace_root();
+            let slot = super::only_slot(&root);
+            let metadata: serde_json::Value =
+                serde_json::from_slice(&fs::read(slot.join("metadata.json")).unwrap()).unwrap();
+            assert!(metadata["outcome"].is_null());
+            assert_eq!(metadata["incomplete"], true);
+            let marker = PathBuf::from(
+                std::env::var_os(TEARDOWN_MARKER_ENV).expect("parent supplied a teardown marker"),
+            );
+            fs::write(marker, "slot observed during teardown").unwrap();
+            tracing::warn!("persistent runtime teardown marker");
+        }
+    }
+
+    /// Arms a pending task whose destructor runs only when the owned runtime shuts down.
+    async fn arm_persistent_teardown_probe() {
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let _probe = PersistentTeardownProbe;
+            ready_tx
+                .send(())
+                .expect("fixture remains until task is armed");
+            pending::<()>().await;
+        });
+        ready_rx.await.expect("pending teardown probe was armed");
+    }
+
+    /// Success observes an unfinished live slot during teardown, then removes it afterward.
+    #[ignore = "subprocess fixture asserted by persistent_wrapper_contract_matrix"]
+    #[farhelm_testtrace::test(flavor = "current_thread")]
+    async fn persistent_success_cleans_after_runtime_teardown() {
+        require_child("child_cases::persistent_success_cleans_after_runtime_teardown");
+        arm_persistent_teardown_probe().await;
+    }
+
+    /// Failure retains the exact event emitted by the same runtime-teardown boundary.
+    #[ignore = "subprocess fixture asserted by persistent_wrapper_contract_matrix"]
+    #[farhelm_testtrace::test(flavor = "current_thread")]
+    async fn persistent_failure_retains_runtime_teardown() -> Result<(), &'static str> {
+        require_child("child_cases::persistent_failure_retains_runtime_teardown");
+        arm_persistent_teardown_probe().await;
+        Err("retain persistent teardown evidence")
+    }
+
+    /// Signals readiness only after the known persistent event append has returned.
+    #[ignore = "subprocess fixture asserted by persistent_abnormal_exit_contracts"]
+    #[farhelm_testtrace::test]
+    fn persistent_waits_for_parent_signal() {
+        require_child("child_cases::persistent_waits_for_parent_signal");
+        tracing::warn!(marker = "abnormal-exit", "event before abnormal exit");
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(APPEND_READY).unwrap();
+        stdout.flush().unwrap();
+        loop {
+            std::thread::park();
+        }
+    }
 }
 
 /// Expected runner and structured-diagnostic contract for one exact child selector.
@@ -816,6 +996,250 @@ fn crash_after_dump_is_not_a_libtest_failure() {
         result.status.code().is_none(),
         "negative control did not terminate by signal"
     );
+}
+
+/// Wrapper persistence preserves exact libtest verdicts and the outcome metadata matrix.
+#[test]
+fn persistent_wrapper_contract_matrix() {
+    struct Case {
+        selector: &'static str,
+        success: bool,
+        outcome: Option<&'static str>,
+        incomplete: Option<bool>,
+        event: Option<&'static str>,
+    }
+    let cases = [
+        Case {
+            selector: "child_cases::explicit_session_ignores_ambient_root",
+            success: true,
+            outcome: None,
+            incomplete: None,
+            event: None,
+        },
+        Case {
+            selector: "child_cases::success_has_no_dump",
+            success: true,
+            outcome: None,
+            incomplete: None,
+            event: None,
+        },
+        Case {
+            selector: "child_cases::asserted_subtask_panic_returns_success",
+            success: true,
+            outcome: None,
+            incomplete: None,
+            event: None,
+        },
+        Case {
+            selector: "child_cases::err_return_keeps_libtest_failure",
+            success: false,
+            outcome: Some("returned_failure"),
+            incomplete: Some(false),
+            event: Some("returned error evidence"),
+        },
+        Case {
+            selector: "child_cases::unwind_keeps_panic_payload",
+            success: false,
+            outcome: Some("unwind"),
+            incomplete: Some(true),
+            event: Some("unwind evidence"),
+        },
+        Case {
+            selector: "child_cases::matching_expected_panic_passes",
+            success: true,
+            outcome: Some("unwind"),
+            incomplete: Some(true),
+            event: Some("expected panic evidence"),
+        },
+        Case {
+            selector: "child_cases::missing_expected_panic_fails",
+            success: false,
+            outcome: Some("returned_success"),
+            incomplete: Some(true),
+            event: Some("missing panic evidence"),
+        },
+        Case {
+            selector: "child_cases::panicking_sync_observer_preserves_return",
+            success: true,
+            outcome: Some("observation_failed"),
+            incomplete: Some(true),
+            event: None,
+        },
+        Case {
+            selector: "child_cases::oversized_expected_panic_preserves_libtest",
+            success: true,
+            outcome: Some("unwind"),
+            incomplete: Some(true),
+            event: Some("oversized metadata body ran"),
+        },
+    ];
+    for case in cases {
+        let root = private_tempdir();
+        let result = run_child_with(case.selector, &[(TRACE_ROOT_ENV, root.path())]);
+        assert!(
+            result.has_libtest_verdict(case.success),
+            "unexpected verdict for {}:\n{}",
+            case.selector,
+            result.display()
+        );
+        match case.outcome {
+            None => assert_eq!(root.path().read_dir().unwrap().count(), 0),
+            Some(outcome) => {
+                let metadata = persisted_metadata(root.path());
+                assert_eq!(metadata["outcome"], outcome, "case {}", case.selector);
+                assert_eq!(metadata["incomplete"], case.incomplete.unwrap());
+                assert!(metadata["test"]["name"].as_str().is_some());
+                if case.selector == "child_cases::oversized_expected_panic_preserves_libtest" {
+                    assert_eq!(metadata["test"]["name"], "<test metadata omitted>");
+                    assert_eq!(metadata["loss"]["diagnostic_failures"], 1);
+                }
+                if let Some(message) = case.event {
+                    assert!(
+                        persisted_events(root.path())
+                            .iter()
+                            .any(|event| { event["fields"]["message"].as_str() == Some(message) })
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Runtime teardown observes its live unfinished slot before success cleanup can remove it.
+#[test]
+fn persistent_cleanup_occurs_after_owned_runtime_teardown() {
+    let success_root = private_tempdir();
+    let marker_root = private_tempdir();
+    let success_marker = marker_root.path().join("success-marker");
+    let result = run_child_with(
+        "child_cases::persistent_success_cleans_after_runtime_teardown",
+        &[
+            (TRACE_ROOT_ENV, success_root.path()),
+            (TEARDOWN_MARKER_ENV, success_marker.as_path()),
+        ],
+    );
+    assert!(result.has_libtest_verdict(true), "{}", result.display());
+    assert_eq!(
+        fs::read_to_string(success_marker).unwrap(),
+        "slot observed during teardown"
+    );
+    assert_eq!(success_root.path().read_dir().unwrap().count(), 0);
+
+    let failure_root = private_tempdir();
+    let failure_marker = marker_root.path().join("failure-marker");
+    let result = run_child_with(
+        "child_cases::persistent_failure_retains_runtime_teardown",
+        &[
+            (TRACE_ROOT_ENV, failure_root.path()),
+            (TEARDOWN_MARKER_ENV, failure_marker.as_path()),
+        ],
+    );
+    assert!(result.has_libtest_verdict(false), "{}", result.display());
+    assert_eq!(
+        fs::read_to_string(failure_marker).unwrap(),
+        "slot observed during teardown"
+    );
+    let events = persisted_events(failure_root.path());
+    let teardown = events
+        .iter()
+        .find(|event| event["fields"]["message"] == "persistent runtime teardown marker")
+        .expect("teardown event was retained");
+    assert_eq!(teardown["sequence"], 0);
+    assert_eq!(
+        persisted_metadata(failure_root.path())["test"]["runtime"]["flavor"],
+        "current_thread"
+    );
+    assert_eq!(
+        persisted_metadata(failure_root.path())["outcome"],
+        "returned_failure"
+    );
+}
+
+/// Slot exhaustion stays diagnostic and cannot replace a successful child verdict.
+#[test]
+fn ambient_slot_exhaustion_preserves_body_outcome_and_existing_entries() {
+    let memory_only = run_child("child_cases::memory_only_loss_remains_silent_on_success");
+    assert!(
+        memory_only.has_libtest_verdict(true),
+        "{}",
+        memory_only.display()
+    );
+    assert!(
+        json_records(&memory_only.stderr).is_empty(),
+        "ordinary memory loss emitted a success diagnostic:\n{}",
+        memory_only.display()
+    );
+
+    let root = private_tempdir();
+    for index in 0..farhelm_testtrace::MAX_PERSISTENT_SLOTS {
+        fs::write(
+            root.path().join(format!("slot-{index:03}")),
+            format!("existing-{index}"),
+        )
+        .unwrap();
+    }
+    let first = fs::read(root.path().join("slot-000")).unwrap();
+    let result = run_child_with(
+        "child_cases::success_has_no_dump",
+        &[(TRACE_ROOT_ENV, root.path())],
+    );
+    assert!(result.has_libtest_verdict(true), "{}", result.display());
+    let metadata = json_records(&result.stderr)
+        .into_iter()
+        .find(|record| record["kind"] == "farhelm-testtrace")
+        .expect("ambient setup failure emits bounded diagnostic metadata");
+    assert_eq!(metadata["outcome"], "returned_success");
+    assert_eq!(metadata["loss"]["persistence_failures"], 1);
+    assert_eq!(fs::read(root.path().join("slot-000")).unwrap(), first);
+    assert_eq!(
+        root.path().read_dir().unwrap().count(),
+        farhelm_testtrace::MAX_PERSISTENT_SLOTS
+    );
+}
+
+/// Abort and SIGKILL retain an appended event without fabricating a libtest verdict.
+#[test]
+fn persistent_abnormal_exit_contracts() {
+    for signal in [libc::SIGABRT, libc::SIGKILL] {
+        let root = private_tempdir();
+        let command = child_command(
+            "child_cases::persistent_waits_for_parent_signal",
+            &[(TRACE_ROOT_ENV, root.path())],
+        );
+        let result = process::run_until_stdout_then_signal(
+            command,
+            APPEND_READY,
+            signal,
+            CHILD_TIMEOUT,
+            OUTPUT_LIMIT,
+        )
+        .unwrap_or_else(|failure| panic!("abnormal-exit fixture: {failure}"));
+        assert_eq!(result.status.signal(), Some(signal));
+        assert!(
+            result
+                .output
+                .stdout
+                .windows(APPEND_READY.len())
+                .any(|window| window == APPEND_READY)
+        );
+        let metadata = persisted_metadata(root.path());
+        assert!(metadata["outcome"].is_null());
+        assert_eq!(metadata["incomplete"], true);
+        let events = persisted_events(root.path());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["sequence"], 0);
+        assert_eq!(events[0]["fields"]["message"], "event before abnormal exit");
+    }
+}
+
+/// EOF bytes without a newline are incomplete and are not parsed as a retained event.
+#[test]
+fn truncated_final_jsonl_line_is_identified() {
+    let bytes = b"{\"sequence\":0}\n{\"sequence\":1}";
+    let (records, incomplete) = inspect_jsonl(bytes);
+    assert!(incomplete);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["sequence"], 0);
 }
 
 /// Broken children must hit a bounded failure and be reaped before the assertion resumes.
