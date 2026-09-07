@@ -2883,6 +2883,7 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     // created_at has one-second granularity and the merged order
     // tiebreaks by id within a second — a real gap is what makes
     // "newest" deterministic.
+    // sleep-ok: separate the sessions' second-resolution creation timestamps.
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     newer = await createSession(request, {
       title: `policy-newer-${Date.now()}`,

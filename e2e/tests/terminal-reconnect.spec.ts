@@ -712,6 +712,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
       // timers have fired even once, which would make the negative check
       // below vacuous.
       const afterRefusal = await terminalSocketsConstructed(page);
+      // sleep-ok: observe the retired ladder on the loser's own clock after the winner echoed input.
       await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 2_500)));
       expect(
         (await terminalSocketsConstructed(page)) - afterRefusal,
@@ -833,7 +834,7 @@ test("leaving-a-session-cancels-a-pending-reconnect", async ({ page, request }) 
     await sharedSessionRow(page).click();
     await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
     await waitForIslandMounted(page, "terminal");
-    // Past the pending rung, with room to spare.
+    // Sample for a stale retry after selecting the shared session.
     await page.waitForTimeout(2_500);
     const islands = await page.evaluate(() => {
       const map = (window as any).__farhelmIslands ?? {};
@@ -1009,9 +1010,10 @@ test("latched-skew-revokes-automatic-reconnect", async ({ page, request }) => {
     ).toHaveAttribute("data-reconnect-phase", "manual-only", { timeout: 15_000 });
     await expect(surface).toContainText("different builds");
 
-    // And it stays that way: several rungs' worth of time passes with no
-    // attach attempted at all.
+    // Sample again after the manual-only state has been established.
+    // Socket identity catches a surviving replacement, not every transient attempt.
     await rememberSocket(page, "terminal").catch(() => {});
+    // sleep-ok: finite observation window for unattended recovery after build-skew revocation.
     await page.waitForTimeout(2_500);
     expect(
       await page.evaluate(() => {
@@ -1368,7 +1370,7 @@ for (const when of [
       // which is the only thing this test is entitled to complain about.
       const pingsBefore = pings.length;
 
-      // Past the deadline the withdrawal was supposed to disarm.
+      // sleep-ok: finite probe-count observation after the rollback stamp revoked the heartbeat.
       await page.waitForTimeout(when.settleMs);
       expect(
         pings.length,
@@ -1431,6 +1433,7 @@ test("view-changes-do-not-postpone-a-recovery", async ({ page, request }) => {
     // these is a `sync()` with a different desired set.
     for (let i = 0; i < 4; i++) {
       await selectTerminal(page, i % 2 === 0 ? "agent" : tabId);
+      // sleep-ok: pace the desired-set churn that challenges the original retry schedule.
       await page.waitForTimeout(250);
     }
 
@@ -1491,7 +1494,7 @@ try {
         get: () => handler,
         set: (fn) => {
           handler = fn;
-          // Deliver the decision as soon as the island is listening.
+          // sleep-ok: deliver the synthetic detach asynchronously after the message handler is installed.
           setTimeout(() => {
             if (!handler) return;
             handler({
@@ -1717,6 +1720,7 @@ try {
   // rungs' worth of time then passes in the manual-only state.
   feed.notify(2);
   await expect(page.locator(".build-skew")).toBeVisible({ timeout: 15_000 });
+  // sleep-ok: retain attempt counts during a finite window after the rollback stamp arrives.
   await page.waitForTimeout(1_500);
 
   const counts = await page.evaluate(() => (window as any).__attachCounts);
@@ -1852,7 +1856,7 @@ test("absent-build-stamp-is-skew-and-silences-the-heartbeat", async ({ page, req
     await expect(page.locator(".build-skew")).toBeVisible();
     await expect(page.locator(".build-skew")).toContainText("predates this interface");
 
-    // Long enough for a dozen idle windows to have elapsed.
+    // sleep-ok: observe probe counts after the missing-build-stamp notice is visible.
     await page.waitForTimeout(1_500);
     expect(
       pings,

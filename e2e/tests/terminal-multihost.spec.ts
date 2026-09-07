@@ -2421,13 +2421,10 @@ test.describe("multi-host", () => {
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
       await expect(page.locator(".host-stale-notice")).toHaveCount(0);
-      // SETTLED is what these assert, deliberately: everything above is
-      // "eventually", so a brief remount while the host reads as connected
-      // but not yet refreshed (its rows still last-known live) is not
-      // excluded here. What must not survive the refresh is any terminal
-      // element, because that is what the reconnect ladder retries into;
-      // a view that kept one would show the overlay again within its first
-      // retry, which is well inside this window.
+      // The interrupted view is already visible. Sample it again after a
+      // finite window to catch recovery reviving a terminal after refresh;
+      // these endpoint assertions do not exclude every transient remount.
+      // sleep-ok: observe the interrupted state again after a finite recovery window.
       await page.waitForTimeout(5_000);
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
