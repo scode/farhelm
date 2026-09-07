@@ -276,6 +276,7 @@ pub fn run_bounded(
                 return Ok(CommandResult { status, output });
             }
             Ok(false) if Instant::now() < deadline => {
+                // sleep-ok: bounded child supervision polls exit after draining available output; the interval is not an exit or persistence premise.
                 thread::sleep(Duration::from_millis(10));
             }
             Ok(false) => {
@@ -412,6 +413,7 @@ pub fn run_until_stdout_then_signal(
                     detail: "child exited before append readiness".to_owned(),
                 });
             }
+            // sleep-ok: poll for the append-readiness marker and subsequent exit; the marker, not elapsed time, permits the requested abnormal-exit signal.
             Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(false) => {
                 return Err(RunFailure {
@@ -541,6 +543,7 @@ fn assert_exit_remains_owned_until_cleanup() {
     let deadline = Instant::now() + Duration::from_secs(2);
     while !group.has_exited().expect("observe leader exit") {
         assert!(Instant::now() < deadline, "leader did not exit");
+        // sleep-ok: wait for an observable unreaped leader exit before checking that the descendant still holds its inherited pipe.
         thread::sleep(Duration::from_millis(10));
     }
     assert!(group.has_exited().expect("exit must remain waitable"));
@@ -569,6 +572,7 @@ fn assert_exit_remains_owned_until_cleanup() {
                     Instant::now() < deadline,
                     "descendant retained stdout after cleanup"
                 );
+                // sleep-ok: group signaling is asynchronous; only pipe EOF proves the inherited writer closed, within the existing cleanup deadline.
                 thread::sleep(Duration::from_millis(10));
             }
             other => panic!("unexpected inherited-pipe output: {other:?}"),
