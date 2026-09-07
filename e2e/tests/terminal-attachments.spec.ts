@@ -40,7 +40,8 @@
 // directory produces one of those two shapes is the manual pass's to
 // confirm.
 // ---------------------------------------------------------------------
-import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { cleanupSession, waitForTermText } from "./helpers/term";
 import {

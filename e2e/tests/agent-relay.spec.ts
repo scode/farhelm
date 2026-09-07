@@ -45,7 +45,8 @@
 // this file owns its own fixtures.
 // =====================================================================
 
-import { test, expect, APIRequestContext, Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { APIRequestContext, Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import {

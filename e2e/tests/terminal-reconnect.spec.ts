@@ -27,7 +27,8 @@
 // =====================================================================
 
 
-import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { expect, newObservedContext, test } from "./helpers/evidence";
+import { type Page, type APIRequestContext } from "@playwright/test";
 import { openFilterBar, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
@@ -466,7 +467,12 @@ test("retry-exhaustion-shows-reprobe-phase", async ({ page, request }) => {
 // The ladder is tuned FAST on purpose: a reconnect that was going to
 // happen would have happened several times over inside the window this
 // test then waits out.
-test("takeover-does-not-bounce-back", async ({ browser, page, request }) => {
+test("takeover-does-not-bounce-back", async ({
+  browser,
+  timeline,
+  page,
+  request,
+}) => {
   await reconnectTimingsFromNextLoad(page, { delaysMs: [20, 20, 20, 20, 20, 20] });
   let ownId: string | undefined;
   try {
@@ -474,7 +480,7 @@ test("takeover-does-not-bounce-back", async ({ browser, page, request }) => {
     ownId = own.id;
     await rememberSocket(page, "terminal");
 
-    const second = await browser.newContext();
+    const second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
     try {
       await openSessionTerminal(page2, ownId!);
@@ -578,7 +584,12 @@ test("manual-reconnect-is-offered-during-the-first-rung", async ({ page, request
 // established by `withholdTerminalSockets` rather than by outrunning a
 // backoff rung; see that helper for the flake that taught us the
 // difference.
-test("takeover-during-backoff-does-not-steal-the-session", async ({ browser, page, request }) => {
+test("takeover-during-backoff-does-not-steal-the-session", async ({
+  browser,
+  timeline,
+  page,
+  request,
+}) => {
   // A cadence, not a barrier: with terminal sockets withheld below, the
   // rung only decides how soon after the winner attaches the loser's first
   // reachable attempt fires. The probe interval matches so a winner that
@@ -606,7 +617,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({ browser, pag
     await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
     await expect(page.locator(".terminal-reconnect-now")).toBeVisible();
 
-    const second = await browser.newContext();
+    const second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
     try {
       // The winner attaches while the loser is on the ladder holding
@@ -1133,7 +1144,12 @@ test("a-non-decision-detach-keeps-the-ladder-climbing", async ({ page, request }
 // from the list does. An implementation that leaked `if_unowned` into the
 // manual path would leave a user pressing a button that politely refuses
 // to do the one thing they asked for.
-test("manual-reconnect-takes-the-session-back", async ({ browser, page, request }) => {
+test("manual-reconnect-takes-the-session-back", async ({
+  browser,
+  timeline,
+  page,
+  request,
+}) => {
   await reconnectTimingsFromNextLoad(page, {
     delaysMs: [30_000, 30_000, 30_000, 30_000, 30_000, 30_000],
   });
@@ -1144,7 +1160,7 @@ test("manual-reconnect-takes-the-session-back", async ({ browser, page, request 
     await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
     await expect(page.locator(".terminal-reconnect-now")).toBeVisible();
 
-    const second = await browser.newContext();
+    const second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
     try {
       // Another client takes the session while this one waits out its rung.

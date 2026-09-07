@@ -18,7 +18,8 @@
  * general CSS regression harness, just a witness for the two claims nothing
  * else would catch.
  */
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Locator, type Page } from "@playwright/test";
 import { cleanupSession, createSession, openRowMenu, pinAutoSelect } from "./helpers/fleet";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 

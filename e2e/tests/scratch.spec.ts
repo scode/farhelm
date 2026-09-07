@@ -7,7 +7,7 @@
 // basename, so a helper that discarded the requested prefix would
 // degrade that test without failing it.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
 import fs from "node:fs";
 import path from "node:path";
 import { stackScratchDir } from "./helpers/scratch";

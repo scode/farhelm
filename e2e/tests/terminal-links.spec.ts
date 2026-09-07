@@ -29,7 +29,8 @@
 // test attaches would only ever reach the terminal via replay — a path
 // that works for OSC 8 (unlike OSC 52, the link survives in the rendered
 // grid) but is not the live path this coverage is about.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, waitForTermText } from "./helpers/term";
 
