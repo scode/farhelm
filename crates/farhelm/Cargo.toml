@@ -78,8 +78,7 @@ tokio.workspace = true
 # `tracing-subscriber` installs the subscriber (init_tracing); `tracing`
 # itself is here for the handful of diagnostics this binary emits on its
 # own — the `FARHELM_AGENT_HOOKS` startup warning in main.rs — rather than
-# through a library crate. The attachment-diagnostics test also implements
-# a `tracing` layer against it.
+# through a library crate.
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
@@ -88,6 +87,9 @@ tracing-subscriber.workspace = true
 # AgentRequestHandler`, whose one method is `async fn` in a trait object —
 # so a test double needs the same attribute the trait is declared with.
 async-trait.workspace = true
+# E2E tracing assertions must use a test-owned capture so supervisor tasks
+# stay attributable to their invoking test without a process-global layer.
+farhelm-testtrace.workspace = true
 # The two-host aggregation test drives a REAL `farhelm helm run` over real
 # loopback HTTP (merged_hosts.rs), because that is the only way to exercise
 # the shipped binary's own serving path; a hand-rolled HTTP client would be
