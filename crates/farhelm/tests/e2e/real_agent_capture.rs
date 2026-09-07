@@ -192,7 +192,7 @@ async fn real_agent_captures_its_conversation(
     )
     .await
     .expect("supervisor");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
 
     let session = client
@@ -608,7 +608,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
         std::env::var_os("HOME").expect("a real-agent run needs a real HOME"),
     );
     let (sup, client, accepting) = serving_supervisor(state.path(), home).await;
-    let tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sock = state.path().join("tmux.sock");
 
     let session = client
@@ -773,7 +773,7 @@ async fn real_codex_session_reports_its_identity_across_new() {
     let (synth, agent) = synthetic_codex_home(work.path());
     let (sup, client, accepting) =
         serving_supervisor(state.path(), synth.path().to_path_buf()).await;
-    let tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let session = client
         .create_session(&work.path().to_string_lossy(), &agent, None, 100, 30)

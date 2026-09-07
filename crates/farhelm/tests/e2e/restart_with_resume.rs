@@ -672,7 +672,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         .expect("symlink the farhelm binary under the agent's own name");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let seams = |boot: &str| SupervisorSeams {
         boot_id: {
@@ -914,7 +914,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         .expect("symlink the farhelm binary under the agent's own name");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let seams = |boot: &str| SupervisorSeams {
         boot_id: {

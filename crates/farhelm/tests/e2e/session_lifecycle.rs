@@ -2152,7 +2152,7 @@ async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config()
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state");
     let sock = state.path().join("tmux.sock");
-    let _tmux = TmuxServerGuard(sock.clone());
+    let _tmux = TmuxServerGuard::new(sock.clone());
 
     // Hand-roll a server on this socket BEFORE any farhelm code touches
     // this state dir, deliberately with the option off — this is the
@@ -2740,7 +2740,7 @@ async fn stdio_proxy_carries_a_real_session() {
     // panic anywhere below leaked the tmux server (plus login shell and
     // fake agent) forever — the exact accumulation Harness exists to
     // prevent, on the one test that cannot use it.
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     // An orphaned launch spec from a "previous run": serve() must sweep
     // it once — and only once — it owns the socket. It holds an agent
@@ -2939,7 +2939,7 @@ async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let driver = TmuxDriver::new(state.path());
     driver.ensure_server().await.expect("ensure server");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     // A decoy session, so tmux's refusal names the missing session
     // ("can't find session: ...") instead of the generic "no sessions" a
     // sessionless server answers with.
@@ -3128,7 +3128,7 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
     let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor 1");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let serving = Arc::clone(&sup1);
     tokio::spawn(async move {
         let _ = serving.serve().await;
@@ -3158,7 +3158,7 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
     let sup3 = Supervisor::new_with_exe(state2.path(), farhelm_bin().into())
         .await
         .expect("supervisor 3");
-    let _tmux2 = TmuxServerGuard(state2.path().join("tmux.sock"));
+    let _tmux2 = TmuxServerGuard::new(state2.path().join("tmux.sock"));
     let stale = state2.path().join("supervisor.sock");
     std::fs::write(&stale, b"").expect("plant stale socket file");
     let serving = Arc::clone(&sup3);
@@ -3200,7 +3200,7 @@ async fn stdio_proxy_half_close_delivers_in_flight_replies() {
     let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let serving = Arc::clone(&sup);
     tokio::spawn(async move {
         let _ = serving.serve().await;
