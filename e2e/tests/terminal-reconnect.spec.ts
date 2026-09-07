@@ -130,6 +130,57 @@ async function rememberSocket(page: Page, elementId: string) {
 }
 
 /**
+ * Capture the open socket before provoking a close whose recovery must be suppressed.
+ * The close event is the product's recovery decision point; a detach banner or
+ * a call to close() alone cannot start a meaningful no-reconnect observation window.
+ */
+async function rememberOpenSocketUntilClose(page: Page, elementId: string) {
+  await page.evaluate((el) => {
+    const win = window as any;
+    const ws = win.__farhelmIslands[el].ws as WebSocket;
+    if (ws.readyState !== WebSocket.OPEN) {
+      throw new Error(`the ${el} socket must be open before provoking its close`);
+    }
+    win.__farhelmPriorWs = ws;
+    win.__farhelmPriorWsClosed = false;
+    ws.addEventListener("close", () => {
+      win.__farhelmPriorWsClosed = true;
+    }, { once: true });
+  }, elementId);
+}
+
+/**
+ * Wait for close dispatch, retaining the captured socket's state and identity on expiry.
+ * A stalled handshake and a replaced island need different diagnoses; neither
+ * readyState nor the current island alone substitutes for the original close event.
+ */
+async function waitForRememberedSocketClose(page: Page, elementId: string) {
+  let last: unknown = null;
+  try {
+    await expect.poll(
+      async () => {
+        const snapshot = await page.evaluate((el) => {
+          const win = window as any;
+          const prior = win.__farhelmPriorWs as WebSocket | undefined;
+          return {
+            closed: win.__farhelmPriorWsClosed === true,
+            captured: !!prior,
+            readyState: prior?.readyState ?? null,
+            currentIsPrior: !!prior && win.__farhelmIslands?.[el]?.ws === prior,
+          };
+        }, elementId);
+        last = snapshot;
+        return snapshot.closed;
+      },
+      { timeout: 10_000, message: "the original terminal socket must dispatch close before observing suppressed recovery" },
+    ).toBe(true);
+  } catch (error) {
+    // Matcher output only retains the predicate; preserve its bounded premise separately.
+    throw new Error(`waiting for ${elementId} close dispatch; last socket snapshot: ${JSON.stringify(last)}`, { cause: error });
+  }
+}
+
+/**
  * Hold this page's TERMINAL sockets off the helm — every reconnect attempt
  * fails to connect — until `admitTerminalSockets` puts the real constructor
  * back.
@@ -478,7 +529,7 @@ test("takeover-does-not-bounce-back", async ({
   try {
     const own = await openOwnTerminal(page, request, `takeover-does-not-bounce-back-${Date.now()}`);
     ownId = own.id;
-    await rememberSocket(page, "terminal");
+    await rememberOpenSocketUntilClose(page, "terminal");
 
     const second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
@@ -491,6 +542,7 @@ test("takeover-does-not-bounce-back", async ({
         timeout: 10_000,
       });
       await expect(page.locator(".banner-reclaim")).toBeVisible();
+      await waitForRememberedSocketClose(page, "terminal");
 
       // Nothing is recovering, and nothing is going to: no reconnect
       // surface, no manual control, and — after long enough for the whole
@@ -499,6 +551,7 @@ test("takeover-does-not-bounce-back", async ({
       await expect(page.locator("#term-connecting")).toHaveCount(1);
       await expect(page.locator("#term-connecting")).toBeHidden();
       await expect(page.locator(".terminal-reconnect-now")).toHaveCount(0);
+      // sleep-ok: finite no-reconnect window after the original socket's close event, covering the tuned ladder several times.
       await page.waitForTimeout(1_000);
       expect(
         await page.evaluate(
@@ -821,7 +874,7 @@ test("bfcache-restore-lets-a-terminal-reconnect-again", async ({ page, request }
   try {
     const own = await openOwnTerminal(page, request, `bfcache-restore-lets-a-terminal-reconnec-${Date.now()}`);
     ownId = own.id;
-    await rememberSocket(page, "terminal");
+    await rememberOpenSocketUntilClose(page, "terminal");
 
     // Enter the cache: the page stops being a page, and its socket dies —
     // a close nothing acts on, because the page is on its way out.
@@ -829,6 +882,8 @@ test("bfcache-restore-lets-a-terminal-reconnect-again", async ({ page, request }
       window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
       (window as any).__farhelmIslands["terminal"].ws.close();
     });
+    await waitForRememberedSocketClose(page, "terminal");
+    // sleep-ok: finite no-reconnect window after close dispatch while the pagehide latch is set; pageshow must be the recovery trigger.
     await page.waitForTimeout(300);
     expect(
       await page.evaluate(
