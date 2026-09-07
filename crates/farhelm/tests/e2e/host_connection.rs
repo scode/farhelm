@@ -247,6 +247,8 @@ async fn remote_supervisor() -> RemoteSupervisor {
 /// one that is merely still starting — is reported with its own error
 /// immediately, instead of being waited out and then blamed on slowness
 /// (see [`ServeFailure`]).
+/// The same deadline covers connecting and completing the handshake: an open
+/// socket whose peer never answers must not trap the readiness loop inside a probe.
 async fn wait_for_socket_client(
     state_dir: &std::path::Path,
     failure: &ServeFailure,
@@ -259,11 +261,19 @@ async fn wait_for_socket_client(
                 state_dir.display()
             );
         }
-        if let Ok(stream) = farhelm_supervisor::service::connect(state_dir).await {
+        let probe = async {
+            let stream = farhelm_supervisor::service::connect(state_dir).await.ok()?;
             let (r, w) = tokio::io::split(stream);
-            if let Ok(client) = SupervisorClient::start(r, w).await {
-                return client;
-            }
+            SupervisorClient::start(r, w).await.ok()
+        };
+        match tokio::time::timeout_at(deadline, probe).await {
+            Ok(Some(client)) => return client,
+            Ok(None) => {}
+            Err(_) => panic!(
+                "supervisor connection or handshake at {} exceeded readiness deadline; serve failure: {:?}",
+                state_dir.display(),
+                *failure.lock().expect("serve failure mutex")
+            ),
         }
         assert!(
             tokio::time::Instant::now() < deadline,
