@@ -26,6 +26,11 @@ Rules:
 
 # Finishing work
 
+For changes to tests or their fixtures, apply [.agents/test-authoring.md](.agents/test-authoring.md) during authoring
+and supply its full text verbatim to the independent reviewer. Use the review process selected for the task; this
+checklist does not request an additional reviewer or a review swarm. Report concrete violations of the relevant
+contracts, not mechanical demands for every bullet to appear in every test.
+
 Before creating or updating a PR, or claiming work is done, use judgment to select the checks below that can
 meaningfully validate the change. The list is the authoritative inventory of CI-equivalent gates and what each one
 covers, not a requirement to run every command for every diff. Run each command whose inputs, generated artifacts, or
