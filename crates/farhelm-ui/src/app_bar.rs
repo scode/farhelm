@@ -240,12 +240,15 @@ enum ProfileFocus {
 /// transit because a focused control can disappear before its replacement is
 /// committed. The caller's monotonic deadline bounds the bridge itself; a
 /// renderer that does not answer in time supplies `Unknown`, not transit.
-async fn classify_profile_focus(deadline: Instant) -> ProfileFocus {
-    let classification = document::eval(
+/// Captured provenance scopes an optional test hold; it never changes the
+/// active-element classification or the production dismissal decision.
+async fn classify_profile_focus(deadline: Instant, trusted_outside: bool) -> ProfileFocus {
+    let classification = document::eval(&format!(
+        "const trustedOutside = {trusted_outside}; {}",
         "const test = window.__farhelmTestProfiles; \
          if (test) test.classificationAttempts = (test.classificationAttempts || 0) + 1; \
          const gate = test?.classification; \
-         if (gate?.holds > 0) { \
+         if (gate?.holds > 0 && (!gate.trustedOnly || trustedOutside)) { \
              gate.holds -= 1; \
              gate.started = (gate.started || 0) + 1; \
              await new Promise((resolve) => { (gate.releases ||= []).push(resolve); }); \
@@ -261,7 +264,7 @@ async fn classify_profile_focus(deadline: Instant) -> ProfileFocus {
          if (active === document.querySelector('.profiles-toggle') || \
              document.querySelector('.profiles-popover')?.contains(active)) return 'inside'; \
          return 'outside';",
-    );
+    ));
     match finish_before(deadline, classification.join::<String>()).await {
         Some(Ok(value)) if value == "inside" => ProfileFocus::Inside,
         Some(Ok(value)) if value == "outside" => ProfileFocus::Outside,
@@ -277,13 +280,15 @@ async fn classify_profile_focus(deadline: Instant) -> ProfileFocus {
 /// dismissal early, while the deadline keeps a broken destination bounded. An
 /// initial `Unknown` may be retried, but a later transit sample still enters
 /// the same pending-request loop rather than becoming dismissal evidence alone.
-async fn settled_profile_focus(focus: FocusCoordinator) -> ProfileFocus {
+/// Every evaluation retains the initiating obligation's provenance, including
+/// retries, so a scoped test hold cannot be consumed by an older form transition.
+async fn settled_profile_focus(focus: FocusCoordinator, trusted_outside: bool) -> ProfileFocus {
     let deadline = Instant::now() + Duration::from_millis(FOCUS_SETTLE_MS + FOCUS_TRANSIT_GRACE_MS);
     // Let the pointer event finish first. Focus-out precedes the click whose
     // handler records a replacement request, so classifying in the same task
     // would observe `body` before that request exists.
     sleep_ms(0).await;
-    let mut classification = classify_profile_focus(deadline).await;
+    let mut classification = classify_profile_focus(deadline, trusted_outside).await;
     if classification == ProfileFocus::Unknown {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let delay = remaining.as_millis().min(25) as u64;
@@ -291,7 +296,7 @@ async fn settled_profile_focus(focus: FocusCoordinator) -> ProfileFocus {
             return ProfileFocus::Unknown;
         }
         sleep_ms(delay).await;
-        classification = classify_profile_focus(deadline).await;
+        classification = classify_profile_focus(deadline, trusted_outside).await;
     }
     if classification != ProfileFocus::Transit {
         return classification;
@@ -307,7 +312,7 @@ async fn settled_profile_focus(focus: FocusCoordinator) -> ProfileFocus {
     if focus.pending() || focus.unknown() {
         return ProfileFocus::Unknown;
     }
-    classify_profile_focus(deadline).await
+    classify_profile_focus(deadline, trusted_outside).await
 }
 
 /// Render the sticky sidebar bar and its viewport-fixed profile manager.
@@ -439,7 +444,8 @@ pub(crate) fn AppBar(
         {
             running_focus_check.set(Some(obligation));
             spawn(async move {
-                let focus = settled_profile_focus(focus_coordinator).await;
+                let focus =
+                    settled_profile_focus(focus_coordinator, obligation.trusted_outside).await;
                 if obligation.opening != *open_generation.peek()
                     || *pending_focus_check.peek() != Some(obligation)
                 {

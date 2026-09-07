@@ -2768,34 +2768,24 @@ test.describe("agent profiles", () => {
     const row = profileRow(page, profile.id);
     const form = await openProfileEditor(row);
     await form.locator(".profile-name-input").fill(`${profile.name}-saved`);
-    // Opening the editor replaced the focused edit button, and that transit
-    // starts a classifier of its own. Let it finish before arming the hold,
-    // or on a slow machine it consumes the hold instead of the inert click's
-    // classifier, which then runs free and dismisses the popup under this
-    // test. Quiescence is "no new classification attempt for a while".
-    await page.evaluate(() => {
-      (window as any).__farhelmTestProfiles = { classificationAttempts: 0 };
-    });
-    await expect
-      .poll(
-        async () => {
-          const before = await page.evaluate(
-            () => (window as any).__farhelmTestProfiles.classificationAttempts,
-          );
-          await page.waitForTimeout(400);
-          const after = await page.evaluate(
-            () => (window as any).__farhelmTestProfiles.classificationAttempts,
-          );
-          return after === before;
-        },
-        { timeout: 20_000, intervals: [100] },
-      )
-      .toBe(true);
+    // The hold belongs to the trusted outside click below. An editor
+    // transition may still have an ordinary classifier in flight; it must
+    // not consume this hold, and the test need not guess when it retires.
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = {
-        classification: { holds: 1, started: 0, releases: [] },
+        classificationAttempts: 0,
+        classification: { trustedOnly: true, holds: 1, started: 0, releases: [] },
       };
     });
+    // Exercise an ordinary classification with the hold already armed.
+    // The relay is the same one used by programmatic focus-out, so this
+    // premise does not depend on whether the engine focused the edit button.
+    await section(page).locator(".profiles-focusout-relay").dispatchEvent("click");
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classificationAttempts)
+    ).toBeGreaterThan(0);
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started))
+      .toBe(0);
     const point = await inertSidebarPoint(page);
     await page.mouse.click(point.x, point.y);
     await expect.poll(() =>
