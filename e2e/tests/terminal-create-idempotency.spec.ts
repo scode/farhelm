@@ -222,13 +222,19 @@ test("the create form's inputs are disabled while a create is in flight", async 
   request,
 }) => {
   const title = `intent-inert-${Date.now()}`;
+  // Keep the POST pending for the disabled-input assertions. If they fail,
+  // abort the held request so cleanup cannot race a late session creation.
+  let release!: (proceed: boolean) => void;
+  const held = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") {
       await route.continue();
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    await route.continue();
+    if (await held) await route.continue();
+    else await route.abort();
   });
 
   try {
@@ -238,13 +244,21 @@ test("the create form's inputs are disabled while a create is in flight", async 
       invocation: FAKE_AGENT_INVOCATION,
       title,
     });
-    await form.locator('button[type="submit"]').click();
+    await Promise.all([
+      page.waitForRequest(
+        (req) => req.method() === "POST" && new URL(req.url()).pathname === "/api/sessions",
+        { timeout: 20_000 },
+      ),
+      form.locator('button[type="submit"]').click(),
+    ]);
     for (const index of [0, 1, 2]) {
       await expect(form.locator('input[type="text"]').nth(index)).toBeDisabled();
     }
+    release(true);
     const id = await sessionIdFor(rowByTitle(page, title));
     await waitForSessionRevealed(page, id);
   } finally {
+    release(false);
     await cleanUpSessionsTitled(request, title);
   }
 });
