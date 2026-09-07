@@ -265,10 +265,22 @@ fn marked_rows(output: &str) -> Vec<&str> {
 /// an upcall can only be answered by a connection that exists. Waiting here
 /// turns "the supervisor was not up yet" into one clear failure instead of
 /// an unrelated one three steps later.
+/// The readiness deadline includes each HTTP response and its body, so a stuck
+/// request cannot bypass the loop's time budget.
 async fn await_local_host(client: &reqwest::Client, base: &str) {
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+    let mut last_completed = None;
     loop {
-        let hosts = get_json(client, &format!("{base}/api/hosts")).await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "local host never connected; last completed response (None means no response): {last_completed:?}"
+        );
+        let hosts =
+            tokio::time::timeout_at(deadline, get_json(client, &format!("{base}/api/hosts")))
+                .await
+                .unwrap_or_else(|_| panic!(
+                    "local-host HTTP probe exceeded readiness deadline; last completed response (None means no response): {last_completed:?}"
+                ));
         let rows = hosts["hosts"].as_array().expect("hosts is an array");
         if rows
             .iter()
@@ -280,6 +292,7 @@ async fn await_local_host(client: &reqwest::Client, base: &str) {
             tokio::time::Instant::now() < deadline,
             "the helm's own host never connected; last seen {hosts}"
         );
+        last_completed = Some(hosts);
         // sleep-ok: poll the actual local-host connection state before routing requests to it.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

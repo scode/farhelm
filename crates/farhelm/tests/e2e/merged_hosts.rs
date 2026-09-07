@@ -46,10 +46,22 @@ use crate::host_connection::self_ssh_available;
 /// "the fleet never came up" is useless on its own, and the states are
 /// exactly what says WHY — an ssh host that is skewed, mismatched, or
 /// unreachable each fails here carrying its own evidence.
+/// The deadline also covers each response body; receiving headers alone does
+/// not make a probe complete.
 async fn await_fleet_connected(client: &reqwest::Client, base: &str) -> serde_json::Value {
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+    let mut last_completed = None;
     loop {
-        let hosts = get_json(client, &format!("{base}/api/hosts")).await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "fleet never reached two connected hosts; last completed response (None means no response): {last_completed:?}"
+        );
+        let hosts =
+            tokio::time::timeout_at(deadline, get_json(client, &format!("{base}/api/hosts")))
+                .await
+                .unwrap_or_else(|_| panic!(
+                    "fleet HTTP probe exceeded readiness deadline; last completed response (None means no response): {last_completed:?}"
+                ));
         let rows = hosts["hosts"].as_array().expect("hosts is an array");
         if rows.len() == 2 && rows.iter().all(|row| row["state"]["phase"] == "connected") {
             return hosts;
@@ -58,6 +70,7 @@ async fn await_fleet_connected(client: &reqwest::Client, base: &str) -> serde_js
             tokio::time::Instant::now() < deadline,
             "the fleet never reached two connected hosts; last seen {hosts}"
         );
+        last_completed = Some(hosts);
         // sleep-ok: poll the two hosts' connection states before exercising the merged fleet.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -68,10 +81,21 @@ async fn await_fleet_connected(client: &reqwest::Client, base: &str) -> serde_js
 /// The list trails a create by up to one refresh interval BY DESIGN — the
 /// helm serves it from its cache and never by asking hosts — so polling is
 /// the correct shape here rather than a concession to flakiness.
+/// A stalled HTTP response shares that deadline with the polling loop.
 async fn await_listed(client: &reqwest::Client, base: &str, ids: &[&str]) -> serde_json::Value {
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+    let mut last_completed = None;
     loop {
-        let listing = get_json(client, &format!("{base}/api/sessions")).await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "merged list never carried {ids:?}; last completed response (None means no response): {last_completed:?}"
+        );
+        let listing =
+            tokio::time::timeout_at(deadline, get_json(client, &format!("{base}/api/sessions")))
+                .await
+                .unwrap_or_else(|_| panic!(
+                    "merged-list HTTP probe for {ids:?} exceeded readiness deadline; last completed response (None means no response): {last_completed:?}"
+                ));
         let present: Vec<&str> = listing["sessions"]
             .as_array()
             .expect("sessions is an array")
@@ -85,6 +109,7 @@ async fn await_listed(client: &reqwest::Client, base: &str, ids: &[&str]) -> ser
             tokio::time::Instant::now() < deadline,
             "the merged list never carried {ids:?}; last seen {listing}"
         );
+        last_completed = Some(listing);
         // sleep-ok: observe the cached merged listing until it contains every requested session.
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
