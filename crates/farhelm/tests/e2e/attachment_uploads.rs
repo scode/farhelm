@@ -43,6 +43,7 @@ struct SlowFs {
 }
 
 impl SlowFs {
+    /// Delay one filesystem stage so disk deadlines and cancellation meet a real blocked operation.
     fn seam(
         stage: &'static str,
         delay: Duration,
@@ -50,11 +51,13 @@ impl SlowFs {
         Arc::new(SlowFs { stage, delay })
     }
 
+    /// Block only the selected disk operation; this is fault stimulus, not a readiness wait.
     fn pause(&self, stage: &'static str) {
         if self.stage == stage {
             // A blocking sleep on purpose: these run inside
             // `spawn_blocking`, which is exactly where a real filesystem
             // would block.
+            // sleep-ok: simulate a disk operation that consumes the injected duration inside spawn_blocking.
             std::thread::sleep(self.delay);
         }
     }
@@ -238,6 +241,63 @@ impl RawPeer {
         self.next_outcome(20).await
     }
 
+    /// Start a successor transfer once the prior owner has released its channel.
+    ///
+    /// Only the correlated channel-in-use refusal is transient here. Storage
+    /// and protocol failures must stay visible instead of becoming retries.
+    /// One deadline bounds writes, replies and polling together.
+    async fn begin_when_channel_reusable(
+        &mut self,
+        req_id: u64,
+        session_id: &str,
+        channel: u32,
+        filename: &str,
+        size: u64,
+    ) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        tokio::time::timeout_at(deadline, async {
+            loop {
+                match self
+                    .begin(req_id, session_id, channel, filename, size)
+                    .await
+                {
+                    ControlMsg::UploadStarted { req_id: reply, .. } if reply == req_id => return,
+                    ControlMsg::Error {
+                        req_id: reply,
+                        kind: ErrorKind::InvalidRequest,
+                        message,
+                    } if reply == req_id
+                        && message == format!("attachment channel {channel} is already in use") => {
+                    }
+                    other => panic!("channel {channel} reuse failed: {other:?}"),
+                }
+                // sleep-ok: the completed transfer releases its channel asynchronously; retry only its explicit in-use refusal.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("channel {channel} did not become reusable within 10s"));
+    }
+
+    /// Send a finite paced stream whose cadence is part of the progress-timeout stimulus.
+    ///
+    /// Empty and nonempty chunks exercise opposite sides of the same rule:
+    /// traffic alone is not progress. This helper deliberately does not wait
+    /// for acknowledgements, which would change the offered traffic pattern.
+    async fn send_paced_chunks(
+        &mut self,
+        channel: u32,
+        bytes: &[u8],
+        count: usize,
+        cadence: Duration,
+    ) {
+        for _ in 0..count {
+            self.chunk(channel, bytes.to_vec()).await;
+            // sleep-ok: pace the specified finite traffic stimulus relative to the injected upload-progress deadline.
+            tokio::time::sleep(cadence).await;
+        }
+    }
+
     /// The whole happy-path sequence — begin, chunks, commit — returning
     /// the transfer's final outcome (`UploadCommitted`, or whatever
     /// refused it).
@@ -335,6 +395,7 @@ async fn wait_for_attachments(
             "attachments never settled to {expected:?} with nothing staged; last saw \
              published {published:?}, staged {staged:?}"
         );
+        // sleep-ok: publication and staging cleanup finish asynchronously; observe both directory states before returning.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -1511,25 +1572,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     // attachment's replay/live cutover rather than trying to reconstruct text
     // that cutover may split with mode sequences.
     let tmux_sock = h.state.path().join("tmux.sock");
-    let tmux_name = format!("fh-{}", session.id);
-    let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        let pane = tmux_query(
-            &tmux_sock,
-            &["capture-pane", "-p", "-S", "-", "-t", &tmux_name],
-        )
-        .await;
-        let rendered = String::from_utf8_lossy(&pane.stdout);
-        if pane.status.success() && rendered.contains("FAKE-AGENT READY") {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < ready_deadline,
-            "the gated flood never became ready; rendered pane:\n{rendered}\ntmux stderr:\n{}",
-            String::from_utf8_lossy(&pane.stderr)
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    wait_for_agent_ready(&tmux_sock, &session.id).await;
 
     let mut peer = RawPeer::connect_with_buffer(&h.sup, 1024).await;
 
@@ -1609,6 +1652,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     // The marker proves live output reached this peer. Leave the remaining
     // finite burst unread long enough to fill the supervisor queue; neither
     // the readiness exchange nor the marker contributes to its denominator.
+    // sleep-ok: intentionally withhold reads to build the measured backlog; the later 32 KiB floor independently checks that premise.
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Freeze what piled up. From here the terminal queue only shrinks
@@ -1632,6 +1676,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         size: 16,
     })
     .await;
+    // sleep-ok: consuming a readiness reply would perturb the queue positions under measurement; the test documents the residual timing margin.
     tokio::time::sleep(SETTLE).await;
 
     // One reader for all three phases (await the start, then the ack, then
@@ -1677,6 +1722,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
                     // produced while the backlog is still whole, so what
                     // the drain then reports is where the ack sits in that
                     // backlog rather than how fast this loop can read.
+                    // sleep-ok: keep the measurement stream unread while the ack is produced; no independent enqueue observation exists.
                     tokio::time::sleep(SETTLE).await;
                 }
                 ControlMsg::UploadAck { channel: 2, .. } => {
@@ -1997,16 +2043,8 @@ async fn a_commit_frees_neither_the_channel_nor_the_slot_until_the_transfer_ends
 
     // Once the transfer has ended, the channel is reusable again — and
     // the new transfer receives only its OWN events.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        match peer.begin(5, &session.id, 1, "again.png", 4).await {
-            ControlMsg::UploadStarted { req_id: 5, .. } => break,
-            ControlMsg::Error { .. } if tokio::time::Instant::now() < deadline => {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            other => panic!("a finished transfer's channel must become reusable, got: {other:?}"),
-        }
-    }
+    peer.begin_when_channel_reusable(5, &session.id, 1, "again.png", 4)
+        .await;
     peer.chunk(1, b"efgh".to_vec()).await;
     let ControlMsg::UploadAck {
         channel: 1,
@@ -2083,10 +2121,8 @@ async fn an_empty_chunk_flood_does_not_defeat_the_stall_timeout() {
 
     let flooding = tokio::spawn(async move {
         // Faster than the progress window, for well past it.
-        for _ in 0..60 {
-            peer.chunk(1, Vec::new()).await;
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        peer.send_paced_chunks(1, &[], 60, Duration::from_millis(50))
+            .await;
         peer
     });
     let mut peer = flooding.await.expect("the flood task must not panic");
@@ -2123,10 +2159,8 @@ async fn a_transfer_that_keeps_progressing_is_never_stalled() {
     assert!(matches!(started, ControlMsg::UploadStarted { .. }));
     // Well past the progress window in total (~1.5s against 300ms), but
     // never a gap that reaches it.
-    for _ in 0..chunks {
-        peer.chunk(1, b"abcd".to_vec()).await;
-        tokio::time::sleep(Duration::from_millis(150)).await;
-    }
+    peer.send_paced_chunks(1, b"abcd", chunks, Duration::from_millis(150))
+        .await;
     peer.control(&ControlMsg::CommitUpload {
         req_id: 2,
         channel: 1,
@@ -2270,16 +2304,8 @@ async fn a_begin_that_cannot_stage_refuses_and_leaves_its_channel_usable() {
     );
 
     std::fs::remove_file(&dir).expect("remove the blocker");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        match peer.begin(2, &session.id, 1, "shot.png", 4).await {
-            ControlMsg::UploadStarted { req_id: 2, .. } => break,
-            ControlMsg::Error { .. } if tokio::time::Instant::now() < deadline => {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            other => panic!("the channel must become usable again, got: {other:?}"),
-        }
-    }
+    peer.begin_when_channel_reusable(2, &session.id, 1, "shot.png", 4)
+        .await;
 }
 
 /// A delete whose attachments cannot be detached FAILS, with the session
