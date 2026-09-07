@@ -259,6 +259,7 @@ test.describe("session list ordering", () => {
       invocation: "sleep 300",
     });
     created.push(first.id);
+    // sleep-ok: cross the server's one-second creation timestamp quantum so UUID tie-breaking cannot choose the fixture's order.
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     const second = await createSession(request, {
       title: `sortfix-${stamp}-mmm`,
@@ -266,6 +267,7 @@ test.describe("session list ordering", () => {
       invocation: "sleep 300",
     });
     created.push(second.id);
+    // sleep-ok: give the third fixture a distinct creation second as well; this creates ordering data, not page readiness.
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     const third = await createSession(request, {
       title: `sortfix-${stamp}-zzz`,
@@ -498,6 +500,7 @@ test.describe("session list ordering", () => {
     // A settle window rather than an assertion that resolves as soon as it
     // is true: what is being proved is that nothing happens, and nothing
     // happening is only observable by waiting long enough for it to have.
+    // sleep-ok: retain the negative request/preference observation window after re-choosing the active sort order.
     await page.waitForTimeout(1_500);
     expect(asked.length, "re-choosing the active order must not restart the walk").toBe(before);
     expect(
@@ -765,6 +768,7 @@ test.describe("session list ordering", () => {
     // itself; it must stay well inside the seed read's own deadline
     // (api.rs's PREFERENCE_SEED_TIMEOUT) or the gate gives up and mounts
     // with defaults, which is the OTHER test's subject.
+    // sleep-ok: observe premature mounting while the captured seed reply stays held, before its own fallback deadline.
     await page.waitForTimeout(500);
     await expect(page.locator(".sort-select")).toHaveCount(0);
     expect(asked.length, "no listing read may start before the seed").toBe(0);
@@ -1061,6 +1065,7 @@ test.describe("session list ordering", () => {
     // Settled before the negative is claimed: the extra read, if it were
     // going to happen, would follow the same listing commit that produced
     // the row above.
+    // sleep-ok: observe unwanted fallback requests after selection; an initially empty request log cannot prove they stay absent.
     await page.waitForTimeout(1_500);
     expect(
       newestReads,
@@ -1091,6 +1096,7 @@ test.describe("session list ordering", () => {
     await expect(page.locator(".titlebar .title")).toHaveText("sortfallback-mmm", {
       timeout: 20_000,
     });
+    // sleep-ok: a truncated listing must also avoid a later fallback request; keep the same negative window as the complete-list case.
     await page.waitForTimeout(1_500);
     expect(
       newestReads,
