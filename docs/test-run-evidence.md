@@ -179,6 +179,31 @@ Even an already exited leader can keep the group visible during this interval; t
 the final signal. A forced kill can leave terminal reports incomplete. Report validation never overwrites an earlier
 nonzero child, timeout or interruption result.
 
+### Explicit browser repetitions
+
+From `e2e/`, plan a finite reproduction with a file pattern or grep selection:
+
+```sh
+python3 ../scripts/hunt-browser-tests.py --repeat 20 --timeout 60 \
+  -- npx playwright test tests/terminal-keys.spec.ts -g 'plain Enter sends bare CR'
+```
+
+Add `--execute` only when the displayed selection and cost are intended. Planning does not probe tools, create evidence,
+install dependencies or build the application. Execution needs the browser recorder's prerequisites above, including the
+pinned tmux already on PATH. Each attempt uses both Chromium and WebKit, one worker, no retries and no internal
+repeat-each loop. Use generic recording for an intentionally single-engine debugging run.
+
+The private batch index retains each attempt and its validated actual and expected outcome counts per engine. A later
+pass does not erase an earlier failure. Ordinary failed assertions and individual case timeouts may proceed to the next
+requested attempt; runner-wide timeouts, interrupted or unstarted cases, global errors, missing reports and incomplete
+output or cleanup stop the batch. Expected failures count as executed assertions; intentional skips do not. Before
+scheduling again, the wrapper revalidates the retained reports and checks that they match the recorder manifest.
+
+The batch returns 0 only when every requested attempt passed, 1 when all attempts completed but at least one failed, 125
+for incomplete evidence, or `128 + signal` for operator cancellation. The plan's `repeat * timeout` is the maximum sum
+of child command time, not a wall-clock deadline: metadata and the browser recorder's 60-second cleanup grace are
+additional. This is an operator-invoked investigation tool, not a required per-edit test or proof of flake absence.
+
 ## Exit status and lifecycle
 
 The manifest's `outcome` is one of:
