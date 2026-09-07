@@ -1,0 +1,40 @@
+# Process-per-test execution makes in-process slot semaphores local to one
+# test. Keep the shared resource budget here, where it covers every binary.
+nextest-version = { required = "0.9.143" }
+
+[profile.default]
+test-threads = 4
+retries = 0
+flaky-result = "fail"
+success-output = "immediate"
+failure-output = "immediate-final"
+final-status-level = "skip"
+fail-fast = false
+
+# A stuck test gets time to run its own teardown before the runner kills its
+# process group. An outer recorder must allow more than this five-second grace.
+slow-timeout = { period = "60s", terminate-after = 5, grace-period = "5s" }
+leak-timeout = { period = "1s", result = "fail" }
+
+[profile.default.junit]
+# The recorded-run adapter supplies a fresh store directory for each run.
+# Selected-out tests stay visible so a narrow pass cannot look like a suite pass.
+path = "junit.xml"
+# Output already goes to the recorder's bounded log and per-test traces.
+# Keep the report for outcomes rather than duplicating arbitrary test output.
+store-success-output = false
+store-failure-output = false
+report-skipped = "all"
+
+[test-groups]
+e2e = { max-threads = 4 }
+
+[[profile.default.overrides]]
+filter = 'package(farhelm) & binary(e2e)'
+test-group = "e2e"
+
+[[profile.default.overrides]]
+# This test measures memory growth while deliberately blocking a viewer.
+# Reserve the default global budget rather than measuring alongside other tests.
+filter = 'test(terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled)'
+threads-required = 4
