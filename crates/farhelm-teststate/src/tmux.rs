@@ -22,6 +22,9 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+/// Private tmux metadata and visible-pane evidence for a failed test cleanup.
+pub mod diagnostics;
+
 const TOTAL_ALLOWANCE: Duration = Duration::from_secs(5);
 const PROTOCOL_ALLOWANCE: Duration = Duration::from_secs(4);
 const CLEANUP_RESERVE: Duration = Duration::from_millis(250);
@@ -476,12 +479,22 @@ fn run_protocol(
                 ));
             }
         };
+    let mut command = tmux_command(socket, executable);
+    command.arg("kill-server");
+    match run_bounded(&mut command, &limits) {
+        Ok(outcome) => TmuxProtocolOutcome::Attempted(outcome),
+        Err(error) => {
+            TmuxProtocolOutcome::NotAttempted(TmuxProtocolUnavailable::InvalidLimits(error))
+        }
+    }
+}
+
+/// Build one client command rooted in the directory whose socket entry was
+/// validated. The socket basename is deliberately the only path passed to
+/// tmux: after validation, an ancestor rename must not redirect this client.
+fn tmux_command(socket: &SocketAuthority, executable: &Path) -> Command {
     let mut command = Command::new(executable);
-    command
-        .arg("-S")
-        .arg(&socket.name)
-        .arg("kill-server")
-        .env_clear();
+    command.arg("-S").arg(&socket.name).env_clear();
     let directory_fd = socket.directory.as_raw_fd();
     // SAFETY: only async-signal-safe fchdir and errno inspection run in the
     // forked child. The parent retains directory_fd through spawn and wait;
@@ -496,12 +509,7 @@ fn run_protocol(
             }
         });
     }
-    match run_bounded(&mut command, &limits) {
-        Ok(outcome) => TmuxProtocolOutcome::Attempted(outcome),
-        Err(error) => {
-            TmuxProtocolOutcome::NotAttempted(TmuxProtocolUnavailable::InvalidLimits(error))
-        }
-    }
+    command
 }
 
 #[cfg(target_os = "linux")]
@@ -1153,6 +1161,182 @@ mod tests {
         assert_eq!(outcome.acquisition, TmuxPeerAcquisition::Verified);
         assert_eq!(outcome.fallback, TmuxFallback::NotNeeded);
         assert_eq!(outcome.death, TmuxDeath::Observed);
+    }
+
+    /// The diagnostic API uses the same pinned private server shape as
+    /// shutdown, yet asks tmux only for metadata and the pane's visible
+    /// screen. A marker sent to the shell makes history-free capture visible
+    /// without exposing an environment or command line in the assertion.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn diagnostics_capture_a_real_tmux_visible_marker() {
+        let Some(fixture) = TmuxFixture::start() else {
+            return;
+        };
+        let limits = CommandRunLimits::new(
+            TOTAL_ALLOWANCE,
+            CLEANUP_RESERVE,
+            OUTPUT_LIMIT,
+            OUTPUT_LIMIT,
+            OUTPUT_LIMIT,
+        )
+        .expect("valid visible-marker limits");
+        let mut marker = Command::new(&fixture.executable);
+        marker
+            .arg("-S")
+            .arg(&fixture.socket)
+            .args(["send-keys", "-t", ":", "farhelm-visible-marker", "Enter"])
+            .env_clear();
+        let marker = run_bounded(&mut marker, &limits).expect("valid visible-marker runner");
+        assert!(
+            command_succeeded(&marker),
+            "visible marker setup failed: {marker:?}"
+        );
+
+        visible_marker_ready(
+            &fixture,
+            b"farhelm-visible-marker",
+            Instant::now() + TOTAL_ALLOWANCE,
+        );
+
+        // Pane-owned markers are data, even when they contain a complete fake
+        // inventory row. Link the same real pane into a second session as well:
+        // both shapes must still yield exactly the two distinct real panes.
+        let forged = "marker\u{1f}tab\u{1e}\n%999999\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1e}\n";
+        for args in [
+            vec!["set-option", "-p", "-t", "0:0", "@farhelm-agent", forged],
+            vec!["set-option", "-p", "-t", "0:0", "@farhelm-tab", forged],
+            vec!["new-session", "-d", "-s", "diagnostic-linked"],
+            vec!["link-window", "-s", "0:0", "-t", "diagnostic-linked:1"],
+        ] {
+            let mut command = Command::new(&fixture.executable);
+            command
+                .arg("-S")
+                .arg(&fixture.socket)
+                .args(args)
+                .env_clear();
+            let result = run_bounded(&mut command, &limits).expect("valid metadata fixture limits");
+            assert!(
+                command_succeeded(&result),
+                "metadata fixture setup: {result:?}"
+            );
+        }
+
+        let snapshot_started = Instant::now();
+        let snapshot = diagnostics::snapshot_tmux_diagnostics(&fixture.socket, &fixture.executable);
+        println!(
+            "healthy tmux diagnostics elapsed: {:?}",
+            snapshot_started.elapsed()
+        );
+        assert_eq!(
+            snapshot.authorization,
+            diagnostics::TmuxDiagnosticsAuthorization::Authorized
+        );
+        assert!(
+            snapshot.captures.iter().any(|capture| {
+                matches!(
+                    &capture.result,
+                    diagnostics::TmuxDiagnosticAttempt::Attempted(outcome)
+                        if outcome.stdout.prefix.windows(b"farhelm-visible-marker".len()).any(
+                            |window| window == b"farhelm-visible-marker"
+                        )
+                )
+            }),
+            "visible marker missing from snapshot: {snapshot:?}"
+        );
+        assert!(snapshot.metadata.iter().all(|command| {
+            matches!(
+                &command.result,
+                diagnostics::TmuxDiagnosticAttempt::Attempted(outcome) if command_succeeded(outcome)
+            )
+        }));
+        assert_eq!(snapshot.omitted_valid_panes, Some(0));
+        // Nonempty IDs alone would miss a format modifier that accidentally
+        // erased every free-text field. Verify retained names, command text,
+        // and the exact safe rendering of both writable marker values.
+        let diagnostics::TmuxDiagnosticAttempt::Attempted(panes) = &snapshot.metadata[1].result
+        else {
+            panic!("pane inventory was not attempted: {snapshot:?}");
+        };
+        let rows = panes.stdout.prefix.split(|byte| *byte == b'\n');
+        let mut original_rows = 0;
+        for row in rows.filter(|row| !row.is_empty()) {
+            let fields: Vec<_> = row
+                .strip_suffix(&[0x1e])
+                .expect("record terminator")
+                .split(|byte| *byte == 0x1f)
+                .collect();
+            assert_eq!(fields.len(), 10);
+            assert!(fields[1] == b"0" || fields[1] == b"diagnostic-linked");
+            assert!(!fields[7].is_empty(), "current command text disappeared");
+            if fields[0] == b"%0" {
+                original_rows += 1;
+                let expected = b"marker_tab__%999999_x_x_x_x_x_x_x_x_x__";
+                assert_eq!(fields[8], expected);
+                assert_eq!(fields[9], expected);
+            }
+        }
+        assert_eq!(
+            original_rows, 2,
+            "linked window must appear in both sessions"
+        );
+        assert_eq!(snapshot.captures.len(), 2, "{snapshot:?}");
+        assert!(
+            snapshot.captures.iter().all(|capture| matches!(
+                &capture.label,
+                diagnostics::TmuxDiagnosticLabel::VisiblePane(id) if id == "%0" || id == "%1"
+            )),
+            "a marker manufactured a target: {snapshot:?}"
+        );
+
+        let shutdown_started = Instant::now();
+        let shutdown = shutdown_tmux_server(&fixture.socket, &fixture.executable);
+        println!(
+            "healthy tmux diagnostics shutdown elapsed: {:?}",
+            shutdown_started.elapsed()
+        );
+        assert_eq!(shutdown.death, TmuxDeath::Observed);
+    }
+
+    /// Poll the visible grid through bounded child commands until the shell
+    /// has consumed its input. Sending keys only queues input, so it cannot
+    /// establish that the final diagnostics snapshot will contain the marker.
+    #[cfg(target_os = "linux")]
+    fn visible_marker_ready(fixture: &TmuxFixture, marker: &[u8], deadline: Instant) {
+        let mut last = None;
+        loop {
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                panic!("visible marker never reached the pane: {last:?}");
+            };
+            let reserve = CLEANUP_RESERVE.min(remaining / 2);
+            if reserve.is_zero() {
+                panic!("visible marker deadline left no cleanup reserve: {last:?}");
+            }
+            let limits = CommandRunLimits::new(
+                remaining,
+                reserve,
+                OUTPUT_LIMIT,
+                OUTPUT_LIMIT,
+                OUTPUT_LIMIT.saturating_mul(2),
+            )
+            .expect("valid visible-marker poll limits");
+            let mut capture = Command::new(&fixture.executable);
+            capture
+                .arg("-S")
+                .arg(&fixture.socket)
+                .args(["capture-pane", "-p", "-t", ":"])
+                .env_clear();
+            let outcome = run_bounded(&mut capture, &limits).expect("valid visible-marker poll");
+            if outcome
+                .stdout
+                .prefix
+                .windows(marker.len())
+                .any(|window| window == marker)
+            {
+                return;
+            }
+            last = Some(outcome);
+        }
     }
 
     /// Replacing the original pathname after validation must redirect neither
