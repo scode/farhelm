@@ -61,6 +61,10 @@ Observations that drive the ordering:
 
 ### 1. Ledger and execution evidence (low)
 
+Implemented by the local recorder and release/agent integration. Its consumer contract is
+[`docs/test-run-evidence.md`](../docs/test-run-evidence.md); historical substrate claims that cannot be verified are
+explicitly qualified in TODO.md and the appended FLAKES.md caveat. The remaining items still use this plan.
+
 Cheapest discovery multiplier on the page, and the precondition for every metric below.
 
 - A failed local, worker, or applicable release run is not cleared by a later green run: retain its evidence until a
