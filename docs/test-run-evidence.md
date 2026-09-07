@@ -448,6 +448,48 @@ The file-content and executable hashing routines check their deadline between re
 interrupt a filesystem syscall that blocks inside the kernel, so this is not a hard wall-clock bound for a broken
 filesystem.
 
+## Manual evidence summary
+
+Run `python3 scripts/summarize-test-runs.py --root /path/to/retained-runs > /path/to/summary.json` when a summary is
+useful. The command reads existing evidence; it launches no tests and changes neither retention nor `FLAKES.md`. Repeat
+`--root` for separate collections, or use `--run` and `--batch` for individual UUID directories. Roots contain run or
+batch directories directly; discovery does not recursively search arbitrary archives. Extract selected evidence before
+reading it. `--flakes /path/to/FLAKES.md` selects another ledger; the default is this checkout's ledger.
+
+The report keeps three denominators separate: recorded command attempts, reported test cases, and dated latent-flake
+entries. Development, repetition and release attempts have separate totals. Child failures remain failures when a later
+attempt passes; unavailable child results do not count as successful observations. Case totals use structurally
+consistent complete manifest reports, with actual browser results distinct from expected outcomes. The command does not
+revalidate raw report contents. Raw artifact presence, output retention and diagnostic gaps are reported separately, so
+a portable manifest can still contribute reported counts after its raw artifacts have expired.
+
+`--since YYYY-MM-DD` filters runs by their UTC start date and ledger entries by their heading date. Undated runs are
+excluded explicitly under that filter. Batch schedules remain unfiltered because their indexes have no batch start date.
+Identical manifest copies contribute one run; conflicting copies of the same UUID are excluded and reported as
+incomplete discovery. These are retained-input counts, not a measurement of all test execution or evidence of a
+long-term reduction in flakes.
+
+When identical manifest copies retain different artifacts, the run still counts once and the report exposes the
+retention differences and combined gaps. Canonical attempt directories absent from a batch index are inspected too:
+their observed runs contribute, while the stale schedule remains explicitly incomplete.
+
+`--scan-output` additionally looks for the literal `SKIPPED` marker in bounded retained output. A marker is an evidence
+limitation, not a test count. Missing or truncated output prevents an absence claim, and absence even from complete
+output cannot prove every substrate-dependent test ran. The JSON contains fixed categories and counts, not raw output,
+commands, environment values, ledger prose or private input paths.
+
+Retain UUID directories with their manifests and selected raw artifacts while investigating a failure. Keep batch
+indexes with their `attempt-NNNN` directories so missing attempts remain detectable. Archive portable JSON summaries
+where the operator chooses; keep raw output and environment identities outside public source. Summaries cannot recover
+discarded evidence. This command never deletes evidence or inserts ledger entries, and same-session development flakes
+remain run observations rather than latent-flake history.
+
+Discovery accepts at most 32 input directories and budgets 10,000 directory entries, 64 MiB of reads and 30 seconds
+between filesystem operations. Per-file limits apply as well. A kernel-blocked filesystem call is outside the elapsed
+time bound. Exit 0 means discovery completed, not that tests passed or all diagnostics were retained. Missing or invalid
+inputs and exhausted discovery budgets produce a partial JSON report and exit 125; cancellation preserves its signal
+status. Inspect `discovery` and the run coverage gaps before interpreting totals.
+
 ## Tmux evidence
 
 `--tmux required` checks both identities before child spawn:
