@@ -3358,6 +3358,52 @@ mod tests {
     use super::test_support::{ScratchServer, tail_containing};
     use super::*;
 
+    /// ScratchServer must retain its private directory until shared diagnostics
+    /// and shutdown run. A removed socket would make the diagnostic owner refuse
+    /// authorization, silently losing the evidence that motivated consolidation.
+    #[farhelm_testtrace::test]
+    async fn scratch_server_captures_before_releasing_its_directory() {
+        let capture = farhelm_testtrace::current_capture().expect("test capture");
+        let server = ScratchServer::start().await;
+        let directory = server.dir.path().to_path_buf();
+        drop(server);
+        let snapshots = capture.matching("tmux fixture snapshot").unwrap();
+        let shutdowns = capture.matching("tmux fixture shutdown").unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(shutdowns.len(), 1);
+        assert_eq!(
+            snapshots[0].fields.get("authorization").map(String::as_str),
+            Some("Authorized")
+        );
+        assert!(snapshots[0].sequence < shutdowns[0].sequence);
+        // A shutdown event alone also describes refused authority. Require
+        // the protocol command to have run successfully while the directory
+        // still authorized it; pidfd death observation is Linux-specific.
+        let commands = capture
+            .matching_events(|event| {
+                event.fields.get("message").map(String::as_str) == Some("tmux diagnostic command")
+                    && event.fields.get("label").map(String::as_str) == Some("shutdown")
+            })
+            .unwrap();
+        assert_eq!(commands.len(), 1);
+        for (field, expected) in [
+            ("successful", "true"),
+            ("timed_out", "false"),
+            ("reaped", "true"),
+            ("ownership_lost", "false"),
+        ] {
+            assert_eq!(
+                commands[0].fields.get(field).map(String::as_str),
+                Some(expected),
+                "{field}"
+            );
+        }
+        assert!(
+            !directory.exists(),
+            "fixture directory must be released after teardown"
+        );
+    }
+
     /// The alternate-screen switch must be in the PRE-content half and
     /// nowhere else: it clears the buffer it switches to, so emitting it
     /// after the replay would erase the replay. Cursor placement belongs

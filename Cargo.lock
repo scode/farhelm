@@ -1837,6 +1837,7 @@ dependencies = [
  "anyhow",
  "base64",
  "farhelm-proto",
+ "farhelm-teststate",
  "farhelm-testtrace",
  "getrandom 0.3.4",
  "libc",

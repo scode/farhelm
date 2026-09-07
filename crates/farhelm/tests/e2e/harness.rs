@@ -39,7 +39,9 @@ pub(crate) use std::time::Duration;
 pub(crate) use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 mod tmux_guard;
-pub(crate) use tmux_guard::TmuxServerGuard;
+pub(crate) use tmux_guard::{
+    TmuxServerGuard, for_supervisor_child as tmux_guard_for_supervisor_child,
+};
 
 /// The receive surface needed by the shared terminal waiters.
 ///
@@ -509,8 +511,7 @@ pub(crate) async fn supervisor_process_on_state(
     for (key, value) in env {
         command.env(key, value);
     }
-    let tmux =
-        TmuxServerGuard::for_supervisor_child(state.path().join("tmux.sock"), command.as_std());
+    let tmux = tmux_guard_for_supervisor_child(state.path().join("tmux.sock"), command.as_std());
     let child = command
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

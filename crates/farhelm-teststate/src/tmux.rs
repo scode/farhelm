@@ -25,6 +25,9 @@ use std::time::{Duration, Instant};
 /// Private tmux metadata and visible-pane evidence for a failed test cleanup.
 pub mod diagnostics;
 
+/// Fixture lifetime ownership keeps diagnostics before bounded server shutdown.
+pub mod guard;
+
 const TOTAL_ALLOWANCE: Duration = Duration::from_secs(5);
 const PROTOCOL_ALLOWANCE: Duration = Duration::from_secs(4);
 const CLEANUP_RESERVE: Duration = Duration::from_millis(250);
