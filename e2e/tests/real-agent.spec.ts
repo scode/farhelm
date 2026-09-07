@@ -329,6 +329,7 @@ test("waitForReplyMarker stays pending through unrelated output and a quiet gap,
       // care about either.
       await submitPrompt(page, "unrelated-output-while-waiting");
       await waitForReplyMarker(page, "echo:unrelated-output-while-waiting");
+      // sleep-ok: exercise a quiet gap after unrelated output, before sending the awaited marker.
       await page.waitForTimeout(1_000);
       expect(settled, "the release marker has not been echoed yet; the waiter must still be pending")
         .toBe(false);
