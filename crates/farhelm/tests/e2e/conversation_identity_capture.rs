@@ -265,7 +265,7 @@ pub(crate) async fn wait_until_window_disjoint_from(earlier: i64) {
 /// The correlator uses whole Unix seconds, so elapsed monotonic time alone
 /// cannot establish this premise. A separate monotonic bound prevents a
 /// stalled or backwards-moving wall clock from hanging the test indefinitely.
-async fn wait_for_capture_clock_past(target: i64) {
+pub(crate) async fn wait_for_capture_clock_past(target: i64) {
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
     loop {
         let now = farhelm_supervisor::agent_kind::now_unix();
