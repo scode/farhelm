@@ -52,16 +52,19 @@ async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_agent_chan, mut agent_rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut agent_seen = Vec::new();
+    let (_agent_chan, mut agent_seen, mut agent_rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for(&mut agent_rx, &mut agent_seen, "FAKE-AGENT READY", 20).await;
     let agent_pid = extract_pid(&agent_seen, "SELF-PID:");
     let agent_daemon = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
 
     let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-    let (tab_chan, mut tab_rx) = h
+    let (tab_chan, mut tab_seen, mut tab_rx) = h
         .client
-        .attach_terminal(
+        .attach_terminal_live(
             &session.id,
             80,
             24,
@@ -70,7 +73,6 @@ async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab
         )
         .await
         .expect("attach the tab");
-    let mut tab_seen = Vec::new();
     wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
 
     h.client.stop_session(&session.id).await.expect("stop");
@@ -107,8 +109,11 @@ async fn a_session_marked_process_with_no_kind_marker_is_still_reaped_by_stop() 
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
-    let mut seen = Vec::new();
+    let (_chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     let legacy = MarkedDecoy::spawn(&session.id);

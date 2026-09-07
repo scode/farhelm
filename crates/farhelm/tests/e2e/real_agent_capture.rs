@@ -200,8 +200,10 @@ async fn real_agent_captures_its_conversation(
         .await
         .unwrap_or_else(|e| panic!("launching the real {agent}: {e:#}"));
 
-    let (chan, mut rx) = client.attach(&session.id, 100, 30).await.expect("attach");
-    let mut seen = Vec::new();
+    let (chan, mut seen, mut rx) = client
+        .attach_live(&session.id, 100, 30)
+        .await
+        .expect("attach");
     // See [`wait_for_agent_ready`] for the dialog handling and the two
     // orderings inside it. What matters HERE is that the capture window is
     // anchored on the FIRST input byte this session ever takes — the
@@ -614,7 +616,10 @@ async fn real_claude_session_reports_its_identity_across_clear() {
         .await
         .unwrap_or_else(|e| panic!("launching the real claude: {e:#}"));
     let tmux_name = format!("fh-{}", session.id);
-    let (chan, mut rx) = client.attach(&session.id, 100, 30).await.expect("attach");
+    let (chan, _replay, mut rx) = client
+        .attach_live(&session.id, 100, 30)
+        .await
+        .expect("attach");
     // Drained for the whole run, not dropped: the terminal path is
     // flow-controlled with an overflow detach, so an unread receiver
     // eventually detaches this viewer — after which every `send_input`
@@ -774,7 +779,10 @@ async fn real_codex_session_reports_its_identity_across_new() {
         .create_session(&work.path().to_string_lossy(), &agent, None, 100, 30)
         .await
         .unwrap_or_else(|e| panic!("launching the real codex: {e:#}"));
-    let (chan, mut rx) = client.attach(&session.id, 100, 30).await.expect("attach");
+    let (chan, _replay, mut rx) = client
+        .attach_live(&session.id, 100, 30)
+        .await
+        .expect("attach");
     // See the claude test above: the stream must stay drained or the
     // attachment overflow-detaches and later input silently stops landing
     // — with far more rendered output here (codex repaints heavily), this
