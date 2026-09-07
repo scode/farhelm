@@ -1162,7 +1162,7 @@ async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments()
     let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     // A session the supervisor knows nothing about: its whole directory
     // is debris a delete never finished removing, and reconciliation must
@@ -1308,7 +1308,7 @@ async fn a_relative_state_directory_still_reports_an_absolute_path() {
     let sup = Supervisor::new_with_exe(&relative, farhelm_bin().into())
         .await
         .expect("supervisor on a relative state dir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = client
@@ -2498,6 +2498,7 @@ async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
 #[farhelm_testtrace::test]
 async fn a_non_utf8_state_directory_is_refused_before_any_session_can_exist() {
     use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::fs::DirBuilderExt;
 
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let parent = farhelm_teststate::tempdir().expect("tempdir");
@@ -2506,12 +2507,17 @@ async fn a_non_utf8_state_directory_is_refused_before_any_session_can_exist() {
     let mut raw = parent.path().as_os_str().to_os_string().into_vec();
     raw.extend_from_slice(b"/state-\xff");
     let state = std::path::PathBuf::from(std::ffi::OsString::from_vec(raw));
-    std::fs::create_dir(&state).expect("non-UTF-8 state dir");
+    // Keep the same private-directory premise as TestDir: the unusual bytes
+    // are the subject, while teardown still needs an exclusive socket parent.
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .expect("non-UTF-8 state dir");
 
     let sup = Supervisor::new_with_exe(&state, farhelm_bin().into())
         .await
         .expect("a supervisor on a non-UTF-8 state dir");
-    let _tmux = TmuxServerGuard(state.join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.join("tmux.sock"));
     let client = connect_client(&sup).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let refused = client

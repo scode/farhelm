@@ -181,7 +181,7 @@ async fn remote_supervisor() -> RemoteSupervisor {
         Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
             .await
             .expect("supervisor");
-    let tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     // `serve` never returns on its own; it owns the accept loop until the
     // guard below aborts it at teardown. Its error — if it ends early — is
     // parked where the socket wait can report it instead of timing out
