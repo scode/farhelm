@@ -878,7 +878,7 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
@@ -1342,60 +1342,7 @@ async fn window_geometry(h: &Harness, pane: &str) -> String {
 /// output distinguishes a dead server from a missing window and from a pane
 /// that exited while its window marker remained.
 async fn tmux_state_after_attach_failure(h: &Harness) -> String {
-    let socket = h.state.path().join("tmux.sock");
-    let sessions = bounded_tmux_diagnostic(
-        "list-sessions",
-        &socket,
-        &[
-            "list-sessions",
-            "-F",
-            "#{session_name}|windows=#{session_windows}|attached=#{session_attached}",
-        ],
-    )
-    .await;
-    let panes = bounded_tmux_diagnostic(
-        "list-panes",
-        &socket,
-        &[
-            "list-panes",
-            "-a",
-            "-F",
-            "#{session_name}|#{window_id}|#{pane_id}|dead=#{pane_dead}|status=#{pane_dead_status}|command=#{pane_current_command}|agent=#{@farhelm-agent}|tab=#{@farhelm-tab}",
-        ],
-    )
-    .await;
-    let clients = bounded_tmux_diagnostic(
-        "list-clients",
-        &socket,
-        &[
-            "list-clients",
-            "-F",
-            "pid=#{client_pid}|session=#{session_name}|flags=#{client_flags}",
-        ],
-    )
-    .await;
-
-    format!("{sessions}\n{panes}\n{clients}")
-}
-
-/// Run one failure-only tmux probe with a hard process-lifetime bound.
-///
-/// These diagnostics execute when the private server may already be wedged.
-/// An unbounded probe would replace the useful attach failure with a hung test
-/// and leave its child behind when the harness times out.
-async fn bounded_tmux_diagnostic(label: &str, socket: &std::path::Path, args: &[&str]) -> String {
-    let mut command = tokio::process::Command::new("tmux");
-    command.arg("-S").arg(socket).args(args).kill_on_drop(true);
-    match tokio::time::timeout(Duration::from_secs(2), command.output()).await {
-        Ok(Ok(output)) => format!(
-            "{label} status={:?}\nstdout:\n{}stderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ),
-        Ok(Err(error)) => format!("{label} could not start or finish: {error}"),
-        Err(_) => format!("{label} timed out after 2s; its child was killed"),
-    }
+    h._tmux.diagnostic_text()
 }
 
 /// Every terminal-fidelity promise SPEC.md makes, asserted once for the
@@ -2561,11 +2508,13 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sock = state.path().join("tmux.sock");
-    let _tmux = TmuxServerGuard(sock.clone());
-
-    let mut supervisor = tokio::process::Command::new(farhelm_bin())
+    let mut supervisor_command = tokio::process::Command::new(farhelm_bin());
+    supervisor_command
         .args(["supervisor", "run", "--state-dir"])
-        .arg(state.path())
+        .arg(state.path());
+    let _tmux = TmuxServerGuard::for_supervisor_child(sock.clone(), supervisor_command.as_std());
+
+    let mut supervisor = supervisor_command
         .kill_on_drop(true)
         .spawn()
         .expect("spawn the supervisor process");

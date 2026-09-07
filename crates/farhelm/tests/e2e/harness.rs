@@ -38,6 +38,9 @@ pub(crate) use std::task::{Context, Poll};
 pub(crate) use std::time::Duration;
 pub(crate) use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+mod tmux_guard;
+pub(crate) use tmux_guard::TmuxServerGuard;
+
 /// The receive surface needed by the shared terminal waiters.
 ///
 /// `TermStream` keeps its event queue private and cannot be constructed
@@ -413,38 +416,6 @@ pub(crate) fn agent_cmd(args: &str) -> String {
 /// timeouts.
 pub(crate) static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
-/// Kills a private tmux server on drop.
-///
-/// Drop-based on purpose: a test that fails an assertion never reaches
-/// an explicit teardown call, and leaked tmux servers accumulate across
-/// runs until they visibly slow the machine down (this happened).
-/// Synchronous because Drop cannot await. Every test that starts a tmux
-/// server — via `harness()` or by hand — must hold one of these, ordered
-/// BEFORE the state `TestDir` in its struct so the server dies before
-/// the directory holding its socket disappears.
-///
-/// That ordering rule extends to DESTRUCTURING a [`Harness`]: the fields
-/// become plain locals dropped in reverse pattern order, so a pattern
-/// naming the guard before `state` silently inverts the rule and leaks the
-/// server (measured: three per full run, all from that one shape). The
-/// guard is deliberately NOT folded into the tempdir type that would make
-/// this unconstructible — one test drops the guard mid-run, on purpose, to
-/// simulate the tmux server dying across a reboot while keeping the state
-/// directory intact.
-pub(crate) struct TmuxServerGuard(pub(crate) std::path::PathBuf);
-
-impl Drop for TmuxServerGuard {
-    fn drop(&mut self) {
-        let _ = std::process::Command::new("tmux")
-            .arg("-S")
-            .arg(&self.0)
-            .arg("kill-server")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
-}
-
 // ---------------------------------------------------------------
 // The REAL-STACK fixtures: separate `farhelm` processes, a loopback
 // port, and HTTP.
@@ -539,13 +510,14 @@ pub(crate) async fn supervisor_process_on_state(
     for (key, value) in env {
         command.env(key, value);
     }
+    let tmux =
+        TmuxServerGuard::for_supervisor_child(state.path().join("tmux.sock"), command.as_std());
     let child = command
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .expect("spawn supervisor");
-    let tmux = TmuxServerGuard(state.path().join("tmux.sock"));
     let socket = state.path().join("supervisor.sock");
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
     while !socket.exists() {
@@ -1362,10 +1334,10 @@ pub(crate) async fn harness_with_seams(
     let timeouts = floor_suite_timeouts(timeouts);
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
+    let guard = TmuxServerGuard::with_program(state.path().join("tmux.sock"), &seams.tmux_program);
     let sup = Supervisor::new_with_seams(state.path(), farhelm_bin().into(), timeouts, seams)
         .await
         .expect("supervisor");
-    let guard = TmuxServerGuard(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
     Harness {
         client,
