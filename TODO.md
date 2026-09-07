@@ -212,11 +212,6 @@ problems before turning out to be invalid premises. That is why the scale factor
 deferred with a trigger, and why prevention of the already-diagnosed classes runs in parallel with evidence work rather
 than behind it.
 
-- Local/worker hunt tooling, effort low for Rust and medium for the browser leg. Explicit developer-invoked commands
-  reproduce the relevant pinned substrate and concurrency, repeat selected or changed tests within a stated bound, and
-  retain commands, counts, environment identity, and failure artifacts. Twenty repetitions remain a focused mode, not a
-  PR requirement. Shared harness or terminal-asset changes can require the whole binary or suite, and browser runs cover
-  both engines. No nightly workflow, workflow-dispatch hunt, or per-PR stress job is added.
 - Authoring rules as a reviewer checklist and a sleep allowlist, effort low. A short checklist the review swarm's
   test-quality lens loads verbatim and CLAUDE.md's "Finishing work" names for PRs touching tests: premise asserted;
   readiness from the named oracle; confirm the other party is still there before writing or tearing down; no lock or fd

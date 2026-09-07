@@ -39,6 +39,34 @@ attempt and after each state transition. Its states are `running`, `completed`, 
 SIGKILL and host loss can leave an in-progress index and do not authorize an automatic resume or retry. The index is a
 bounded summary; use each retained recorder manifest and JUnit report for the exact command status and test counts.
 
+## Planning hunts for changed inputs
+
+From the checkout, compare a named base with the current tracked working tree and untracked non-ignored files:
+
+```sh
+python3 scripts/plan-test-hunts.py --base main --repeat 20 --timeout 60
+```
+
+This reads bounded Git metadata and Cargo manifests and prints JSON; it never runs the suggested commands. Each
+suggestion has a working directory, exact argv and copyable shell command, concurrency, widening reasons and a maximum
+sum of child-command time. The displayed commands include `--execute`: run one only after reviewing its selection and
+cost and preparing the required tools on a sandbox. Prerequisite builds, metadata and cleanup add wall-clock time.
+
+Rust integration-test changes select the complete test target. Shared fixture changes therefore cannot accidentally
+select only a filename-derived test name; refine the suggested command with a verified nextest filter when a narrower
+reproduction is appropriate. Other Rust changes include reverse package dependencies. Browser spec changes select their
+files under both engines; shared browser inputs, deleted specs and application changes widen to the browser suite.
+Package-wide suggestions subsume narrower targets for the same package. Known cross-package fixture imports are mapped
+explicitly; unresolved helper ownership also appears in the manual-review list. Large browser selections are partitioned
+to respect the runner's argument-count and byte limits, and each partition contributes to the displayed total cost.
+
+`manual_review_paths` contains inputs the planner does not map. An empty command list with manual-review paths is not
+evidence that no validation is needed. Prose paths are listed separately for applicable document checks.
+Feature-specific tests, doctests and other non-hunt checks still require author judgment: this is not a complete build
+dependency analyzer or a replacement for the finishing instructions. Regenerate after source edits; discovery is not an
+atomic snapshot, and actual execution records the source again. Incomplete or oversized discovery is refused rather than
+silently planning a subset.
+
 ## Running a command
 
 Use a Unix Python interpreter with `os.waitid` and `WNOWAIT`. On macOS this requires Python 3.13 or newer; older

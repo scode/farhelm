@@ -138,12 +138,14 @@ Retires cross-test interference as a class instead of fixing instances, and supp
   over selected or changed tests, and preserve item 3's evidence. This is the shape that produced the corpus; the
   2026-09-05 "two CPU-load children" shape reproduced only part of it (the profiles pair, over-one-megabyte, and the
   sentinel all failed with no extra load).
-- A changed Rust test can use twenty fresh invocations, and a changed Playwright spec can use `--repeat-each=20` on both
-  engines. A change to `harness.rs`, `terminal-suite.ts`, or `terminal.js` may require the whole binary or suite, since
-  every module imports them. Twenty repetitions are a filter, not a proof: #355 passed three gates and a sandbox before
-  failing once. The command and its cost stay explicit; no repetition is mandatory for every PR or edit.
-- The browser leg needs `cargo build`, a `dx` release build, and a Playwright install per run, the cost that got the e2e
-  job disabled. It remains explicit local/worker work, never a nightly, on-demand workflow, or per-PR stress job.
+- A changed Rust test or Playwright spec can use twenty explicitly requested recorder-backed invocations; the browser
+  wrapper keeps both engines and gives each attempt its own evidence. A change to `harness.rs`, `terminal-suite.ts`, or
+  `terminal.js` may require the whole binary or suite, since every module imports them. Twenty repetitions are a filter,
+  not a proof: #355 passed three gates and a sandbox before failing once. The command and its cost stay explicit; no
+  repetition is mandatory for every PR or edit.
+- The browser leg needs prepared application builds and installed Playwright engines. Reuse those prerequisites when
+  their inputs are unchanged; the wrappers never install or build them automatically. This expensive work stays on
+  explicitly selected local/worker runs, never a nightly, on-demand workflow, or per-PR stress job.
 
 ### 6. Authoring rules as a reviewer checklist, and a sleep allowlist (low)
 
