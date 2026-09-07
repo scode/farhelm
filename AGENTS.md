@@ -245,6 +245,11 @@ substrate details, run IDs, and confidence about the cause. Record an unavailabl
 than reconstructing it from what a machine was supposed to run. No mandatory repetition count or extra CI run follows
 from this retention rule. Storage, schema, interruption limits, and examples are in `docs/test-run-evidence.md`.
 
+When reporting across retained runs, use `python3 scripts/summarize-test-runs.py --root /path/to/retained-runs` and
+archive its portable JSON where the operator chooses. Supply additional roots or individual `--run`/`--batch`
+directories explicitly. Record incomplete discovery and coverage gaps alongside totals; retained failure-only release
+artifacts are not a denominator for all releases. This is a manual reporting aid, not another validation gate.
+
 The existing release gates use the same recorder. Collection follows those gates and uploads selected bounded records
 when a failure has occurred by that point; later packaging failures cannot trigger it. Download useful failure artifacts
 before hosted retention expires. Successful jobs do not upload run records, so those artifacts alone cannot establish a
