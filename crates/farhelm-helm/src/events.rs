@@ -851,6 +851,7 @@ mod tests {
                     revision(&mut ws).await;
                     return;
                 }
+                // sleep-ok: retry admission within NOTICE until the released subscriber seat is usable.
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
