@@ -3840,6 +3840,7 @@ mod tests {
             {
                 Ok(_) => return path,
                 Err(error) if error.raw_os_error() == Some(26) => {
+                    // sleep-ok: retry only ETXTBSY while an inherited writer closes; successful exec is the fixture boundary.
                     std::thread::sleep(Duration::from_millis(5))
                 }
                 Err(error) => panic!("fixture {name} is not runnable: {error}"),
@@ -3937,6 +3938,7 @@ mod tests {
                 std::time::Instant::now() < gone,
                 "the descendant holding the probe's stdout survived the probe"
             );
+            // sleep-ok: a delivered kill does not imply completed reaping; poll the recorded descendant's existence.
             std::thread::sleep(Duration::from_millis(20));
         }
     }

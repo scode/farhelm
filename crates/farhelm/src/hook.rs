@@ -809,6 +809,7 @@ mod tests {
                             break;
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            // sleep-ok: the nonblocking accept loop must also observe owner cancellation before a client connects.
                             std::thread::sleep(SERVER_POLL);
                         }
                         Err(err) => panic!("accept failed: {err}"),

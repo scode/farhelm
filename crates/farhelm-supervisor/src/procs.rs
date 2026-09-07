@@ -1118,6 +1118,7 @@ pub(crate) mod sleeper {
         std::io::stdout()
             .flush()
             .expect("flushing the readiness line");
+        // sleep-ok: hold the announced fixture process alive for the parent's sweep, with a finite lifetime if its owner fails.
         std::thread::sleep(std::time::Duration::from_secs(30));
     }
 }
@@ -1335,6 +1336,7 @@ mod tests {
                     break;
                 }
             }
+            // sleep-ok: sample marker visibility throughout the negative observation window; one absent pre-exec read is insufficient.
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         let _ = child.kill();

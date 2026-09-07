@@ -1315,6 +1315,7 @@ mod tests {
             match std::process::Command::new(path).arg("-V").output() {
                 Ok(_) => return,
                 Err(error) if error.raw_os_error() == Some(ETXTBSY) => {
+                    // sleep-ok: retry only the inherited-writer exec race; a completed spawn, not elapsed time, admits the fixture.
                     std::thread::sleep(std::time::Duration::from_millis(5));
                 }
                 Err(error) => panic!("fixture script {} is not runnable: {error}", path.display()),

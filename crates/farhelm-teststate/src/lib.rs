@@ -515,6 +515,7 @@ fn kill_tmux_server(socket: &Path) {
                     let _ = child.wait();
                     return;
                 }
+                // sleep-ok: throttle cleanup's child-exit poll until the kill-server command exits or exhausts its allowance.
                 std::thread::sleep(Duration::from_millis(25));
             }
             // Do not walk away from a possibly-live child on a polling
@@ -1063,6 +1064,7 @@ mod tests {
                 std::time::Instant::now() < deadline,
                 "tmux server {pid} survived the sweep"
             );
+            // sleep-ok: directory removal is not process reaping; observe the recorded tmux pid disappearing after the sweep.
             std::thread::sleep(Duration::from_millis(25));
         }
     }
