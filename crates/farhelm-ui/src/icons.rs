@@ -12,10 +12,10 @@
 //! in lockstep (`scripts/check-desktop-assets.sh` fails the moment the two
 //! diverge) for two glyphs simple enough to draw directly in markup — a
 //! second asset-parity surface with nothing to show for it. Inline SVG pays
-//! neither cost: the shape is markup, `currentColor` makes it follow the
-//! row's own text color (dimmed on a stale row, inverted on a selected one)
-//! with no rule of its own, and there is no file for the two build targets to
-//! disagree about.
+//! neither cost: the shape is markup, `currentColor` lets the caller style
+//! its meaning, and there is no file for the two build targets to disagree
+//! about. Remote glyphs inherit the surrounding text color; session-local
+//! glyphs retain an explicit red caution color across row states.
 //!
 //! Both components below deliberately carry no accessible name of their own
 //! (`aria-hidden="true"`, and neither takes a `title` prop) — see each
