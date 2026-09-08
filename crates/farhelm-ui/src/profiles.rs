@@ -840,7 +840,7 @@ pub(crate) struct FocusCoordinator {
     generation: Signal<u64>,
     pending: Signal<bool>,
     unknown: Signal<bool>,
-    /// The trusted outside obligation sequence mutation completion must yield to.
+    /// The trusted outside sequence that opening and completion focus must yield to.
     outside_obligation: Signal<Option<u64>>,
 }
 
@@ -896,7 +896,7 @@ impl FocusCoordinator {
         }
     }
 
-    /// Whether mutation completion must yield to a trusted outside choice.
+    /// Whether opening or completion focus must yield to a trusted outside choice.
     fn outside_obligation_pending(self) -> bool {
         self.outside_obligation.peek().is_some()
     }
@@ -910,8 +910,8 @@ impl FocusCoordinator {
 /// Create one generation-tagged request with matching Rust and browser clocks.
 ///
 /// `may_replace` separates opening, synchronous in-popup transitions, and
-/// asynchronous completion. Completion yields when the app bar has published
-/// a sequence-tagged trusted outside obligation; ordinary focus-out alone is
+/// asynchronous completion. Opening and completion yield when the app bar has
+/// published a sequence-tagged trusted outside obligation; ordinary focus-out alone is
 /// not evidence that the user chose that destination. A failed or timed-out
 /// browser-clock guard consumes the request as `Unknown` before observation.
 fn request_focus(
@@ -920,7 +920,7 @@ fn request_focus(
     destination: FocusDestination,
     may_replace: Replace,
 ) {
-    if may_replace == Replace::Completion && coordinator.outside_obligation_pending() {
+    if may_replace != Replace::Internal && coordinator.outside_obligation_pending() {
         return;
     }
     let generation = coordinator.advance();
@@ -1033,6 +1033,7 @@ async fn observe_focus_destination(request: &FocusRequest, attempt: u64) -> Focu
          if (test?.hideFocusTarget) return 'missing'; \
          const popup = document.querySelector('.profiles-popover'); \
          if (!popup) return 'refused'; \
+         if ('{replace_mode}' !== 'internal' && popup.__farhelmProfilesOutsideIntent) return 'refused'; \
          const active = document.activeElement; \
          const replaceable = '{replace_mode}' === 'opening' \
              ? (!active || active === document.body || active === document.querySelector('.profiles-toggle')) \
@@ -1067,7 +1068,11 @@ async fn observe_focus_destination(request: &FocusRequest, attempt: u64) -> Focu
 /// Rust races this bridge call against the same request-wide budget. The
 /// renderer separately checks its absolute deadline immediately before
 /// `focus()`, because dropping an overdue eval future cannot stop JavaScript
-/// that has already started running.
+/// that has already started running. Opening and completion also check the
+/// popup node's synchronous outside-intent veto here: a trusted click can
+/// supersede the request after Rust has dispatched this bridge call.
+/// The optional test hold exposes that boundary without extending either
+/// deadline; its receipts distinguish a missed fixture window from a late focus.
 async fn commit_focus_destination(request: &FocusRequest, attempt: u64) -> FocusAttempt {
     let generation = request.generation;
     let replace_mode = match request.may_replace {
@@ -1082,6 +1087,14 @@ async fn commit_focus_destination(request: &FocusRequest, attempt: u64) -> Focus
         "const test = window.__farhelmTestProfiles; \
          if (test) {{ \
              test.focusCommitAttempts = (test.focusCommitAttempts || 0) + 1; \
+             if (test.focusCommitHold) {{ \
+                 const hold = test.focusCommitHold; \
+                 hold.deadline = {browser_deadline}; \
+                 hold.pending = true; \
+                 await new Promise((resolve) => {{ hold.release = resolve; }}); \
+                 hold.pending = false; \
+                 hold.releasedInBudget = performance.now() <= {browser_deadline}; \
+             }} \
              if (test.focusCommitDelayMs > 0) \
                  await new Promise((resolve) => setTimeout(resolve, test.focusCommitDelayMs)); \
          }} \
@@ -1091,6 +1104,7 @@ async fn commit_focus_destination(request: &FocusRequest, attempt: u64) -> Focus
          }} \
          const popup = document.querySelector('.profiles-popover'); \
          if (!popup) return 'refused'; \
+         if ('{replace_mode}' !== 'internal' && popup.__farhelmProfilesOutsideIntent) return 'refused'; \
          const active = document.activeElement; \
          const replaceable = '{replace_mode}' === 'opening' \
              ? (!active || active === document.body || active === document.querySelector('.profiles-toggle')) \
@@ -1369,7 +1383,7 @@ pub(crate) fn ProfilesPopup(
                 if focus_coordinator.generation_now() != request.generation {
                     return;
                 }
-                if request.may_replace == Replace::Completion
+                if request.may_replace != Replace::Internal
                     && focus_coordinator.outside_obligation_pending()
                 {
                     break FocusAttempt::Refused;
@@ -1385,7 +1399,7 @@ pub(crate) fn ProfilesPopup(
                     return;
                 }
                 if outcome == FocusAttempt::Ready {
-                    if request.may_replace == Replace::Completion
+                    if request.may_replace != Replace::Internal
                         && focus_coordinator.outside_obligation_pending()
                     {
                         outcome = FocusAttempt::Refused;

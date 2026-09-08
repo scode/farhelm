@@ -246,6 +246,15 @@ refresh patches unchanged keyed profile rows in place, so it does not replay foc
 terminal whose retained output becomes visible while the popup is mounted does not take focus. Closing the popup does
 not hand focus to that terminal; the user can click it when they want to type there.
 
+A trusted outside pointer or Tab destination supersedes pending opening and completion focus. The popup DOM node records
+that choice synchronously, so even a focus commit already sent across the renderer bridge must yield before moving
+focus. The Rust request worker observes the same obligation; internal form transitions still express newer in-popup
+intent. Unknown classification supplies no dismissal evidence and leaves the obligation pending. A subsequent outside
+focus event or window focus return reconsiders it with a new observation revision once its current observation has
+finished, preserving the original intent's identity and provenance. Notifications during that observation coalesce into
+one queued recheck if it returns Unknown; old classifier completions cannot clear a newer obligation. There is no outer
+timer retry chain; each reconsideration retains the existing bounded classification and pending-focus settlement.
+
 Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
 Every row always shows its name, phase dot, and muted actions toggle in the same narrow trailing gutter as the

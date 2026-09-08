@@ -456,3 +456,45 @@ the accompanying test change; the earlier failed receipt remains retained.
 Class: ambiguous-observable
 
 Cause: established
+
+## 2026-09-08 — profiles opening focus overrides an outside click
+
+The inert-click product defect recorded on 2026-09-05 was reproduced with the controlled companion
+`an outside click overrides a delayed opening focus commit` in `e2e/tests/profiles.spec.ts`. Run
+`db4afac4-d335-43c4-b64e-24968828bc1f`, at `92090716d559` with only the regression fixture changed, used
+`npx playwright test --project chromium-profiles -g 'an outside click overrides a delayed opening focus commit' --workers 1 --retries 0`.
+The trace recorded body focus after the trusted click, then opening focus returned to the new-profile button and left
+the popup mounted. A browser commit already dispatched before the outside choice had no synchronous veto. The
+accompanying popup correction supplies that veto and preserves unresolved dismissal intent across renderer failures. The
+final test uses an explicit commit hold and pointer/deadline receipts rather than a fixed delay. Batch
+`2ded0438-5af3-45c2-a58d-a95fb650615e` passed all 24 cases across three attempts, selecting
+`profiles\.spec\.ts -g 'inert sidebar click|outside click overrides|unresolved outside focus|outside focus recovery survives'`
+under Chromium and WebKit, one worker and zero retries. Both runs used a non-root Ubuntu 26.04 container with a six-CPU
+quota, a 24 GiB memory limit and no added load; tmux 3.7c executable SHA256 was
+`1151ac9d3217afd8c4bc07e54c9fa01d3c71d70357688b6e296094d8ef3deeb3`, `LC_CTYPE=C.UTF-8`, with `LANG` and `LC_ALL` unset.
+No ambient `FARHELM_*` variables were present; the recorder supplied `FARHELM_TEST_TRACE_DIR` and, for the strict
+repetitions, `FARHELM_PLAYWRIGHT_POLICY_FILE`. Disposition: fixed in #527. The separate profile-creation fixture race
+and historical startup/bridge symptoms remain open in TODO.md.
+
+Class: product
+
+Cause: established
+
+## 2026-09-08 — overdue focus fixture assumes a transient attempt count
+
+`an overdue focus commit expires before its side effect` in `e2e/tests/profiles.spec.ts` failed in WebKit in run
+`86c17b1c-5f2c-482c-9b44-1f3491996063`, at `92090716d559` with the popup correction in progress: it observed two commit
+attempts where the unchanged test expected exactly one. The exact selection was `profiles\.spec\.ts` with
+`-g 'focus and Escape|delayed and superseded|overdue focus|focus evaluation errors|unknown then transit|stale focus-out|profile form transitions|busy profile work|synthetic outside|Tab to an outside|Tab leaving|same-turn programmatic|late busy claim|inert sidebar click|outside click overrides|unresolved outside focus'`,
+both engines, one worker and zero retries. The unchanged worker permits another Expired attempt before its Rust budget
+ends; the fixture's shorter browser deadline cannot establish an exact attempt count. The correction requires at least
+one dispatched commit and retains the expiry, Unknown settlement and absence-of-focus assertions. Exact both-engine run
+`7f3ea0ee-184c-4463-a25a-e1e0cdbfb7d6` and final related run `70d4e08d-026d-4675-a585-a9d61cfab8f7` passed. The failing
+run used a non-root Ubuntu 26.04 container with a six-CPU quota, a 24 GiB memory limit and no added load; tmux 3.7c
+executable SHA256 was `1151ac9d3217afd8c4bc07e54c9fa01d3c71d70357688b6e296094d8ef3deeb3`, `LC_CTYPE=C.UTF-8`, with
+`LANG` and `LC_ALL` unset. No ambient `FARHELM_*` variables were present; the recorder supplied `FARHELM_TEST_TRACE_DIR`
+and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Disposition: fixed in #527; the product retry loop is unchanged.
+
+Class: fixture-premise
+
+Cause: established
