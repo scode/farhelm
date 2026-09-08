@@ -1449,19 +1449,19 @@ test("a menu dismissed by a layout change returns focus to its toggle", async ({
  * A browser cannot focus a natively `disabled` control, and the menu
  * keeps consuming Arrow/Home/End regardless — so an implementation that
  * used the `disabled` attribute here produced a menu that swallowed every
- * navigation key and honoured none of them, and an item that lost focus
- * the moment its own action made the row busy, putting Escape out of
+ * navigation key and honoured none of them, putting Escape out of
  * reach with the panel still open. `aria-disabled` plus a guarded
  * `onclick` is the fix, and it is invisible to every other test: the
  * items still report as disabled to Playwright, still refuse clicks, and
  * still look inert.
  *
- * The stalled route is the whole fixture. It holds the shared operation
- * token for as long as this test needs the busy window to last, and is
+ * Accepted Stop closes its menu, so reopen it during the held request to
+ * exercise inert commands. The stalled route keeps the row busy for as
+ * long as this test needs the busy window to last, and is
  * released in `finally` so the request completes rather than being left
  * dangling.
  */
-test("a busy menu stays navigable while refusing to act", async ({ page, request }) => {
+test("a reopened busy menu stays navigable while refusing to act", async ({ page, request }) => {
   const session = await createSession(request, {
     title: `menu-busy-${Date.now()}`,
     cwd: "/tmp",
@@ -1471,8 +1471,10 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let stopRequests = 0;
   try {
     await page.route(`**/api/sessions/${session.id}/stop`, async (route) => {
+      stopRequests++;
       await held;
       // Swallowed on purpose: by the time the gate opens the test may
       // already be tearing down, and a route whose page has gone away
@@ -1506,9 +1508,8 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
     const stop = target.locator(".session-row-stop");
     const archive = target.locator(".session-row-archive");
 
-    // Start a stalled action FROM a focused item: the item that made the
-    // menu busy must keep its focus rather than being blurred out from
-    // under the user mid-keystroke.
+    // Acceptance completes the interaction even with the request held.
+    // A keyboard user must land back on the toggle, ready to reopen it.
     await openRowMenu(target);
     await expect(rename).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -1518,8 +1519,21 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
     await page.keyboard.press("ArrowDown");
     await expect(stop).toBeFocused();
     await stop.click();
+    await expect.poll(() => stopRequests).toBe(1);
+    await expect(target.getByRole("menu")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    await openRowMenu(target);
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(clone).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(replace).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(stop).toBeFocused();
     await expect(stop).toHaveAttribute("aria-disabled", "true");
-    await expect(stop, "the item that went busy must not lose focus").toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(stop, "an inert choice must retain the menu and focus").toBeFocused();
 
     // And the menu still navigates while every command in it is inert —
     // the property a native `disabled` cannot have.
@@ -1540,6 +1554,7 @@ test("a busy menu stays navigable while refusing to act", async ({ page, request
     await openRowMenu(target);
     await expect(rename).toBeFocused();
     await expect(rename).toHaveAttribute("aria-disabled", "true");
+    expect(stopRequests).toBe(1);
   } finally {
     release();
     await page.unroute(`**/api/sessions/${session.id}/stop`).catch(() => {});
@@ -4241,6 +4256,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     const markSeenItem = target.locator(".session-row-mark-seen");
     await expect(markSeenItem).toHaveText("mark unread");
     await markSeenItem.click();
+    await expect(target.getByRole("menu")).toHaveCount(0);
     await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
       timeout: 20_000,
     });
@@ -4324,17 +4340,75 @@ test("the mark-seen item is reachable and operable by role and keyboard", async 
     await expect(markRead).toBeFocused();
 
     await page.keyboard.press("Enter");
-    // MarkSeen deliberately does NOT close the menu on activation, unlike
-    // Stop/Archive/Delete/Clone (`row.rs`'s `on_mark_seen` handler calls
-    // only `on_mark_seen`, never `on_menu_toggle`) — the toggle stays
-    // visible so its own label flip is the thing to watch, in place,
-    // without navigating away and back. That flip — not a closed menu — is
-    // the proof this was a real activation, once the write's fleet-events
-    // bump brings the next listing read back.
+    // Acceptance closes the panel and returns keyboard focus to its
+    // toggle. Reopening must show the persisted label flip as well: a
+    // dismissal alone would not prove the command actually ran.
+    await expect(menu).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    await openRowMenu(target);
     await expect(menu.getByRole("menuitem", { name: "mark unread" })).toBeVisible({
       timeout: 20_000,
     });
   } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A manual seen write completes the menu interaction before the network
+ * answers. A later refusal must remain visible in its row without
+ * dismissing or reclaiming focus from a menu opened in the meantime.
+ * Pinning selection elsewhere prevents automatic marks from entering the
+ * held route; its receipt therefore proves acceptance of this menu choice.
+ */
+test("a failed manual mark closes on acceptance and preserves a newer menu", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const session = await createSession(request, {
+    title: `seen-menu-failure-${Date.now()}`,
+    invocation: "sleep 300",
+  });
+  let releaseSeen: () => void = () => {};
+  const seenHeld = new Promise<void>((resolve) => {
+    releaseSeen = resolve;
+  });
+  let seenRequests = 0;
+  try {
+    // This refusal must come from the current helm. A missing build stamp
+    // would introduce version skew and its unrelated layout/focus effects.
+    const listing = await request.get("/api/sessions");
+    expect(listing.ok()).toBe(true);
+    const stamp = listing.headers()["x-farhelm-build"];
+    expect(stamp).toBeTruthy();
+    const otherId = await sharedSessionId(request);
+    await pinAutoSelect(page, otherId);
+    await page.goto("/");
+    const target = row(page, session.id);
+    await openRowMenu(target);
+    const markRead = target.getByRole("menuitem", { name: "mark read" });
+    await expect(markRead).toBeVisible({ timeout: 45_000 });
+    await page.route(`**/api/sessions/${session.id}/seen`, async (route) => {
+      seenRequests++;
+      await seenHeld;
+      await route.fulfill({
+        status: 500,
+        headers: { "x-farhelm-build": stamp, "content-type": "text/plain" },
+        body: "seen-failure-sentinel",
+      });
+    });
+    await markRead.click();
+    await expect.poll(() => seenRequests).toBe(1);
+    await expect(target.getByRole("menu")).toHaveCount(0);
+
+    const other = row(page, otherId);
+    await openRowMenu(other);
+    const rename = other.getByRole("menuitem", { name: "rename" });
+    await expect(rename).toBeFocused();
+    releaseSeen();
+    await expect(target.locator(".action-error")).toContainText("seen-failure-sentinel");
+    await expect(other.getByRole("menu")).toBeVisible();
+    await expect(rename).toBeFocused();
+  } finally {
+    releaseSeen();
     await cleanupSession(request, session.id);
   }
 });

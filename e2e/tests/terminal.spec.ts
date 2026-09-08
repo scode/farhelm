@@ -2777,6 +2777,7 @@ test("stop and delete failures surface in the row's own error line, without dist
     );
     await openRowMenu(row);
     await row.locator(".session-row-stop").click();
+    await expect(row.getByRole("menu")).toHaveCount(0);
     await expect(row.locator(".action-error")).toContainText(
       "stop-failure-sentinel",
     );
@@ -2975,6 +2976,11 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
     // checks below fail confusingly far from the cause.
     await expect.poll(() => stopRequests).toBe(1);
 
+    // The accepted choice closes before the held request completes. A
+    // user may reopen the menu to inspect its now-inert actions; closing
+    // must not replace the existing per-session guard.
+    await expect(rowA.getByRole("menu")).toHaveCount(0);
+    await openRowMenu(rowA);
     // While the delayed stop is in flight: A's own controls are locked...
     await expect(rowA.locator(".session-row-stop")).toBeDisabled();
     await expect(rowA.locator(".session-row-delete")).toBeDisabled();

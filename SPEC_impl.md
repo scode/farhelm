@@ -287,6 +287,10 @@ navigation key. **Confirm in place:** a destructive item swaps the panel's own c
 confirm/cancel pair with focus on cancel, rather than opening a second surface; that sub-state is a `role="dialog"`
 inside the same positioned box, and it survives the panel closing, which is why it deliberately does not answer Escape.
 
+Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
+appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. Rename and
+in-place confirmations retain their panel so the user can finish the interaction.
+
 Clone (the row menu's newest item) reuses the create form rather than a second submit path: the click builds a
 `CreatePrefill` snapshot of the row's `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic
 generation the list view mints per click. A `use_effect` inside the form compares that generation against the last one

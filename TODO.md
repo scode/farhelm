@@ -32,15 +32,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   conversation. Replace should preserve the session's directory, title, and agent choice while starting fresh. Cause and
   reproducibility are not established.
 
-- Close the row menu when a menu item finishes its action. Clicking an item in a session row's "⋯" menu leaves the panel
-  mounted over the row, so the menu has to be dismissed by hunting down the same toggle again — reported as one of the
-  more annoying things about using the list. The rule is not "every click closes": rename and the three destructive
-  actions deliberately swap the panel's contents in place for a field or a confirm prompt, and those must stay open.
-  What is missing is the close on the items that COMPLETE on the click. In `list::view`, `on_clone` clears `menu_open`;
-  `on_mark_seen` and `on_stop` do not, and those are exactly the two items that misbehave. Check the host row's menu
-  (`hosts`, retry/adopt/edit/remove) against the same rule while fixing this, since it shares `menu_panel`'s machinery
-  but keeps its own handlers.
-
 ## Deflake
 
 - Correct the editor-focus fixture in `a popup-created profile is offered on every host`, in

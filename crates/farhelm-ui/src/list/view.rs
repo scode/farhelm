@@ -1500,6 +1500,12 @@ pub(crate) fn ListView(
         if !begin_row_op(&id) {
             return;
         }
+        // Acceptance completes the menu interaction; a later stop failure
+        // belongs in the row's error line. Close here so async completion
+        // cannot dismiss a menu the user opens while the request is pending.
+        if menu_open.peek().as_deref() == Some(id.as_str()) {
+            menu_open.set(None);
+        }
         let base = stop_base.clone();
         // Cloned per invocation: the spawned task takes ownership of what it
         // captures, and this handler runs once per stop click.
@@ -2260,6 +2266,11 @@ pub(crate) fn ListView(
     // directly, so losing it silently would be exactly the kind of
     // succeeded-when-it-failed illusion that section forbids.
     let on_mark_seen = move |(id, seen_activity_at): (String, Option<i64>)| {
+        // The status dot shares this handler. Only dismiss this row's menu,
+        // and do it at acceptance rather than when the queued write returns.
+        if menu_open.peek().as_deref() == Some(id.as_str()) {
+            menu_open.set(None);
+        }
         let report_id = id.clone();
         queue_seen_write(
             &mark_seen_base,
