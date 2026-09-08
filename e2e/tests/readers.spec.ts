@@ -135,8 +135,9 @@ test.describe("read ordering and recovery", () => {
     const reads = countReads(page);
     // Auto-select must not open THIS session before the registry hold
     // below is armed — pin it to the shared session instead.
-    const shared = await listSessions(request, "title=e2e-session");
-    await pinAutoSelect(page, shared.sessions[0].id);
+    const shared = (await listSessions(request)).sessions.find((candidate) => candidate.title === "e2e-session");
+    expect(shared, "the shared fixture must exist before pinning auto-selection").toBeTruthy();
+    await pinAutoSelect(page, shared!.id);
     await page.goto("/");
     await feed.waitForConnection(1);
     feed.notify(1);
@@ -263,8 +264,8 @@ test.describe("read ordering and recovery", () => {
     await row(page, session.id).locator(".session-row-stop").click();
     await expect
       .poll(async () => {
-        const listed = await listSessions(request, `title=${encodeURIComponent(session.title)}`);
-        return listed.sessions[0]?.status?.state;
+        const listed = await listSessions(request);
+        return listed.sessions.find((candidate) => candidate.id === session.id)?.status?.state;
       }, { timeout: 20_000 })
       .toBe("exited");
     settled();

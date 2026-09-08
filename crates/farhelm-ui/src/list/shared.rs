@@ -213,6 +213,17 @@ pub(super) struct HostOption {
 }
 
 impl HostOption {
+    /// The stable machine label used by the sidebar's host selector.
+    ///
+    /// Connection phases are deliberately absent here. The selector is an
+    /// identity control and keeps disconnected hosts available; the host
+    /// panel beside it is the authoritative status surface. Directional
+    /// characters are still escaped because selecting the wrong displayed
+    /// machine changes where the list is scoped.
+    pub(super) fn selector_label(&self) -> String {
+        display_peer(&self.name)
+    }
+
     /// What the `<option>` reads: the host's name, with its phase appended
     /// when there is one to warn about.
     ///
@@ -403,8 +414,7 @@ pub(super) fn enrich_created_session(
     }
 }
 
-/// Every registered host as the create dialog and the filter surface offer
-/// it.
+/// Every registered host as the create dialog and sidebar selector offer it.
 ///
 /// A free function over the snapshot rather than an inline `map` in the
 /// render, because `ListView`'s target effect needs exactly the same reduction
@@ -778,6 +788,17 @@ pub(super) mod tests {
         assert_eq!(
             option(3, "user@\u{202E}box", false).label(),
             "user@<U+202E>box"
+        );
+    }
+
+    /// The sidebar selector names stable registry identities; connection
+    /// status belongs to the adjacent host panel and must not make an option's
+    /// label change while someone is choosing it.
+    #[farhelm_testtrace::test]
+    fn a_sidebar_selector_label_omits_connection_phase() {
+        assert_eq!(
+            option_in(2, "user@box", false, "unreachable, retrying").selector_label(),
+            "user@box"
         );
     }
 

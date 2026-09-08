@@ -15,7 +15,6 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  openFilterBar,
   openHostMenu,
   openHostsPanel,
   stubFeed,
@@ -882,117 +881,6 @@ test("UPDATE plans once, binds to the row, and releases OpLock at acceptance", a
   // earlier ADD case's comment for why `toBeDisabled()` still applies.
   await openHostMenu(row);
   await expect(row.locator(".host-edit")).toBeDisabled();
-});
-
-/**
- * A plan can land after Details and the fixed filter are already open. The
- * confirmation changes host-list height without toggling Details, so its
- * arrival must dismiss the filter independently of sidebar resize events.
- */
-test("a newly landed plan closes an already-open filter", async ({
-  page,
-  request,
-}, testInfo) => {
-  const remote = destination(testInfo, "plan-filter");
-  // Keep the expanded sidebar in view. Otherwise focusing the new filter
-  // can scroll its ancestor, legitimately dismissing it before plan arrival.
-  await page.setViewportSize({ width: 1280, height: 1600 });
-  const accepted = await startAdd(request, remote);
-  await waitForProgress(request, accepted.host_id, "completed");
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
-    await held;
-    await route.continue();
-  });
-
-  // Isolate the plan-arrival callback. Sidebar resize would both race this
-  // test's setup and hide a missing callback by closing the filter itself.
-  // Other resize observers, including the terminal's, retain their behavior.
-  await page.addInitScript(() => {
-    const Real = window.ResizeObserver;
-    window.ResizeObserver = class extends Real {
-      constructor(callback: ResizeObserverCallback) {
-        super((entries, observer) => {
-          const relevant = entries.filter((entry) => !entry.target.classList.contains("app-sidebar"));
-          if (relevant.length) callback(relevant, observer);
-        });
-      }
-    };
-  });
-  await page.goto("/");
-  await openHostsPanel(page);
-  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
-  await openHostMenu(row);
-  await row.locator(".provisioning-update").click();
-  // Details must already be open: otherwise toggling it could supply the
-  // dismissal that this test requires from the newly arrived plan.
-  await expect(page.locator(".host-details-toggle")).toBeChecked();
-  await expect(row.locator(".provisioning-planning")).toBeVisible();
-  await expect.poll(() => page.locator(".app-sidebar").evaluate((sidebar) =>
-    sidebar.scrollHeight - sidebar.clientHeight
-  ), { message: "expanded sidebar must fit without scrolling before opening the filter" }).toBeLessThanOrEqual(0);
-  const toggle = page.locator(".filter-toggle");
-  await toggle.click();
-  await expect(page.locator(".filter-popover")).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  release();
-
-  await expect(row.locator(".provisioning-plan")).toBeVisible();
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
-  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-});
-
-/**
- * Running, failed, and cleared traces each alter the collapsed host-list
- * shape. A fixed filter opened below that host must close at every boundary,
- * including running-to-failed where the traced host set itself is unchanged.
- */
-test("collapsed trace transitions invalidate fixed-surface geometry", async ({
-  page,
-  request,
-}, testInfo) => {
-  const remote = destination(testInfo, "trace-shape");
-  const accepted = await startAdd(request, remote);
-  await waitForProgress(request, accepted.host_id, "completed");
-  const feed = await stubFeed(page);
-  feed.notifyOnConnect(1);
-  let view: Progress = {
-    run_id: "trace-shape",
-    operation: "update",
-    status: "completed",
-    steps: [],
-    message: null,
-  };
-  await page.route(`**/api/hosts/${accepted.host_id}/provisioning`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
-      body: JSON.stringify({ host_id: accepted.host_id, ...view }),
-    });
-  });
-
-  await page.goto("/");
-  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
-  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-
-  for (const status of ["running", "failed", "completed"] as const) {
-    await openFilterBar(page);
-    view = { ...view, status };
-    await notifyFeed(feed, status === "running" ? 2 : status === "failed" ? 3 : 4);
-    await expect(page.locator(".filter-popover")).toHaveCount(0);
-    await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-    if (status === "completed") {
-      await expect(row.locator(".provisioning-trace")).toHaveCount(0);
-    } else {
-      await expect(row.locator(".provisioning-trace")).toHaveAttribute(
-        "data-provisioning-status",
-        status,
-      );
-    }
-  }
 });
 
 test("a row change and an observed foreign run each discard a pending plan", async ({

@@ -65,9 +65,9 @@
 //!
 //! ## Filtering, and why it happens HERE
 //!
-//! SPEC.md's session list filters by host, directory, profile, status and
-//! title, and every one of those predicates is applied in this merged view
-//! — not in the drains, and not in the browser.
+//! SPEC.md's session list can be narrowed to one registered host, and
+//! that predicate is applied in this merged view — not in the drains, and
+//! not in the browser.
 //!
 //! Not in the DRAINS: a filtered drain would cache a partial list, and the
 //! cache's whole job is to be the complete last-known state of a host that
@@ -526,10 +526,8 @@ async fn session_list_staged(
     //
     // A HOST filter scopes the notice, on both paths: a request for one
     // host's sessions cannot be missing rows another host's cap cut, so an
-    // unrelated capped host must not mark it incomplete. Only the host
-    // dimension gets this — for every other filter (title, status,
-    // profile, parent, directory) an omitted row COULD have matched, so
-    // any capped host keeps the conservative any-host rule.
+    // unrelated capped host must not mark it incomplete. Archive exclusion
+    // cannot narrow that evidence: a cut may have omitted non-archived rows.
     let counts_toward_notice =
         |host: HostId| filter.host_scope().is_none_or(|scoped| scoped == host);
     let mut hosts_truncated = slice
@@ -681,10 +679,8 @@ mod tests {
     /// and the one place a count could disagree with the rows beside it.
     #[farhelm_testtrace::test]
     fn counts_describe_the_view_and_the_filter_from_one_array() {
-        let mut keep = row("keep", 300, 1);
-        keep.info.title = "keep me".to_string();
-        let mut drop = row("drop", 200, 1);
-        drop.info.title = "other".to_string();
+        let keep = row("keep", 300, 1);
+        let drop = row("drop", 200, 2);
         let view = vec![keep, drop];
 
         let unfiltered = assemble(
@@ -705,7 +701,7 @@ mod tests {
             view,
             &store::SessionFilter::default()
                 .include_archived(true)
-                .title("KEEP"),
+                .host(1),
             store::ListSort::Created,
             false,
         );
@@ -741,9 +737,12 @@ mod tests {
     /// never raised over a list the client did read to the end.
     #[farhelm_testtrace::test]
     fn the_cap_cuts_the_sorted_filtered_array_and_flags_it() {
-        let view: Vec<SessionRow> = (0..=LIST_SESSIONS_CAP)
+        let mut view: Vec<SessionRow> = (0..=LIST_SESSIONS_CAP)
             .map(|i| row(&format!("s{i:04}"), i as i64, 1))
             .collect();
+        for row in view.iter_mut().take(10) {
+            row.host = 2;
+        }
         let body = assemble(
             view.clone(),
             &store::SessionFilter::default().include_archived(true),
@@ -767,7 +766,7 @@ mod tests {
             view.clone(),
             &store::SessionFilter::default()
                 .include_archived(true)
-                .title("s000"),
+                .host(2),
             store::ListSort::Created,
             false,
         );
@@ -927,7 +926,7 @@ mod tests {
         harness.await_refreshed(local).await;
         harness.await_refreshed(_cached).await;
 
-        let filter = store::SessionFilter::default().title("keep");
+        let filter = store::SessionFilter::default().host(local);
         let first = session_list(
             &harness.manager,
             &harness.store,
@@ -936,8 +935,8 @@ mod tests {
         )
         .await
         .expect("the first list reads");
-        assert_eq!(first.sessions.len(), 2);
-        assert_eq!(first.matching, Some(2));
+        assert_eq!(first.sessions.len(), 1);
+        assert_eq!(first.matching, Some(1));
 
         let second = session_list_staged(
             &harness.manager,
@@ -948,7 +947,7 @@ mod tests {
                 harness.fleet.edit(local, |script| {
                     script
                         .sessions
-                        .push(rest_harness::session("live-keep-2", 200));
+                        .push(rest_harness::session("live-new-2", 200));
                 });
                 harness.manager.refresh_now(local);
                 harness
@@ -970,7 +969,7 @@ mod tests {
 
         assert_eq!(
             second.sessions.len(),
-            3,
+            2,
             "the new in-memory session is in the list"
         );
         assert_eq!(

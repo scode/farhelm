@@ -5479,115 +5479,31 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
 // only against `SessionFilter::matches` would prove the predicate
 // works without proving anything reaches it.
 
-/// A session with the fields the filters actually read.
+/// A host query selects exactly one registry row and keeps fleet-wide counts.
 ///
-/// `rest_harness::session` fills everything with the id, which is fine
-/// for ordering tests and useless here — a directory filter that
-/// matched the title would pass against it.
-fn filterable(
-    id: &str,
-    created_at: i64,
-    cwd: &str,
-    title: &str,
-    status: farhelm_proto::SessionStatus,
-    source_profile: Option<farhelm_proto::SourceProfile>,
-) -> farhelm_proto::SessionInfo {
-    farhelm_proto::SessionInfo {
-        cwd: cwd.to_string(),
-        title: title.to_string(),
-        status,
-        source_profile,
-        ..rest_harness::session(id, created_at)
-    }
-}
-
-/// The profile reference a session created from a profile carries.
-///
-/// `existence` is a PARAMETER rather than a fixed `Present`, and the
-/// reason is the property these fixtures exist to pin: a session's
-/// snapshot (`id` and `name`) is durable and never rewritten, while the
-/// helm derives existence from its catalog before serving a row. So a
-/// cached row can legitimately carry `Deleted` beside a name no catalog
-/// holds any more — which is exactly the row the profile filter must
-/// still match, by that name. Fixing this field at `Present` would make
-/// every fixture describe the easy case and leave the interesting one
-/// unrepresentable.
-fn source(
-    id: &str,
-    name: &str,
-    existence: farhelm_proto::ProfileExistence,
-) -> farhelm_proto::SourceProfile {
-    farhelm_proto::SourceProfile {
-        id: id.to_string(),
-        name: name.to_string(),
-        existence,
-    }
-}
-
-/// A two-host fleet whose four sessions differ along every filter
-/// dimension at once, so that each single-dimension assertion below
-/// distinguishes ONE property rather than accidentally selecting on
-/// several.
-///
-/// One session was created from a profile that has since been DELETED,
-/// which is the case SPEC.md's snapshot rule makes load-bearing: it
-/// still filters, under the name it snapshotted, because nothing
-/// rewrote its row when the profile went away.
-async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::HostId) {
-    use farhelm_proto::{ProfileExistence, SessionStatus};
-
-    let (builder, alpha) = rest_harness::FleetBuilder::new()
+/// This drives the public query through both persisted host sources so the
+/// sidebar contract is pinned at the handler boundary, including the
+/// denominator used by its count banner.
+#[farhelm_testtrace::test]
+async fn a_host_filter_selects_one_registry_row() {
+    let (builder, remote) = rest_harness::FleetBuilder::new()
         .await
         .local(rest_harness::HostScript {
             identity: Some("identity-local".to_string()),
             sessions: vec![
-                farhelm_proto::SessionInfo {
-                    parent: Some("root-session".to_string()),
-                    ..filterable(
-                        "local-running",
-                        400,
-                        "/home/me/src/farhelm",
-                        "Refactor the drain",
-                        SessionStatus::Running,
-                        Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
-                    )
-                },
-                filterable(
-                    "local-idle",
-                    300,
-                    "/home/me/notes",
-                    "Read the SPEC",
-                    SessionStatus::Idle,
-                    None,
-                ),
+                rest_harness::session("local-new", 400),
+                rest_harness::session("local-old", 300),
             ],
             ..rest_harness::HostScript::default()
         })
         .await
         .ssh(
-            "user@alpha",
+            "user@remote",
             rest_harness::HostScript {
-                identity: Some("identity-alpha".to_string()),
+                identity: Some("identity-remote".to_string()),
                 sessions: vec![
-                    filterable(
-                        "alpha-waiting",
-                        200,
-                        "/srv/alpha/work",
-                        "Nightly sweep",
-                        SessionStatus::Waiting,
-                        Some(source("p-gone", "Codex", ProfileExistence::Deleted)),
-                    ),
-                    farhelm_proto::SessionInfo {
-                        parent: Some("root-session".to_string()),
-                        ..filterable(
-                            "alpha-exited",
-                            100,
-                            "/srv/alpha/other",
-                            "Drain the queue",
-                            SessionStatus::Exited { exit_code: Some(0) },
-                            Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
-                        )
-                    },
+                    rest_harness::session("remote-new", 200),
+                    rest_harness::session("remote-old", 100),
                 ],
                 ..rest_harness::HostScript::default()
             },
@@ -5595,221 +5511,34 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
         .await;
     let harness = builder.start().await;
     let local = rest_harness::local_id(&harness.store).await;
-    for host in [local, alpha] {
+    for host in [local, remote] {
         harness.await_refreshed(host).await;
     }
-    (harness, local, alpha)
-}
 
-/// Every dimension SPEC.md names — host, parent, directory, profile,
-/// status, title — narrows the list by itself, with the semantics
-/// `store::SessionFilter` documents.
-///
-/// One test rather than five because the fixture is the expensive part
-/// and the assertions are one line each; what matters is that each
-/// parameter selects a DIFFERENT subset, which is only visible with all
-/// six side by side.
-#[farhelm_testtrace::test]
-async fn every_filter_dimension_narrows_the_list_on_its_own() {
-    let (harness, local, alpha) = filterable_fleet().await;
-
-    let (status, value) = get_json(&harness, &format!("/api/sessions?host={alpha}")).await;
+    let (status, value) = get_json(&harness, &format!("/api/sessions?host={remote}")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["alpha-waiting", "alpha-exited"]);
-
-    // Substring, and case-insensitive: a user searching a path types a
-    // fragment of it, not the whole thing.
-    let (_, value) = get_json(&harness, "/api/sessions?directory=SRC/farhelm").await;
-    assert_eq!(row_ids(&value), vec!["local-running"]);
-
-    // Exact, on the state tag the wire uses.
-    let (_, value) = get_json(&harness, "/api/sessions?status=waiting").await;
-    assert_eq!(row_ids(&value), vec!["alpha-waiting"]);
-
-    // A status that carries a payload still filters by its tag alone —
-    // `exited` selects the session whatever its exit code was.
-    let (_, value) = get_json(&harness, "/api/sessions?status=exited").await;
-    assert_eq!(row_ids(&value), vec!["alpha-exited"]);
-
-    // By profile ID: exact, opaque, and rename-proof. Both hosts'
-    // sessions from that profile come back, in the merged order.
-    let (_, value) = get_json(&harness, "/api/sessions?profile=p-claude").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
-
-    // Substring again, and case-insensitive again.
-    let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
-
-    // Parent ids are opaque and exact; only direct children match.
-    let (_, value) = get_json(&harness, "/api/sessions?parent=root-session").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
-
-    // And the local host, so the host filter is shown selecting rather
-    // than merely excluding the other one.
-    let (_, value) = get_json(&harness, &format!("/api/sessions?host={local}")).await;
-    assert_eq!(row_ids(&value), vec!["local-running", "local-idle"]);
-}
-
-/// SPEC.md's snapshot rule, as the LIST sees it: a session created from
-/// a profile that has since been deleted still filters — under the name
-/// it snapshotted, because that is the only handle anyone still has.
-///
-/// The alternative implementations all fail here in different ways:
-/// matching only by id loses the session as soon as a user picks the
-/// name they remember, and rewriting historical rows on a profile
-/// delete (the shape PLAN_M6_75.md item 3 rejects) would have erased
-/// the name this filter matches.
-#[farhelm_testtrace::test]
-async fn a_deleted_profiles_sessions_still_filter_under_their_snapshotted_name() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    let (status, value) = get_json(&harness, "/api/sessions?profile=Codex").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(
-        row_ids(&value),
-        vec!["alpha-waiting"],
-        "a deleted profile's sessions stay findable by the name they snapshotted"
-    );
-    assert_eq!(value["matching"], 1);
-
-    // The id half of the same rule, for the same session: the id
-    // outlives the profile too, so a client holding one still resolves.
-    let (_, value) = get_json(&harness, "/api/sessions?profile=p-gone").await;
-    assert_eq!(row_ids(&value), vec!["alpha-waiting"]);
-
-    // A raw-created session matches NO profile filter — it was never
-    // shaped by one, and "sessions from profile X" must not quietly
-    // include sessions from no profile at all.
-    let (_, value) = get_json(&harness, "/api/sessions?profile=").await;
-    assert_eq!(
-        row_ids(&value).len(),
-        4,
-        "an empty profile parameter is a cleared search box, not a filter matching nothing"
-    );
-}
-
-/// Filters AND together, and the combination narrows further than
-/// either alone.
-///
-/// Pinned because the alternative (OR, or last-parameter-wins) reads
-/// identically in a single-filter test: a client refining a search would
-/// see the list GROW, which is the opposite of what refining means.
-#[farhelm_testtrace::test]
-async fn combined_filters_narrow_rather_than_widen() {
-    let (harness, _local, alpha) = filterable_fleet().await;
-
-    let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
-
-    let (status, value) = get_json(
-        &harness,
-        &format!("/api/sessions?title=drain&host={alpha}&status=exited"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["alpha-exited"]);
-    assert_eq!(value["matching"], 1);
+    assert_eq!(row_ids(&value), vec!["remote-new", "remote-old"]);
+    assert_eq!(value["matching"], 2);
     assert_eq!(
         value["total"], 4,
-        "the fleet total is not a function of the filter"
+        "host selection narrows membership without moving the fleet denominator"
     );
-
-    // A combination nothing satisfies is an empty list with an honest
-    // pair of counts, never an error.
-    let (status, value) = get_json(&harness, "/api/sessions?title=drain&status=waiting").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert!(row_ids(&value).is_empty());
-    assert_eq!(value["matching"], 0);
-    assert_eq!(value["total"], 4);
 }
 
-/// The default list excludes archived rows, so it reports a matching
-/// count beside the fleet total even when no text dimension is present.
+/// The default archive predicate reports a count even without host selection.
 ///
-/// Reporting no `matching` there would have been the convenient answer,
-/// and the UI does substitute `total` where a count is absent — but that
-/// substitution is meant for a helm that predates filtering, and the
-/// default view's archive exclusion IS a predicate this helm applied. A
-/// present count is what lets the client tell the two apart.
+/// A present count lets the client distinguish a current helm answer from an
+/// older response that predates server-side membership counts.
 #[farhelm_testtrace::test]
 async fn the_default_archive_predicate_reports_both_counts() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    let (status, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(value["total"], 4);
-    assert_eq!(value["matching"], 4);
-}
-
-/// A status word this build does not know is a 400 naming the
-/// vocabulary, never an empty list.
-///
-/// The failure mode this prevents is a silent lie: a client (or a user
-/// hand-editing a URL) that misspells a status would otherwise be told
-/// there are no such sessions, which is indistinguishable from the truth
-/// and far more likely to be believed.
-#[farhelm_testtrace::test]
-async fn an_unknown_status_filter_is_refused_rather_than_matching_nothing() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    let (status, body) = get_json(&harness, "/api/sessions?status=alive").await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
-    let text = body.as_str().unwrap_or_default();
-    assert!(
-        text.contains("running") && text.contains("interrupted"),
-        "the refusal must name the vocabulary it accepts, got {text:?}"
-    );
-}
-
-/// Whitespace is CONTENT, not noise: only the exactly-empty value clears
-/// a filter.
-///
-/// Trimming looks harmless and is not. Directories and titles genuinely
-/// contain spaces, so a trimmed search cannot find `/srv/my project`
-/// by what the user typed; and trimming makes `?title=%20` mean the same
-/// as `?title=`, so typing a space would silently clear the filter and
-/// show everything — a change the user can see and cannot explain.
-#[farhelm_testtrace::test]
-async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
-    use farhelm_proto::SessionStatus;
-
     let harness = rest_harness::helm_listing(vec![
-        filterable(
-            "spaced",
-            200,
-            "/srv/my project",
-            "fix  the  spacing",
-            SessionStatus::Running,
-            None,
-        ),
-        filterable(
-            "plain",
-            100,
-            "/srv/plain",
-            "ordinary",
-            SessionStatus::Running,
-            None,
-        ),
+        rest_harness::session("new", 200),
+        rest_harness::session("old", 100),
     ])
     .await;
 
-    // Searchable by text that only exists WITH its whitespace.
-    let (status, value) = get_json(&harness, "/api/sessions?directory=my%20project").await;
+    let (status, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["spaced"]);
-    let (_, value) = get_json(&harness, "/api/sessions?title=the%20%20spacing").await;
-    assert_eq!(row_ids(&value), vec!["spaced"]);
-
-    // A lone space is a real search that matches only what contains one
-    // — emphatically not a cleared filter.
-    let (_, value) = get_json(&harness, "/api/sessions?title=%20").await;
-    assert_eq!(row_ids(&value), vec!["spaced"]);
-    assert_eq!(value["matching"], 1);
-
-    // The exactly-empty value clears the TEXT dimension. The implicit
-    // archive exclusion remains, so this is still a counted predicate.
-    let (_, value) = get_json(&harness, "/api/sessions?title=").await;
-    assert_eq!(row_ids(&value), vec!["spaced", "plain"]);
     assert_eq!(value["total"], 2);
     assert_eq!(value["matching"], 2);
 }
@@ -5822,27 +5551,10 @@ async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
 /// above "of 12 sessions" with nothing typed into any filter.
 #[farhelm_testtrace::test]
 async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
-    let mut archived = filterable(
-        "archived",
-        200,
-        "/tmp/archive",
-        "retained",
-        farhelm_proto::SessionStatus::Exited { exit_code: None },
-        None,
-    );
+    let mut archived = rest_harness::session("archived", 200);
     archived.archived = true;
-    let harness = rest_harness::helm_listing(vec![
-        archived,
-        filterable(
-            "active",
-            100,
-            "/tmp/active",
-            "ordinary",
-            farhelm_proto::SessionStatus::Running,
-            None,
-        ),
-    ])
-    .await;
+    let harness =
+        rest_harness::helm_listing(vec![archived, rest_harness::session("active", 100)]).await;
 
     let (_, ordinary) = get_json(&harness, "/api/sessions").await;
     assert_eq!(row_ids(&ordinary), vec!["active"]);
@@ -5861,58 +5573,55 @@ async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
     );
 }
 
-/// An identity-less host's sessions live in the manager's MEMORY rather
-/// than in helm.db, so they reach the merged list by a different path —
-/// and the filter has to apply on that path too.
+/// An identity-less host's sessions live in the manager's memory rather than
+/// in helm.db, so host selection must apply on that merge path too.
 ///
-/// The bug this pins is a silent one: a filter applied to one source and
-/// not the other would let such a host's rows flow through unfiltered, so
-/// a search would return sessions that plainly do not match beside ones
-/// that do, with `matching` counting them.
+/// Both directions matter: a cached-host selection must exclude the in-memory
+/// rows, while a local selection must exclude the cached remote row.
 #[farhelm_testtrace::test]
-async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
-    use farhelm_proto::SessionStatus;
-
-    let harness = rest_harness::FleetBuilder::new()
+async fn a_host_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
+    let (builder, remote) = rest_harness::FleetBuilder::new()
         .await
         .local(rest_harness::HostScript {
             // No identity: this host caches nothing, and its sessions
             // are merged in from the actor's own memory.
             identity: None,
             sessions: vec![
-                filterable(
-                    "memory-running",
-                    200,
-                    "/opt/work",
-                    "Live one",
-                    SessionStatus::Running,
-                    None,
-                ),
-                filterable(
-                    "memory-idle",
-                    100,
-                    "/opt/other",
-                    "Quiet one",
-                    SessionStatus::Idle,
-                    None,
-                ),
+                rest_harness::session("memory-new", 200),
+                rest_harness::session("memory-old", 100),
             ],
             ..rest_harness::HostScript::default()
         })
         .await
-        .start()
+        .ssh(
+            "user@cached",
+            rest_harness::HostScript {
+                identity: Some("identity-cached".to_string()),
+                sessions: vec![rest_harness::session("cached", 300)],
+                ..rest_harness::HostScript::default()
+            },
+        )
         .await;
+    let harness = builder.start().await;
     let local = rest_harness::local_id(&harness.store).await;
-    harness.await_refreshed(local).await;
+    for host in [local, remote] {
+        harness.await_refreshed(host).await;
+    }
 
-    let (status, value) = get_json(&harness, "/api/sessions?status=idle").await;
+    let (status, value) = get_json(&harness, &format!("/api/sessions?host={local}")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["memory-idle"]);
-    assert_eq!(value["matching"], 1);
+    assert_eq!(row_ids(&value), vec!["memory-new", "memory-old"]);
+    assert_eq!(value["matching"], 2);
     assert_eq!(
-        value["total"], 2,
+        value["total"], 3,
         "an identity-less host's rows count toward the fleet total like any other"
     );
+
+    let (status, value) = get_json(&harness, &format!("/api/sessions?host={remote}")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(row_ids(&value), vec!["cached"]);
+    assert_eq!(value["matching"], 1);
+    assert_eq!(value["total"], 3);
 }
 
 /// The archive switch moves the denominator on the IN-MEMORY path too.
@@ -5926,32 +5635,13 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
 /// removes.
 #[farhelm_testtrace::test]
 async fn an_identity_less_hosts_archived_rows_leave_the_default_view_s_total() {
-    use farhelm_proto::SessionStatus;
-
-    let mut archived = filterable(
-        "memory-archived",
-        200,
-        "/opt/work",
-        "Put away",
-        SessionStatus::Exited { exit_code: None },
-        None,
-    );
+    let mut archived = rest_harness::session("memory-archived", 200);
     archived.archived = true;
     let harness = rest_harness::FleetBuilder::new()
         .await
         .local(rest_harness::HostScript {
             identity: None,
-            sessions: vec![
-                archived,
-                filterable(
-                    "memory-active",
-                    100,
-                    "/opt/other",
-                    "Still here",
-                    SessionStatus::Running,
-                    None,
-                ),
-            ],
+            sessions: vec![archived, rest_harness::session("memory-active", 100)],
             ..rest_harness::HostScript::default()
         })
         .await

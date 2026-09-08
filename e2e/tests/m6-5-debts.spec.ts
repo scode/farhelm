@@ -52,8 +52,8 @@ function row(page: Page, id: string) {
 async function waitForRestart(request: APIRequestContext, title: string): Promise<void> {
   await expect
     .poll(async () => {
-      const listed = await listSessions(request, `title=${encodeURIComponent(title)}`);
-      return listed.sessions[0]?.status?.state ?? "no such session";
+      const listed = await listSessions(request);
+      return listed.sessions.find((session) => session.title === title)?.status?.state ?? "no such session";
     }, {
       timeout: 30_000,
       message: "the restart must have produced a new run server-side",
@@ -147,8 +147,8 @@ test.describe("the M6.5 test debts", () => {
     await row(page, session.id).locator(".session-row-stop").click();
     await expect
       .poll(async () => {
-        const listed = await listSessions(request, `title=${encodeURIComponent(session.title)}`);
-        return listed.sessions[0]?.status?.state;
+        const listed = await listSessions(request);
+        return listed.sessions.find((candidate) => candidate.id === session.id)?.status?.state;
       }, { timeout: 20_000 })
       .toBe("exited");
     settled();
@@ -238,8 +238,8 @@ test.describe("the M6.5 test debts", () => {
     // stubbed silent feed means the page never re-reads on its own.
     await expect
       .poll(async () => {
-        const listed = await listSessions(request, `title=${encodeURIComponent(original)}`);
-        return listed.sessions[0]?.status?.state;
+        const listed = await listSessions(request);
+        return listed.sessions.find((candidate) => candidate.id === session.id)?.status?.state;
       }, { timeout: 20_000 })
       .toBe("exited");
 
@@ -346,8 +346,8 @@ test.describe("the M6.5 test debts", () => {
     await stopSession(request, session.id);
     await expect
       .poll(async () => {
-        const listed = await listSessions(request, `title=${encodeURIComponent(original)}`);
-        return listed.sessions[0]?.status?.state;
+        const listed = await listSessions(request);
+        return listed.sessions.find((candidate) => candidate.id === session.id)?.status?.state;
       }, { timeout: 20_000 })
       .toBe("exited");
 

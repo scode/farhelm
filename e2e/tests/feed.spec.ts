@@ -44,7 +44,6 @@ import {
   hideSeenState,
   holdReads,
   listSessions,
-  openFilterBar,
   openRowMenu,
   observeFeedReaders,
   readFeedReaders,
@@ -848,83 +847,6 @@ test.describe("the invalidation feed", () => {
   });
 
   /**
-   * The OTHER half of the withdrawal rule: a skewed page still does what a
-   * person asks it to.
-   *
-   * SPEC_impl.md draws the line at attendance rather than at risk —
-   * "withdraws every UNATTENDED behavior … while anything the user explicitly
-   * asks for keeps working" — and both halves have teeth. The test above pins
-   * the first; without this one, a page that stood every read down would pass
-   * it perfectly while leaving a skewed user with a search box that does
-   * nothing, which is the failure mode a reviewer would never see because it
-   * looks exactly like the rule being obeyed.
-   *
-   * The classification lives one layer down (`reader::Trigger`) and its unit
-   * tests already prove an Explicit demand survives a latched mismatch. What
-   * only a browser can say is that the UI CLASSIFIES a live filter edit that
-   * way: the assertion is a request on the wire carrying the search, and rows
-   * that changed because of it.
-   *
-   * The unattended half is asserted in the same test rather than trusted from
-   * the one above, because the interesting failure is a fix that reopens the
-   * floodgates — restoring live filtering by ungating reads altogether.
-   */
-  test("a skewed page still reads after a live filter edit", async ({ page, request }) => {
-    await observeFeedReaders(page);
-    const stamp = Date.now();
-    const needle = `skew-needle-${stamp}`;
-    const wanted = await createSession(request, { title: needle });
-    const other = await createSession(request, { title: `skew-haystack-${stamp}` });
-    created.push(wanted.id, other.id);
-
-    const feed = await stubFeed(page);
-    const reads = countReads(page);
-    await forceBuildSkew(page, "9.9.9-not-this-bundle");
-    await page.goto("/");
-    await openFilterBar(page);
-    await expect(page.locator(".build-skew")).toBeVisible({ timeout: 20_000 });
-    // The mount read is explicit too (a person navigated here), so the rows
-    // are on screen even under skew — which is what gives the filter below
-    // something to narrow.
-    await expect(row(page, wanted.id)).toBeVisible({ timeout: 20_000 });
-    await expect(row(page, other.id)).toBeVisible();
-
-    // Nothing unattended is running: four poll intervals with a socket the
-    // page was told to give up and a fallback it was told not to start.
-    await waitForFeedReadersWithdrawn(page);
-    const quiet = reads.count();
-    // sleep-ok: uninterrupted negative observation before the explicit user action.
-    await page.waitForTimeout(12_000);
-    expect(
-      reads.count() - quiet,
-      `a skewed page reads nothing on its own; saw ${reads.urls().slice(quiet).join(", ")}`,
-    ).toBe(0);
-
-    // And then a person asks.
-    const before = reads.count("listing");
-    await page.locator(".filter-title").fill(needle);
-
-    await expect(page.locator(".session-row")).toHaveCount(1, { timeout: 20_000 });
-    await expect(row(page, wanted.id)).toBeVisible();
-    await expect(row(page, other.id)).toHaveCount(0);
-    const asked = reads.urls("listing").slice(before);
-    expect(
-      asked.length,
-      "a live filter edit under skew must reach the helm, or the search box is decorative",
-    ).toBeGreaterThan(0);
-    expect(
-      asked.every((url) => new URL(url).searchParams.get("title") === needle),
-      `every read the live edit produced must carry the search; saw ${asked.join(", ")}`,
-    ).toBe(true);
-    // The banner is the helm's own count, so it is the half the page could
-    // not have produced by narrowing rows it already held.
-    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
-    // Still skewed, and still saying so: the read the user asked for is not a
-    // reason to forget the mismatch.
-    await expect(page.locator(".build-skew")).toBeVisible();
-  });
-
-  /**
    * The withdrawal binds a subscription that had not been made yet.
    *
    * The ordering hole this pins is real and asymmetric: the page subscribes
@@ -1088,7 +1010,7 @@ test.describe("the invalidation feed", () => {
 
     // And the session really is the one the helm is describing, rather than
     // a stale row this page happened to keep.
-    const listing = await listSessions(request, `title=${encodeURIComponent(session.title)}`);
-    expect(listing.sessions[0]?.status?.state).toBe("idle");
+    const listing = await listSessions(request);
+    expect(listing.sessions.find((candidate) => candidate.id === session.id)?.status?.state).toBe("idle");
   });
 });

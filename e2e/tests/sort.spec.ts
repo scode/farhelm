@@ -6,9 +6,7 @@
  * Its own spec file per the convention every area has followed since M6.5
  * (see sidebar.spec.ts's header). The subject is close to filters.spec.ts's
  * and deliberately separate from it: an order and a filter are different
- * dimensions of one request — a filter decides which sessions a listing
- * holds, an order decides in what sequence they arrive — and the control
- * under test here is specifically the one OUTSIDE the filter popover.
+ * because ordering has its own persistence and whole-list query contracts.
  *
  * ## What these tests are actually checking
  *
@@ -56,7 +54,6 @@ import {
   patchPreferences,
   readPreferences,
   resetPreferences,
-  openFilterBar,
   SESSION_LISTING,
   stubFeed,
 } from "./helpers/fleet";
@@ -69,15 +66,14 @@ function row(page: Page, id: string) {
 /**
  * Load the list with a stubbed, healthy feed.
  *
- * Stubbed for filters.spec.ts's reason: the shared stack's other sessions
+ * Stubbed for the host-selector suite's reason: the shared stack's other sessions
  * keep changing status, every change is a revision bump, and each bump
  * re-reads the list — under assertions about the ORDER of rows, at moments
  * no test chose. A silent feed makes the list change exactly when a test
  * asks it to.
  *
- * Deliberately does NOT open the filter popover. The sort control's whole
- * placement decision is that it is reachable without opening anything, and a
- * helper that opened the bar on the way in would hide a regression that put
+ * The sort control is directly reachable in the sidebar. A helper that
+ * changed another control on the way in would hide a regression that put
  * the control back inside it.
  *
  * The stub is handed back, unlike filters.spec.ts's: the persistence test
@@ -307,10 +303,6 @@ test.describe("session list ordering", () => {
       expect(sort, "every listing read must name the order it wants").toBe("activity");
     }
     await expect(page.locator(".sort-select")).toHaveValue("activity");
-    // The control is reachable with the filter popover shut, which is the whole
-    // reason it does not live inside it.
-    await expect(page.locator(".filter-popover")).toHaveCount(0);
-
     // Newest first, and for these rows that is both the activity order and
     // the creation order (see the fixture's docstring).
     expect(await orderOf(page, [ids.a, ids.m, ids.z])).toEqual([ids.z, ids.m, ids.a]);
@@ -507,77 +499,6 @@ test.describe("session list ordering", () => {
       (await readPreferences(request)).list_sort,
       "and must not write a preference either",
     ).toBeUndefined();
-  });
-
-  /**
-   * Order and filter are independent dimensions of one request, and stay
-   * that way across a whole session of using both.
-   *
-   * One flow rather than four tests because the failures worth catching are
-   * about the INTERACTION: a re-sort that dropped the applied filter would
-   * silently widen the list while its count still reports matching rows, and
-   * a live filter edit that dropped the order would answer the user's
-   * search in a sequence their control does not name. Both look like a
-   * working list until someone reads the numbers.
-   *
-   * Clearing the filter at the end is the other half of the split: "clear"
-   * undoes a narrowing, and the order is not one — a client that lost its
-   * chosen order to a filter reset would have to re-pick it every time it
-   * finished searching.
-   */
-  test("an order and a filter survive each other, and clearing the filter keeps the order", async ({
-    page,
-    request,
-  }) => {
-    const stamp = Date.now();
-    const ids = await threeOrderedSessions(request, stamp);
-    const search = `sortfix-${stamp}-`;
-
-    const reads = await watchListingReads(page);
-    await listWithStubbedFeed(page);
-    await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
-
-    await page.locator(".sort-select").selectOption("title");
-    await expect
-      .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
-      .toEqual([ids.a, ids.m, ids.z]);
-
-    await openFilterBar(page);
-    await page.locator(".filter-title").fill(search);
-    await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
-    await expect(page.locator(".session-row")).toHaveCount(3);
-    expect(await orderOf(page, [ids.a, ids.m, ids.z])).toEqual([ids.a, ids.m, ids.z]);
-    const filtered = latestRead(reads);
-    expect(filtered.searchParams.get("sort")).toBe("title");
-    expect(filtered.searchParams.get("title")).toBe(search);
-
-    // Re-sorting WHILE filtered: the request has to carry both, and the
-    // membership and the banner must not move — only the sequence does.
-    await page.locator(".sort-select").selectOption("created");
-    await expect
-      .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
-      .toEqual([ids.z, ids.m, ids.a]);
-    await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
-    await expect(page.locator(".session-row")).toHaveCount(3);
-    const resorted = latestRead(reads);
-    expect(resorted.searchParams.get("sort")).toBe("created");
-    expect(
-      resorted.searchParams.get("title"),
-      "changing the order must not clear the filter the list is under",
-    ).toBe(search);
-
-    // Clearing the filter widens the list and leaves the order alone. Picking
-    // the sort moved focus out of the popover and closed it, so reopen first.
-    await openFilterBar(page);
-    await page.locator(".filter-clear").click();
-    await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/);
-    await expect(page.locator(".sort-select")).toHaveValue("created");
-    await expect
-      .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
-      .toEqual([ids.z, ids.m, ids.a]);
-    const cleared = latestRead(reads);
-    expect(cleared.searchParams.get("sort")).toBe("created");
-    expect(cleared.searchParams.has("title")).toBe(false);
   });
 
   /**
