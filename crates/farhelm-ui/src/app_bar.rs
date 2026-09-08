@@ -91,23 +91,35 @@ fn focus_profiles_toggle() {
 /// cancellation finish after a newer outside choice. A trusted Tab reserves
 /// its token at keydown, so the same provenance survives when focus leaves the
 /// document and there is no outside `focusin` to report the destination.
+///
+/// The popup node also carries a synchronous outside-intent veto. A focus
+/// commit already dispatched over the bridge can outlive its Rust future;
+/// checking this veto before focus prevents that commit from undoing the
+/// pointer event that just arrived. Each opening owns a different node.
 fn install_profiles_outside_intent_tracking() {
     document::eval(
         "if (!window.__farhelmProfilesOutsideIntentTracking) { \
              window.__farhelmProfilesOutsideIntentTracking = true; \
              let pointerPopup = null; \
              let tabIntent = null; \
-             const relay = (popup, trusted) => \
+             const relay = (popup, trusted) => { \
+                 if (trusted) popup.__farhelmProfilesOutsideIntent = true; \
                  popup.querySelector(trusted \
                      ? '.profiles-trusted-focusout-relay' \
                      : '.profiles-focusout-relay')?.click(); \
-             const cancel = (popup) => \
+             }; \
+             const cancel = (popup) => { \
+                 popup.__farhelmProfilesOutsideIntent = false; \
                  popup.querySelector('.profiles-focusin-relay')?.click(); \
+             }; \
+             const reconsider = (popup) => \
+                 popup.querySelector('.profiles-focus-recheck-relay')?.click(); \
              const reserveTab = (popup) => \
                  popup.querySelector('.profiles-tab-start-relay')?.click(); \
              const commitTab = (intent) => { \
                  if (tabIntent !== intent) return; \
                  tabIntent = null; \
+                 intent.popup.__farhelmProfilesOutsideIntent = true; \
                  intent.popup.querySelector('.profiles-tab-commit-relay')?.click(); \
              }; \
              const cancelTab = (intent) => { \
@@ -168,11 +180,19 @@ fn install_profiles_outside_intent_tracking() {
                      if (intent?.popup === popup) cancelTab(intent); else cancel(popup); \
                  } else if (intent?.popup === popup && intent.focusout && event.isTrusted) { \
                      commitTab(intent); \
+                 } else if (!(event.relatedTarget instanceof Element) || \
+                     (!popup.contains(event.relatedTarget) && !event.relatedTarget.closest('.profiles-toggle'))) { \
+                     reconsider(popup); \
                  } \
              }, true); \
              window.addEventListener('blur', () => { \
                  const intent = tabIntent; \
                  if (intent?.focusout) commitTab(intent); \
+             }, true); \
+             window.addEventListener('focus', (event) => { \
+                 if (event.target !== window) return; \
+                 const popup = document.querySelector('.profiles-popover'); \
+                 if (popup) reconsider(popup); \
              }, true); \
          }",
     );
@@ -200,25 +220,11 @@ struct FocusObligation {
     sequence: u64,
     /// Whether a trusted pointer or Tab destination caused this obligation.
     trusted_outside: bool,
-    /// How many classifications of this obligation came back `Unknown`.
-    /// Part of the identity on purpose: re-arming the same obligation with
-    /// this bumped is what makes the classifier effect run again, and a
-    /// classifier that started for the previous count no longer owns it.
-    unknown_retries: u8,
+    /// A later focus event can reconsider the same unresolved intent. Its
+    /// revision fences out an older classifier without replacing the intent's
+    /// sequence or losing the trusted outside choice that completion yields to.
+    observation: u64,
 }
-
-/// How many times an `Unknown` classification is retried before the
-/// obligation is dropped, and the pause before each retry.
-///
-/// `Unknown` almost always means the renderer was too busy to answer within
-/// the settlement budget, not that it cannot answer. Dropping the obligation
-/// on the first `Unknown` left a real focus-out unhonored on a loaded
-/// machine: the popup stayed open after focus moved to an outside control
-/// until the user closed it by hand. The retries keep the "never dismiss on
-/// no evidence" rule while giving a busy renderer a few more chances to
-/// produce evidence; the cap keeps a dead renderer from retrying forever.
-const UNKNOWN_CLASSIFICATION_RETRIES: u8 = 6;
-const UNKNOWN_CLASSIFICATION_RETRY_MS: u64 = 150;
 
 /// The settled destinations relevant to popup focus-out dismissal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,6 +353,10 @@ pub(crate) fn AppBar(
     let mut pending_layout_close = use_signal(|| false);
     let mut pending_focus_check = use_signal(|| None::<FocusObligation>);
     let mut running_focus_check = use_signal(|| None::<FocusObligation>);
+    // A bridge call may time out without seeing a focus event that arrived
+    // while it ran. Retain one notification for that exact observation; a
+    // newer intent or opening makes it inert without starting parallel work.
+    let mut queued_focus_recheck = use_signal(|| None::<FocusObligation>);
     let mut tentative_keyboard_focus = use_signal(|| None::<FocusObligation>);
     let mut focus_sequence = use_signal(|| 0_u64);
     let focus_coordinator = FocusCoordinator::new(
@@ -454,31 +464,22 @@ pub(crate) fn AppBar(
                     }
                     return;
                 }
+                let recheck = *queued_focus_recheck.peek() == Some(obligation);
+                if recheck {
+                    queued_focus_recheck.set(None);
+                }
                 match focus {
-                    ProfileFocus::Unknown
-                        if obligation.unknown_retries < UNKNOWN_CLASSIFICATION_RETRIES =>
-                    {
-                        // Re-arm the SAME obligation with its retry count
-                        // bumped, after a pause. Changing the pending token is
-                        // what reruns the classifier effect; a newer focus-out
-                        // arriving during the pause replaces the token and
-                        // the retry stands down.
-                        let next = FocusObligation {
-                            unknown_retries: obligation.unknown_retries + 1,
-                            ..obligation
-                        };
-                        spawn(async move {
-                            sleep_ms(UNKNOWN_CLASSIFICATION_RETRY_MS).await;
-                            if *pending_focus_check.peek() == Some(obligation)
-                                && obligation.opening == *open_generation.peek()
-                            {
-                                pending_focus_check.set(Some(next));
-                            }
-                        });
-                    }
                     ProfileFocus::Unknown => {
-                        pending_focus_check.set(None);
-                        focus_coordinator.clear_outside_obligation(obligation.sequence);
+                        // No evidence means the obligation remains unresolved.
+                        // A later focus event (or operation-lock transition)
+                        // can reconsider it; a timer must neither keep a dead
+                        // bridge busy nor discard the user's outside choice.
+                        if recheck {
+                            pending_focus_check.set(Some(FocusObligation {
+                                observation: obligation.observation + 1,
+                                ..obligation
+                            }));
+                        }
                     }
                     _ if obligation.trusted_outside && ops.busy_now() => {
                         // Keep the exact token pending. The operation lock's
@@ -527,7 +528,7 @@ pub(crate) fn AppBar(
             opening: open_generation(),
             sequence: *focus_sequence.peek(),
             trusted_outside,
-            unknown_retries: 0,
+            observation: 0,
         };
         pending_focus_check.set(Some(obligation));
         focus_coordinator.set_outside_obligation(if trusted_outside {
@@ -535,6 +536,31 @@ pub(crate) fn AppBar(
         } else {
             None
         });
+    };
+
+    // Outside-to-outside focus changes do not emit another popup focusout.
+    // Reconsider the pending intent itself, preserving its trusted provenance.
+    // A running observation normally samples the new destination, but an
+    // unanswered bridge call cannot do so. Keep one notification to consume
+    // after Unknown, without launching competing observers for the same intent.
+    let mut reconsider_focus_out = move || {
+        let pending = *pending_focus_check.peek();
+        if let Some(mut obligation) = pending {
+            if *running_focus_check.peek() == Some(obligation) {
+                // A held browser eval can outlive its Rust observer. Tests
+                // need a receipt from this owner to prove the recovery event
+                // arrived before that observer retired, not merely before
+                // the browser promise was released.
+                document::eval(
+                    "if (window.__farhelmTestProfiles) \
+                     window.__farhelmTestProfiles.focusRecheckWhileRunning = true;",
+                );
+                queued_focus_recheck.set(Some(obligation));
+                return;
+            }
+            obligation.observation += 1;
+            pending_focus_check.set(Some(obligation));
+        }
     };
 
     // Keyboard provenance is reserved at keydown, before the browser moves
@@ -546,7 +572,7 @@ pub(crate) fn AppBar(
             opening: open_generation(),
             sequence: *focus_sequence.peek(),
             trusted_outside: true,
-            unknown_retries: 0,
+            observation: 0,
         }));
     };
     let mut commit_keyboard_focus = move || {
@@ -624,6 +650,13 @@ pub(crate) fn AppBar(
                     hidden: true,
                     tabindex: "-1",
                     onclick: move |_| record_focus_out(true),
+                }
+                button {
+                    r#type: "button",
+                    class: "profiles-focus-recheck-relay",
+                    hidden: true,
+                    tabindex: "-1",
+                    onclick: move |_| reconsider_focus_out(),
                 }
                 button {
                     r#type: "button",

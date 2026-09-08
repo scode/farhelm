@@ -36,20 +36,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   machine is not an appropriate place for `--yolo` mode; the color should keep the user clearly aware that the session
   is local.
 
-- Fix the opening-focus obligation exposed by `an inert sidebar click dismisses the profiles popup` in
-  `e2e/tests/profiles.spec.ts`. In the final Chromium run at `6903cf90`, the test observed body focus after its outside
-  click, then found the popup still mounted with its new-profile button focused: the delayed opening handoff returned
-  focus inside and canceled dismissal. This is a product focus-obligation defect: a trusted outside click must override
-  or invalidate the stale opening-focus request, as `SPEC_impl.md` requires. Preserve that immediate click in the test;
-  waiting for opening focus first would hide the defective ordering. The shared reproduction evidence with the separate
-  profile-creation fixture race is retained under "Deflake". Repeat both engines and retain focus-event traces after
-  correction; do not add retries.
-
-- Product-side policies that only show under load, worth their own decisions rather than test tweaks: the profiles
-  popup's "an unknown focus classification never dismisses" rule leaves the popup open on a slow renderer (retries were
-  bolted on; the real fix is retrying on the next focus event instead of dropping), and the launch shim consuming a
-  planted spec before a delete runs (pin the spec or make delete's fail-closed check independent of shim timing).
-
 - Close the row menu when a menu item finishes its action. Clicking an item in a session row's "⋯" menu leaves the panel
   mounted over the row, so the menu has to be dismissed by hunting down the same toggle again — reported as one of the
   more annoying things about using the list. The rule is not "every click closes": rename and the three destructive
@@ -62,24 +48,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Deflake
 
 - Correct the editor-focus fixture in `a popup-created profile is offered on every host`, in
-  `e2e/tests/profiles.spec.ts`. The shared evidence below also records the separate inert-click product defect tracked
-  under "Near term"; only the profile-creation fixture correction belongs in this bucket.
-
-  Shared evidence for the distinct focus failures in `an inert sidebar click dismisses the profiles popup` and
-  `a popup-created profile is offered on every host`, in `e2e/tests/profiles.spec.ts`. Both failed in the final Chromium
-  run at `6903cf90` on the worker shape and pin documented under "Difficult deflake", without extra load. The first
-  observed body focus after its outside click, then found the popup still mounted with its new-profile button focused:
-  the delayed opening handoff returned focus inside and canceled dismissal. The second filled invocation while an editor
-  handoff was still pending; the trace shows that text appended to the name, an empty required invocation field, and no
-  POST to the profile route. Its catalog wait therefore timed out without a save ever being sent. A pinned candidate
-  batch passed the first case once, then failed the second on its first attempt. Separate exact baseline batches on
-  untouched `d71a87fb`, with `--repeat-each=20 --max-failures=1 --workers=1`, failed the inert case immediately and the
-  profile case after one pass. Both failures therefore predate this work; passing retries would not settle them. The
-  relevant popup production code is unchanged. The inert-click failure is a product focus-obligation defect: a trusted
-  outside click must override or invalidate the stale opening-focus request, as `SPEC_impl.md` requires. Preserve that
-  immediate click in the test; waiting for opening focus first would hide the defective ordering. The profile-creation
-  failure is a separate fixture handoff race: apply the existing editor-name-focus precondition before filling fields.
-  Repeat both engines and retain focus-event traces after each correction. Do not add retries or widen the catalog wait.
+  `e2e/tests/profiles.spec.ts`. In the final Chromium run at `6903cf90`, on the worker shape and pin documented under
+  "Difficult deflake" without extra load, invocation was filled while an editor handoff was still pending. The trace
+  shows text appended to the name, an empty required invocation field, and no POST to the profile route; the catalog
+  wait timed out without a save being sent. A pinned candidate batch failed this case on its first attempt. An exact
+  baseline batch on untouched `d71a87fb`, with `--repeat-each=20 --max-failures=1 --workers=1`, failed after one pass.
+  This fixture race predates the popup outside-focus correction and remains unresolved. Apply the existing
+  editor-name-focus precondition before filling fields, repeat both engines, and retain focus-event traces. Do not add
+  retries or widen the catalog wait. FLAKES.md retains the shared history with the separate inert-click product defect.
 
 ### Difficult deflake
 
@@ -122,8 +98,8 @@ is a clean gate.
   older fingerprint recurred. The previous event-driven retry/classification-ordinal attempt made pending focus failures
   more frequent and did not settle Escape dismissal; do not revive it as a proven solution. On recurrence, retain the
   full browser/bridge trace and feed open/close timestamps, separating no socket request from a late request and a
-  classifier exhausting observations. A new retry policy needs that evidence first; the older product-policy proposal
-  under "Near term" is not a proven fix.
+  classifier exhausting observations. The controlled regressions for retaining unresolved obligations and honoring later
+  focus events do not establish the cause of these older startup/bridge failures.
 - Investigate `opening the actions menu enters it, and Tab leaves it` in `e2e/tests/sidebar.spec.ts`, WebKit. At
   `6903cf90`, the full run failed to open the menu with ArrowDown. Its trace shows the toggle focus assertion passing,
   then terminal focus in the keyboard-action snapshot about 23 ms later; the menu handler never received that key.

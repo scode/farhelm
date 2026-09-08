@@ -711,9 +711,12 @@ test.describe("agent profiles", () => {
     await openProfilesAtBoundary(page);
     const target = section(page).locator(".new-profile-button");
     await expect(target).toBeAttached();
+    // The browser deadline is shorter than the Rust budget in this fixture.
+    // Expired commits may be attempted again while Rust still has time; the
+    // contract is that a dispatched commit expires without ever moving focus.
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitAttempts)
-    ).toBe(1);
+    ).toBeGreaterThanOrEqual(1);
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.focusSettled)
     ).toBe("unknown");
@@ -821,6 +824,66 @@ test.describe("agent profiles", () => {
   });
 
   /**
+   * Unknown evidence must leave dismissal unresolved until another focus
+   * event supplies a reason to reconsider it. Keep the renderer faulted past
+   * the bounded retry window, then move between two outside controls: that
+   * produces focusin but no new popup focusout to recreate a lost obligation.
+   */
+  test("an unresolved outside focus is reconsidered on the next focus event", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = { classificationErrors: 100 };
+    });
+    const first = page.locator(".host-details-toggle");
+    await first.focus();
+    await expect(first).toBeFocused();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classificationAttempts)
+    ).toBeGreaterThan(0);
+    // sleep-ok: keep classification unavailable beyond the existing bounded retry window and observe that uncertainty never dismisses.
+    await page.waitForTimeout(4_000);
+    await expect(section(page)).toBeVisible();
+    await expect(first).toBeFocused();
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles.classificationErrors = 0;
+      (document.querySelector(".add-host-button") as HTMLElement).focus();
+    });
+    await expect(page.locator(".add-host-button")).toBeFocused();
+    await expect(section(page)).toHaveCount(0);
+  });
+
+  /**
+   * Recovery may arrive before an unanswered classifier reaches its deadline.
+   * That outside-to-outside event must survive the old observation's timeout;
+   * the held evaluation itself never supplies the dismissal evidence.
+   */
+  test("outside focus recovery survives an unanswered classifier", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        classification: { holds: 1, started: 0, releases: [] },
+      };
+    });
+    const first = page.locator(".host-details-toggle");
+    await first.focus();
+    await expect(first).toBeFocused();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.classification.started)
+    ).toBe(1);
+    const second = page.locator(".add-host-button");
+    await second.focus();
+    await expect(second).toBeFocused();
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusRecheckWhileRunning),
+      { message: "the recovery event must reach the still-running Rust observation" },
+    ).toBe(true);
+    await expect(section(page)).toHaveCount(0);
+    await page.evaluate(() => (window as any).__farhelmTestProfiles.classification.releases.shift()());
+  });
+
+  /**
    * Focus-out tasks may finish out of order within one opening or after a new
    * opening. Full obligation tokens prevent either stale classifier from
    * clearing the newer dismissal it does not own.
@@ -925,11 +988,13 @@ test.describe("agent profiles", () => {
   /**
    * An inert sidebar click closes profiles after focus remains on the document
    * body, matching the adjacent filter popover without stealing focus back to
-   * the profiles toggle.
+   * the profiles toggle. Click while opening is still allowed to be pending:
+   * waiting for its focus handoff would hide a stale request stealing focus
+   * back after the user's outside choice.
    */
   test("an inert sidebar click dismisses the profiles popup", async ({ page }) => {
     await listWithStubbedFeed(page);
-    await openProfiles(page);
+    await openProfilesAtBoundary(page);
 
     // A real click, because synthetic dispatch would not move focus; on a spot
     // chosen from live geometry, because which part of the sidebar the popup
@@ -940,6 +1005,60 @@ test.describe("agent profiles", () => {
       .toBe(true);
     await expect(section(page)).toHaveCount(0);
     await expect(page.locator(".profiles-toggle")).not.toBeFocused();
+  });
+
+  /**
+   * A commit already dispatched to the renderer must still yield to a newer
+   * trusted outside click. Holding that phase distinguishes a browser-side
+   * veto from a Rust guard that can only prevent future bridge calls.
+   */
+  test("an outside click overrides a delayed opening focus commit", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await page.evaluate(() => {
+      (window as any).__farhelmTestProfiles = {
+        focusCommitHold: {},
+        focusCommitAttempts: 0,
+      };
+      const observeOutside = (event: PointerEvent) => {
+        const target = event.target;
+        if (!(target instanceof Element) ||
+          target.closest(".profiles-popover, .profiles-toggle")) return;
+        const test = (window as any).__farhelmTestProfiles;
+        const hold = test.focusCommitHold;
+        hold.outsideReceipt = {
+          trusted: event.isTrusted,
+          pending: hold.pending === true,
+          inBudget: performance.now() <= hold.deadline,
+          focused: document.activeElement?.matches(".new-profile-button") === true,
+        };
+        document.removeEventListener("pointerdown", observeOutside, true);
+      };
+      document.addEventListener("pointerdown", observeOutside, true);
+    });
+    await openProfilesAtBoundary(page);
+    const { x, y } = await inertSidebarPoint(page);
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitHold.pending)
+    ).toBe(true);
+    await page.mouse.click(x, y);
+    const receipt = await page.evaluate(() => {
+      const hold = (window as any).__farhelmTestProfiles.focusCommitHold;
+      hold.release();
+      return hold.outsideReceipt;
+    });
+    expect(receipt, "the trusted click must reach a held, unexpired opening commit").toEqual({
+      trusted: true, pending: true, inBudget: true, focused: false,
+    });
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitHold.releasedInBudget)
+    ).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+    await expect(section(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitExpired))
+      .not.toBe(true);
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusedAt))
+      .toBeUndefined();
   });
 
   /**
