@@ -498,3 +498,70 @@ and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Disposition: fixed in #527; the product re
 Class: fixture-premise
 
 Cause: established
+
+## 2026-09-08 — browser gate follow-up on terminal and profile fixtures
+
+Run `03f274cb-017a-40ef-b362-02c693ffa3b9` executed `npx playwright test` on clean
+`606396a49c405271947ff201d396dad41cc63b87`: 889 passed, 13 expected skips, 14 failed. It used Chromium and WebKit, one
+worker, zero retries, a non-root Ubuntu 26.04 container with six CPUs and 24 GiB, and no added CPU-load process. Pinned
+tmux 3.7c SHA256 was `1151ac9d3217afd8c4bc07e54c9fa01d3c71d70357688b6e296094d8ef3deeb3`; `LC_CTYPE=C.UTF-8`, `LANG` and
+`LC_ALL` unset. No ambient `FARHELM_*` names were present; the recorder supplied `FARHELM_TEST_TRACE_DIR` and
+`FARHELM_PLAYWRIGHT_POLICY_FILE`. The following observations share this substrate and retained failure record. They do
+not turn that failed command into a clean gate.
+
+Class: unknown
+
+Cause: unknown
+
+### Raw-byte sentinels depend on the byte dumper
+
+Four cases in `e2e/tests/terminal-keys.spec.ts` failed in each engine: Shift+Enter, plain Enter, Ctrl+Shift+Enter, and
+plain Enter after the chord all reached `RAWREADY` but missed the final sentinel. The default `od` was uutils coreutils
+0.8.0. Direct pty comparison `c99b4526-07a0-41e1-8449-64a5297a940e` observed no live output from its unbounded
+`od -v -An -tx1 -w1` after CR and `z`, while installed GNU od 9.7 emitted both bytes immediately. Selecting GNU od only
+in the isolated runner made all ten key cases pass in `25c38eeb-c7f5-4e6e-af1b-50d6934f8db6`, which selected
+`terminal-keys.spec.ts profiles.spec.ts -g 'Shift.Enter|plain Enter|Ctrl.Shift.Enter|outside click overrides a delayed|profile edited in another browser'`
+on the same clean revision, both engines, one worker and zero retries. No product or fixture source changed. The
+full-run failures therefore do not establish lost Farhelm input. Disposition: open fixture portability follow-up in
+TODO.md; require a live-output dumper without weakening the complete byte-sequence oracle.
+
+Class: substrate
+
+Cause: established
+
+### Large paste times out on the unchanged baseline too
+
+`an over-one-megabyte message does not drop the terminal socket` and the following
+`real backspace erases; real ctrl-c kills the fake agent`, in `e2e/tests/terminal-flood.spec.ts`, failed in both engines
+in the full run above. Both backspace cases failed during `resetStack` session-deletion setup: `deleted.ok()` was false,
+before either input assertion ran. Narrow candidate run `184477eb-d9b5-490b-bc26-a8f5bbae75b2` selected
+`terminal-flood.spec.ts -g 'over-one-megabyte|real backspace'`, both engines, one worker and zero retries: both paste
+waits failed and both backspace cases passed. After rebuilding clean baseline
+`722a690f4ee06dbf7350519811ddec0bcc3e5413`, run `ee79924b-b525-4f7e-ba9f-f105f3faa1f7` selected
+`profiles.spec.ts terminal-flood.spec.ts -g 'outside click overrides a delayed|profile edited in another browser|over-one-megabyte|real backspace'`
+with the same policy. Both paste waits failed again; the six other cases passed. Both narrow runs used the substrate
+above with GNU od selected. This extends the earlier WebKit paste observation to Chromium and establishes that the paste
+failure predates the host-selector stack. The backspace failure's relationship to the preceding paste remains unproven;
+a narrow pass does not erase it. Disposition: paste remains in its existing Difficult deflake entry; retain a separate
+backspace follow-up and inspect the deletion response and session lifecycle evidence before changing deadlines or
+behavior.
+
+Class: unknown
+
+Cause: unknown
+
+### Profile focus fixtures miss their intended boundary
+
+In WebKit, `an outside click overrides a delayed opening focus commit` in `e2e/tests/profiles.spec.ts` failed its
+unexpired-commit premise in the full run: the trusted click arrived after the held deadline. Narrow run `25c38eeb` above
+failed the release-within-deadline assertion instead. The full run also failed
+`a profile edited in another browser reaches this one over the real feed` while opening the popup, before exercising the
+profile update: the new-profile button never acquired focus. That case passed narrowly on the candidate; both profile
+cases passed once on clean baseline `722a690f` in `ee79924b`. These are non-reproductions, not proof that the failures
+predate the stack or that the earlier outside-click product defect returned. The new sidebar layout may affect timing.
+Disposition: open in TODO.md; preserve pointer/deadline receipts and popup focus readiness while locating the missing
+fixture boundary. Do not remove the assertions or extend the product focus deadline to make the tests pass.
+
+Class: pointer-focus
+
+Cause: unknown
