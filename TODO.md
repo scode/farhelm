@@ -253,6 +253,9 @@ Deferred work, with its original triggers:
 
 ## Maybe later
 
+- Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
+  restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
+
 - Free up more space for session names in the sidebar: the agent and yolo/profile labels currently take too much of each
   row. Use one small indicator for the agent and a separate small indicator for whether it is running in yolo mode.
   Decide the agent indicator's form (SVG icon, short name, etc.) and the remaining display details when doing the work.
