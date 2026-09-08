@@ -18,6 +18,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
+  `include a SPEC.md` to a prompt quickly made the display show `include a SPE` followed by another line containing
+  scattered fragments such as `COMMI`, `PR`, and repeated `SPEC` text, with large gaps between them. The screenshot
+  shows the prompt still being edited, before submission. Whether the underlying input was corrupted or only its
+  rendering is unknown; cause and reproducibility are not established.
+
 - Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
   combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.
 
