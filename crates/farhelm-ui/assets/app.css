@@ -1871,6 +1871,14 @@ samp {
   flex: 0 0 auto;
 }
 
+/* Local sessions need a persistent caution cue, including selected and
+   archived rows. Scope it to the session locality slot so host controls and
+   remote glyphs keep their existing meaning. Classification still comes from
+   confirmed host identity, never the host's displayed name. */
+.session-locality-slot .host-kind-icon[data-glyph="local"] {
+  color: var(--danger);
+}
+
 /* The rendered host name leads the optional second line beside the cwd.
    `flex: 0 1 auto` differs from `.session-cwd`'s `1 1 auto` only in
    flex-GROW: this item claims none of the line's unused space, while the cwd

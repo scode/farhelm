@@ -32,10 +32,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   conversation. Replace should preserve the session's directory, title, and agent choice while starting fresh. Cause and
   reproducibility are not established.
 
-- Color the "this machine" icon in the session list red by default to make local sessions unmistakable. Assume the local
-  machine is not an appropriate place for `--yolo` mode; the color should keep the user clearly aware that the session
-  is local.
-
 - Close the row menu when a menu item finishes its action. Clicking an item in a session row's "⋯" menu leaves the panel
   mounted over the row, so the menu has to be dismissed by hunting down the same toggle again — reported as one of the
   more annoying things about using the list. The rule is not "every click closes": rename and the three destructive

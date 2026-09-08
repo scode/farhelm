@@ -390,6 +390,8 @@ test("switching sessions directly tears the old view down and mounts the new one
     await expect(row(page, a.id)).toHaveAttribute("data-session-selected", "true");
     await expect(row(page, b.id)).toHaveAttribute("data-session-selected", "false");
     await expect(row(page, a.id)).toHaveClass(/(^| )selected( |$)/);
+    // Selection changes row colors without hiding the local-execution caution.
+    await expect(row(page, a.id).locator(".host-kind-icon[data-glyph='local']")).toHaveCSS("color", "rgb(224, 128, 128)");
     await expect(row(page, b.id)).not.toHaveClass(/(^| )selected( |$)/);
     const background = (id: string) =>
       row(page, id).evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -521,6 +523,8 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
     // since neither depends on which shape actually rendered.
     await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
     await expect(target.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
+    // Local execution remains a red caution cue once identity is confirmed.
+    await expect(target.locator(".host-kind-icon")).toHaveCSS("color", "rgb(224, 128, 128)");
 
     // A deliberately loose ceiling: the point is the density decision (a
     // row roughly half the four-line layout's ~90px), not a pixel-exact
@@ -2133,6 +2137,9 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-meta")).toHaveCount(0);
     await expect(target.locator(".session-row-open")).toHaveAttribute("title", session.cwd);
+    // Compact mode keeps the first-line local-execution cue visible.
+    await expect(target.locator(".host-kind-icon[data-glyph='local']")).toBeVisible();
+    await expect(target.locator(".host-kind-icon[data-glyph='local']")).toHaveCSS("color", "rgb(224, 128, 128)");
     expect((await target.boundingBox())!.height).toBeLessThan(expandedHeight);
     await expect.poll(async () => (await readPreferences(request)).compact).toBe(true);
 
@@ -2742,6 +2749,8 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   await expect(rows[2].locator(".session-cwd")).toHaveText("/srv/unknown");
   await expect(rows[1].locator(".stale-badge")).toBeVisible();
   await expect(rows[1].locator(".archived-badge")).toBeVisible();
+  // Stale/archive qualifiers must not mute the confirmed-local caution cue.
+  await expect(rows[1].locator(".host-kind-icon")).toHaveCSS("color", "rgb(224, 128, 128)");
   /** DOM visibility alone misses a badge completely clipped by its parent. */
   async function expectPaintedQualifiers() {
     const identity = (await rows[1].locator(".session-identity-copy").boundingBox())!;
