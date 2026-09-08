@@ -50,22 +50,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   bolted on; the real fix is retrying on the next focus event instead of dropping), and the launch shim consuming a
   planted spec before a delete runs (pin the spec or make delete's fail-closed check independent of shim timing).
 
-- Find out why a session created from a yolo profile can come back from a restart without its permission mode. Reported
-  from ordinary use, not reproduced under a test: after restarting, the session is running the agent again but the
-  permission-skipping mode is gone and has to be set by hand. Whether it happens every time is not established. The
-  strongest lead is `IntegrationSnapshot::resolve` in the supervisor's `agent_kind` module: when a create carries no
-  explicit `resume_template`, the template falls back to `default_resume_template`, which is built from argv0 and the
-  resume flag ALONE — every other token of the launch invocation is dropped, `--dangerously-skip-permissions` and
-  `--yolo` with them. So any yolo session that reaches restart without its profile's template resumes stripped, and
-  reproducing this is mostly a matter of finding which sessions those are. Two candidate paths worth checking first: the
-  starter rows are inserted once by the schema migration that adds the `profiles` table (both stores), so a store
-  already past that version never receives them and their templates cannot help it; and the profile editor falls back to
-  the SEED's template when the user does not author a resume line, which a brand-new user-authored profile does not
-  have. Also confirm that `codex --yolo resume {conversation}` — the starter row's own template — actually applies
-  `--yolo` with the flag ahead of the subcommand, since that is a codex argument-parsing question and not ours. One fact
-  that narrows the search for free: `RestartOffer::FreshOnly` relaunches the original invocation verbatim, so a session
-  that lost the flag went through the resume path, not the fresh one.
-
 - Close the row menu when a menu item finishes its action. Clicking an item in a session row's "⋯" menu leaves the panel
   mounted over the row, so the menu has to be dismissed by hunting down the same toggle again — reported as one of the
   more annoying things about using the list. The rule is not "every click closes": rename and the three destructive
@@ -259,6 +243,17 @@ Deferred work, with its original triggers:
 - Free up more space for session names in the sidebar: the agent and yolo/profile labels currently take too much of each
   row. Use one small indicator for the agent and a separate small indicator for whether it is running in yolo mode.
   Decide the agent indicator's form (SVG icon, short name, etc.) and the remaining display details when doing the work.
+
+- Separate an agent profile's common invocation (how to invoke the agent), initial launch arguments, and resume
+  arguments into three independently specified parts. The immediate restart fix is deliberately simpler: when no
+  explicit resume template is supplied, reuse the original invocation and append the agent's resume syntax, assuming
+  every original argument is reusable and there is no initial prompt, launch-only input, or custom command shape to
+  interpret. Keep the immediate fix to launch arguments plus resume arguments; custom argument handling belongs to this
+  follow-up. It must remove that assumption: initial prompts and launch-only options must not be replayed on resume, and
+  existing resume/continue selectors or an end-of-options marker must not collide with the generated resume command.
+  Preserve shared permission and configuration options without requiring users to duplicate them between launch and
+  resume. Settle the composition, editor, and migration behavior when this is picked up; keep it out of the immediate
+  fix.
 
 - Let the user mark each host as "yolo is fine" or "yolo is not fine", controlling which hosts appear red in the session
   list. This could also support warnings when the user is about to run an unsandboxed agent on a host marked "yolo is

@@ -527,6 +527,13 @@ has been accepted, which covers more than unhooked launches: a hook that is skip
 leaves the scan in charge exactly as before. The hook is therefore never required. Both Claude Code and Codex offer such
 a hook and write discoverable session records, which is why requiring this in v1 is safe.
 
+When an integrated session has no explicit resume invocation, its resume invocation is derived from the original launch
+argv retained for that session: Claude appends `--resume <conversation-id>`, and Codex appends
+`resume <conversation-id>`. The original argv is reused as-is, including permission and configuration arguments, and is
+preserved as argv elements rather than rejoined shell text. This immediate rule assumes every original argument is
+reusable and that the launch has no initial prompt or launch-only option; separating those concerns into common, launch,
+and resume arguments is deferred.
+
 Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
 no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job
 gives up silently within a bounded time and leaves its diagnostics in farhelm's own state directory, never in the user's

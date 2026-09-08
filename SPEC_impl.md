@@ -1096,9 +1096,13 @@ reports a failed listing rather than a silently shortened one.
   Codex in plain and permission-skipping variants exactly once, so edits and deletions remain durable. A profile names
   its kind explicitly (`generic` means no integration), and an absent resume template selects that kind's default. The
   helm resolves every profile-backed create into an invocation, kind, template, and immutable id/name snapshot before
-  the supervisor call. It also resolves every supervisor `SourceProfile` marked `Unresolved` against one catalog read
-  per reply before browser JSON or session-cache storage; missing ids become `Deleted`, and ids whose current names
-  differ from the snapshot become `Renamed`. Profile writes are last-write-wins and carry no definition fingerprint.
+  the supervisor call. When the template is absent for Claude or Codex, the supervisor derives it by retaining the
+  parsed original invocation argv and appending that kind's resume arguments; the argv is captured before per-launch
+  Farhelm hook injection. This deliberately assumes original arguments are reusable and has no parser for initial
+  prompts or launch-only options. It also resolves every supervisor `SourceProfile` marked `Unresolved` against one
+  catalog read per reply before browser JSON or session-cache storage; missing ids become `Deleted`, and ids whose
+  current names differ from the snapshot become `Renamed`. Profile writes are last-write-wins and carry no definition
+  fingerprint.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never registered, retargeted, or removed through the ssh-host management API, so its destination and its
   existence are not user management surface — but its alias is user-editable on the same terms as any other host's. It

@@ -194,13 +194,12 @@ const MAX_CONVERSATION_ID_LEN: usize = 128;
 /// agent whose status stays at the generic baseline. See `sharpen`'s own
 /// docs for why the default is "no sharpening" and never "no status".
 pub trait AgentIntegration: Send + Sync {
-    /// The resume invocation this kind gets by default, built from the
-    /// session's ORIGINAL first token rather than from a bare command
-    /// name: a session launched as `/opt/bin/claude` must resume through
-    /// `/opt/bin/claude`, because that is the binary the user chose and
-    /// possibly the only one reachable from the supervisor's own service
-    /// environment.
-    fn default_resume_template(&self, argv0: &str) -> Vec<String>;
+    /// The resume invocation this kind gets by default, preserving the
+    /// complete original launch argv before Farhelm appends per-launch hook
+    /// arguments. Resume arguments are deliberately appended as argv
+    /// elements so the user's argument boundaries survive without shell
+    /// reconstruction.
+    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String>;
 
     /// The directory beneath which records for `canonical_cwd` can be
     /// found. For Claude this is the munged-cwd project directory; for
@@ -372,12 +371,10 @@ struct ClaudeIntegration;
 struct CodexIntegration;
 
 impl AgentIntegration for ClaudeIntegration {
-    fn default_resume_template(&self, argv0: &str) -> Vec<String> {
-        vec![
-            argv0.to_string(),
-            "--resume".to_string(),
-            CONVERSATION_PLACEHOLDER.to_string(),
-        ]
+    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
+        let mut template = original_argv.to_vec();
+        template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
+        template
     }
 
     fn record_root(&self, home: &Path, canonical_cwd: &str) -> PathBuf {
@@ -479,12 +476,10 @@ impl AgentIntegration for CodexIntegration {
     /// `codex resume <id>`, the audited shape — a SUBCOMMAND rather than a
     /// flag, which is exactly why the default template is per-kind
     /// knowledge instead of one shared string with the command swapped in.
-    fn default_resume_template(&self, argv0: &str) -> Vec<String> {
-        vec![
-            argv0.to_string(),
-            "resume".to_string(),
-            CONVERSATION_PLACEHOLDER.to_string(),
-        ]
+    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
+        let mut template = original_argv.to_vec();
+        template.extend(["resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
+        template
     }
 
     /// Every session, regardless of working directory: Codex partitions
@@ -1430,7 +1425,7 @@ fn kind_name(kind: AgentKind) -> &'static str {
 }
 
 impl IntegrationSnapshot {
-    /// Resolve a create's snapshot from the invocation and the request's
+    /// Resolve a create's snapshot from the parsed invocation argv and the request's
     /// optional overrides (PLAN_M3.md item 7).
     ///
     /// The precedence is: an explicit override always wins over derivation,
@@ -1440,22 +1435,27 @@ impl IntegrationSnapshot {
     /// exist precisely because this heuristic cannot be made smart without
     /// becoming wrong in ways nobody could predict.
     ///
-    /// The default template is built from the ORIGINAL `argv0`, not from a
-    /// canonical command name, so `/opt/bin/claude` resumes through
-    /// `/opt/bin/claude`.
+    /// The default template preserves the ORIGINAL argv, not a canonical
+    /// command name or a shell reconstruction, so `/opt/bin/claude
+    /// --dangerously-skip-permissions` resumes through that original argv
+    /// before its per-kind suffix.
+    ///
+    /// Callers must provide a non-empty executable argv. Create validation
+    /// establishes that precondition before resolution; an empty slice has
+    /// no program from which to derive a kind and is therefore invalid.
     ///
     /// One validation invariant, and it is the only thing that can fail
     /// here: an integrated kind must end up with a template containing the
     /// placeholder. See [`SnapshotError`].
     pub fn resolve(
-        argv0: &str,
+        original_argv: &[String],
         kind_override: Option<AgentKind>,
         template_override: Option<Vec<String>>,
     ) -> Result<IntegrationSnapshot, SnapshotError> {
-        let kind = kind_override.unwrap_or_else(|| derive_kind(argv0));
+        let kind = kind_override.unwrap_or_else(|| derive_kind(&original_argv[0]));
         let integration = integration_for(kind);
-        let resume_template =
-            template_override.or_else(|| integration.map(|i| i.default_resume_template(argv0)));
+        let resume_template = template_override
+            .or_else(|| integration.map(|i| i.default_resume_template(original_argv)));
         if integration.is_some() && !template_has_placeholder(resume_template.as_deref()) {
             return Err(SnapshotError::IntegratedTemplateHasNoPlaceholder {
                 kind: kind_name(kind),
@@ -1985,26 +1985,34 @@ mod tests {
         assert_eq!(derive_kind(""), AgentKind::Generic);
     }
 
-    /// The default template must be built from the ORIGINAL first token,
-    /// which is the whole reason PLAN_M3.md item 7 spells it out: resuming
-    /// a session launched as `/opt/bin/claude` through a bare `claude`
-    /// would depend on a PATH the supervisor's own service environment may
-    /// not have. Codex's shape is a subcommand, not a flag — pinned here
-    /// because it is audited vendor behavior, not a choice.
+    /// A derived template preserves every original launch argument before
+    /// appending the kind's resume syntax, so permission flags survive a
+    /// restart without shell rejoining. Codex's shape is a subcommand, not a
+    /// flag — pinned here because it is audited vendor behavior, not a choice.
     #[farhelm_testtrace::test]
-    fn default_templates_keep_the_original_first_token() {
-        let claude = IntegrationSnapshot::resolve("/opt/bin/claude", None, None).unwrap();
+    fn default_templates_keep_the_original_launch_argv() {
+        let claude_argv = vec![
+            "/opt/bin/claude".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+        let claude = IntegrationSnapshot::resolve(&claude_argv, None, None).unwrap();
         assert_eq!(claude.kind, AgentKind::Claude);
         assert_eq!(
             claude.resume_template.unwrap(),
-            vec!["/opt/bin/claude", "--resume", "{conversation}"]
+            vec![
+                "/opt/bin/claude",
+                "--dangerously-skip-permissions",
+                "--resume",
+                "{conversation}"
+            ]
         );
-        let codex = IntegrationSnapshot::resolve("codex", None, None).unwrap();
+        let codex_argv = vec!["codex".to_string(), "--yolo".to_string()];
+        let codex = IntegrationSnapshot::resolve(&codex_argv, None, None).unwrap();
         assert_eq!(
             codex.resume_template.unwrap(),
-            vec!["codex", "resume", "{conversation}"]
+            vec!["codex", "--yolo", "resume", "{conversation}"]
         );
-        let generic = IntegrationSnapshot::resolve("bash", None, None).unwrap();
+        let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
         assert_eq!(generic.kind, AgentKind::Generic);
         assert_eq!(generic.resume_template, None);
     }
@@ -2016,7 +2024,8 @@ mod tests {
     /// hand to an exec without a shell.
     #[farhelm_testtrace::test]
     fn a_first_token_with_spaces_survives_as_one_argv_element() {
-        let snapshot = IntegrationSnapshot::resolve("/opt/my agents/claude", None, None).unwrap();
+        let snapshot =
+            IntegrationSnapshot::resolve(&["/opt/my agents/claude".into()], None, None).unwrap();
         assert_eq!(
             snapshot.resume_template.as_deref().unwrap(),
             ["/opt/my agents/claude", "--resume", "{conversation}"]
@@ -2036,7 +2045,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn explicit_overrides_win_over_derivation_in_both_directions() {
         let promoted =
-            IntegrationSnapshot::resolve("my-wrapper", Some(AgentKind::Claude), None).unwrap();
+            IntegrationSnapshot::resolve(&["my-wrapper".into()], Some(AgentKind::Claude), None)
+                .unwrap();
         assert_eq!(promoted.kind, AgentKind::Claude);
         assert_eq!(
             promoted.resume_template.unwrap(),
@@ -2044,7 +2054,8 @@ mod tests {
             "an overridden kind still derives its template from the real first token"
         );
         let demoted =
-            IntegrationSnapshot::resolve("claude", Some(AgentKind::Generic), None).unwrap();
+            IntegrationSnapshot::resolve(&["claude".into()], Some(AgentKind::Generic), None)
+                .unwrap();
         assert_eq!(demoted.kind, AgentKind::Generic);
         assert_eq!(
             demoted.resume_template, None,
@@ -2063,7 +2074,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_integrated_kind_refuses_a_placeholder_free_template() {
         let refused = IntegrationSnapshot::resolve(
-            "claude",
+            &["claude".into()],
             None,
             Some(vec!["claude".to_string(), "--continue".to_string()]),
         );
@@ -2076,7 +2087,7 @@ mod tests {
         // literal `--resume={conversation}` on the command line.
         assert!(
             IntegrationSnapshot::resolve(
-                "claude",
+                &["claude".into()],
                 None,
                 Some(vec![
                     "claude".to_string(),
@@ -2088,13 +2099,15 @@ mod tests {
         // Generic keeps every shape, including none at all.
         assert!(
             IntegrationSnapshot::resolve(
-                "bash",
+                &["bash".into()],
                 None,
                 Some(vec!["bash".to_string(), "--restore".to_string()]),
             )
             .is_ok()
         );
-        assert!(IntegrationSnapshot::resolve("bash", Some(AgentKind::Generic), None).is_ok());
+        assert!(
+            IntegrationSnapshot::resolve(&["bash".into()], Some(AgentKind::Generic), None).is_ok()
+        );
     }
 
     /// The placeholder may not be the PROGRAM, and the shapes that put it
@@ -2131,8 +2144,9 @@ mod tests {
             CONVERSATION_PLACEHOLDER.to_string(),
         ];
         ensure_resume_template(&wrapper).expect("the placeholder in an ARGUMENT slot is the point");
-        let snapshot = IntegrationSnapshot::resolve("sh", Some(AgentKind::Claude), Some(wrapper))
-            .expect("an integrated kind is satisfied by a placeholder anywhere in the vector");
+        let snapshot =
+            IntegrationSnapshot::resolve(&["sh".into()], Some(AgentKind::Claude), Some(wrapper))
+                .expect("an integrated kind is satisfied by a placeholder anywhere in the vector");
         assert_eq!(
             snapshot
                 .filled_resume_argv("0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31")
@@ -2220,7 +2234,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn conversation_and_cwd_placeholders_coexist_in_one_template() {
         let snapshot = IntegrationSnapshot::resolve(
-            "w",
+            &["w".into()],
             Some(AgentKind::Claude),
             Some(vec![
                 "w".to_string(),
@@ -2323,7 +2337,7 @@ mod tests {
         assert!(!is_plausible_conversation_id(CWD_PLACEHOLDER));
         assert!(!is_plausible_conversation_id(CONVERSATION_PLACEHOLDER));
         let snapshot = IntegrationSnapshot::resolve(
-            "w",
+            &["w".into()],
             Some(AgentKind::Claude),
             Some(vec![
                 "w".to_string(),
@@ -2381,7 +2395,8 @@ mod tests {
     /// through capture's own validation again.
     #[farhelm_testtrace::test]
     fn an_option_shaped_identity_neither_fills_a_template_nor_is_offered() {
-        let snapshot = IntegrationSnapshot::resolve("claude", None, None).expect("resolve");
+        let snapshot =
+            IntegrationSnapshot::resolve(&["claude".into()], None, None).expect("resolve");
         assert_eq!(
             snapshot.filled_resume_argv("--dangerously-bypass-approvals-and-sandbox"),
             None,
@@ -2414,12 +2429,12 @@ mod tests {
     /// SPEC.md forbids ever running the placeholder unfilled.
     #[farhelm_testtrace::test]
     fn the_restart_offer_reflects_exactly_what_could_honestly_be_run() {
-        let claude = IntegrationSnapshot::resolve("claude", None, None).unwrap();
+        let claude = IntegrationSnapshot::resolve(&["claude".into()], None, None).unwrap();
         assert_eq!(claude.restart_offer(None), RestartOffer::FreshOnly);
         assert_eq!(claude.restart_offer(Some("conv-1")), RestartOffer::Resume);
 
         let fallback = IntegrationSnapshot::resolve(
-            "some-agent",
+            &["some-agent".into()],
             None,
             Some(vec!["some-agent".to_string(), "--continue".to_string()]),
         )
@@ -2430,14 +2445,14 @@ mod tests {
             "a placeholder-free template is the one thing that can be run verbatim"
         );
 
-        let generic = IntegrationSnapshot::resolve("bash", None, None).unwrap();
+        let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
         assert_eq!(generic.restart_offer(None), RestartOffer::FreshOnly);
 
         // A generic session whose template DOES mention the placeholder can
         // never have an identity to fill it with, so it must not advertise
         // a fallback it could not run.
         let unfillable = IntegrationSnapshot::resolve(
-            "bash",
+            &["bash".into()],
             None,
             Some(vec![
                 "bash".to_string(),
@@ -3219,7 +3234,7 @@ mod tests {
     fn the_default_sharpener_leaves_every_baseline_alone() {
         struct Unsharpened;
         impl AgentIntegration for Unsharpened {
-            fn default_resume_template(&self, _argv0: &str) -> Vec<String> {
+            fn default_resume_template(&self, _original_argv: &[String]) -> Vec<String> {
                 unreachable!("this fixture exists only to exercise the defaulted method")
             }
             fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> PathBuf {

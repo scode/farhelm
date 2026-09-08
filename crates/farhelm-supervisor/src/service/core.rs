@@ -5038,9 +5038,9 @@ impl Supervisor {
     /// invariant — and every refusal in this function is one a keyed create
     /// records against its intent key and replays verbatim, which is the
     /// contract acceptance 7 states without a validation exception. And it
-    /// needs the parsed `argv`, since the kind and the default template
-    /// both come from the invocation's FIRST TOKEN rather than from the
-    /// invocation string.
+    /// needs the parsed `argv`: the first token determines the kind, while
+    /// the complete vector supplies the default resume template without
+    /// reconstructing shell text or losing launch arguments.
     ///
     /// The parsed argv and any resume-template override are additionally
     /// held to the shared executable-argv rule
@@ -5189,12 +5189,12 @@ impl Supervisor {
                 .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
                 .collect(),
         };
-        // Derived from `argv[0]`, the ORIGINAL first token — not from a
-        // canonical command name — so `/opt/bin/claude` resumes through
-        // `/opt/bin/claude`. `crate::agent_kind` owns every rule here,
-        // including the one failure this whole function can produce that
-        // is not about the filesystem.
-        let snapshot = IntegrationSnapshot::resolve(&argv[0], agent_kind, resume_template)
+        // Derived from the ORIGINAL parsed argv — before launch-only hook
+        // arguments are appended — so permission/configuration arguments
+        // survive a derived resume. `crate::agent_kind` owns the kind and
+        // suffix rules, including the one failure this whole function can
+        // produce that is not about the filesystem.
+        let snapshot = IntegrationSnapshot::resolve(&argv, agent_kind, resume_template)
             .map_err(|e| RequestError::new(ErrorKind::InvalidRequest, e.to_string()))?;
         // The agent will report its own `getcwd()`, which the kernel has
         // already resolved, so correlation has to compare against the
@@ -12334,8 +12334,8 @@ pub(crate) mod tests {
     /// The snapshot is item 7's IMMUTABLE record, and immutability is only
     /// worth anything if the value that lands is the resolved one. This
     /// drives a real create through the store and asserts what came back
-    /// out of it: derivation from the first token, the default template
-    /// built from that same token, and the honest restart offer that
+    /// out of it: kind derivation from the first token, the default template
+    /// built from the complete launch argv, and the honest restart offer that
     /// follows from having no captured identity yet.
     ///
     /// It also pins the negative half — the validation invariant refuses
@@ -12391,10 +12391,11 @@ pub(crate) mod tests {
             snapshot.resume_template.as_deref().unwrap(),
             [
                 "/opt/bin/claude",
+                "--dangerously-skip-permissions",
                 "--resume",
                 crate::agent_kind::CONVERSATION_PLACEHOLDER
             ],
-            "the template is built from the ORIGINAL first token, not a bare command name"
+            "the template preserves the original program path and launch arguments"
         );
         assert_eq!(snapshot.captured_conversation, None);
         assert_eq!(snapshot.resume_argv, None);
@@ -12519,6 +12520,131 @@ pub(crate) mod tests {
             ["wrapper", crate::agent_kind::CWD_PLACEHOLDER, "claude"],
             "validation must not substitute the placeholder itself"
         );
+    }
+
+    /// A restart must preserve the launch arguments that survived create,
+    /// for plain and permission-skipping Claude/Codex sessions alike.
+    /// Read both the template and captured identity through the durable
+    /// snapshot seam so an in-memory-only fix cannot satisfy this test.
+    /// The launch shim is deliberately absent in an owned directory: create
+    /// persists its row before launch failure, and no vendor process runs.
+    #[farhelm_testtrace::test]
+    async fn derived_resume_preserves_create_argv_for_claude_and_codex() {
+        let cases = [
+            (
+                "claude",
+                vec!["claude", "--resume", "{conversation}"],
+                vec!["claude", "--resume", "conversation-1"],
+            ),
+            (
+                "claude --dangerously-skip-permissions",
+                vec![
+                    "claude",
+                    "--dangerously-skip-permissions",
+                    "--resume",
+                    "{conversation}",
+                ],
+                vec![
+                    "claude",
+                    "--dangerously-skip-permissions",
+                    "--resume",
+                    "conversation-1",
+                ],
+            ),
+            (
+                "codex",
+                vec!["codex", "resume", "{conversation}"],
+                vec!["codex", "resume", "conversation-1"],
+            ),
+            (
+                "codex --yolo",
+                vec!["codex", "--yolo", "resume", "{conversation}"],
+                vec!["codex", "--yolo", "resume", "conversation-1"],
+            ),
+        ];
+        for (invocation, expected_template, expected_resume) in cases {
+            let state = StateDir::new();
+            let work = tempfile::tempdir().expect("workdir");
+            let cwd = work.path().to_string_lossy().to_string();
+            let absent_shim = work.path().join("absent-launch-shim");
+            assert!(
+                !absent_shim.exists(),
+                "the fixture must not launch a vendor"
+            );
+            let sup = Supervisor::new_with_exe(state.path(), absent_shim)
+                .await
+                .expect("supervisor");
+            let created = sup
+                .create_session(
+                    CreateInputs {
+                        cwd: &cwd,
+                        parent: None,
+                        mode: CreateMode::Raw {
+                            invocation: invocation.to_string(),
+                            agent_kind: None,
+                            resume_template: None,
+                            source_profile: None,
+                        },
+                        title: None,
+                        cols: 80,
+                        rows: 24,
+                    },
+                    None,
+                )
+                .await
+                .expect("create persists before the absent shim fails");
+            let snapshot = sup
+                .session_snapshot(&created.id)
+                .await
+                .expect("read durable snapshot")
+                .expect("created session exists");
+            assert_eq!(
+                snapshot.resume_template,
+                Some(expected_template.iter().map(|s| (*s).to_string()).collect())
+            );
+            assert_eq!(snapshot.captured_conversation, None);
+            assert_eq!(snapshot.restart_offer, RestartOffer::FreshOnly);
+
+            // Inject the capture result through its normal durable writer.
+            // Record discovery is outside this regression; no record file is
+            // read by this seam, and the fake path stays in the owned fixture.
+            let generation = sup
+                .store
+                .session(&created.id)
+                .await
+                .expect("read generation")
+                .expect("session exists")
+                .generation;
+            let captured = sup
+                .store
+                .record_captured_conversation(
+                    &created.id,
+                    generation,
+                    "conversation-1",
+                    &work.path().join("record.jsonl"),
+                )
+                .await
+                .expect("persist captured identity");
+            assert_eq!(captured.as_deref(), Some("conversation-1"));
+            let snapshot = sup
+                .session_snapshot(&created.id)
+                .await
+                .expect("read captured snapshot")
+                .expect("session still exists");
+            assert_eq!(
+                snapshot.captured_conversation.as_deref(),
+                Some("conversation-1")
+            );
+            assert_eq!(snapshot.restart_offer, RestartOffer::Resume);
+            assert_eq!(
+                relaunch_argv(RestartMode::Resume, &snapshot, invocation)
+                    .expect("the captured conversation can be relaunched"),
+                expected_resume
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     /// Drive `handle_control`'s create arm three times against one intent
@@ -14641,7 +14767,8 @@ pub(crate) mod tests {
             AgentKind::Codex => "codex",
             AgentKind::Generic => "agent",
         };
-        IntegrationSnapshot::resolve(argv0, Some(kind), None).expect("a derived template resolves")
+        IntegrationSnapshot::resolve(&[argv0.to_string()], Some(kind), None)
+            .expect("a derived template resolves")
     }
 
     /// The exact tail each integrated kind expects for `exe`, straight
