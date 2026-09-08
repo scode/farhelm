@@ -987,8 +987,8 @@ test.describe("agent profiles", () => {
 
   /**
    * An inert sidebar click closes profiles after focus remains on the document
-   * body, matching the adjacent filter popover without stealing focus back to
-   * the profiles toggle. Click while opening is still allowed to be pending:
+   * body without stealing focus back to the profiles toggle. Click while
+   * opening is still allowed to be pending:
    * waiting for its focus handoff would hide a stale request stealing focus
    * back after the user's outside choice.
    */
@@ -1702,7 +1702,7 @@ test.describe("agent profiles", () => {
     await expect
       .poll(
         async () => {
-          matching = (await listSessions(request, `title=${encodeURIComponent(title)}`)).sessions;
+          matching = (await listSessions(request)).sessions.filter((session) => session.title === title);
           // EVERY match is registered as it is seen, not just the first: if a
           // second one somehow exists, the assertion below fails and the
           // cleanup still reaps both rather than leaving an agent running in
@@ -2619,12 +2619,6 @@ test.describe("agent profiles", () => {
     await page.keyboard.press("Escape");
     await expect(section(page), "Escape cannot unmount the in-flight reply destination")
       .toBeVisible();
-    // The open popup physically covers this control, so drive the busy-surface
-    // contract directly rather than pretending a pointer can reach it.
-    await page.locator(".filter-toggle").dispatchEvent("click");
-    await expect(page.locator(".filter-popover"), "a competing filter is refused while busy")
-      .toHaveCount(0);
-    await expect(section(page)).toBeVisible();
     await page.setViewportSize({ width: 900, height: 650 });
     await expect(section(page), "resize dismissal waits for the mutation reply").toBeVisible();
 
@@ -2932,28 +2926,6 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * Profiles and filters are mutually exclusive in both opening directions.
-   * Testing each direction prevents two independent reactive effects from
-   * drifting into an asymmetric two-popover state.
-   */
-  test("profiles and filters exclude each other in both opening directions", async ({ page }) => {
-    await listWithStubbedFeed(page);
-
-    await page.locator(".filter-toggle").click();
-    await expect(page.locator(".filter-popover")).toBeVisible();
-    await openProfiles(page);
-    await expect(page.locator(".filter-popover")).toHaveCount(0);
-    await closeProfiles(page);
-
-    await openProfiles(page);
-    // The open popup physically covers this control, so drive mutual exclusion
-    // directly rather than pretending a pointer can reach it.
-    await page.locator(".filter-toggle").dispatchEvent("click");
-    await expect(page.locator(".filter-popover")).toBeVisible();
-    await expect(section(page)).toHaveCount(0);
-  });
-
-  /**
    * A refused competing surface may focus its own toggle as part of handling
    * the refusal, but that programmatic side effect is not an outside choice.
    * The busy profiles operation therefore keeps its popup and confirmation.
@@ -3195,7 +3167,7 @@ async function settleExistence(
   await expect
     .poll(
       async () =>
-        (await listSessions(request, `title=${encodeURIComponent(title)}`)).sessions[0]
+        (await listSessions(request)).sessions.find((session) => session.title === title)
           ?.source_profile?.existence,
       {
         timeout: 20_000,

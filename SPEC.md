@@ -229,9 +229,8 @@ The client supports: create, open, rename, restart, clone, replace, stop, archiv
   other create. The agent carries over as a profile only while the source's profile is still the one it names (the same
   identity a session's own profile snapshot already tracks); otherwise the form falls back to the source's raw
   invocation, exactly as "the client asks instead of guessing" already requires for a vanished remembered default.
-  Cloning does not deduplicate titles — a duplicate is allowed, the same as any other create. Clone is offered on
-  archived sessions too: it is the only way to get a new, running agent out of one without restarting (and thereby
-  unarchiving) the original.
+  Cloning does not deduplicate titles — a duplicate is allowed, the same as any other create. The sidebar offers clone
+  on its visible, non-archived rows; it has no archive-browsing surface.
 - **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and agent (a
   profile while the source's profile is still the one it names, otherwise the source's raw invocation, exactly as clone
   resolves it) — and then DELETES the source; it never archives it. Confirmed directly from the row menu, with one
@@ -239,8 +238,8 @@ The client supports: create, open, rename, restart, clone, replace, stop, archiv
   keeps the session's own id and its conversation: restart continues a session, replace starts one over under the same
   settings. If the create fails, the source is untouched. If the create succeeds and the removal that follows fails, the
   reply names both sessions; whether the source is still there depends on how the removal failed, and the user checks or
-  removes it by hand. Replace is offered wherever clone is offered, archived sessions included — an archived source has
-  no agent to kill, only a record to delete.
+  removes it by hand. Replace is offered wherever clone is offered. The API also accepts archived sources — an archived
+  source has no agent to kill, only a record to delete.
 - **Archive** hides the session from the default list and shuts down everything in it — agent and terminal tabs — with
   confirmation when anything is still running. Archived sessions keep their metadata; their terminal contents are gone
   (see Terminal experience). Restart on an archived session unarchives it and recovers the conversation where the agent
@@ -273,23 +272,21 @@ it shows the session's metadata and says why there is no terminal, rather than a
 
 ### Session list
 
-One flat list across all registered hosts, with filtering and search by host, directory, agent profile, status, and
-title. The list can be ordered by most recent activity, by creation time, or by title, chosen from a control that is
-reachable without opening the filter controls; the order someone picks is remembered by the helm as one preference
-shared by every client, together with the last-selected session and compact-row choice, and most recent activity is what
-a client shows until someone picks otherwise. No client keeps its own copy: every client reads the helm's preference
-once after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on
-the same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients
-remember different answers — is not wanted. A client that asks the helm for no particular order gets creation time. The
-filter controls open on demand rather than standing permanently above the list and apply as someone edits them; while an
-applied filter's controls are closed, the list says visibly that a filter is in force, so a narrowed list can never
-masquerade as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable
-as a filter, but parentage does not nest the list and implies nothing about VCS state.
+One flat list across all registered hosts, with one always-visible host selector: ALL, This machine, and every
+configured machine (including disconnected ones). The list can be ordered by most recent activity, by creation time, or
+by title, chosen from a separate control; the order someone picks is remembered by the helm as one preference shared by
+every client, together with the last-selected session and compact-row choice, and most recent activity is what a client
+shows until someone picks otherwise. No client keeps its own copy: every client reads the helm's preference once after
+authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the same
+session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
+different answers — is not wanted. A client that asks the helm for no particular order gets creation time. The host
+selection starts at ALL for each page lifetime, applies immediately, and does not deselect an open session. If the
+selected host is removed, the selector returns to ALL after the registry confirms the removal. No mandatory hierarchy.
+Agent-spawned sessions (see below) carry a parent reference, but parentage does not nest the list and implies nothing
+about VCS state.
 
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
-view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That
-switch is which list you are looking at rather than a filter you applied, so it does not make the list call itself
-filtered. A filter someone typed or chose does, and the count then says how many matched alongside how big the view is.
+view, so they are outside its count. A host selection says how many matched alongside how big the ordinary view is.
 
 The list is served and rendered WHOLE. The fleet this product is for is tens of sessions across a few hosts, not
 thousands, and the design assumes that scale outright: every supervisor answers a listing with its entire list in one
@@ -317,13 +314,14 @@ is an implementation choice, covered in SPEC_impl.md rather than here.
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host actions
 open on demand from the row menu, and details reveals the version, identity, session count, remedies, diagnostics, and
-provisioning progress under every row. Profiles and filtering use secondary buttons; session creation remains the blue
-primary action. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives
-helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are
-refused with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
-directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
-one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
-clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
+provisioning progress under every row. Profiles use a secondary button; host selection stays beside sort, and session
+creation remains the blue primary action. Sessions on an unreachable host stay in the list from the helm's last-known
+knowledge (which survives helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an
+unreachable host are refused with a clear error; nothing queues for later delivery in v1. Opening such a session shows
+its metadata — title, directory, last-known status — behind a clear host-unreachable notice; there is no terminal to
+show and no pretense of one. Changes made from any client — creates, renames, stops, deletes, status transitions —
+appear in all other connected clients automatically; the agent-spawn behavior below is one instance of this general
+rule, not a special case.
 
 ### Status
 

@@ -21,7 +21,6 @@ import {
   createSession,
   listProfiles,
   listSessions,
-  openFilterBar,
   type ProfileRow,
   type SessionRow,
 } from "./helpers/fleet";
@@ -60,7 +59,7 @@ async function childByTitle(request: APIRequestContext, title: string): Promise<
   await expect
     .poll(
       async () => {
-        child = (await listSessions(request, `title=${encodeURIComponent(title)}`)).sessions.find(
+        child = (await listSessions(request)).sessions.find(
           (session) => session.title === title,
         );
         return child?.id;
@@ -119,7 +118,6 @@ test("a fake agent spawns children that appear without refreshing the observer",
     driver = await context.newPage();
 
     await page.goto("/");
-    await openFilterBar(page);
     await expect(row(page, parent.id)).toBeVisible({ timeout: 20_000 });
     const observerUrl = page.url();
     await openReadyTerminal(driver, parent.id, {
@@ -138,18 +136,14 @@ test("a fake agent spawns children that appear without refreshing the observer",
     await expect(row(page, unparented.id)).toBeVisible({ timeout: 20_000 });
     expect(page.url(), "the observer must not navigate to discover the child").toBe(observerUrl);
 
-    // The fixture's second command adds the authenticated parent solely to
-    // exercise the UI's exact direct-child filter.
+    // The second command proves an authenticated parent reaches the spawned
+    // session without changing how the observer discovers it.
     await submitPrompt(driver, `spawn-parented ${parentedDir}`, 100);
     await waitForReplyMarker(driver, "SPAWNED-PARENTED:");
     parented = await childByTitle(request, path.basename(parentedDir));
     await expect(row(page, parented.id)).toBeVisible({ timeout: 20_000 });
     expect(page.url()).toBe(observerUrl);
 
-    await page.locator(".filter-parent").fill(parent.id);
-    await expect(row(page, parented.id)).toBeVisible({ timeout: 20_000 });
-    await expect(row(page, unparented.id)).toHaveCount(0);
-    await expect(page.locator(".session-row")).toHaveCount(1);
   } finally {
     if (driver) await driver.close();
     if (parented) await cleanupSession(request, parented.id);

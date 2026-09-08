@@ -16,9 +16,9 @@ details, this is the map:
   holds or stubs around a specific session's first reads must `pinAutoSelect(page, otherId)` BEFORE `goto` (the helper
   fetches the helm identity and writes the keyed record — a bare id is silently ignored). `__farhelmTermReady` is true
   from load, so it no longer gates "the session I just acted on is up" — use title-based completion signals.
-- **On-demand surfaces need their open helpers first**: `openRowMenu` and `openFilterBar` await their floating surfaces;
-  `openHostsPanel` now awaits the permanent host list and opens its global details disclosure. A bare-DOM
-  `querySelector().click()` on a not-yet-mounted control is a silent no-op.
+- **On-demand surfaces need their open helpers first**: `openRowMenu` awaits its floating surface; `openHostsPanel` now
+  awaits the permanent host list and opens its global details disclosure. A bare-DOM `querySelector().click()` on a
+  not-yet-mounted control is a silent no-op.
 - **"Leaving" a session means selecting another** (no back button): bounce through the shared `e2e-session` row, and
   prove teardown via stashed handles (socket readyState, instance identity) rather than gone-entirely windows — the
   replacement mount owns the globals immediately.

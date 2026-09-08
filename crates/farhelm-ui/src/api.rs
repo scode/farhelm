@@ -19,8 +19,8 @@
 //! `SessionListBody`/`SessionListing`, `SessionFilter`, `POLL_INTERVAL_MS`,
 //! and `restart_mode_for` live here too, even though none of them performs
 //! I/O directly: the first pair is this module's own decoded response shape
-//! and the listing it assembles from it, `SessionFilter` is the query surface's
-//! half of the helm's server-side filtering (PLAN_M6_75.md item 7),
+//! and the listing it assembles from it, `SessionFilter` carries the sidebar's
+//! optional host selection,
 //! `POLL_INTERVAL_MS` is the cadence the FALLBACK polls run at, and the last
 //! documents the wire-level pairing `restart_session` enforces from the
 //! caller's side — all of them are part of the HTTP contract this module
@@ -93,8 +93,7 @@ struct SessionListBody {
     truncated: bool,
 }
 
-/// The session list's query surface: SPEC.md's dimensions, as the values a
-/// user typed or chose.
+/// The session list's host selector as the query the UI sends to the helm.
 ///
 /// Filtering is a QUERY, not a render pass. Every field here becomes a
 /// parameter on `GET /api/sessions` and the helm answers with the matching
@@ -103,115 +102,33 @@ struct SessionListBody {
 /// hide matches beyond the cut while reporting a count that included them,
 /// and the count is what the banner says out loud.
 ///
-/// Strings rather than `Option<String>` because a text field's empty value
-/// IS its absent value, and the helm agrees — an exactly-empty parameter is
-/// treated as absent there, which is what makes clearing a search box widen
-/// the list instead of erroring.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionFilter {
-    /// Whether the list includes archived sessions. False is the ordinary
-    /// view and therefore still an active server-side predicate.
-    pub(crate) include_archived: bool,
     /// A registered host's id, from `GET /api/hosts`.
     pub(crate) host: Option<HostId>,
-    /// The exact session id whose direct children should be listed.
-    pub(crate) parent: String,
-    /// Substring of the working directory, case-insensitively.
-    pub(crate) directory: String,
-    /// A profile, named by its id or by the name a session snapshotted at
-    /// creation — the latter is what keeps a DELETED profile's sessions
-    /// findable, and is why this is free text rather than a picker over the
-    /// catalog as it stands today.
-    pub(crate) profile: String,
-    /// A status, spelled exactly as the wire spells it. The helm refuses a
-    /// word it does not know with a 400 rather than answering "no sessions",
-    /// so this is offered as a choice rather than typed.
-    pub(crate) status: String,
-    /// Substring of the title, case-insensitively — SPEC.md's "search".
-    pub(crate) title: String,
 }
 
 impl SessionFilter {
-    /// Whether a reply to this request MAY leave some of the fleet out — the
-    /// EVIDENCE predicate.
-    ///
-    /// A statement about the request's SHAPE, not a detection of anything
-    /// that actually went missing: it answers yes for any request the helm
-    /// is allowed to answer with less than the whole fleet, whether or not
-    /// this particular reply did. That is the only useful reading, because
-    /// the reconciliations it gates — retiring an optimistic rename, closing
-    /// a rename editor, dropping a delete confirmation — act on sessions
-    /// that are NOT in the reply, and nothing in a reply can say why
-    /// something is missing from it.
-    ///
-    /// The DEFAULT view answers yes, and must: it hides archived sessions,
-    /// so an archived session missing from the rows has not left the fleet.
-    ///
-    /// Deliberately NOT the banner's question. See
-    /// [`Self::narrows_beyond_archive`] for why the two diverge, and note
-    /// which way each errs — this one is the conservative half, so when in
-    /// doubt a caller wants this one.
-    pub(crate) fn omits_fleet_members(&self) -> bool {
-        self != &SessionFilter {
-            include_archived: true,
-            ..SessionFilter::default()
-        }
-    }
-
     /// Whether the USER narrowed this listing — the BANNER predicate.
     ///
-    /// True for a filter the user applied (host, parent, directory, profile,
-    /// status, title) and false for the archive switch in either position.
+    /// True when the user chose one host.
     /// That is what makes the ordinary list say "12 sessions" rather than "12
     /// matching of 12 sessions": with nothing typed there is no filter to
     /// report, and the helm now counts the same view the rows come from
     /// (`SessionListBody::total` there, [`SessionListing::total`] here), so
     /// the two numbers no longer need a sentence explaining why they differ.
     ///
-    /// Turning the archive switch ON is not a narrowing either — it WIDENS
-    /// the view, and the total widens with it — so it too keeps the
-    /// unfiltered wording.
-    ///
-    /// This is the weaker of the pair by construction: every filter it
-    /// reports is also one [`Self::omits_fleet_members`] reports, and the
-    /// default view is the gap between them. Using this one to decide what a
-    /// reply is evidence about would read an archived session's absence as a
-    /// departure.
     pub(crate) fn narrows_beyond_archive(&self) -> bool {
-        self != &SessionFilter {
-            include_archived: self.include_archived,
-            ..SessionFilter::default()
-        }
+        self.host.is_some()
     }
 
     /// This filter as the query string's parameters, percent-encoded and
     /// joined — empty when nothing is set.
     ///
-    /// Values travel BYTE FOR BYTE apart from the encoding: no trimming, on
-    /// purpose and in step with the helm, which drops only the exactly-empty
-    /// value. A directory may legitimately contain surrounding whitespace
-    /// and a title may be `fix  the  spacing`, so trimming would make text
-    /// that is actually there unfindable — and would collapse `" "` and `""`
-    /// into one request, which the user can see as a space silently clearing
-    /// their filter.
     fn query(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
-        if self.include_archived {
-            parts.push("include_archived=true".to_string());
-        }
         if let Some(host) = self.host {
             parts.push(format!("host={host}"));
-        }
-        for (name, value) in [
-            ("parent", &self.parent),
-            ("directory", &self.directory),
-            ("profile", &self.profile),
-            ("status", &self.status),
-            ("title", &self.title),
-        ] {
-            if !value.is_empty() {
-                parts.push(format!("{name}={}", encode_query_value(value)));
-            }
         }
         parts.join("&")
     }
@@ -225,9 +142,7 @@ impl SessionFilter {
 /// statement from its side): a filter decides WHICH sessions a listing
 /// holds, an order decides in what sequence they arrive. Folded together,
 /// re-sorting would look like re-filtering — the count banner would announce
-/// a filter nobody applied, and the evidence predicates
-/// ([`SessionFilter::omits_fleet_members`]) would answer for a dimension
-/// that cannot change what a reply covers.
+/// a filter nobody applied.
 ///
 /// The default here is deliberately NOT the wire's. A request naming no
 /// order gets `created`, which is what every client written before there was
@@ -730,29 +645,21 @@ pub(crate) struct SessionListing {
     /// silently reverting to the unfiltered wording and leaving the user
     /// wondering whether their filter took.
     ///
-    /// The archive switch is not one of those filters in either position —
-    /// see the predicate's own docs, and [`Self::omits_fleet_members`] for
-    /// the field that DOES count it.
+    /// The sidebar's implicit archive exclusion is not a user filter and does
+    /// not change this flag.
     pub(crate) filtered: bool,
-    /// Whether the request behind this listing PERMITTED the helm to leave some
-    /// of the fleet out (`SessionFilter::omits_fleet_members`) — the flag
-    /// that decides what an absence here may be read as.
+    /// Whether this listing permits the helm to leave some of the fleet out —
+    /// the flag that decides what an absence here may be read as.
     ///
     /// True does not mean anything was actually withheld; it means nothing
     /// missing from `sessions` can be assumed gone. That is the only
     /// question a reader can answer from a reply, since a session that is
     /// not here left no trace saying why.
     ///
-    /// A second flag rather than a second reading of `filtered`, because the
-    /// two questions have different answers for exactly one listing: the
-    /// DEFAULT view, which is unfiltered to a reader (`filtered` is false, so
-    /// the banner says "12 sessions") while still hiding every archived
-    /// session (so an absent row is not a departure). Collapsing them would
-    /// make a poll retire an optimistic rename, close an editor, or drop a
-    /// confirmation the moment a session was archived somewhere else.
-    ///
-    /// From the REQUEST as well, for the same reason: what a reply covers is
-    /// a property of what was asked, not of what came back.
+    /// This is always true for the browser's active-session list, even when
+    /// `filtered` is false, because archived sessions remain absent. Keeping
+    /// the evidence fact explicit prevents reconciliation from treating an
+    /// archived row as deleted while keeping the banner's ordinary wording.
     pub(crate) omits_fleet_members: bool,
     /// Whether entries remain beyond what `sessions` carries — the helm's
     /// own word, passed through: some host's reply hit the wire's cap, or
@@ -1292,17 +1199,17 @@ pub(crate) async fn fetch_sessions(
         .json::<SessionListBody>()
         .await
         .map_err(|e| e.to_string())?;
-    // BOTH predicates, because they answer different questions about the
-    // same request and the listing carries both: what the banner says
-    // happened, and what this reply is allowed to be evidence about. See
-    // `SessionFilter::narrows_beyond_archive` for where they part.
+    // Every browser listing excludes archived sessions, so absence is never
+    // evidence that a session left the fleet. Keep that fact on the listing
+    // because the reconciliation helpers consume the reply's evidence
+    // contract rather than reinterpreting the request independently.
     let filtered = filter.narrows_beyond_archive();
     Ok(SessionListing {
         sessions: body.sessions,
         total: body.total,
         matching: matching_count(filtered, body.matching, body.total),
         filtered,
-        omits_fleet_members: filter.omits_fleet_members(),
+        omits_fleet_members: true,
         truncated: body.truncated,
     })
 }
@@ -3169,128 +3076,37 @@ mod tests {
         );
     }
 
-    /// The archive switch parts the two predicates, and each answers the
-    /// question it exists for.
+    /// The default archive exclusion and host selection answer different
+    /// questions about one listing.
     ///
-    /// This is the whole point of there being two. The DEFAULT view sends an
-    /// empty query string (omission is the wire spelling of
-    /// `include_archived=false`) and reads as unfiltered to a person, so the
-    /// banner says "12 sessions" — while the helm is still withholding every
-    /// archived row, so the reply covers less than the fleet and nothing may
-    /// read an absence in it as a departure. Collapse the two and one of
-    /// those goes wrong: either the ordinary list announces a filter nobody
-    /// applied, or a session archived from another client is mistaken for one
-    /// that left.
-    ///
-    /// Turning the switch ON is the mirror case: it widens the view rather
-    /// than narrowing it, so the banner stays unfiltered and the reply
-    /// becomes fleet-wide.
+    /// The ordinary sidebar sends no host query and reads as unfiltered to a
+    /// person, while it still withholds archived rows. A host choice changes
+    /// the banner and query but does not make absence authoritative: that
+    /// host's archived sessions are still omitted.
     #[farhelm_testtrace::test]
-    fn the_archive_switch_is_a_view_rather_than_a_filter() {
+    fn host_selection_narrows_an_archive_excluding_view() {
         let ordinary = SessionFilter::default();
         assert!(
             !ordinary.narrows_beyond_archive(),
             "nothing was typed, so the banner has no filter to report"
         );
-        assert!(
-            ordinary.omits_fleet_members(),
-            "the ordinary view still hides archived rows, so its absences prove nothing"
-        );
         assert_eq!(ordinary.query(), "");
 
-        let widened = SessionFilter {
-            include_archived: true,
-            ..SessionFilter::default()
-        };
-        assert!(
-            !widened.narrows_beyond_archive(),
-            "the switch widens the view; it is not a filter in either position"
-        );
-        assert!(
-            !widened.omits_fleet_members(),
-            "and with it on the reply is the whole fleet, so absence IS evidence"
-        );
-
-        let searched = SessionFilter {
-            title: "needle".to_string(),
-            ..SessionFilter::default()
-        };
-        assert!(
-            searched.narrows_beyond_archive() && searched.omits_fleet_members(),
-            "a filter a person applied answers both questions the same way"
-        );
-    }
-
-    /// The sidebar's two filter controls read the switch differently, on
-    /// purpose, and this pins the pair rather than either half alone.
-    ///
-    /// `rows::count_banner` chooses its matching wording with
-    /// [`SessionFilter::narrows_beyond_archive`], while `list::ListView`
-    /// enables Clear with a full comparison against the default. The switch
-    /// is the one setting where those disagree, and each direction is a
-    /// separate way to get it wrong: call the widened view matching and the
-    /// ordinary count lies; hide the switch from Clear and a user who turned
-    /// it on has no control offering to put it back.
-    ///
-    /// Kept beside the predicate rather than in the view because that is
-    /// where the decision is testable at all — the count wording is Dioxus
-    /// markup a browser has to render, and the e2e archive spec pins the
-    /// rendered half.
-    #[farhelm_testtrace::test]
-    fn the_archive_switch_is_clearable_without_being_announced() {
-        let widened = SessionFilter {
-            include_archived: true,
-            ..SessionFilter::default()
-        };
-        assert!(
-            !widened.narrows_beyond_archive(),
-            "the badge must stay off: the switch chose a view, it did not narrow one"
-        );
-        assert_ne!(
-            widened,
-            SessionFilter::default(),
-            "and Clear must stay live: the switch is still a setting to undo"
-        );
+        let selected = SessionFilter { host: Some(7) };
+        assert!(selected.narrows_beyond_archive());
         assert_eq!(
-            SessionFilter {
-                include_archived: false,
-                host: None,
-                parent: String::new(),
-                directory: String::new(),
-                profile: String::new(),
-                status: String::new(),
-                title: String::new(),
-            },
-            SessionFilter::default(),
-            "while the archive-excluding view with nothing typed IS the default, so Clear has \
-             nothing to offer there — the fact that makes the comparison above a real one"
+            selected.query(),
+            "host=7",
+            "the opaque registry id is the only sidebar predicate on the wire"
         );
     }
 
-    /// Each dimension reaches the wire under the helm's own parameter name,
-    /// and every value is encoded rather than pasted.
-    ///
-    /// The encoding is the load-bearing half: an unescaped `&` in a title
-    /// search would split into a second parameter, and a search for
-    /// `a&status=exited` would silently become a status filter the user
-    /// never asked for.
+    /// Host selection reaches the wire under the helm's parameter name.
     #[farhelm_testtrace::test]
-    fn every_filter_dimension_travels_under_its_own_encoded_parameter() {
-        let filter = SessionFilter {
-            include_archived: true,
-            host: Some(7),
-            parent: "session/root".to_string(),
-            directory: "/srv/my project".to_string(),
-            profile: "claude code".to_string(),
-            status: "waiting".to_string(),
-            title: "a&b".to_string(),
-        };
+    fn the_host_selection_travels_as_one_query_parameter() {
+        let filter = SessionFilter { host: Some(7) };
         assert!(filter.narrows_beyond_archive());
-        assert_eq!(
-            filter.query(),
-            "include_archived=true&host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
-             profile=claude%20code&status=waiting&title=a%26b"
-        );
+        assert_eq!(filter.query(), "host=7");
     }
 
     /// Every listing request names its order, unfiltered ones included, and
@@ -3322,14 +3138,8 @@ mod tests {
         // Alongside a filter, the order leads and the filter's own
         // parameters follow unchanged — the two are independent dimensions
         // of one request (see `ListSort`), not one merged query.
-        let searched = SessionFilter {
-            title: "needle".to_string(),
-            ..SessionFilter::default()
-        };
-        assert_eq!(
-            list_query(&searched, ListSort::Title),
-            "sort=title&title=needle"
-        );
+        let selected = SessionFilter { host: Some(7) };
+        assert_eq!(list_query(&selected, ListSort::Title), "sort=title&host=7");
 
         // And the words survive a round trip, so a value written to storage
         // under one build is read back as the same order by the next.
@@ -3340,51 +3150,6 @@ mod tests {
             ListSort::from_key("recent"),
             None,
             "a word this build does not know must not resolve to some other order"
-        );
-    }
-
-    /// Only the EXACTLY-empty value clears a dimension; whitespace is a
-    /// search like any other.
-    ///
-    /// The helm draws the line in the same place, and both sides have to for
-    /// the same user-visible reason: a directory may legitimately contain
-    /// surrounding spaces, so trimming would make what is actually there
-    /// unfindable — and would turn typing a single space into a silent
-    /// clear, which is the one version of this a user can watch happen.
-    #[farhelm_testtrace::test]
-    fn only_an_exactly_empty_value_clears_a_dimension() {
-        let blank = SessionFilter {
-            include_archived: true,
-            title: String::new(),
-            ..SessionFilter::default()
-        };
-        assert!(
-            !blank.narrows_beyond_archive(),
-            "an empty box filters nothing"
-        );
-
-        let spaced = SessionFilter {
-            include_archived: true,
-            title: " ".to_string(),
-            ..SessionFilter::default()
-        };
-        assert!(spaced.narrows_beyond_archive());
-        assert_eq!(
-            spaced.query(),
-            "include_archived=true&title=%20",
-            "a space is a search for a space, not a cleared filter"
-        );
-
-        // And the host dimension, whose emptiness is an absent id rather
-        // than an empty string — including id 0, which is a value and not a
-        // blank.
-        assert!(
-            SessionFilter {
-                include_archived: true,
-                host: Some(0),
-                ..SessionFilter::default()
-            }
-            .narrows_beyond_archive()
         );
     }
 

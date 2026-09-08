@@ -4,7 +4,6 @@
 //! child modules so their narrower contracts remain visible.
 
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use dioxus::prelude::*;
 
@@ -18,11 +17,10 @@ use crate::app_bar::AppBar;
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead};
-use crate::menu_panel::{PanelPlacement, measurement_outcome};
 use crate::ops::{OpLock, ReadGate};
 use crate::profiles::use_catalog_surface;
 use crate::provisioning::ProvisioningTraceShape;
-use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
+use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner, listing_is_complete,
     menu_row_reordered, retire_vanished_renames, settle_optimistic_renames,
@@ -199,85 +197,6 @@ fn newest_created_fallback(sessions: &[Session]) -> Option<&Session> {
         .or_else(|| sessions.iter().find(|session| !session.archived))
 }
 
-/// Every status this list offers as a filter, in the spelling the wire uses
-/// and the helm parses.
-///
-/// Offered as a CHOICE rather than typed, and that is the helm's constraint
-/// showing through rather than a UI preference: it refuses an unrecognized
-/// status with a 400 rather than answering "no sessions", precisely because
-/// a typo that answers "no sessions" is a lie the user will believe. A
-/// select cannot produce a typo.
-///
-/// `unknown` is deliberately NOT among them, even though the wire has the
-/// word and this UI still decodes it. PLAN_M6_75.md item 3 makes Unknown
-/// internal/compat vocabulary that must never RENDER — a session nothing has
-/// classified yet shows no badge at all, precisely so the UI never says
-/// something it does not know. Offering it here would put that word back on
-/// screen in the one control whose options ARE its vocabulary, and would
-/// invite a user to search for a state the rest of the interface refuses to
-/// name. The compat side is untouched: a helm still reporting it decodes as
-/// before, and those rows still appear under every unfiltered listing.
-const FILTERABLE_STATUSES: [&str; 6] = [
-    "running",
-    "waiting",
-    "idle",
-    "exited",
-    "interrupted",
-    "error",
-];
-
-/// Keep the filter popover visibly tethered without letting it touch a
-/// viewport edge that would make a focused control difficult to reach.
-const FILTER_POPOVER_VIEWPORT_MARGIN_PX: f64 = 8.0;
-
-/// The filter's preferred reading width. Placement owns the responsive cap so
-/// the same ceiling governs a measured and an unmeasurable renderer.
-const FILTER_POPOVER_MAX_WIDTH_PX: f64 = 288.0;
-
-/// Separate the filter from its toggle while retaining the requested
-/// below-left anchor when the viewport has room.
-const FILTER_POPOVER_TOGGLE_GAP_PX: f64 = 2.0;
-
-/// Render the filter popover from its toggle's viewport rect.
-///
-/// Unlike a row action menu, this surface is left-aligned with the toggle: it
-/// does not need to keep a neighboring destructive-action column uncovered.
-/// The CSS expressions preserve that ordinary anchor but clamp both horizontal
-/// edges and the bottom edge when a narrow or short viewport cannot fit it.
-/// `Unmeasured` stays hidden until the async rect read resolves, while a
-/// measurement failure gets the visible fallback rather than a dead toggle.
-fn filter_popover_placement_style(placement: PanelPlacement) -> String {
-    match placement {
-        PanelPlacement::Unmeasured => "opacity: 0; pointer-events: none;".to_string(),
-        PanelPlacement::Measured(rect) => {
-            let top = rect.max_y() + FILTER_POPOVER_TOGGLE_GAP_PX;
-            let left = rect.min_x();
-            format!(
-                "opacity: 1; pointer-events: auto; right: auto; \
-                 --filter-popover-top: max({FILTER_POPOVER_VIEWPORT_MARGIN_PX}px, \
-                 min({top}px, calc(100vh - {FILTER_POPOVER_VIEWPORT_MARGIN_PX}px))); \
-                 --filter-popover-left: max({FILTER_POPOVER_VIEWPORT_MARGIN_PX}px, \
-                 min({left}px, calc(100vw - {FILTER_POPOVER_VIEWPORT_MARGIN_PX}px))); \
-                 top: var(--filter-popover-top); left: var(--filter-popover-left); \
-                 max-width: min({FILTER_POPOVER_MAX_WIDTH_PX}px, \
-                 calc(100vw - {FILTER_POPOVER_VIEWPORT_MARGIN_PX}px - var(--filter-popover-left)), \
-                 calc(100vw - {}px)); \
-                 max-height: calc(100vh - {FILTER_POPOVER_VIEWPORT_MARGIN_PX}px - var(--filter-popover-top));",
-                FILTER_POPOVER_VIEWPORT_MARGIN_PX * 2.0,
-            )
-        }
-        PanelPlacement::Fallback => format!(
-            "opacity: 1; pointer-events: auto; right: auto; \
-             top: {FILTER_POPOVER_VIEWPORT_MARGIN_PX}px; left: {FILTER_POPOVER_VIEWPORT_MARGIN_PX}px; \
-             max-width: min({FILTER_POPOVER_MAX_WIDTH_PX}px, \
-             calc(100vw - {}px)); \
-             max-height: calc(100vh - {}px);",
-            FILTER_POPOVER_VIEWPORT_MARGIN_PX * 2.0,
-            FILTER_POPOVER_VIEWPORT_MARGIN_PX * 2.0,
-        ),
-    }
-}
-
 /// Whether a listing reply may touch this view at all.
 ///
 /// Two independent admissions, and a reply needs both. Split out of
@@ -349,7 +268,7 @@ fn clone_is_refused(
 }
 
 /// The flat session list: host, title, cwd, invocation, and a truthful
-/// status badge per row; the filter and search surface above them, the hosts
+/// status badge per row; the host and sort selectors above them, the hosts
 /// panel, the "new session" form and the per-row stop/delete actions
 /// (PLAN_M2.md step 8) live here too, since all of them need to reach into
 /// the same reads — a create or a stop should be reflected as soon as the
@@ -370,7 +289,7 @@ fn clone_is_refused(
 ///   untouched;
 /// - from the fallback poll, which runs only while the feed is unhealthy and
 ///   no build mismatch has been latched (`feed::fallback_polls`);
-/// - from the filter surface's own submit, since nothing else is coming.
+/// - from a host or sort selection, since nothing else is coming.
 ///
 /// None of those STARTS a read directly. All four ask the surface's reader
 /// (`reader::request_read`), which runs one read at a time, coalesces
@@ -399,27 +318,24 @@ fn clone_is_refused(
 /// selected host. Keeping the reader mounted with this page also means feed
 /// invalidations advance the answer while both consumers are closed.
 ///
-/// ## Filtering is a query, not a render pass (PLAN_M6_75.md item 7)
+/// ## Host selection is a query, not a render pass
 ///
-/// The filter surface builds `api::SessionFilter` and the helm answers with
+/// The host selector builds `api::SessionFilter` and the helm answers with
 /// the matching rows plus their count; nothing here narrows a list it was
 /// handed. That is the only arrangement coherent with the helm's cap — a
 /// client-side filter over a cut list hides matches beyond the cut while
 /// the banner reports a count that includes them.
 ///
-/// The popover writes the applied filter as it is edited. Discrete choices
-/// request a read immediately; the four text fields share a 150 ms generation
-/// debounce, which coalesces a phrase or a multi-field edit without letting an
-/// obsolete delay request a filter the user can no longer see.
+/// A host choice applies immediately. The selected session remains open even
+/// when its row is absent from the narrowed list.
 ///
 /// ## Ordering is a query too, and a separate one
 ///
 /// The sort control is the same arrangement with a different dimension: it
 /// changes `api::ListSort`, the next walk asks the helm for that order, and
-/// nothing here rearranges rows it was handed (which pagination forbids for
-/// the same reason it forbids a client-side filter — the rows past a cut are
-/// the ones a local sort never sees). Applied on CHANGE rather than on
-/// submit, because unlike a filter there is no second field to fill in first.
+/// nothing here rearranges rows it was handed: a local sort cannot recover
+/// rows omitted by the server's cap. Like the host choice, it applies on
+/// CHANGE rather than waiting for a separate submit action.
 ///
 /// It is deliberately NOT part of the filter's state, and the consequence
 /// worth carrying in mind while reading the rest of this file is that every
@@ -568,30 +484,9 @@ pub(crate) fn ListView(
     // update disabling it is not synchronous with the click handler
     // itself.
     let mut pending = use_signal(HashSet::<String>::new);
-    // The on-demand sidebar popovers default closed and stay unpersisted.
-    // Their state lives together here so every floating surface can enforce
-    // the page-wide one-popover-at-a-time contract. The host list itself is
-    // always mounted; its global details disclosure belongs to HostsPanel.
-    let mut filter_open = use_signal(|| false);
+    // The profile surface is the one remaining header popup. The host selector
+    // stays visible, so it needs no open-state, focus, or geometry lifecycle.
     let mut profiles_open = use_signal(|| false);
-    // The fixed popover needs the same measured-rect race handling as a row
-    // menu. Its toggle lives in this component, so unlike a row-local menu
-    // the geometry state belongs here beside the open state.
-    let mut filter_toggle_handle = use_signal(|| None::<Rc<MountedData>>);
-    let filter_placement = use_signal(|| PanelPlacement::Unmeasured);
-    let filter_open_generation = use_signal(|| 0_u64);
-    // Text inputs share one generation because their combined values form one
-    // server-side query. A later edit to any text field makes every earlier
-    // delayed request obsolete before it can add an intermediate read.
-    let filter_text_generation = use_signal(|| 0_u64);
-    // The count row is part of the filter toggle's anchor geometry, but live
-    // filtering changes it on every accepted listing. Preserve the popover
-    // through those ordinary updates and remeasure instead of treating each
-    // changed count as a disruptive surface transition.
-    let listing_header_shape = use_memo(move || match &*listing.read() {
-        Some(Ok(listing)) => Some(count_banner(listing).text),
-        None | Some(Err(_)) => None,
-    });
     // `pending`'s entry and exit, with the cross-pane bookkeeping attached:
     // every row operation must (a) refuse to start while the SHARED token
     // is held — the session view or a page operation is mid-write, and a
@@ -632,14 +527,9 @@ pub(crate) fn ListView(
     // mutual exclusion explicit instead of overloading one flag with an
     // action kind that every handler would then have to decode.
     let mut confirming_archive = use_signal(HashSet::<String>::new);
-    // Replace's own prompt, on the same footing as the two above. Unlike
-    // `confirming_archive` — which `commit_listing` retires once a row
-    // ARCHIVES, since an archived row's `archive_confirmation` prompt no
-    // longer applies to it — this one reconciles the same way `confirming`
-    // does: only a row that leaves the listing ENTIRELY drops its pending
-    // replace confirmation, because replace stays a legitimate action on an
-    // archived row (`row::session_menu_order` offers it unconditionally,
-    // same as clone).
+    // Replace's own prompt, on the same footing as the two above. It
+    // reconciles the same way `confirming` does: only an authoritative
+    // departure can discard an answer the user is still considering.
     let mut confirming_replace = use_signal(HashSet::<String>::new);
     // At most one row's actions menu is open, and this parent owns which.
     // A per-row boolean would let two menus fight, and the parent is the
@@ -740,8 +630,7 @@ pub(crate) fn ListView(
     //   session rows. None of these go
     //   through `layout_epoch` — they are this component's own renders, not
     //   an ancestor's scroll or resize — so each is read directly here
-    //   instead. The fixed filter popover does not shift a row, so opening it
-    //   is handled separately as mutual exclusion rather than geometry.
+    //   instead.
     //
     // The three dependencies are deliberate: `layout_epoch` aggregates
     // ancestor scroll and resize events, `show_create` covers the create
@@ -781,48 +670,11 @@ pub(crate) fn ListView(
             host_menu_open.set(None);
         }
     });
-    // Scroll and resize are ancestor-owned movement signals. Keep this effect
-    // narrow so the filter closes only when that anchor can actually move,
-    // not merely because an unrelated menu signal reran the broad effect.
-    use_effect(move || {
-        layout_epoch();
-        if *filter_open.peek() {
-            filter_open.set(false);
-        }
-    });
-    // Host-list and create-form shape changes move the header itself. Unlike
-    // a listing count update, these are layout transitions, so a fixed
-    // snapshot is no longer a trustworthy attachment to its toggle.
-    use_effect(move || {
-        show_create();
-        hosts_list_shape();
-        if *filter_open.peek() {
-            filter_open.set(false);
-        }
-    });
-    // There is one floating surface at a time. Opening the fixed filter is
-    // mutual exclusion, not a row-geometry event; closing it must not race a
-    // row menu the user opens immediately afterward.
-    use_effect(move || {
-        if filter_open() {
-            menu_open.set(None);
-            host_menu_open.set(None);
-            if *profiles_open.peek() && ops.busy_now() {
-                // A busy profile popup cannot be dismissed: the response
-                // needs its mounted form. Refuse the newer surface instead
-                // of briefly allowing two fixed panels to overlap.
-                filter_open.set(false);
-            } else {
-                profiles_open.set(false);
-            }
-        }
-    });
     // Opening the profile popup takes every other floating surface down. Its
     // own busy guard is enforced by `AppBar`, so a mutation cannot strand the
     // form by letting another surface replace it mid-request.
     use_effect(move || {
         if profiles_open() {
-            filter_open.set(false);
             menu_open.set(None);
             host_menu_open.set(None);
         }
@@ -832,7 +684,6 @@ pub(crate) fn ListView(
     // is the single place that also covers keyboard and pointer activation.
     use_effect(move || {
         if menu_open().is_some() || host_menu_open().is_some() {
-            filter_open.set(false);
             if *profiles_open.peek() && ops.busy_now() {
                 // Row menus remain ordinary transient surfaces while the
                 // profile mutation owns the page. Closing the attempted menu
@@ -859,17 +710,14 @@ pub(crate) fn ListView(
     // below, so an ordinary "new session" open never inherits a stale
     // clone's fields.
     let mut clone_prefill = use_signal(|| None::<CreatePrefill>);
-    // The filter the reads carry and the popover displays. One signal is now
-    // the honest model: edits are live, and `accepts_listing` rejects replies
-    // that were walking under an earlier value while a debounce was pending.
+    // The host choice every listing read carries. It starts at ALL for each
+    // page lifetime and is deliberately not part of the helm's preferences.
     let mut filter = use_signal(SessionFilter::default);
     // The order the reads are carrying, seeded from the helm's shared
     // remembered order (`stored_sort` over the `SharedPreferences` context).
     //
-    // ONE signal, unlike the filter's applied/draft pair, because a sort has
-    // no draft state to speak of: picking an option IS the decision, there is
-    // nothing else on the control to fill in first, and applying it costs the
-    // same one re-read a submit would. It is deliberately not a field of
+    // Picking an option is the whole decision, so applying it costs the same
+    // one re-read as a host choice. It is deliberately not a field of
     // `SessionFilter` either — see `api::ListSort` for why the two dimensions
     // stay apart, and note that every reconciliation predicate on this page
     // reads the FILTER: a re-sorted listing covers exactly what the same
@@ -1003,10 +851,8 @@ pub(crate) fn ListView(
             // an optimistic rename.
             settle_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
             // An open actions menu closes the moment its row leaves the
-            // RENDERED list — any committed reply counts, filtered or
-            // not, unlike the fleet-absence retains below (a title filter
-            // is not evidence a session left the fleet, but it absolutely
-            // removes the row this transient popup was anchored to).
+            // RENDERED list — any committed reply counts, including a host
+            // choice that removes the row from this sidebar view.
             // Left set, the panel would reappear already open if the row
             // later returned — a popup nobody re-requested, exposing
             // controls for a session whose state changed while it was
@@ -1137,7 +983,7 @@ pub(crate) fn ListView(
     };
 
     // One listing read, shared by every caller — the mount read, the feed's
-    // re-read, the fallback poll, and the filter surface's apply. Going
+    // re-read, the fallback poll, and a host selection. Going
     // through one place is what makes the generation a total order over
     // READS rather than a per-caller counter each could satisfy
     // independently, and it is why swapping the poll for the feed changed
@@ -1146,7 +992,7 @@ pub(crate) fn ListView(
     // Everything that has to describe THIS request is sampled synchronously,
     // before the `await`: the generation, the read's position in the read
     // order, and the filter itself. Sampling the filter after the await
-    // would let a submit landing mid-flight relabel a reply as answering a
+    // would let a selection landing mid-flight relabel a reply as answering a
     // query it never asked. Sampled per CALL rather than per reader, because
     // the reader calls this again for a retry or a coalesced notice, and
     // that later read is a new request with a new filter to answer for.
@@ -1165,7 +1011,7 @@ pub(crate) fn ListView(
         // Cloned OUT of the signal rather than read through it, and the
         // annotation is what enforces that: a borrow guard moved into the
         // async block below would be held across the walk's every round
-        // trip, and the filter surface's own submit writes that signal.
+        // trip, and changing the host writes that signal.
         let requested: SessionFilter = filter.peek().clone();
         // Sampled with the filter and for the same reason: the reply has to
         // be able to say which SEQUENCE it walked, or a re-sort landing
@@ -1183,7 +1029,9 @@ pub(crate) fn ListView(
         // as unfiltered on screen while still hiding archived rows, so
         // authorizing its reads to treat absence as departure would retire
         // work on any session archived from another client.
-        let authoritative = !requested.omits_fleet_members();
+        // Sidebar listings always exclude archived sessions, so an absent row
+        // can never prove that the session left the fleet.
+        let authoritative = false;
         let generation = listing_reads.write().start();
         async move {
             let fetched = fetch_sessions(&base, &requested, ordered_by).await;
@@ -1249,7 +1097,7 @@ pub(crate) fn ListView(
     // cancelling a backoff with it would flatten the retry ladder into a
     // three-second poll), and under a latched build mismatch only ATTENDED
     // reads still happen — the feed and the fallback stand down, while a
-    // live filter edit or a mutation's refresh is answered, because the page
+    // host selection or a mutation's refresh is answered, because the page
     // must keep working for the person using it (SPEC_impl.md's withdrawal
     // rule is about unattended behavior).
     //
@@ -1356,70 +1204,31 @@ pub(crate) fn ListView(
         host_mutation_listing(Trigger::Explicit);
     };
 
-    // Filtering writes the query the listing reader carries immediately.
-    // A read already walking under the old query is allowed to finish, then
+    // Selecting a host writes the query the listing reader carries immediately.
+    // A read already walking under the old selection is allowed to finish, then
     // refused by `commit_listing`; recording a fresh demand is what makes the
-    // reader follow it with the query now visible in the popover.
+    // reader follow it with the selection now visible in the control.
     let filter_read = request_listing.clone();
-    let request_text_filter = {
-        let filter_read = filter_read.clone();
-        move || {
-            let mut generation = filter_text_generation;
-            generation += 1;
-            let captured_generation = generation();
-            let generation_at_delay = generation;
-            let filter_read = filter_read.clone();
-            spawn(async move {
-                sleep_ms(150).await;
-                if *generation_at_delay.peek() == captured_generation {
-                    filter_read(Trigger::Explicit);
-                }
-            });
-        }
-    };
-    // A discrete choice is already a complete filter. It also retires a
-    // pending text delay, so changing a select while typing cannot request
-    // the same final filter twice.
-    let request_immediate_filter = {
-        let filter_read = filter_read.clone();
-        move || {
-            let mut generation = filter_text_generation;
-            generation += 1;
-            filter_read(Trigger::Explicit);
-        }
-    };
+    let request_host_filter = move || filter_read(Trigger::Explicit);
 
-    // This is the filter-toggle counterpart of a row menu's measurement
-    // task. Capturing the generation before the await prevents a stale rect
-    // from a prior open from repainting a fast close-and-reopen.
-    let measure_filter_popover = move || {
-        let handle = filter_toggle_handle;
-        let mut placement = filter_placement;
-        let generation = filter_open_generation();
-        spawn(async move {
-            let measured = match handle.peek().clone() {
-                Some(handle) => handle.get_client_rect().await.ok(),
-                None => None,
-            };
-            if let Some(outcome) =
-                measurement_outcome(generation, *filter_open_generation.peek(), measured)
-            {
-                placement.set(outcome);
-            }
-        });
-    };
-    // A count line can mount or change text above the toggle while someone is
-    // typing. Start a fresh measurement generation so an older rect cannot
-    // overwrite the post-listing position, but leave the live controls open.
-    let remeasure_filter_popover = measure_filter_popover;
+    // A missing option means removal only after a successful registry read.
+    // Loading and refresh failures retain the prior snapshot, so treating
+    // either as absence would silently broaden a selection the user chose.
+    let recover_removed_host = request_listing.clone();
     use_effect(move || {
-        listing_header_shape();
-        if *filter_open.peek() {
-            let mut generation = filter_open_generation;
-            let mut placement = filter_placement;
-            generation += 1;
-            placement.set(PanelPlacement::Unmeasured);
-            remeasure_filter_popover();
+        let Some(selected_host) = filter().host else {
+            return;
+        };
+        let read = hosts.read();
+        if read.refresh_error().is_some() {
+            return;
+        }
+        let Some(known) = read.hosts() else {
+            return;
+        };
+        if !known.iter().any(|host| host.id == selected_host) {
+            filter.set(SessionFilter::default());
+            recover_removed_host(Trigger::Explicit);
         }
     });
 
@@ -1429,7 +1238,7 @@ pub(crate) fn ListView(
     // read from here on asks for the new sequence. The preference is written
     // — on CHANGE only, which is what keeps a client that never touches the
     // control from writing storage at all. And a read is asked for, for
-    // live filter edit's reason: nothing else is coming, since the fleet did
+    // host selection's reason: nothing else is coming, since the fleet did
     // not change and no revision will be published for a decision this client
     // made about itself.
     //
@@ -1800,20 +1609,13 @@ pub(crate) fn ListView(
                     // listing, and the archived row still sitting in it —
                     // as the remembered id, no less — would be immediately
                     // re-selected, defeating the reconciliation.
-                    if !filter.peek().include_archived
-                        && let Some(Ok(current)) = listing.write().as_mut()
-                    {
+                    if let Some(Ok(current)) = listing.write().as_mut() {
                         current.sessions.retain(|s| s.id != id);
                     }
                     refresh(Trigger::Explicit);
-                    // An archived session leaves the DEFAULT filter, so for
-                    // the selection's owner it has been removed just as a
-                    // delete removes. Under an include-archived filter the
-                    // row stays listed, so the selection legitimately
-                    // stays too.
-                    if !filter.peek().include_archived {
-                        on_removed.call(id.clone());
-                    }
+                    // The sidebar has one archive-excluding view, so archive
+                    // always removes the row and reconciles its selection.
+                    on_removed.call(id.clone());
                 }
                 Err(e) => {
                     errors.write().insert(id.clone(), format!("archive: {e}"));
@@ -2075,20 +1877,11 @@ pub(crate) fn ListView(
                     if renaming.peek().as_deref() == Some(id.as_str()) {
                         renaming.set(None);
                     }
-                    // The overlay paints the new title and can do nothing
-                    // else — and a title is exactly what a filter can be ON,
-                    // and now also what the list can be ORDERED by. A row
-                    // renamed OUT of an active title search stays on screen
-                    // under a query it no longer matches, and the counts
-                    // beside it still describe the old name; a row renamed
-                    // under title order paints its new name in its OLD
-                    // position, so the sidebar is briefly not alphabetical.
-                    // Both are the same staleness and both end the same way,
-                    // on the next read. That is acceptable rather than
-                    // merely tolerated: the position is cosmetic where the
-                    // title is the thing the user just typed, and the
-                    // correction costs nothing extra — the read below is the
-                    // one every rename already triggers. Normally the feed
+                    // Under title order the overlay paints the new name in
+                    // its old position, so the sidebar is briefly not
+                    // alphabetical. The next read corrects that cosmetic
+                    // staleness and costs nothing extra: every rename already
+                    // needs a refreshed server listing. Normally the feed
                     // would supply it; under a latched build mismatch nothing
                     // does, so this explicit read is the correction.
                     refresh(Trigger::Explicit);
@@ -2338,33 +2131,10 @@ pub(crate) fn ListView(
     // nothing else is happening (see `activity`).
     let now_secs = *ACTIVITY_NOW.read();
 
-    // What clear has to undo: any departure from the public default, the
-    // archive switch included. Flipping that switch is something the user did
-    // and clear is the way back from it, even though it does not narrow the
-    // count banner's view.
-    let filter_changed = *filter.read() != SessionFilter::default();
-    // The selector's own copy: the create form takes ownership of
-    // `host_options` further down, and both surfaces want the same list —
-    // the same hosts, called the same things, with the same phase labels.
-    let filter_hosts = host_options.clone();
-    // The host this filter names that the registry no longer carries, if
-    // any — a host removed from another client while a filter on it remains
-    // applied. Only derive it once a registry read has landed: an empty list
-    // before the first read would make every id look removed.
-    let removed_filter_host = filter.read().host.filter(|id| {
-        hosts.read().hosts().is_some() && !filter_hosts.iter().any(|host| host.id == *id)
-    });
-    // Event handlers own their captures. Give each field its own handle to
-    // the shared request operation so no handler consumes the operation the
-    // next field needs to invoke.
-    let request_host_filter = request_immediate_filter.clone();
-    let request_status_filter = request_immediate_filter.clone();
-    let request_archive_filter = request_immediate_filter.clone();
-    let request_parent_filter = request_text_filter.clone();
-    let request_directory_filter = request_text_filter.clone();
-    let request_profile_filter = request_text_filter.clone();
-    let request_title_filter = request_text_filter;
-    let request_clear_filter = request_immediate_filter.clone();
+    // The selector shares the create form's registry reduction so every host
+    // is named and classified from the same authoritative snapshot. The local
+    // row is identified by registry kind, never by its display name or order.
+    let selector_hosts = host_options.clone();
     // The create form's own copy of the API base, for recording a created
     // session as the selection (see `remember_selection`).
     let created_base = base.clone();
@@ -2387,281 +2157,7 @@ pub(crate) fn ListView(
             provisioning_trace_shapes,
             host_menu_open,
             session_menu_open: menu_open,
-            filter_open,
             on_changed: refresh_hosts,
-        }
-        // The filter is a viewport-fixed popover rather than an in-flow bar:
-        // it follows the same overflow-escaping geometry as row menus without
-        // making the sidebar reflow every time the controls open.
-        if filter_open() {
-        div {
-            class: "filter-popover",
-            style: filter_popover_placement_style(filter_placement()),
-            onkeydown: move |evt| {
-                if evt.key() == Key::Escape {
-                    evt.prevent_default();
-                    // Escape is the one close path that restores focus: the
-                    // user asked to leave this transient surface, rather than
-                    // choosing an outside destination with the pointer or Tab.
-                    filter_open.set(false);
-                    document::eval("document.querySelector('.filter-toggle')?.focus({ preventScroll: true });");
-                }
-            },
-            onfocusout: move |_| {
-                // Dioxus does not preserve `relatedTarget` through the
-                // desktop event bridge. Once this bubbling event has finished
-                // moving focus, the document's active element answers the
-                // same question on both renderers — and it has to be a
-                // four-way answer, not "inside or not":
-                //
-                // - inside the popover: focus moved between its own controls;
-                // - the toggle: only reachable by keyboard (Tab from the last
-                //   control), since the toggle's own `onmousedown` refuses
-                //   focus on a pointer press; that is a genuine leave;
-                // - `body` or nothing: EITHER focus is in transit — the
-                //   control that had it was just unmounted by a re-render (a
-                //   keystroke in the live filter, say) and the render that
-                //   re-mounts it has not landed — OR the user clicked inert
-                //   chrome outside (the count line), which focuses nothing
-                //   at all. The two look identical at this instant and mean
-                //   opposite things, so this case is asked AGAIN a moment
-                //   later: a transit has resolved inside by then, a click on
-                //   nothing has not, and only the latter closes;
-                // - anything else: the user really moved on. Close, and leave
-                //   focus where they put it.
-                let mut filter_open = filter_open;
-                let generation = filter_open_generation();
-                spawn(async move {
-                    const WHERE_IS_FOCUS: &str = "const active = document.activeElement; \
-                         if (!active || active === document.body) { return 'transit'; } \
-                         if (document.querySelector('.filter-popover')?.contains(active)) { return 'inside'; } \
-                         if (active.classList.contains('filter-toggle')) { return 'toggle'; } \
-                         return 'outside';";
-                    let mut destination = document::eval(WHERE_IS_FOCUS).join::<String>().await;
-                    if matches!(destination.as_deref(), Ok("transit")) {
-                        // Long enough for a re-render to re-mount and refocus
-                        // a replaced control; short enough that a click on
-                        // inert chrome still reads as an immediate close.
-                        sleep_ms(120).await;
-                        destination = document::eval(WHERE_IS_FOCUS).join::<String>().await;
-                    }
-                    // A bridge that cannot answer is UNKNOWN, not evidence
-                    // that focus escaped. A stale focus-out task also must
-                    // not close a newer open after a quick toggle cycle.
-                    if matches!(destination.as_deref(), Ok("outside") | Ok("toggle") | Ok("transit"))
-                        && generation == *filter_open_generation.peek()
-                    {
-                        filter_open.set(false);
-                    }
-                });
-            },
-            label {
-                "host"
-                select {
-                    class: "filter-host",
-                    // Focused explicitly on mount rather than through
-                    // `autofocus`: a browser honors autofocus on a control
-                    // inserted after load only while NOTHING else holds
-                    // focus, and whatever opened this popover usually does
-                    // (the toggle after a keyboard activation; the last
-                    // control the user touched after a pointer one, since
-                    // the toggle refuses pointer focus). A popover that opens
-                    // without focus inside it never sees the focus-out that
-                    // is its only pointer-driven close path, so a click on
-                    // inert chrome would leave it standing.
-                    onmounted: move |evt| {
-                        spawn(async move {
-                            let _ = evt.data().set_focus(true).await;
-                        });
-                    },
-                    // The empty value is "any host", not "no host": absence
-                    // is what an unfiltered dimension looks like on the wire,
-                    // so it is what the blank option has to produce.
-                    value: filter.read().host.map(|id| id.to_string()).unwrap_or_default(),
-                    onchange: move |evt| {
-                        filter.write().host = evt.value().parse::<HostId>().ok();
-                        request_host_filter();
-                    },
-                    // Selection is stated on each option, not only via the
-                    // select's `value`: the option LIST mutates under an
-                    // applied value (a removed host's option gives way to
-                    // the tombstone below), and a re-rendered list resets
-                    // the browser's selection to nothing while Dioxus —
-                    // whose Rust-side `value` did not change — never
-                    // re-applies it. The same defect class the create and
-                    // profile selects fixed; this select joined it the day
-                    // the tombstone made its options mutable.
-                    option {
-                        value: "",
-                        selected: filter.read().host.is_none(),
-                        "any host"
-                    }
-                    for host in filter_hosts.iter() {
-                        option {
-                            key: "{host.id}",
-                            value: "{host.id}",
-                            selected: filter.read().host == Some(host.id),
-                            "{host.label()}"
-                        }
-                    }
-                    // A host the filter names but the registry no longer
-                    // carries gets a tombstone rather than vanishing.
-                    //
-                    // Without one the select falls back to showing its first
-                    // option — "any host" — while the applied filter goes on
-                    // sending the dead id with every read: the control says
-                    // one thing, the request says another, and the rows
-                    // agree with neither. The alternative (clearing the
-                    // filter for them) was rejected because it silently
-                    // widens a query the user chose; a disabled option
-                    // states the situation and leaves the fix theirs, which
-                    // is one click on any other option.
-                    //
-                    // Only ever rendered once the registry has actually been
-                    // read: before that every id looks unregistered, and a
-                    // tombstone during loading would be a lie that flickers.
-                    if let Some(missing) = removed_filter_host {
-                        option {
-                            value: "{missing}",
-                            disabled: true,
-                            // Selected by construction: the tombstone only
-                            // renders while the applied filter names this host, and
-                            // it must claim the selection the moment it
-                            // replaces the ordinary option.
-                            selected: true,
-                            "host {missing} (no longer registered)"
-                        }
-                    }
-                }
-            }
-            label {
-                "status"
-                select {
-                    class: "filter-status",
-                    value: "{filter.read().status}",
-                    onchange: move |evt| {
-                        filter.write().status = evt.value();
-                        request_status_filter();
-                    },
-                    option { value: "", "any status" }
-                    for status in FILTERABLE_STATUSES {
-                        option { key: "{status}", value: "{status}", "{status}" }
-                    }
-                }
-            }
-            label {
-                "parent"
-                input {
-                    r#type: "text",
-                    class: "filter-parent",
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    value: "{filter.read().parent}",
-                    oninput: move |evt| {
-                        filter.write().parent = evt.value();
-                        request_parent_filter();
-                    },
-                }
-            }
-            // The four free-text dimensions opt out of every form of
-            // browser text mangling for the same reason the create form's
-            // fields do: a directory is a literal path, a profile is a name
-            // the helm matches exactly, and an autocorrected search term
-            // finds the wrong thing while looking like it found nothing.
-            label {
-                "directory"
-                input {
-                    r#type: "text",
-                    class: "filter-directory",
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    value: "{filter.read().directory}",
-                    oninput: move |evt| {
-                        filter.write().directory = evt.value();
-                        request_directory_filter();
-                    },
-                }
-            }
-            label {
-                "profile"
-                input {
-                    r#type: "text",
-                    class: "filter-profile",
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    // Free text rather than a picker over the catalog, and
-                    // deliberately: the helm matches a profile by id OR by
-                    // the name a session snapshotted at creation, which is
-                    // what keeps a DELETED profile's sessions findable — and
-                    // a picker built from the catalog could not offer a
-                    // profile that no longer exists.
-                    value: "{filter.read().profile}",
-                    oninput: move |evt| {
-                        filter.write().profile = evt.value();
-                        request_profile_filter();
-                    },
-                }
-            }
-            label {
-                "search titles"
-                input {
-                    r#type: "text",
-                    class: "filter-title",
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    value: "{filter.read().title}",
-                    oninput: move |evt| {
-                        filter.write().title = evt.value();
-                        request_title_filter();
-                    },
-                }
-            }
-            label { class: "filter-archived",
-                input {
-                    r#type: "checkbox",
-                    class: "filter-include-archived",
-                    checked: filter.read().include_archived,
-                    onchange: move |evt| {
-                        filter.write().include_archived = evt.checked();
-                        request_archive_filter();
-                    },
-                }
-                "include archived"
-            }
-            button {
-                r#type: "button",
-                class: "btn filter-clear",
-                // Inert while nothing is applied, so the control cannot
-                // offer to undo something that never happened. Cosmetic
-                // only, like every other `disabled` on this page — the
-                // handler clears an already-empty filter harmlessly.
-                //
-                disabled: !filter_changed,
-                onclick: move |_| {
-                    filter.set(SessionFilter::default());
-                    request_clear_filter();
-                    // Clearing disables this very button while it holds
-                    // focus, and a focused control that becomes disabled
-                    // drops focus onto `body`. The popover's focus-out probe
-                    // would read that as a click on inert chrome and close
-                    // the popover the user is still working in. The title
-                    // field is where the next query goes, so focus moves
-                    // there deliberately instead of falling out.
-                    document::eval(
-                        "document.querySelector('.filter-title')?.focus({ preventScroll: true });",
-                    );
-                },
-                "clear"
-            }
-        }
         }
         // The session list's own header: count, compact preference, and the
         // creation action share one line so neither former control row costs
@@ -2757,41 +2253,34 @@ pub(crate) fn ListView(
                     },
                 }
             }
-        // The session list's remaining header: filter toggle and sort.
-        // Rendered in EVERY listing state, not only after
-        // a successful read — these controls are the only way to change or
-        // clear a filter, and a failed read is exactly when someone may need
-        // to (a filter naming a host that has since been removed, say). The
-        // count already lives beside compact and new, so this row contains
-        // only the controls that need a separate line.
+        // Both controls stay available while listings load or fail: changing
+        // a host or sort is a new request, independent of the last reply.
             div { class: "list-header-controls",
-                button {
-                    r#type: "button",
-                    class: "btn filter-toggle",
-                    aria_expanded: filter_open(),
-                    // A pointer press must not move focus onto this button:
-                    // the popover closes on focus-out, and a click that first
-                    // took focus would close it from the focus-out and then
-                    // reopen it from the click. Keyboard activation never
-                    // goes through mousedown, so Enter/Space are unaffected,
-                    // and a Tab that lands here still counts as leaving.
-                    onmousedown: move |evt| evt.prevent_default(),
-                    onmounted: move |element| {
-                        filter_toggle_handle.set(Some(element.data()));
+                select {
+                    class: "host-select",
+                    aria_label: "host",
+                    value: filter().host.map(|id| id.to_string()).unwrap_or_default(),
+                    onchange: move |evt| {
+                        filter.write().host = evt.value().parse::<HostId>().ok();
+                        request_host_filter();
                     },
-                    onclick: move |_| {
-                        if filter_open() {
-                            filter_open.set(false);
-                        } else {
-                            let mut generation = filter_open_generation;
-                            let mut placement = filter_placement;
-                            generation += 1;
-                            placement.set(PanelPlacement::Unmeasured);
-                            filter_open.set(true);
-                            measure_filter_popover();
+                    option { value: "", selected: filter().host.is_none(), "ALL" }
+                    for host in selector_hosts.iter().filter(|host| host.local) {
+                        option {
+                            key: "{host.id}",
+                            value: "{host.id}",
+                            selected: filter().host == Some(host.id),
+                            "This machine"
                         }
-                    },
-                    "filter"
+                    }
+                    for host in selector_hosts.iter().filter(|host| !host.local) {
+                        option {
+                            key: "{host.id}",
+                            value: "{host.id}",
+                            selected: filter().host == Some(host.id),
+                            "{host.selector_label()}"
+                        }
+                    }
                 }
                 // A native select keeps the platform's keyboard and assistive
                 // behavior. Its accessible name survives without a visible
@@ -2827,23 +2316,17 @@ pub(crate) fn ListView(
                 div { class: "status error", "failed to load sessions: {e}" }
             },
             Some(Ok(listing)) => rsx! {
-                // The plain empty-fleet line, which is deliberately NOT the
-                // same thing as a filter matching nothing — see
-                // `rows::is_empty_fleet` for why the request has to be
-                // consulted and what taking this branch would suppress.
+                // The plain empty-fleet line appears only when the reply can
+                // establish it; an active-only listing normally cannot prove
+                // that archived sessions do not exist.
                 if rows::is_empty_fleet(listing) {
                     div { class: "status", "no sessions" }
                 } else {
-                    // A filter that matched nothing says so in words, beside
-                    // the banner's numbers. Without it the page is a count
-                    // over an empty box, which reads as a list that failed
-                    // to load rather than as a search that found nothing —
-                    // and the two call for opposite reactions. The wording
-                    // is `rows::no_match_line`'s: categorical only for a
-                    // complete listing, scoped to "the sessions that could
-                    // be read" under a cut one.
+                    // An empty host selection says so beside the banner's
+                    // numbers, distinguishing a valid empty answer from a
+                    // listing that failed to load.
                     if let Some(line) = rows::no_match_line(listing) {
-                        div { class: "status filter-empty", "{line}" }
+                        div { class: "status host-selection-empty", "{line}" }
                     }
                     div { class: "session-list",
                         // The rows are the server's listing with this
@@ -3222,20 +2705,5 @@ mod tests {
             None,
             "an all-archived listing offers nothing to auto-select"
         );
-    }
-
-    /// The filter's measurement states keep a current open hidden only while
-    /// it lacks a rect, then expose either a clamped placement or the usable
-    /// fallback. This pins the race contract independently of a renderer.
-    #[farhelm_testtrace::test]
-    fn filter_popover_placement_keeps_unmeasured_and_fallback_states_distinct() {
-        assert_eq!(
-            filter_popover_placement_style(PanelPlacement::Unmeasured),
-            "opacity: 0; pointer-events: none;"
-        );
-        let fallback = filter_popover_placement_style(PanelPlacement::Fallback);
-        assert!(fallback.contains("opacity: 1; pointer-events: auto"));
-        assert!(fallback.contains("max-width: min(288px"));
-        assert!(fallback.contains("max-height: calc(100vh - 16px)"));
     }
 }

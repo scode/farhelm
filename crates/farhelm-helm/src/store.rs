@@ -77,7 +77,7 @@
 //!
 use crate::aggregate::host_display_name;
 use anyhow::Context;
-use farhelm_proto::{SessionInfo, SessionStatus};
+use farhelm_proto::SessionInfo;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -452,8 +452,7 @@ fn source_is_newer(candidate: ProfileSource<'_>, stored: ProfileSource<'_>) -> b
     }
 }
 
-/// The predicates a merged-view read is narrowed by — SPEC.md's filtering
-/// and search dimensions, including spawned-session parentage, as one value.
+/// The archive view and optional host selection for a merged session list.
 ///
 /// ## Why it lives in the STORE
 ///
@@ -466,45 +465,10 @@ fn source_is_newer(candidate: ProfileSource<'_>, stored: ProfileSource<'_>) -> b
 /// count still claiming it. So the predicate is defined once, here, and
 /// BOTH sources call [`Self::matches`].
 ///
-/// ## Match semantics, and why each is what it is
-///
-/// SPEC.md calls the feature "filtering and search" without saying which
-/// dimensions belong to which half. The split below follows the
-/// shape of the data rather than the wording:
-///
-/// - **archive is a default-off inclusion switch.** Withholding archived
-///   rows is the ordinary view; enabling the switch removes that predicate
-///   rather than selecting archived rows alone. It is also the one dimension
-///   the served `total` follows (`crate::aggregate`): the switch picks
-///   which view is being counted, while every other dimension narrows a view
-///   whose size the count goes on reporting.
-/// - **host, parent, status, profile — EXACT.** Each is an identifier or a
-///   value chosen from a finite set
-///   the client already has in hand (the hosts list, the status vocabulary,
-///   the helm's profile catalog), so a substring match would only ever
-///   create surprises: `error` matching nothing else today but matching a
-///   future `error_recovered`, or a profile named `claude` also selecting
-///   `claude-review`.
-/// - **directory, title — case-insensitive SUBSTRING.** These are free text
-///   the user types into a search box, and neither has a canonical prefix a
-///   user reliably remembers: a session in `/home/me/src/farhelm` is found
-///   by typing `farhelm`, and one titled "Refactor the drain" by typing
-///   `drain`. Case folding is Rust's `to_lowercase` (Unicode-aware, not
-///   ASCII-only) on both needle and haystack.
-/// - **profile matches the SNAPSHOT, by id OR by name.** A session carries
-///   the profile id and the name AS SNAPSHOTTED at creation
-///   (`SourceProfile`), and nothing rewrites those when the profile is
-///   edited or deleted. Matching the id is what makes a picker's selection
-///   exact and rename-proof; matching the snapshotted name is what keeps a
-///   DELETED profile's sessions filterable at all, since after the delete
-///   the name is the only handle anyone still has. Both are accepted in one
-///   parameter because a client has one search box and the two never
-///   collide in practice (an id is supervisor-minted opaque text).
-///
-/// A session with no `source_profile` — a raw-invocation create — never
-/// matches a profile filter. That is the honest reading of "sessions from
-/// profile X" and not merely a convenience: such a session was never shaped
-/// by any profile.
+/// Archive inclusion chooses the ordinary or whole-fleet view. The optional
+/// host then narrows that view while leaving its fleet-wide denominator
+/// intact. Keeping both predicates here makes the persisted and in-memory
+/// halves of the merged listing apply the same rule.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionFilter {
     /// Whether archived rows participate in this view. False is the public
@@ -512,83 +476,6 @@ pub struct SessionFilter {
     /// removing it from the fleet or its durable history.
     include_archived: bool,
     host: Option<HostId>,
-    parent: Option<String>,
-    directory: Option<Folded>,
-    title: Option<Folded>,
-    /// The raw needle AND its folded form: the id half of the match is a
-    /// byte comparison against opaque text, the name half is case-folded,
-    /// and precomputing the fold here keeps the per-row cost to a
-    /// comparison rather than an allocation.
-    profile: Option<Folded>,
-    /// The `state` tag of [`SessionStatus`], as [`status_key`] spells it.
-    /// `&'static str` rather than an enum of this module's own: the
-    /// vocabulary is the protocol's, and a second copy of it here would be
-    /// a second thing to keep in step with the wire.
-    status: Option<&'static str>,
-}
-
-/// A search needle kept beside its case-folded form.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Folded {
-    raw: String,
-    folded: String,
-}
-
-impl Folded {
-    fn new(raw: &str) -> Folded {
-        Folded {
-            raw: raw.to_string(),
-            folded: raw.to_lowercase(),
-        }
-    }
-
-    /// Whether `haystack` contains this needle, ignoring case.
-    fn contained_in(&self, haystack: &str) -> bool {
-        haystack.to_lowercase().contains(&self.folded)
-    }
-}
-
-/// The `state` tag one [`SessionStatus`] serializes under — the word a
-/// client filters by, and the same word the wire carries.
-///
-/// Written as a match rather than derived from serde so that adding a
-/// status variant fails to compile here, which is exactly the reminder a
-/// new status needs: a filter vocabulary that silently omitted a status
-/// would make those sessions unfindable with no error anywhere.
-pub fn status_key(status: &SessionStatus) -> &'static str {
-    match status {
-        SessionStatus::Unknown => "unknown",
-        SessionStatus::Running => "running",
-        SessionStatus::Waiting => "waiting",
-        SessionStatus::Idle => "idle",
-        SessionStatus::Exited { .. } => "exited",
-        SessionStatus::Error { .. } => "error",
-        SessionStatus::Interrupted => "interrupted",
-    }
-}
-
-/// The status vocabulary a `?status=` parameter may name, or `None` for a
-/// word this build does not know.
-///
-/// `unknown` is accepted even though it must never RENDER (see
-/// `SessionStatus::Unknown`'s own docs): the value exists in the cache
-/// while a freshly created session waits for its first classification, and
-/// a filter that could not name it would leave those rows unreachable
-/// rather than merely unbadged. Refusing an unrecognized word — rather
-/// than matching nothing — is what turns a typo into a 400 the user can
-/// read instead of an empty list they will believe.
-pub fn parse_status_key(text: &str) -> Option<&'static str> {
-    [
-        "unknown",
-        "running",
-        "waiting",
-        "idle",
-        "exited",
-        "error",
-        "interrupted",
-    ]
-    .into_iter()
-    .find(|known| *known == text)
 }
 
 /// Which order a merged listing is served in — the `?sort=` vocabulary, and
@@ -635,10 +522,8 @@ pub enum ListSort {
 
 /// The `?sort=` vocabulary, or `None` for a word this build does not know.
 ///
-/// Refusing an unrecognized word rather than falling back to the default is
-/// the same judgement [`parse_status_key`] makes: a typo answered with a
-/// silently different order is a list the user reads as authoritative and
-/// cannot tell is wrong.
+/// Refusing an unrecognized word rather than falling back to the default
+/// keeps a typo from producing a plausible list in the wrong order.
 pub fn parse_sort_key(text: &str) -> Option<ListSort> {
     match text {
         "created" => Some(ListSort::Created),
@@ -758,37 +643,6 @@ impl SessionFilter {
         self
     }
 
-    /// Narrow to direct children of one session id.
-    pub fn parent(mut self, parent: &str) -> SessionFilter {
-        self.parent = Some(parent.to_string());
-        self
-    }
-
-    /// Narrow to sessions whose working directory contains `needle`.
-    pub fn directory(mut self, needle: &str) -> SessionFilter {
-        self.directory = Some(Folded::new(needle));
-        self
-    }
-
-    /// Narrow to sessions whose title contains `needle`.
-    pub fn title(mut self, needle: &str) -> SessionFilter {
-        self.title = Some(Folded::new(needle));
-        self
-    }
-
-    /// Narrow to sessions created from the profile named by `value` —
-    /// either its id or its snapshotted name (see this type's docs).
-    pub fn profile(mut self, value: &str) -> SessionFilter {
-        self.profile = Some(Folded::new(value));
-        self
-    }
-
-    /// Narrow to one status, by the tag [`status_key`] spells.
-    pub fn status(mut self, status: &'static str) -> SessionFilter {
-        self.status = Some(status);
-        self
-    }
-
     /// The one host this filter admits, when it names exactly one.
     ///
     /// Read by the merge to SCOPE the truncation notice, not the rows: a
@@ -809,13 +663,7 @@ impl SessionFilter {
         *self == SessionFilter::default().include_archived(true)
     }
 
-    /// Whether one session, on `host`, satisfies every dimension set.
-    ///
-    /// AND across dimensions, deliberately: each parameter narrows, and a
-    /// client that wants a union asks twice. Nothing here is fallible —
-    /// an unmatched dimension is simply false — because a filter is a
-    /// question about a row, and there is no row this can fail to answer
-    /// for.
+    /// Whether one session belongs in the archive view and host selection.
     pub fn matches(&self, host: HostId, info: &SessionInfo) -> bool {
         if info.archived && !self.include_archived {
             return false;
@@ -824,34 +672,6 @@ impl SessionFilter {
             && wanted != host
         {
             return false;
-        }
-        if let Some(status) = self.status
-            && status != status_key(&info.status)
-        {
-            return false;
-        }
-        if let Some(parent) = &self.parent
-            && info.parent.as_deref() != Some(parent.as_str())
-        {
-            return false;
-        }
-        if let Some(directory) = &self.directory
-            && !directory.contained_in(&info.cwd)
-        {
-            return false;
-        }
-        if let Some(title) = &self.title
-            && !title.contained_in(&info.title)
-        {
-            return false;
-        }
-        if let Some(profile) = &self.profile {
-            let Some(source) = &info.source_profile else {
-                return false;
-            };
-            if source.id != profile.raw && source.name.to_lowercase() != profile.folded {
-                return false;
-            }
         }
         true
     }
@@ -9331,90 +9151,35 @@ mod tests {
         assert_eq!(alpha_only, vec!["a-1".to_string()]);
     }
 
-    /// The filter's match semantics, pinned where they are defined.
+    /// Archive exclusion and host selection apply to both listing sources.
     ///
-    /// The REST tests cover the query string and the two totals; this covers
-    /// the predicate itself, including the three rules a reader is most
-    /// likely to get wrong when touching it: substring versus exact per
-    /// dimension, the profile filter's id-OR-snapshotted-name reading, and
-    /// the fact that dimensions AND together.
+    /// This pins the predicate below the REST layer: archived rows stay
+    /// outside the ordinary view, and a host choice compares the opaque
+    /// registry id rather than any display name or destination.
     #[farhelm_testtrace::test]
-    fn the_session_filter_matches_by_the_documented_rules() {
-        use farhelm_proto::{ProfileExistence, SessionStatus, SourceProfile};
+    fn the_session_filter_matches_archive_and_host() {
+        let info = session("s-1", 100);
 
-        let info = SessionInfo {
-            parent: Some("parent-7".to_string()),
-            cwd: "/home/Me/src/Farhelm".to_string(),
-            title: "Refactor the Drain".to_string(),
-            status: SessionStatus::Waiting,
-            source_profile: Some(SourceProfile {
-                id: "p-7".to_string(),
-                name: "Claude Code".to_string(),
-                // Deliberately deleted: existence is DERIVED at reply time
-                // and says nothing about whether a filter matches, because
-                // the snapshot is what the session actually carries.
-                existence: ProfileExistence::Deleted,
-            }),
-            ..session("s-1", 100)
-        };
-
-        // Free text: substring, case-insensitive, on both dimensions.
-        assert!(
-            SessionFilter::default()
-                .directory("src/farhelm")
-                .matches(1, &info)
-        );
-        assert!(SessionFilter::default().title("DRAIN").matches(1, &info));
-        assert!(
-            !SessionFilter::default()
-                .title("drainpipe")
-                .matches(1, &info)
-        );
-
-        // Enumerable: exact.
-        assert!(SessionFilter::default().status("waiting").matches(1, &info));
-        assert!(!SessionFilter::default().status("running").matches(1, &info));
+        assert!(SessionFilter::default().matches(1, &info));
         assert!(SessionFilter::default().host(1).matches(1, &info));
         assert!(!SessionFilter::default().host(2).matches(1, &info));
-        assert!(
-            SessionFilter::default()
-                .parent("parent-7")
-                .matches(1, &info)
-        );
-        assert!(!SessionFilter::default().parent("parent").matches(1, &info));
 
-        // Profile: by id (exact, opaque) or by snapshotted name
-        // (case-insensitive), and never by prefix.
-        assert!(SessionFilter::default().profile("p-7").matches(1, &info));
-        assert!(
-            SessionFilter::default()
-                .profile("claude code")
-                .matches(1, &info)
-        );
-        assert!(!SessionFilter::default().profile("claude").matches(1, &info));
-        assert!(!SessionFilter::default().profile("p-").matches(1, &info));
-
-        // A raw-created session matches no profile filter at all.
-        let raw = SessionInfo {
-            source_profile: None,
-            ..info.clone()
+        let archived = SessionInfo {
+            archived: true,
+            ..info
         };
-        assert!(!SessionFilter::default().profile("p-7").matches(1, &raw));
-
-        // Dimensions AND: adding one can only ever narrow.
+        assert!(!SessionFilter::default().matches(1, &archived));
         assert!(
-            !SessionFilter::default()
-                .title("drain")
-                .status("running")
-                .matches(1, &info)
+            SessionFilter::default()
+                .include_archived(true)
+                .matches(1, &archived)
         );
         assert!(
             !SessionFilter::default().is_empty(),
             "the default archive exclusion requires the predicate scan"
         );
         assert!(SessionFilter::default().include_archived(true).is_empty());
-        assert!(!SessionFilter::default().title("x").is_empty());
-        assert!(!SessionFilter::default().parent("parent-7").is_empty());
+        assert!(!SessionFilter::default().host(1).is_empty());
     }
 
     /// Completed drains converge the remembered default to their newest
@@ -9738,48 +9503,11 @@ mod tests {
         );
     }
 
-    /// Every status the wire can carry has a filter word, and nothing else
-    /// is accepted.
-    ///
-    /// The round trip is what matters: a status whose key could not be
-    /// parsed back would make those sessions unfilterable, and a word
-    /// accepted that no status produces would silently match nothing.
-    #[farhelm_testtrace::test]
-    fn every_status_key_round_trips_and_unknown_words_are_refused() {
-        use farhelm_proto::SessionStatus;
-
-        for status in [
-            SessionStatus::Unknown,
-            SessionStatus::Running,
-            SessionStatus::Waiting,
-            SessionStatus::Idle,
-            SessionStatus::Exited { exit_code: Some(3) },
-            SessionStatus::Error {
-                detail: "no such file".to_string(),
-            },
-            SessionStatus::Interrupted,
-        ] {
-            let key = status_key(&status);
-            assert_eq!(
-                parse_status_key(key),
-                Some(key),
-                "{key} must parse back to itself"
-            );
-        }
-        for unknown in ["alive", "", "Running", "waiting "] {
-            assert_eq!(
-                parse_status_key(unknown),
-                None,
-                "{unknown:?} is not a status"
-            );
-        }
-    }
-
     /// Every order this helm serves has a `?sort=` word, and nothing else is
     /// accepted.
     ///
-    /// [`parse_status_key`]'s reasoning one dimension over: an order whose
-    /// word did not parse back would be unreachable from a query string, and
+    /// An order whose word did not parse back would be unreachable from a
+    /// query string, and
     /// a word accepted that names no order would serve a list in a sequence
     /// the caller did not ask for — which, unlike an empty result, looks
     /// entirely plausible.

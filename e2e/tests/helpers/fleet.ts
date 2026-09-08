@@ -197,6 +197,8 @@ export interface SessionPage {
 export interface HostRow {
   id: number;
   kind: string;
+  /** Stable display identity used by both the host panel and selector. */
+  name: string;
   /** The helm's connection token, which a session create echoes back as
    * `expected_incarnation` — captured by the wire specs so they can assert the
    * request carried THIS value rather than merely some value. The create is
@@ -257,13 +259,16 @@ export async function localHostId(request: APIRequestContext): Promise<number> {
   return local.id;
 }
 
-/** One page of the session list, with an optional filter query string. */
+/**
+ * Read the fleet's visible sessions for fixture lookup. Select fixture rows by
+ * identity or exact title in the returned list: the API does not filter titles.
+ * Host-selector tests issue their explicit host queries separately.
+ */
 export async function listSessions(
   request: APIRequestContext,
-  query = "",
 ): Promise<SessionPage> {
-  const response = await request.get(`/api/sessions${query ? `?${query}` : ""}`);
-  await ok(response, `listing sessions (${query || "unfiltered"})`);
+  const response = await request.get("/api/sessions");
+  await ok(response, "listing sessions");
   return await response.json();
 }
 
@@ -987,19 +992,6 @@ export async function openHostsPanel(page: Page): Promise<void> {
       { timeout: 20_000, intervals: [250, 500, 1000] },
     )
     .toBe(true);
-}
-
-/**
- * Open the session list's filter popover if it is not already open — the same
- * on-demand-toggle story as [`openHostsPanel`], for every test that
- * applies, clears, or inspects the session filter.
- */
-export async function openFilterBar(page: Page): Promise<void> {
-  const toggle = page.locator(".filter-toggle");
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click();
-  }
-  await expect(page.locator(".filter-popover")).toBeVisible();
 }
 
 /**

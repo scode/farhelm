@@ -59,22 +59,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
 
-/// Query parameters for `GET /api/sessions`: the view switch, the filters,
-/// and the order. There is no cursor and no page size, by contract (SPEC.md's
+/// Query parameters for `GET /api/sessions`: archive inclusion, optional host
+/// scope, and order. There is no cursor and no page size, by contract (SPEC.md's
 /// Session list section): the reply is the whole list.
 ///
-/// Everything except the archive inclusion switch is absent-by-default.
 /// A caller sending no query sees the ordinary, non-archived fleet view;
-/// `include_archived=true` widens that view — rows AND `total` both — without
-/// changing any of the search dimensions.
+/// `include_archived=true` widens that view — rows AND `total` both.
 ///
-/// The filter parameters are SPEC.md's session-list dimensions: host,
-/// parent, directory, profile, status, and title. Their match semantics live on
-/// [`store::SessionFilter`], which is also where both the persisted and the
-/// in-memory sources read them from, so there is one definition rather than
-/// one per source. A parameter present but EMPTY is treated as absent
-/// (`?title=` is what a cleared search box sends, and refusing it would make
-/// clearing the box an error).
+/// The optional host parameter narrows the ordinary archive-excluding view.
+/// Archive inclusion remains available to the agent-facing whole-fleet listing.
 ///
 /// Unknown parameters are ignored rather than refused — deliberately, so a
 /// client one version behind that still sends the paged design's `limit=`
@@ -92,22 +85,6 @@ pub(crate) struct ListQuery {
     include_archived: bool,
     /// Only sessions on this registered host (a `HostView::id`).
     host: Option<store::HostId>,
-    /// Only direct children of this session id.
-    parent: Option<String>,
-    /// Only sessions whose working directory CONTAINS this text, ignoring
-    /// case.
-    directory: Option<String>,
-    /// Only sessions created from this profile, named either by its id or
-    /// by the name they snapshotted at creation — which is what keeps a
-    /// DELETED profile's sessions findable. See [`store::SessionFilter`].
-    profile: Option<String>,
-    /// Only sessions in this status, spelled exactly as the wire spells it
-    /// (`running`, `waiting`, `idle`, `exited`, `error`, `interrupted`,
-    /// `unknown`). An unrecognized word is a 400 rather than an empty list:
-    /// a typo that answers "no sessions" is a lie the user will believe.
-    status: Option<String>,
-    /// Only sessions whose title CONTAINS this text, ignoring case.
-    title: Option<String>,
     /// Which order to serve the list in: `created` (the default when the
     /// parameter is absent), `activity`, or `title`. See
     /// [`store::ListSort`] for what each one is and for the tie-break tail
@@ -124,61 +101,16 @@ pub(crate) struct ListQuery {
     sort: Option<String>,
 }
 
-/// Build the merged view's predicate from one request's query string, or
-/// refuse it.
+/// Build the merged view's predicate from one request's query string.
 ///
-/// The one place the wire's spelling meets [`store::SessionFilter`].
-///
-/// The EXACTLY-EMPTY value is dropped rather than matched against, so a
-/// cleared search box widens the list instead of narrowing it to sessions
-/// whose title contains the empty string (which is all of them, but by
-/// accident rather than by intent — and would count as "filtered" for the
-/// two-totals reply).
-///
-/// Nothing else is dropped, and specifically not surrounding whitespace:
-/// a directory or a title may legitimately contain it, and a session in
-/// `/srv/my project/` or titled `fix  the  spacing` must stay findable by
-/// typing what is actually there. Trimming would also make two different
-/// searches — `" "` and `""` — into the same request, which is the one case
-/// a user can see: typing a space would silently clear the filter. The cost
-/// of not trimming is a search for `"drain "` that finds nothing, which the
-/// user can see and fix.
-fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
-    let present = |value: &Option<String>| -> Option<String> {
-        value
-            .as_deref()
-            .filter(|text| !text.is_empty())
-            .map(str::to_string)
-    };
+/// The archive switch remains for agent-facing whole-fleet reads. The browser
+/// supplies only the optional registry host id.
+fn list_filter(q: &ListQuery) -> store::SessionFilter {
     let mut filter = store::SessionFilter::default().include_archived(q.include_archived);
     if let Some(host) = q.host {
         filter = filter.host(host);
     }
-    if let Some(parent) = present(&q.parent) {
-        filter = filter.parent(&parent);
-    }
-    if let Some(directory) = present(&q.directory) {
-        filter = filter.directory(&directory);
-    }
-    if let Some(profile) = present(&q.profile) {
-        filter = filter.profile(&profile);
-    }
-    if let Some(title) = present(&q.title) {
-        filter = filter.title(&title);
-    }
-    if let Some(status) = present(&q.status) {
-        let known = store::parse_status_key(&status).ok_or_else(|| {
-            anyhow::Error::new(SupervisorError {
-                kind: ErrorKind::InvalidRequest,
-                message: format!(
-                    "{status:?} is not a session status; this helm knows running, waiting, idle, \
-                     exited, error, interrupted, and unknown"
-                ),
-            })
-        })?;
-        filter = filter.status(known);
-    }
-    Ok(filter)
+    filter
 }
 
 /// Read one request's `?sort=`, or refuse it.
@@ -235,7 +167,7 @@ fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
 /// merge hit `farhelm_proto::LIST_SESSIONS_CAP` — and is the only thing
 /// behind SPEC.md's "could not read to the end" notice.
 ///
-/// The filter parameters narrow the list server-side, which is what makes
+/// Host selection narrows the list server-side, which is what makes
 /// "N matching of M" a claim about the whole view rather than about the
 /// rows a client happens to hold.
 ///
@@ -255,10 +187,7 @@ pub(crate) async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
-    let filter = match list_filter(&q) {
-        Ok(filter) => filter,
-        Err(e) => return http_error(e),
-    };
+    let filter = list_filter(&q);
     let sort = match list_sort(&q) {
         Ok(sort) => sort,
         Err(e) => return http_error(e),

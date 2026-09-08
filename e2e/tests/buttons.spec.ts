@@ -188,7 +188,7 @@ test("sidebar heading controls share secondary paint and compact sizing", async 
   await expect(page.getByRole("button", { name: "new session" })).toHaveText("new");
   await expect(page.getByRole("button", { name: "add host" })).toHaveText("add");
 
-  const secondary = [".profiles-toggle", ".filter-toggle", ".add-host-button"];
+  const secondary = [".profiles-toggle", ".add-host-button"];
   const styles = await Promise.all(
     secondary.map((selector) =>
       page.locator(selector).evaluate((node) => {
@@ -198,7 +198,6 @@ test("sidebar heading controls share secondary paint and compact sizing", async 
     ),
   );
   expect(styles[1]).toEqual(styles[0]);
-  expect(styles[2]).toEqual(styles[0]);
   const primaryBackground = await page
     .locator(".new-session-button")
     .evaluate((node) => getComputedStyle(node).backgroundColor);
