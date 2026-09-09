@@ -852,7 +852,7 @@ mod tests {
 
         let mut source = rest_harness::session("profiled", 1);
         source.source_profile = Some(farhelm_proto::SourceProfile {
-            id: "starter-claude".to_string(),
+            id: "builtin-claude".to_string(),
             name: "claude".to_string(),
             existence: farhelm_proto::ProfileExistence::Unresolved,
         });

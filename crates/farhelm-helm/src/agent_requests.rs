@@ -2804,7 +2804,7 @@ mod tests {
                     agent_kind: farhelm_proto::AgentKind::Codex,
                     resume_template: None,
                     source_profile: farhelm_proto::ProfileSnapshot {
-                        id: "starter-codex".to_string(),
+                        id: "builtin-codex".to_string(),
                         name: "codex".to_string(),
                     },
                 },
@@ -4156,7 +4156,7 @@ mod tests {
             cwd: "/srv/project".to_string(),
             title: "source title".to_string(),
             source_profile: Some(SourceProfile {
-                id: "starter-claude".to_string(),
+                id: "builtin-claude".to_string(),
                 name: "old snapshot name".to_string(),
                 existence: ProfileExistence::Unresolved,
             }),
@@ -4197,7 +4197,7 @@ mod tests {
         assert_eq!(
             seen[0].source_profile,
             Some(farhelm_proto::ProfileSnapshot {
-                id: "starter-claude".to_string(),
+                id: "builtin-claude".to_string(),
                 name: "claude".to_string(),
             })
         );
@@ -4305,7 +4305,7 @@ mod tests {
         assert_eq!(
             seen[0].source_profile,
             Some(farhelm_proto::ProfileSnapshot {
-                id: "starter-codex-yolo".to_string(),
+                id: "builtin-codex-yolo".to_string(),
                 name: "codex-yolo".to_string(),
             })
         );
@@ -4587,7 +4587,7 @@ mod tests {
             cwd: "/srv/project".to_string(),
             title: "the original".to_string(),
             source_profile: Some(SourceProfile {
-                id: "starter-claude".to_string(),
+                id: "builtin-claude".to_string(),
                 name: "claude".to_string(),
                 existence: ProfileExistence::Present,
             }),
@@ -4631,6 +4631,10 @@ mod tests {
         });
         let h = crate::rest_harness::spliced_helm_listing(client_side, vec![source]).await;
         let local = local_id(&h.store).await;
+
+        // The clone must reach the replaying peer, rather than fail early on
+        // a missing source profile and leave the bookkeeping boundary untested.
+        assert!(h.store.profile("builtin-claude").await.unwrap().is_some());
 
         // Written through the store's administrative entry point, which is
         // the one that records no source session — see the docstring.
@@ -4808,9 +4812,26 @@ mod tests {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
         let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let stored = match h
+            .store
+            .create_profile(
+                "codex".to_string(),
+                "codex".to_string(),
+                farhelm_proto::AgentKind::Codex,
+                None,
+            )
+            .await
+            .expect("create stored profile")
+        {
+            crate::store::ProfileCreation::Created(profile) => profile,
+            crate::store::ProfileCreation::CatalogFull => {
+                panic!("fresh catalog has stored capacity")
+            }
+        };
         h.store
             .update_profile(farhelm_proto::Profile {
-                id: "starter-codex".to_string(),
+                id: stored.id.clone(),
+                builtin: false,
                 name: "codex-current".to_string(),
                 invocation: "codex --model current".to_string(),
                 agent_kind: farhelm_proto::AgentKind::Codex,
@@ -4822,9 +4843,9 @@ mod tests {
             })
             .await
             .expect("edit remembered profile")
-            .expect("starter profile exists");
+            .expect("stored profile exists");
         h.store
-            .remember_profile_default("starter-codex")
+            .remember_profile_default(&stored.id)
             .await
             .expect("remember profile id");
 
@@ -4866,7 +4887,7 @@ mod tests {
         assert_eq!(
             seen[0].source_profile,
             Some(farhelm_proto::ProfileSnapshot {
-                id: "starter-codex".to_string(),
+                id: stored.id,
                 name: "codex-current".to_string(),
             })
         );
@@ -4884,12 +4905,28 @@ mod tests {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
         let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let stored = match h
+            .store
+            .create_profile(
+                "removed codex".to_string(),
+                "codex".to_string(),
+                farhelm_proto::AgentKind::Codex,
+                None,
+            )
+            .await
+            .expect("create stored profile")
+        {
+            crate::store::ProfileCreation::Created(profile) => profile,
+            crate::store::ProfileCreation::CatalogFull => {
+                panic!("fresh catalog has stored capacity")
+            }
+        };
         h.store
-            .delete_profile("starter-codex")
+            .delete_profile(&stored.id)
             .await
             .expect("delete profile");
         h.store
-            .remember_profile_default("starter-codex")
+            .remember_profile_default(&stored.id)
             .await
             .expect("retain dangling default");
 
@@ -4910,7 +4947,7 @@ mod tests {
         match outcome {
             AgentOutcome::Err { kind, message } => {
                 assert_eq!(kind, ErrorKind::NotFound);
-                assert!(message.contains("starter-codex"));
+                assert!(message.contains(&stored.id));
             }
             other => panic!("a dangling default must be refused, got {other:?}"),
         }

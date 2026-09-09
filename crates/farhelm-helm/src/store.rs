@@ -149,17 +149,76 @@ const SESSION_SEEN_SCHEMA: &str = "CREATE TABLE session_seen (
                  seen_activity_at INTEGER NOT NULL
              ) STRICT;";
 
-/// Seed rows are inserted once with the schema migration, not repaired at
-/// startup, so deleting or editing a starter remains durable.
-const STARTER_PROFILES: &str = "INSERT INTO profiles \
-                 (id, name, invocation, agent_kind, resume_template) VALUES \
-                 ('starter-claude', 'claude', 'claude', 'claude', NULL), \
-                 ('starter-claude-yolo', 'claude-yolo', \
-                  'claude --dangerously-skip-permissions', 'claude', \
-                  '[\"claude\",\"--dangerously-skip-permissions\",\"--resume\",\"{conversation}\"]'), \
-                 ('starter-codex', 'codex', 'codex', 'codex', NULL), \
-                 ('starter-codex-yolo', 'codex-yolo', 'codex --yolo', 'codex', \
-                  '[\"codex\",\"--yolo\",\"resume\",\"{conversation}\"]');";
+/// The prefix reserved for release-owned definitions.
+///
+/// Stored profiles use UUIDs, but this guard also protects direct store
+/// callers: an accidental persistence path must not create a row that could
+/// shadow a definition supplied by a later release.
+const BUILTIN_PROFILE_PREFIX: &str = "builtin-";
+
+/// Return the fixed profiles that every release exposes beside persisted rows.
+///
+/// These definitions deliberately live outside SQLite. That lets a release
+/// correct a built-in command without treating a user's catalog as generated
+/// state, while stored historical starters remain ordinary editable rows.
+pub(crate) fn builtin_profiles() -> Vec<farhelm_proto::Profile> {
+    vec![
+        farhelm_proto::Profile {
+            id: "builtin-claude".to_string(),
+            builtin: true,
+            name: "claude".to_string(),
+            invocation: "claude".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Claude,
+            resume_template: None,
+        },
+        farhelm_proto::Profile {
+            id: "builtin-claude-yolo".to_string(),
+            builtin: true,
+            name: "claude-yolo".to_string(),
+            invocation: "claude --dangerously-skip-permissions".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Claude,
+            resume_template: Some(vec![
+                "claude".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string(),
+            ]),
+        },
+        farhelm_proto::Profile {
+            id: "builtin-codex".to_string(),
+            builtin: true,
+            name: "codex".to_string(),
+            invocation: "codex".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Codex,
+            resume_template: None,
+        },
+        farhelm_proto::Profile {
+            id: "builtin-codex-yolo".to_string(),
+            builtin: true,
+            name: "codex-yolo".to_string(),
+            invocation: "codex --yolo".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Codex,
+            resume_template: Some(vec![
+                "codex".to_string(),
+                "--yolo".to_string(),
+                "resume".to_string(),
+                "{conversation}".to_string(),
+            ]),
+        },
+    ]
+}
+
+/// Resolve one release-owned profile by its opaque id.
+pub(crate) fn builtin_profile(id: &str) -> Option<farhelm_proto::Profile> {
+    builtin_profiles()
+        .into_iter()
+        .find(|profile| profile.id == id)
+}
+
+/// Whether an id belongs to the namespace reserved for built-ins.
+fn is_builtin_profile_id(id: &str) -> bool {
+    id.starts_with(BUILTIN_PROFILE_PREFIX)
+}
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -392,6 +451,9 @@ fn read_profile_columns(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProfileColu
 /// bypass the catalog's current field contract.
 fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::Profile> {
     let (id, name, invocation, kind, template) = columns;
+    if is_builtin_profile_id(&id) {
+        anyhow::bail!("stored profile {id} uses the reserved built-in namespace");
+    }
     let agent_kind = agent_kind_from_column(&kind).with_context(|| format!("profile {id}"))?;
     let resume_template =
         resume_template_from_column(template).with_context(|| format!("profile {id}"))?;
@@ -404,6 +466,7 @@ fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::
     .map_err(|message| anyhow::anyhow!("profile {id}: {message}"))?;
     Ok(farhelm_proto::Profile {
         id,
+        builtin: false,
         name,
         invocation,
         agent_kind,
@@ -1289,8 +1352,8 @@ pub struct HelmStore {
 ///   lived in browser storage and the desktop state file, which the helm
 ///   never saw, so every upgraded helm starts from defaults.
 /// - 15: the helm-owned `profiles` catalog and one remembered-default row.
-///   The old per-host rows are dropped without migration so the catalog starts
-///   with the same four seeded profiles and an empty default.
+///   The old per-host rows are dropped without migration so stored catalog
+///   rows start empty and release-owned built-ins remain available in code.
 /// - 16: the nullable `hosts.alias` display label. See [`validate_alias`]
 ///   and `update_alias` for why uniqueness is checked against every other
 ///   host's current DISPLAY name (derived or aliased) rather than only
@@ -1484,7 +1547,6 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- profile-backed create is newer -- so a delayed drain cannot
              -- roll the default backward past a newer create.
              {PROFILES_SCHEMA}
-             {STARTER_PROFILES}
              CREATE TABLE remembered_profile (
                  singleton     INTEGER PRIMARY KEY CHECK (singleton = 1),
                  profile_id    TEXT NOT NULL,
@@ -1915,11 +1977,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         // Profile definitions now belong to this helm, while the old
         // remembered values were host-scoped and therefore have no valid
         // migration target. Dropping them is intentional: the new singleton
-        // starts empty, and the catalog is seeded exactly once here.
+        // starts empty. Release-owned definitions are constructed in code so
+        // this migration never writes generated catalog rows.
         tx.execute_batch(&format!(
             "DROP TABLE remembered_profiles;
              {PROFILES_SCHEMA}
-             {STARTER_PROFILES}
              CREATE TABLE remembered_profile (
                  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                  profile_id TEXT NOT NULL,
@@ -4369,7 +4431,7 @@ impl HelmStore {
     /// decoder instead of silently normalized into a different profile.
     pub async fn profiles(&self) -> anyhow::Result<Vec<farhelm_proto::Profile>> {
         let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let stored: Vec<farhelm_proto::Profile> = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
             let conn = conn.lock().expect("helm db mutex poisoned");
             let mut statement = conn
                 .prepare("SELECT id, name, invocation, agent_kind, resume_template FROM profiles ORDER BY id")
@@ -4385,11 +4447,19 @@ impl HelmStore {
         })
         .await
         .context("profile list task panicked")?
+        ?;
+        let mut profiles = builtin_profiles();
+        profiles.extend(stored);
+        profiles.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(profiles)
     }
 
     /// Read one helm-owned profile, returning `None` for an unknown id so
     /// update and delete routes can distinguish absence from storage failure.
     pub async fn profile(&self, id: &str) -> anyhow::Result<Option<farhelm_proto::Profile>> {
+        if let Some(profile) = builtin_profile(id) {
+            return Ok(Some(profile));
+        }
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
@@ -4436,6 +4506,7 @@ impl HelmStore {
             }
             let profile = farhelm_proto::Profile {
                 id: uuid::Uuid::new_v4().to_string(),
+                builtin: false,
                 name,
                 invocation,
                 agent_kind,
@@ -4465,6 +4536,9 @@ impl HelmStore {
         &self,
         profile: farhelm_proto::Profile,
     ) -> anyhow::Result<Option<farhelm_proto::Profile>> {
+        if is_builtin_profile_id(&profile.id) {
+            anyhow::bail!("built-in profiles are read-only");
+        }
         farhelm_proto::validate_profile_fields(
             &profile.name,
             &profile.invocation,
@@ -4517,6 +4591,9 @@ impl HelmStore {
     /// Delete one profile and report whether its id existed; the raw
     /// remembered default is intentionally left untouched when it dangles.
     pub async fn delete_profile(&self, id: &str) -> anyhow::Result<bool> {
+        if is_builtin_profile_id(id) {
+            anyhow::bail!("built-in profiles are read-only");
+        }
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
@@ -9858,19 +9935,20 @@ mod tests {
         );
     }
 
-    /// A fresh catalog contains every starter definition exactly once, and
-    /// reopening it preserves user edits and deletions.
+    /// Fresh catalogs expose release-owned definitions without persisting
+    /// them, while legacy starter rows survive reopening as editable storage.
     ///
     /// Count-only coverage would allow a typo in an invocation, integration,
     /// or resume template to ship. Reopening after mutations also pins that
     /// schema setup is initialization, not a startup repair that resurrects
     /// or overwrites a starter the user changed.
     #[farhelm_testtrace::test]
-    async fn starter_profiles_are_complete_and_seeded_only_once() {
+    async fn builtins_do_not_seed_and_legacy_starters_remain_editable() {
         let (dir, store) = fresh_store().await;
         let starters = vec![
             farhelm_proto::Profile {
                 id: "starter-claude".to_string(),
+                builtin: false,
                 name: "claude".to_string(),
                 invocation: "claude".to_string(),
                 agent_kind: farhelm_proto::AgentKind::Claude,
@@ -9878,6 +9956,7 @@ mod tests {
             },
             farhelm_proto::Profile {
                 id: "starter-claude-yolo".to_string(),
+                builtin: false,
                 name: "claude-yolo".to_string(),
                 invocation: "claude --dangerously-skip-permissions".to_string(),
                 agent_kind: farhelm_proto::AgentKind::Claude,
@@ -9890,6 +9969,7 @@ mod tests {
             },
             farhelm_proto::Profile {
                 id: "starter-codex".to_string(),
+                builtin: false,
                 name: "codex".to_string(),
                 invocation: "codex".to_string(),
                 agent_kind: farhelm_proto::AgentKind::Codex,
@@ -9897,6 +9977,7 @@ mod tests {
             },
             farhelm_proto::Profile {
                 id: "starter-codex-yolo".to_string(),
+                builtin: false,
                 name: "codex-yolo".to_string(),
                 invocation: "codex --yolo".to_string(),
                 agent_kind: farhelm_proto::AgentKind::Codex,
@@ -9908,10 +9989,37 @@ mod tests {
                 ]),
             },
         ];
-        assert_eq!(store.profiles().await.unwrap(), starters);
+        let expected_builtins = starters
+            .iter()
+            .cloned()
+            .map(|profile| farhelm_proto::Profile {
+                id: profile.id.replacen("starter-", "builtin-", 1),
+                builtin: true,
+                ..profile
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(store.profiles().await.unwrap(), expected_builtins);
+        {
+            let conn = store.conn.lock().unwrap();
+            for profile in &starters {
+                conn.execute(
+                    "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![
+                        profile.id,
+                        profile.name,
+                        profile.invocation,
+                        agent_kind_column(profile.agent_kind),
+                        resume_template_column(profile.resume_template.as_deref()),
+                    ],
+                )
+                .unwrap();
+            }
+        }
 
         let edited = farhelm_proto::Profile {
             id: "starter-claude".to_string(),
+            builtin: false,
             name: "claude-local".to_string(),
             invocation: "claude --model local".to_string(),
             agent_kind: farhelm_proto::AgentKind::Claude,
@@ -9925,9 +10033,12 @@ mod tests {
 
         drop(store);
         let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let mut expected = starters;
-        expected[0] = edited;
+        let mut expected = expected_builtins;
+        expected.extend(starters);
         expected.retain(|profile| profile.id != "starter-codex");
+        expected.retain(|profile| profile.id != "starter-claude");
+        expected.push(edited);
+        expected.sort_by(|left, right| left.id.cmp(&right.id));
         assert_eq!(reopened.profiles().await.unwrap(), expected);
     }
 
@@ -9998,7 +10109,10 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn helm_profile_catalog_crud_is_bounded_and_validated() {
         let (_dir, store) = fresh_store().await;
-        assert_eq!(store.profiles().await.unwrap().len(), 4);
+        assert_eq!(store.profiles().await.unwrap(), builtin_profiles());
+        let builtin = builtin_profile("builtin-claude").unwrap();
+        assert!(store.update_profile(builtin).await.is_err());
+        assert!(store.delete_profile("builtin-claude").await.is_err());
 
         let created = match store
             .create_profile(
@@ -10020,6 +10134,7 @@ mod tests {
 
         let updated = farhelm_proto::Profile {
             id: created.id.clone(),
+            builtin: false,
             name: "renamed".to_string(),
             invocation: "wrapper --renamed".to_string(),
             agent_kind: farhelm_proto::AgentKind::Codex,
@@ -10075,8 +10190,7 @@ mod tests {
                 .is_err()
         );
 
-        let starting_len = store.profiles().await.unwrap().len();
-        for index in starting_len..farhelm_proto::MAX_PROFILES {
+        for index in 0..farhelm_proto::MAX_PROFILES {
             assert!(matches!(
                 store
                     .create_profile(
@@ -10092,7 +10206,7 @@ mod tests {
         }
         assert_eq!(
             store.profiles().await.unwrap().len(),
-            farhelm_proto::MAX_PROFILES
+            farhelm_proto::MAX_PROFILES + builtin_profiles().len()
         );
         assert_eq!(
             store
@@ -10106,8 +10220,16 @@ mod tests {
                 .unwrap(),
             ProfileCreation::CatalogFull
         );
+        assert_eq!(
+            store.profiles().await.unwrap().len(),
+            farhelm_proto::MAX_PROFILES + builtin_profiles().len(),
+            "release-owned rows remain available beside a full stored catalog"
+        );
         let after_refusal = store.profiles().await.unwrap();
-        assert_eq!(after_refusal.len(), farhelm_proto::MAX_PROFILES);
+        assert_eq!(
+            after_refusal.len(),
+            farhelm_proto::MAX_PROFILES + builtin_profiles().len()
+        );
         assert!(
             after_refusal
                 .iter()

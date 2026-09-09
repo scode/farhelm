@@ -1001,6 +1001,13 @@ pub(crate) struct FleetBuilder {
 }
 
 impl FleetBuilder {
+    /// Configure durable fixtures before any connection actor starts.
+    /// Profile-backed session scripts need the real stored ID at construction
+    /// time; creating that row here keeps their initial refresh deterministic.
+    pub(crate) fn store(&self) -> &HelmStore {
+        &self.store
+    }
+
     /// A fresh helm.db with only its reserved local row, and a local host
     /// scripted UNREACHABLE.
     ///

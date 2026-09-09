@@ -674,6 +674,11 @@ pub struct Profile {
     /// Helm-minted and stable across every rename and every managed host: what
     /// a create names and what a session's [`SourceProfile`] snapshots.
     pub id: String,
+    /// The helm marks release-owned definitions so this client can keep their
+    /// commands readable while withholding catalog mutation controls. A
+    /// default keeps replies from an older helm ordinary editable rows.
+    #[serde(default)]
+    pub builtin: bool,
     /// The user's label, as the CATALOG holds it today: what the profiles
     /// section lists and what the create dialog's picker offers.
     ///

@@ -988,15 +988,15 @@ pub enum ProfileExistence {
     Deleted,
 }
 
-/// How many profiles one helm catalog may hold.
+/// How many stored profiles one helm catalog may hold, besides built-ins.
 ///
 /// Together with [`PROFILE_FIELD_CAP`], the bound keeps the helm's
 /// unpaginated `/api/profiles` JSON response predictably sized. A catalog
 /// too large to list would also be impossible to trim through the same API,
 /// so bounding the response is part of the storage contract.
 ///
-/// 128 is far past any hand-curated set (SPEC.md's starter catalog is two,
-/// and a profile is something a person writes by hand), which is the point:
+/// Release-owned built-ins are additional to this stored-row limit.
+/// 128 is far past an ordinary hand-curated set, which is the point:
 /// a bound nobody legitimately reaches costs nothing and closes the hole
 /// anyway. Pagination was rejected as disproportionate for the same reason
 /// the session list is served whole ([`LIST_SESSIONS_CAP`]): a picker that
@@ -1159,8 +1159,9 @@ fn validate_resume_template(template: &[String]) -> Result<(), String> {
     ensure_no_cwd_program("resume template", template)
 }
 
-/// One agent profile in the helm-owned catalog: a named, editable definition
-/// of how to launch an agent and how to resume one.
+/// One agent definition in the helm-wide catalog, either stored and editable
+/// or supplied read-only by the release. Both sources resolve launches and
+/// resume behavior through the same fields.
 ///
 /// SPEC.md's "a fresh helm is not empty" makes profiles the ordinary
 /// way sessions get created — a user picks a profile rather than typing a
@@ -1180,8 +1181,14 @@ pub struct Profile {
     /// never parse it. Distinct from `name` on purpose: a name is the user's
     /// label and changes, an id is the reference and does not.
     pub id: String,
-    /// The user's label for this profile, shown in pickers and in the
-    /// session list. Mutable — an edit changes it, and every session
+    /// Whether this release supplies the definition rather than the helm's
+    /// durable catalog. Clients use this authoritative source marker to
+    /// present a readable but immutable row without deriving policy from an
+    /// opaque id.
+    #[serde(default)]
+    pub builtin: bool,
+    /// The label for this profile, shown in pickers and in the
+    /// session list. Stored labels are mutable, and every session
     /// already created from this profile keeps the name it snapshotted.
     pub name: String,
     /// The launch invocation, as one shell-parsed command line — the same
@@ -6119,6 +6126,7 @@ mod tests {
     fn a_profile() -> Profile {
         Profile {
             id: "prof-7".to_string(),
+            builtin: false,
             name: "Claude Code".to_string(),
             invocation: "claude".to_string(),
             agent_kind: AgentKind::Claude,
@@ -6135,6 +6143,7 @@ mod tests {
     fn profile_json_shape_is_pinned() {
         let expected = serde_json::json!({
             "id": "prof-7",
+            "builtin": false,
             "name": "Claude Code",
             "invocation": "claude",
             "agent_kind": "claude",
@@ -6144,6 +6153,22 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<Profile>(expected).unwrap(),
             a_profile()
+        );
+    }
+
+    /// Older helms sent the profile shape before source metadata existed.
+    ///
+    /// Defaulting this descriptive field keeps those stored fixture and API
+    /// values usable as ordinary stored profiles instead of making rollout
+    /// depend on a coordinated browser and helm update.
+    #[farhelm_testtrace::test]
+    fn a_profile_without_source_metadata_defaults_to_stored() {
+        let mut historical = serde_json::to_value(a_profile()).unwrap();
+        historical.as_object_mut().unwrap().remove("builtin");
+        assert!(
+            !serde_json::from_value::<Profile>(historical)
+                .unwrap()
+                .builtin
         );
     }
 
@@ -6161,6 +6186,7 @@ mod tests {
     fn a_generic_profile_states_its_kind_and_omits_no_field() {
         let profile = Profile {
             id: "prof-8".to_string(),
+            builtin: false,
             name: "my script".to_string(),
             invocation: "./run-agent.sh".to_string(),
             agent_kind: AgentKind::Generic,
@@ -6168,6 +6194,7 @@ mod tests {
         };
         let expected = serde_json::json!({
             "id": "prof-8",
+            "builtin": false,
             "name": "my script",
             "invocation": "./run-agent.sh",
             "agent_kind": "generic",

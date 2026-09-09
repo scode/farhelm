@@ -411,15 +411,35 @@ test.describe("agent profiles", () => {
   }
 
   /**
-   * The app-bar trigger opens the helm-wide popup with every seeded starter.
+   * The app-bar trigger opens the helm-wide popup with every release-owned
+   * profile, visibly distinguishes its immutable source, and keeps stored
+   * rows actionable beside it.
    * This pins both the new entry point and the fact that management consumes
    * the same complete catalog as session creation.
    */
-  test("the app-bar popup lists all four starter profiles", async ({ page }) => {
+  test("the app-bar popup distinguishes immutable built-ins from stored profiles", async ({ page, request }) => {
+    const stored = await createProfile(request, { name: `stored-${Date.now()}` });
+    profiles.push(stored.id);
     await listWithStubbedFeed(page);
     await openProfiles(page);
-    await expect(section(page).locator("[data-profile-id]")).toHaveCount(4);
+    const builtins = ["builtin-claude", "builtin-claude-yolo", "builtin-codex", "builtin-codex-yolo"];
+    await expect(section(page).locator("[data-profile-id]")).toHaveCount(5);
+    for (const id of builtins) {
+      await expect(profileRow(page, id).locator(".profile-builtin")).toHaveText("Built-in");
+      await expect(profileRow(page, id).locator(".profile-edit, .profile-delete")).toHaveCount(0);
+    }
+    await expect(profileRow(page, stored.id).locator(".profile-edit")).toHaveCount(1);
+    await expect(profileRow(page, stored.id).locator(".profile-delete")).toHaveCount(1);
     await expect(page.locator(".profiles-toggle")).toHaveAttribute("aria-expanded", "true");
+    await profileRow(page, stored.id).locator(".profile-delete").click();
+    await profileRow(page, stored.id).locator(".profile-confirm-delete").click();
+    await expect(profileRow(page, stored.id)).toHaveCount(0);
+    await expect(section(page).locator("[data-profile-id]")).toHaveCount(builtins.length);
+    await page.locator(".profiles-toggle").click();
+    await openCreateDialog(page);
+    for (const id of builtins) {
+      await expect(page.locator(`.create-session-profile option[value="${id}"]`)).toContainText("(Built-in)");
+    }
   });
 
   /**
@@ -1073,10 +1093,13 @@ test.describe("agent profiles", () => {
     page,
     request,
   }) => {
-    const first = await createProfile(request, { name: `focus-a-${Date.now()}` });
-    profiles.push(first.id);
-    const second = await createProfile(request, { name: `focus-b-${Date.now()}` });
-    profiles.push(second.id);
+    const a = await createProfile(request, { name: `focus-a-${Date.now()}` });
+    profiles.push(a.id);
+    const b = await createProfile(request, { name: `focus-b-${Date.now()}` });
+    profiles.push(b.id);
+    // UUID order is unrelated to creation order. Delete the earlier stored
+    // row so the intended focus successor exists even with built-ins between.
+    const [first, second] = [a, b].sort((left, right) => left.id < right.id ? -1 : 1);
 
     await listWithStubbedFeed(page);
     await openProfiles(page);
@@ -1093,7 +1116,7 @@ test.describe("agent profiles", () => {
 
     const catalog = (await listProfiles(request)).profiles;
     const firstIndex = catalog.findIndex((profile) => profile.id === first.id);
-    const next = catalog[firstIndex + 1];
+    const next = catalog.slice(firstIndex + 1).find((profile) => profile.id === second.id);
     expect(next, "the first fixture must have a following row for the delete focus check")
       .toBeTruthy();
     await firstRow.locator(".profile-delete").click();

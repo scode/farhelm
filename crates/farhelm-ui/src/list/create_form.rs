@@ -1473,6 +1473,9 @@ pub(super) fn CreateSessionForm(
                             // profile read as another, and what is chosen
                             // here decides what runs.
                             "{display_peer(&profile.name)}"
+                            if profile.builtin {
+                                " (Built-in)"
+                            }
                         }
                     }
                 }
@@ -2159,6 +2162,7 @@ mod tests {
         let catalog = ProfileCatalog {
             profiles: vec![Profile {
                 id: "p-1".to_string(),
+                builtin: false,
                 name: "profile".to_string(),
                 invocation: "agent".to_string(),
                 agent_kind: "generic".to_string(),
@@ -2198,6 +2202,7 @@ mod tests {
         let catalog = ProfileCatalog {
             profiles: vec![Profile {
                 id: "p-1".to_string(),
+                builtin: false,
                 name: "profile".to_string(),
                 invocation: "agent".to_string(),
                 agent_kind: "generic".to_string(),
