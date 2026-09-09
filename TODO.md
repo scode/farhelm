@@ -52,15 +52,29 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Difficult deflake
 
-These entries remain unresolved after targeted investigation; clean repetitions are non-reproduction evidence, not
-fixes. The 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs and 8 GiB RAM. Those workers
-reported pinned tmux 3.7c, but no resolved executable hash was retained; exact substrate identity remains unverified.
-Unless stated otherwise, Rust batches ran twenty fresh invocations of the built `farhelm` e2e binary with the exact
-named test and `--exact --show-output`, stopping at the first failure. The ignored binary-output case also used
-`--include-ignored`. Browser batches used the named project/test with `--workers=1 --repeat-each=20
---max-failures=1`.
-`.agents/narrow-tests.md` gives the corresponding Cargo and Playwright commands. Extra load, changed fixtures, and
-historical evidence are called out per entry.
+The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
+
+- Make the raw-byte fixture in `e2e/tests/terminal-keys.spec.ts` use a dumper that emits live bytes on supported test
+  substrates. Ubuntu 26.04's uutils od withheld the sentinel; GNU od passed all ten cases without source changes.
+  Preserve the complete byte sequence and single-write assertions rather than ending the stream early to flush output.
+- Investigate the full-run backspace/Ctrl+C failures in `e2e/tests/terminal-flood.spec.ts`. Both engines failed during
+  session-deletion setup after the large-paste case, before the input assertions: `deleted.ok()` was false. Both passed
+  in narrow candidate and baseline sequences. Inspect the deletion response and session lifecycle evidence to
+  distinguish paste contamination from an independent failure; do not infer a cause from a retry.
+- Stabilize the intended boundaries of `an outside click overrides a delayed opening focus commit` and
+  `a profile edited in another browser reaches this one over the real feed` in `e2e/tests/profiles.spec.ts`. WebKit
+  missed the held commit's deadline or popup focus readiness before the behavior under test. A baseline pass does not
+  establish that the new layout is uninvolved. Preserve trusted-pointer, unexpired-release, and focus assertions.
+
+The earlier entries below remain unresolved after targeted investigation; clean repetitions are non-reproduction
+evidence, not fixes. Their 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs and 8 GiB RAM.
+Those workers reported pinned tmux 3.7c, but no resolved executable hash was retained; exact substrate identity remains
+unverified. Unless stated otherwise, Rust batches ran twenty fresh invocations of the built `farhelm` e2e binary with
+the exact named test and `--exact --show-output`, stopping at the first failure. The ignored binary-output case also
+used `--include-ignored`. Browser batches used the named project/test with
+`--workers=1 --repeat-each=20
+--max-failures=1`. `.agents/narrow-tests.md` gives the corresponding Cargo and Playwright
+commands. Extra load, changed fixtures, and historical evidence are called out per entry.
 
 The combined native run at `aa333815` used four test threads and the same reported tmux pin, with a real systemd user
 manager and no extra CPU-load process. The stalled-viewer RSS, degenerate-size READY, replacement-claim, and malformed
