@@ -1177,7 +1177,7 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let source = farhelm_proto::SessionInfo {
         source_profile: Some(farhelm_proto::SourceProfile {
-            id: "starter-claude".to_string(),
+            id: "builtin-claude".to_string(),
             name: "claude".to_string(),
             existence: farhelm_proto::ProfileExistence::Unresolved,
         }),
@@ -1205,15 +1205,14 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
         else {
             panic!("expected CreateSession, got {request:?}");
         };
-        // `starter-claude` is one of the two seeded starter profiles every
-        // fresh `helm.db` carries (`store.rs`'s `STARTER_PROFILES`), so the
-        // fixture below can name it with no profile-creation setup of its
-        // own.
+        // This release-owned definition exists without fixture setup, so the
+        // replacement path exercises the same catalog resolution a browser
+        // uses when it selects a built-in by id.
         assert_eq!(invocation, Some("claude".to_string()));
         assert_eq!(
             source_profile,
             Some(ProfileSnapshot {
-                id: "starter-claude".to_string(),
+                id: "builtin-claude".to_string(),
                 name: "claude".to_string(),
             })
         );
@@ -1240,7 +1239,7 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
             // ordinary placeholder every other fixture in this file
             // uses.
             source_profile: Some(SourceProfile {
-                id: "starter-claude".to_string(),
+                id: "builtin-claude".to_string(),
                 name: "claude".to_string(),
                 existence: farhelm_proto::ProfileExistence::Unresolved,
             }),
@@ -1279,7 +1278,7 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
     assert_eq!(session.id, "sess-2");
     assert_eq!(
         session.source_profile.as_ref().map(|p| p.id.as_str()),
-        Some("starter-claude")
+        Some("builtin-claude")
     );
 
     peer.await.unwrap();
@@ -3142,7 +3141,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         assert_eq!(
             source_profile,
             Some(farhelm_proto::ProfileSnapshot {
-                id: "starter-claude".to_string(),
+                id: "builtin-claude".to_string(),
                 name: "claude".to_string(),
             }),
             "the only create that may reach a supervisor carries the resolved profile"
@@ -3185,7 +3184,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "profile_id": "starter-claude",
+            "profile_id": "builtin-claude",
             "expected_incarnation": current - 1,
         }),
     )
@@ -3204,7 +3203,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "profile_id": "starter-claude",
+            "profile_id": "builtin-claude",
             "expected_incarnation": current,
         }),
     )
@@ -5006,7 +5005,7 @@ async fn catalog_failure_precedes_every_session_mutation() {
             "/api/sessions",
             serde_json::json!({
                 "cwd": "/tmp",
-                "profile_id": "starter-claude",
+                "profile_id": "builtin-claude",
             }),
         ),
         (
@@ -5045,11 +5044,11 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
     ///
     /// Reconstructing it for every mutation ensures no earlier helm verdict
     /// can accidentally make a later assertion pass through cached state.
-    fn unresolved_profiled_session(archived: bool) -> SessionInfo {
+    fn unresolved_profiled_session(id: &str, archived: bool) -> SessionInfo {
         SessionInfo {
             archived,
             source_profile: Some(SourceProfile {
-                id: "starter-claude".to_string(),
+                id: id.to_string(),
                 name: "claude".to_string(),
                 existence: ProfileExistence::Unresolved,
             }),
@@ -5057,6 +5056,22 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
         }
     }
 
+    let builder = rest_harness::FleetBuilder::new().await;
+    let crate::store::ProfileCreation::Created(mut profile) = builder
+        .store()
+        .create_profile(
+            "claude".to_string(),
+            "claude".to_string(),
+            farhelm_proto::AgentKind::Claude,
+            None,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("fresh catalog has capacity")
+    };
+    let original = unresolved_profiled_session(&profile.id, false);
+    let peer_profile_id = profile.id.clone();
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
@@ -5094,21 +5109,21 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
                 Ok(ControlMsg::RestartSession { req_id, .. }) => writer
                     .write_control(&ControlMsg::SessionRestarted {
                         req_id,
-                        session: unresolved_profiled_session(false),
+                        session: unresolved_profiled_session(&peer_profile_id, false),
                     })
                     .await
                     .unwrap(),
                 Ok(ControlMsg::RenameSession { req_id, .. }) => writer
                     .write_control(&ControlMsg::SessionRenamed {
                         req_id,
-                        session: unresolved_profiled_session(false),
+                        session: unresolved_profiled_session(&peer_profile_id, false),
                     })
                     .await
                     .unwrap(),
                 Ok(ControlMsg::ArchiveSession { req_id, .. }) => writer
                     .write_control(&ControlMsg::SessionArchived {
                         req_id,
-                        session: unresolved_profiled_session(true),
+                        session: unresolved_profiled_session(&peer_profile_id, true),
                     })
                     .await
                     .unwrap(),
@@ -5117,28 +5132,31 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
         }
     });
 
-    let harness =
-        rest_harness::spliced_helm_listing(client_side, vec![unresolved_profiled_session(false)])
-            .await;
+    let harness = builder
+        .local(rest_harness::HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions: vec![original],
+            peer: Some(client_side),
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    harness
+        .await_refreshed(rest_harness::local_id(&harness.store).await)
+        .await;
 
     let (status, created) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/tmp", "profile_id": "starter-codex" }),
+        serde_json::json!({ "cwd": "/tmp", "profile_id": "builtin-codex" }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{created}");
     let created: serde_json::Value = serde_json::from_str(&created).unwrap();
     assert_eq!(created["source_profile"]["existence"], "present");
 
-    let mut profile = harness
-        .store
-        .profiles()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|profile| profile.id == "starter-claude")
-        .expect("starter profile");
+    let profile_id = profile.id.clone();
     profile.name = "claude-renamed".to_string();
     harness
         .store
@@ -5166,13 +5184,7 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
         assert_eq!(response["source_profile"]["existence"], "renamed");
     }
 
-    assert!(
-        harness
-            .store
-            .delete_profile("starter-claude")
-            .await
-            .unwrap()
-    );
+    assert!(harness.store.delete_profile(&profile_id).await.unwrap());
     let (status, archived) = post_text(
         &harness,
         "/api/sessions/profile-live/archive",
@@ -5419,8 +5431,21 @@ async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
 /// leaking the cache's older existence verdict.
 #[farhelm_testtrace::test]
 async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
-    let (builder, host) = rest_harness::FleetBuilder::new()
+    let builder = rest_harness::FleetBuilder::new().await;
+    let crate::store::ProfileCreation::Created(profile) = builder
+        .store()
+        .create_profile(
+            "claude".to_string(),
+            "claude".to_string(),
+            farhelm_proto::AgentKind::Claude,
+            None,
+        )
         .await
+        .unwrap()
+    else {
+        panic!("fresh catalog has capacity")
+    };
+    let (builder, host) = builder
         .ssh(
             "user@breaks",
             rest_harness::HostScript {
@@ -5429,7 +5454,7 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
                     title: "the work in progress".to_string(),
                     cwd: "/home/user/project".to_string(),
                     source_profile: Some(farhelm_proto::SourceProfile {
-                        id: "starter-claude".to_string(),
+                        id: profile.id.clone(),
                         name: "claude".to_string(),
                         existence: farhelm_proto::ProfileExistence::Unresolved,
                     }),
@@ -5444,7 +5469,7 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
     assert!(
         harness
             .store
-            .delete_profile("starter-claude")
+            .delete_profile(&profile.id)
             .await
             .expect("delete the cached session's profile")
     );

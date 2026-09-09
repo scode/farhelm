@@ -86,6 +86,7 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
     let invocation = format!("/bin/sh {}", shell_words::quote(&script.to_string_lossy()));
     let profile = Profile {
         id: "archive-fixture".to_string(),
+        builtin: false,
         name: "Archive Fixture".to_string(),
         invocation: invocation.clone(),
         agent_kind: AgentKind::Generic,

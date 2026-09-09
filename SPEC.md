@@ -32,15 +32,15 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
   annotations, captured conversation identity — is durable and lives with the session's supervisor, so it survives helm
   loss and re-registration; terminal contents live only as long as the host-side terminal does (see Terminal
   experience).
-- **Agent profile**: a named, user-editable definition of how to run an agent. Its fields: the launch invocation
-  (command line including arguments, e.g. `claude`, `claude --dangerously-skip-permissions`, `codex`); an optional
-  resume invocation, a template that may reference the captured conversation identity (e.g.
-  `claude --resume {conversation}`); and optional agent-specific integrations (status heuristics, conversation-identity
-  capture — see Status and Durability). Both invocations may reference the session's working directory as `{cwd}`, for
-  launchers that take the directory as an argument. The user controls the invocations completely; the integrations are
-  the only per-agent machinery Farhelm itself carries. Profile edits are last-write-wins: two clients editing the same
-  profile at once is not a case Farhelm guards, because it is one user's rare action, and no optimistic-concurrency
-  check on profile writes is wanted.
+- **Agent profile**: a named definition of how to run an agent. Stored profiles are user-editable; release-owned
+  built-ins are read-only. Its fields: the launch invocation (command line including arguments, e.g. `claude`,
+  `claude --dangerously-skip-permissions`, `codex`); an optional resume invocation, a template that may reference the
+  captured conversation identity (e.g. `claude --resume {conversation}`); and optional agent-specific integrations
+  (status heuristics, conversation-identity capture — see Status and Durability). Both invocations may reference the
+  session's working directory as `{cwd}`, for launchers that take the directory as an argument. The user controls stored
+  invocations completely; the integrations are the only per-agent machinery Farhelm itself carries. Profile edits are
+  last-write-wins: two clients editing the same profile at once is not a case Farhelm guards, because it is one user's
+  rare action, and no optimistic-concurrency check on profile writes is wanted.
 
 ## Topology
 
@@ -135,10 +135,12 @@ systemd units for it, so a reboot of the helm's machine brings the web UI back; 
 the app.
 
 Agent profiles belong to the helm: one catalog applies to every host the helm manages, while the invocation still has to
-exist on the host that runs it. A fresh helm seeds editable starter profiles for Claude Code and Codex, each in a plain
-and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, and `codex-yolo`. Integrations are not
-user-authored — a profile optionally names an agent kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which
-selects that kind's status heuristics and conversation-identity capture; profiles without a kind get generic treatment.
+exist on the host that runs it. Every release supplies read-only built-in Claude Code and Codex profiles, each in a
+plain and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, and `codex-yolo`. They appear beside
+the user's stored, editable definitions and are identified as Built-in; historical stored starter rows remain editable
+and deletable. Integrations are not user-authored — a profile optionally names an agent kind from Farhelm's built-in v1
+catalog (Claude Code, Codex), which selects that kind's status heuristics and conversation-identity capture; profiles
+without a kind get generic treatment.
 
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a

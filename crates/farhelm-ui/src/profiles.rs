@@ -1144,19 +1144,20 @@ async fn clear_focus_candidate(generation: u64) {
     .await;
 }
 
-/// Pick the row after a deleted profile in the catalog's stable order.
+/// Pick the next editable row after a deleted profile in the catalog's stable order.
 ///
-/// The id is captured before the local removal changes the list. Deleting the
-/// last row deliberately returns no target so focus falls back to the popup's
-/// stable `new profile` control instead of jumping backward.
+/// The id is captured before the local removal changes the list.
+/// Read-only built-ins have no edit control, so they are skipped. When no
+/// editable row follows, focus falls back to the popup's stable `new profile`
+/// control instead of jumping backward.
 fn edit_target_after_delete(catalog: &ProfileCatalog, deleted: &str) -> Option<String> {
     let index = catalog
         .profiles
         .iter()
         .position(|profile| profile.id == deleted)?;
-    catalog
-        .profiles
-        .get(index + 1)
+    catalog.profiles[index + 1..]
+        .iter()
+        .find(|profile| !profile.builtin)
         .map(|profile| profile.id.clone())
 }
 
@@ -1475,6 +1476,17 @@ pub(crate) fn ProfilesPopup(
             ops.release();
             return;
         };
+        if let Editing::Existing(id) = &editing_now
+            && matches!(
+                surface.catalog.peek().answer(),
+                CatalogLookup::Known { catalog, .. }
+                    if catalog.profiles.iter().any(|profile| profile.id == *id && profile.builtin)
+            )
+        {
+            form_error.set(Some("built-in profiles are read-only".to_string()));
+            ops.release();
+            return;
+        }
         let spec = match draft.peek().spec() {
             Ok(spec) => spec,
             // The one thing this form validates locally, because it is the one
@@ -1777,7 +1789,7 @@ pub(crate) fn ProfilesPopup(
                                 form_error: form_error.read().clone(),
                                 draft,
                                 on_edit_start: move |profile: Profile| {
-                                    if ops.busy_now() {
+                                    if ops.busy_now() || profile.builtin {
                                         return;
                                     }
                                     confirming.set(None);
@@ -1821,6 +1833,13 @@ pub(crate) fn ProfilesPopup(
                                 },
                                 on_delete_start: move |id: String| {
                                     if ops.busy_now() {
+                                        return;
+                                    }
+                                    if matches!(
+                                        surface.catalog.peek().answer(),
+                                        CatalogLookup::Known { catalog, .. }
+                                            if catalog.profiles.iter().any(|profile| profile.id == id && profile.builtin)
+                                    ) {
                                         return;
                                     }
                                     editing.set(None);
@@ -1965,7 +1984,7 @@ fn ProfileRow(
                         },
                         "cancel"
                     }
-                } else if !editing {
+                } else if !editing && !profile.builtin {
                     button {
                         r#type: "button",
                         class: "btn profile-edit",
@@ -1983,6 +2002,9 @@ fn ProfileRow(
                         },
                         "delete"
                     }
+                }
+                if profile.builtin {
+                    span { class: "profile-builtin", "Built-in" }
                 }
             }
             // The definition itself, on its own line: an invocation is
@@ -2222,6 +2244,7 @@ mod tests {
     fn profile(id: &str, name: &str) -> Profile {
         Profile {
             id: id.to_string(),
+            builtin: false,
             name: name.to_string(),
             invocation: "agent".to_string(),
             agent_kind: "generic".to_string(),
@@ -2782,6 +2805,26 @@ mod tests {
         );
         assert_eq!(edit_target_after_delete(&catalog, "p-3"), None);
         assert_eq!(edit_target_after_delete(&catalog, "missing"), None);
+    }
+
+    /// A built-in beside a deleted stored row has no edit control, so focus
+    /// must continue to the next editable row rather than landing nowhere.
+    #[farhelm_testtrace::test]
+    fn delete_focus_skips_a_read_only_builtin_row() {
+        let mut builtin = profile("builtin-claude", "claude");
+        builtin.builtin = true;
+        let catalog = catalog(
+            vec![
+                profile("a-stored", "first"),
+                builtin,
+                profile("z-stored", "last"),
+            ],
+            None,
+        );
+        assert_eq!(
+            edit_target_after_delete(&catalog, "a-stored"),
+            Some("z-stored".to_string())
+        );
     }
 
     /// The DOM's existence vocabulary is the WIRE's, one word per state and

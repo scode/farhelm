@@ -2,8 +2,9 @@
 //!
 //! ## The helm owns the catalog
 //!
-//! The helm now stores one catalog shared by every host and every client.
-//! `GET` and CRUD under `/api/profiles` read and mutate that catalog. There is
+//! The helm combines stored profiles with release-owned built-ins in one
+//! catalog shared by every host and client. `/api/profiles` lists both sources
+//! and permits mutations only for stored profiles. There is
 //! no host-scoped profile surface: hosts consume resolved launch bundles, not
 //! catalog storage. The remembered default is one raw id per helm, including a
 //! dangling id after deletion, so the client can ask instead of guessing.
@@ -101,12 +102,13 @@ pub(crate) struct ProfilesView {
     /// that combination is meaningful rather than a bug: it is what a client
     /// keys SPEC.md's ask-don't-guess fallback off.
     ///
-    /// Both values live in helm.db. They are read separately because a
+    /// The default and stored portion of the catalog live in helm.db;
+    /// built-ins come from this release. Reads remain separate because a
     /// mismatch has one safe interpretation: ask rather than guess.
     pub(crate) default_profile: Option<String>,
 }
 
-/// The body of a profile create or update — everything but the id.
+/// The editable fields of a stored profile; identity and source are server-owned.
 ///
 /// A client has no id to know in advance, and letting it propose one would
 /// invite collisions. On update, the URL is the sole resource authority.
@@ -218,6 +220,9 @@ pub(crate) async fn update_catalog_profile(
     AxPath(profile_id): AxPath<String>,
     axum::Json(spec): axum::Json<ProfileSpec>,
 ) -> impl IntoResponse {
+    if crate::store::builtin_profile(&profile_id).is_some() {
+        return catalog_validation_error("built-in profiles are read-only".to_string());
+    }
     if let Err(message) = farhelm_proto::validate_profile_fields(
         &spec.name,
         &spec.invocation,
@@ -228,6 +233,7 @@ pub(crate) async fn update_catalog_profile(
     }
     let profile = Profile {
         id: profile_id,
+        builtin: false,
         name: spec.name,
         invocation: spec.invocation,
         agent_kind: spec.agent_kind,
@@ -262,6 +268,9 @@ pub(crate) async fn delete_catalog_profile(
     State(state): State<Arc<AppState>>,
     AxPath(profile_id): AxPath<String>,
 ) -> impl IntoResponse {
+    if crate::store::builtin_profile(&profile_id).is_some() {
+        return catalog_validation_error("built-in profiles are read-only".to_string());
+    }
     let task_state = Arc::clone(&state);
     let mutation = tokio::spawn(async move {
         let deleted = task_state.store.delete_profile(&profile_id).await?;
@@ -321,7 +330,7 @@ mod tests {
         (status, value)
     }
 
-    /// The helm-owned routes expose the seeded catalog, validate writes, and
+    /// The helm-owned routes expose built-ins beside stored rows, validate writes, and
     /// keep the catalog bound observable at the HTTP boundary. This test
     /// matters because store-only coverage cannot catch a wrong route, status
     /// code, request shape, or fleet-revision invalidation.
@@ -334,6 +343,33 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::OK);
         assert_eq!(value["profiles"].as_array().unwrap().len(), 4);
         assert_eq!(value["default_profile"], serde_json::Value::Null);
+        assert!(
+            value["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|profile| profile["builtin"] == true)
+        );
+
+        for method in ["POST", "DELETE"] {
+            let (status, value) = request(
+                &harness,
+                method,
+                "/api/profiles/builtin-claude",
+                (method == "POST").then(|| {
+                    serde_json::json!({
+                        "name": "replacement",
+                        "invocation": "agent",
+                        "agent_kind": "generic",
+                        "resume_template": null,
+                    })
+                }),
+            )
+            .await;
+            assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+            assert!(value.as_str().unwrap().contains("read-only"));
+            assert_eq!(harness.manager.events().revision(), before);
+        }
 
         let (status, value) = request(
             &harness,
@@ -414,8 +450,7 @@ mod tests {
         assert!(value.as_str().unwrap().contains("profile not found"));
         assert_eq!(harness.manager.events().revision(), after_delete);
 
-        let starting_len = harness.store.profiles().await.unwrap().len();
-        for _ in starting_len..farhelm_proto::MAX_PROFILES {
+        for _ in 0..farhelm_proto::MAX_PROFILES {
             assert!(matches!(
                 harness
                     .store
@@ -447,7 +482,7 @@ mod tests {
         assert_eq!(harness.manager.events().revision(), after_delete);
         assert_eq!(
             harness.store.profiles().await.unwrap().len(),
-            farhelm_proto::MAX_PROFILES
+            farhelm_proto::MAX_PROFILES + crate::store::builtin_profiles().len()
         );
 
         harness
@@ -460,7 +495,7 @@ mod tests {
         assert_eq!(value["default_profile"], "deleted-profile");
         assert_eq!(
             value["profiles"].as_array().unwrap().len(),
-            farhelm_proto::MAX_PROFILES
+            farhelm_proto::MAX_PROFILES + crate::store::builtin_profiles().len()
         );
     }
 
