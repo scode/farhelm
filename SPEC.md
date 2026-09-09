@@ -279,23 +279,21 @@ it shows the session's metadata and says why there is no terminal, rather than a
 
 ### Session list
 
-One flat list across all registered hosts, with filtering and search by host, directory, agent profile, status, and
-title. The list can be ordered by most recent activity, by creation time, or by title, chosen from a control that is
-reachable without opening the filter controls; the order someone picks is remembered by the helm as one preference
-shared by every client, together with the last-selected session and compact-row choice, and most recent activity is what
-a client shows until someone picks otherwise. No client keeps its own copy: every client reads the helm's preference
-once after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on
-the same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients
-remember different answers — is not wanted. A client that asks the helm for no particular order gets creation time. The
-filter controls open on demand rather than standing permanently above the list and apply as someone edits them; while an
-applied filter's controls are closed, the list says visibly that a filter is in force, so a narrowed list can never
-masquerade as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable
-as a filter, but parentage does not nest the list and implies nothing about VCS state.
+One flat list across all registered hosts, with an always-visible host selector. It starts at `ALL`; `This machine`
+means the registered local host, and configured remote hosts follow in registry order, including unavailable hosts whose
+last-known sessions remain useful. Choosing a host sends a server-side query immediately and is not persisted. The list
+can be ordered independently by most recent activity, by creation time, or by title; the order someone picks is
+remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
+choice, and most recent activity is what a client shows until someone picks otherwise. No client keeps its own copy:
+every client reads the helm's preference once after authenticating and writes it on change, so a browser tab and the
+desktop app open in the same order and on the same session. Per-client persistence — browser storage, a desktop state
+file, anything that lets two clients remember different answers — is not wanted. A client that asks the helm for no
+particular order gets creation time. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference
+usable by the API, but parentage does not nest the list and implies nothing about VCS state.
 
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
-view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That
-switch is which list you are looking at rather than a filter you applied, so it does not make the list call itself
-filtered. A filter someone typed or chose does, and the count then says how many matched alongside how big the view is.
+view, so they are outside its count. The host selector is a narrowing query, so its count says how many matched
+alongside how big the default non-archived view is.
 
 The list is served and rendered WHOLE. The fleet this product is for is tens of sessions across a few hosts, not
 thousands, and the design assumes that scale outright: every supervisor answers a listing with its entire list in one
@@ -323,13 +321,14 @@ is an implementation choice, covered in SPEC_impl.md rather than here.
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host actions
 open on demand from the row menu, and details reveals the version, identity, session count, remedies, diagnostics, and
-provisioning progress under every row. Profiles and filtering use secondary buttons; session creation remains the blue
-primary action. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives
-helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are
-refused with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
-directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
-one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
-clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
+provisioning progress under every row. Profiles use secondary buttons, while the host selector stays a native control;
+session creation remains the blue primary action. Sessions on an unreachable host stay in the list from the helm's
+last-known knowledge (which survives helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations
+against an unreachable host are refused with a clear error; nothing queues for later delivery in v1. Opening such a
+session shows its metadata — title, directory, last-known status — behind a clear host-unreachable notice; there is no
+terminal to show and no pretense of one. Changes made from any client — creates, renames, stops, deletes, status
+transitions — appear in all other connected clients automatically; the agent-spawn behavior below is one instance of
+this general rule, not a special case.
 
 ### Status
 

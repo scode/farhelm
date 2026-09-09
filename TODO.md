@@ -19,13 +19,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Extend Muse beyond basic terminal launching: integrate per-launch hooks/instructions, capture the correct conversation
-  identity for resume, and recognize Muse's waiting/status signals. Built-in `muse` and `muse-yolo` profiles currently
-  use generic activity status without hooks or conversation resume; these are Farhelm integration gaps, not established
-  limitations of Muse.
+- Investigate and fix scrolling backward becoming unreliable while an agent is actively emitting output. Frequently, the
+  terminal appears split somewhere around the middle: the upper portion freezes while the lower portion keeps scrolling
+  upward as new output arrives. Scrolling up does not restore normal behavior; after output stops, scrolling eventually
+  recovers on its own. This is an approximate report without precise reproduction steps or an established cause. Capture
+  the behavior during sustained output and after it stops, and identify why the viewport stops scrolling coherently.
 
-- Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
-  combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.
+- Investigate whether Farhelm can easily match Ghostty's default terminal colors for a readable out-of-the-box
+  experience. Foreground text was too dark in Farhelm while the same application was readable in Ghostty. Compare the
+  foreground/background colors, ANSI palette, and color-query responses through tmux, including how applications detect
+  a light or dark terminal. Determine whether a small configuration change can reproduce Ghostty's behavior before
+  committing to exact parity; matching the palette alone may not explain the difference.
 
 ## Tricky bugs
 
@@ -224,6 +228,11 @@ Deferred work, with its original triggers:
   rather than reviving the old libtest thread setting.
 
 ## Maybe later
+
+- Extend Muse beyond basic terminal launching: integrate per-launch hooks/instructions, capture the correct conversation
+  identity for resume, and recognize Muse's waiting/status signals. Built-in `muse` and `muse-yolo` profiles currently
+  use generic activity status without hooks or conversation resume; these are Farhelm integration gaps, not established
+  limitations of Muse.
 
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.

@@ -5,10 +5,7 @@
 // still `Present` in the catalog, the raw invocation otherwise. A selected
 // profile displays its own invocation while the raw value remains the seed
 // for custom mode. Submitting the edited copy creates a SEPARATE session
-// while leaving the cloned row exactly as it was. Also covers an archived
-// row, since clone is deliberately offered there: it is the one way an
-// archived session gets a fresh, running agent again without touching the
-// archived original (row.rs's `row_control_visibility`).
+// while leaving the cloned row exactly as it was.
 
 import { expect, test } from "./helpers/evidence";
 import { Locator, Page } from "@playwright/test";
@@ -19,7 +16,6 @@ import {
   createSession,
   FAKE_AGENT,
   localHostId,
-  openFilterBar,
   openRowMenu,
   type SessionRow,
 } from "./helpers/fleet";
@@ -161,70 +157,6 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await cleanupSession(request, original.id);
     await cleanupProfile(request, profileA.id);
     await cleanupProfile(request, profileB.id);
-  }
-});
-
-test("clone reaches an archived row, pre-filling its raw invocation, and the archived original stays archived", async ({
-  page,
-  request,
-}) => {
-  const title = `clone-archived-${Date.now()}`;
-  const cwd = "/tmp";
-  const session = await createSession(request, { title, cwd });
-  let cloneId: string | undefined;
-  try {
-    await page.goto("/");
-    const target = row(page, session.id);
-    await expect(target).toBeVisible({ timeout: 20_000 });
-
-    // Archive it through the real UI flow (archive.spec.ts's own pattern),
-    // so the row this test clones is genuinely in the state clone is
-    // offered for, not a fixture standing in for it.
-    await openRowMenu(target);
-    await target.locator(".session-row-archive").click();
-    await target.locator(".confirm-archive").click();
-    await expect(target).toHaveCount(0, { timeout: 20_000 });
-
-    await openFilterBar(page);
-    await page.locator(".filter-include-archived").check();
-    const archived = row(page, session.id);
-    await expect(archived).toBeVisible({ timeout: 20_000 });
-    await expect(archived).toHaveAttribute("data-session-archived", "true");
-
-    await openRowMenu(archived);
-    // The point of the coverage: stop and archive are gone from an
-    // archived row's menu, but clone is not.
-    await expect(archived.locator(".session-row-stop")).toHaveCount(0);
-    await expect(archived.locator(".session-row-archive")).toHaveCount(0);
-    await archived.locator(".session-row-clone").click();
-
-    const form = page.locator(".create-session-form");
-    await expect(form).toBeVisible();
-    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(cwd);
-    await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(title);
-    // No profile on this session, so the picker reflects the raw-command
-    // path and the invocation itself carries into the command field —
-    // the fallback `PrefillAgent` takes when there is no profile to trust.
-    await expect(form.locator(".create-session-profile")).toHaveValue("");
-    await expect(form.locator('input[type="text"]').nth(1)).toHaveValue(FAKE_AGENT);
-
-    const newCwd = stackScratchDir("clone-archived-e2e-");
-    cloneId = await submitClonedCwd(page, form, newCwd);
-
-    const cloned = row(page, cloneId);
-    await expect(cloned).toBeVisible({ timeout: 20_000 });
-    await expect(cloned).not.toHaveAttribute("data-session-archived", "true");
-    await expect(cloned.locator(".session-title")).toHaveText(title);
-    await expect(cloned.locator(".session-cwd")).toHaveAttribute("title", newCwd);
-
-    // The archived original: still archived, still at its own directory —
-    // cloning it must not have resurrected or otherwise touched it.
-    await expect(archived).toBeVisible();
-    await expect(archived).toHaveAttribute("data-session-archived", "true");
-    await expect(archived.locator(".session-cwd")).toHaveAttribute("title", cwd);
-  } finally {
-    if (cloneId) await cleanupSession(request, cloneId);
-    await cleanupSession(request, session.id);
   }
 });
 
