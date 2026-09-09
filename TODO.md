@@ -31,7 +31,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Investigate Codex resuming the existing conversation after using "Replace" on a session. Reported in ordinary use: the
   replacement retained the previous conversation and could summarize the earlier work, instead of starting a fresh
   conversation. Replace should preserve the session's directory, title, and agent choice while starting fresh. Cause and
-  reproducibility are not established.
+  reproducibility are not established. [Investigation findings](docs/codex-replace-investigation.md): controlled and
+  real Codex comparisons started distinct replacement conversations, including after Resume; the incident remains
+  unresolved without its launch configuration and vendor conversation identities.
 
 ## Deflake
 
