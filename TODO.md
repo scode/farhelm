@@ -20,9 +20,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
   `include a SPEC.md` to a prompt quickly made the display show `include a SPE` followed by another line containing
-  scattered fragments such as `COMMI`, `PR`, and repeated `SPEC` text, with large gaps between them. The screenshot
-  shows the prompt still being edited, before submission. Whether the underlying input was corrupted or only its
-  rendering is unknown; cause and reproducibility are not established.
+  scattered fragments such as `COMMI`, `PR`, and repeated `SPEC` text, with large gaps between them, before submission.
+  No bug screenshot or logs were supplied. Whether the underlying input was corrupted or only its rendering is unknown.
+  [Investigation findings](docs/codex-input-investigation.md): direct tmux and Linux Chromium/WebKit probes did not
+  reproduce the scattered current input; the report remains unresolved, including native macOS coverage.
 
 - Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
   combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.
