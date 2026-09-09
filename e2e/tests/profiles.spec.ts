@@ -422,8 +422,10 @@ test.describe("agent profiles", () => {
     profiles.push(stored.id);
     await listWithStubbedFeed(page);
     await openProfiles(page);
-    const builtins = ["builtin-claude", "builtin-claude-yolo", "builtin-codex", "builtin-codex-yolo"];
-    await expect(section(page).locator("[data-profile-id]")).toHaveCount(5);
+    const builtins = [
+      "builtin-claude", "builtin-claude-yolo", "builtin-codex", "builtin-codex-yolo", "builtin-muse", "builtin-muse-yolo",
+    ];
+    await expect(section(page).locator("[data-profile-id]")).toHaveCount(7);
     for (const id of builtins) {
       await expect(profileRow(page, id).locator(".profile-builtin")).toHaveText("Built-in");
       await expect(profileRow(page, id).locator(".profile-edit, .profile-delete")).toHaveCount(0);

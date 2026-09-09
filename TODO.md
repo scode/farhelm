@@ -19,7 +19,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Add Muse support equivalent to the existing Codex and Claude support.
+- Extend Muse beyond basic terminal launching: integrate per-launch hooks/instructions, capture the correct conversation
+  identity for resume, and recognize Muse's waiting/status signals. Built-in `muse` and `muse-yolo` profiles currently
+  use generic activity status without hooks or conversation resume; these are Farhelm integration gaps, not established
+  limitations of Muse.
 
 - Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
   combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.

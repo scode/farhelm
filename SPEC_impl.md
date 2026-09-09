@@ -1106,10 +1106,10 @@ reports a failed listing rather than a silently shortened one.
   remembered default, recoverable web token, hashed browser device sessions, and the one client preference (list order,
   last-selected session, compact rows) every client shares.
 - The `profiles` table is bounded on both axes — 128 stored profiles per helm, 8 KiB of caller-supplied text per profile
-  — so the unpaginated catalog reply stays predictably bounded. The helm combines those stored rows with four
-  release-owned Claude Code and Codex built-ins in its read and resolution paths; built-ins are never seeded, persisted,
-  or mutable. The response carries an authoritative `builtin` boolean, defaulting false for stored rows and old
-  responses, so the UI need not derive source policy from an opaque ID. Existing stored starters remain ordinary
+  — so the unpaginated catalog reply stays predictably bounded. The helm combines those stored rows with six
+  release-owned Claude Code, Codex, and Muse built-ins in its read and resolution paths; built-ins are never seeded,
+  persisted, or mutable. The response carries an authoritative `builtin` boolean, defaulting false for stored rows and
+  old responses, so the UI need not derive source policy from an opaque ID. Existing stored starters remain ordinary
   editable rows. A profile names its kind explicitly (`generic` means no integration), and an absent resume template
   selects that kind's default. The helm resolves every profile-backed create into an invocation, kind, template, and
   immutable id/name snapshot before the supervisor call. When the template is absent for Claude or Codex, the supervisor
@@ -1118,7 +1118,9 @@ reports a failed listing rather than a silently shortened one.
   no parser for initial prompts or launch-only options. It also resolves every supervisor `SourceProfile` marked
   `Unresolved` against one catalog read per reply before browser JSON or session-cache storage; missing ids become
   `Deleted`, and ids whose current names differ from the snapshot become `Renamed`. Profile writes are last-write-wins
-  and carry no definition fingerprint.
+  and carry no definition fingerprint. Muse's two definitions explicitly select `generic` with no resume template. They
+  use the ordinary terminal launch path and generic activity classifier, without per-agent hooks or
+  conversation-identity capture.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never registered, retargeted, or removed through the ssh-host management API, so its destination and its
   existence are not user management surface — but its alias is user-editable on the same terms as any other host's. It

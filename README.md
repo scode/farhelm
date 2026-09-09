@@ -141,12 +141,15 @@ Linux" below).
   already running for your user is registered as-is; on a host without one, Farhelm shows the exact file-and-unit plan
   and does nothing until you confirm it. No root is involved at any point.
 - Create a session: choose "new" in the session-count heading, pick the host, pick an agent profile — every helm offers
-  read-only Built-in profiles for Claude Code and Codex alongside the editable definitions you store, shared by every
-  host. The working directory starts at `~`, which expands once against that host's home at creation; any other
+  read-only Built-in profiles for Claude Code, Codex, and Muse alongside the editable definitions you store, shared by
+  every host. The working directory starts at `~`, which expands once against that host's home at creation; any other
   directory must be an existing absolute path on that host — plain relative paths are rejected, and `~user` forms and
   variables never expand. Submitting drops you straight into the agent's terminal.
 - Manage that shared catalog from the "profiles" button in the sidebar app bar. Its popup creates, edits, and deletes
   definitions without attaching them to any host row.
+- Muse support covers terminal launching and generic activity status. Muse must be installed on the target host; hooks,
+  conversation resume, and Muse-specific waiting detection are not integrated. `muse-yolo` uses `muse --yolo`, which
+  skips approvals and sandboxing and trusts the workspace for that run.
 - Upgrading does not carry over profiles previously stored on each host's supervisor; recreate custom definitions in the
   helm catalog.
 - If you start agents through a launcher that wants the directory as an argument (`my-wrapper run <dir> claude`), write

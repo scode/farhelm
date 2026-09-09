@@ -135,12 +135,16 @@ systemd units for it, so a reboot of the helm's machine brings the web UI back; 
 the app.
 
 Agent profiles belong to the helm: one catalog applies to every host the helm manages, while the invocation still has to
-exist on the host that runs it. Every release supplies read-only built-in Claude Code and Codex profiles, each in a
-plain and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, and `codex-yolo`. They appear beside
-the user's stored, editable definitions and are identified as Built-in; historical stored starter rows remain editable
-and deletable. Integrations are not user-authored — a profile optionally names an agent kind from Farhelm's built-in v1
-catalog (Claude Code, Codex), which selects that kind's status heuristics and conversation-identity capture; profiles
-without a kind get generic treatment.
+exist on the host that runs it. Every release supplies read-only built-in Claude Code, Codex, and Muse profiles, each in
+a plain and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, `codex-yolo`, `muse`, and
+`muse-yolo`. They appear beside the user's stored, editable definitions and are identified as Built-in; historical
+stored starter rows remain editable and deletable. Integrations are not user-authored — a profile optionally names an
+agent kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that kind's status heuristics and
+conversation-identity capture; profiles without a kind get generic treatment.
+
+Muse support uses `muse` and `muse --yolo` with generic activity status. The yolo variant skips approval prompts and
+sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
+recognition are not implemented; no Muse integration kind is implied by the presence of its built-in profiles.
 
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
