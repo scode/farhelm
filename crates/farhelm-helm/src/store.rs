@@ -205,6 +205,24 @@ pub(crate) fn builtin_profiles() -> Vec<farhelm_proto::Profile> {
                 "{conversation}".to_string(),
             ]),
         },
+        // Muse launches through the generic path until its per-session
+        // identity, hooks, and waiting-state signals have an integration.
+        farhelm_proto::Profile {
+            id: "builtin-muse".to_string(),
+            builtin: true,
+            name: "muse".to_string(),
+            invocation: "muse".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+        },
+        farhelm_proto::Profile {
+            id: "builtin-muse-yolo".to_string(),
+            builtin: true,
+            name: "muse-yolo".to_string(),
+            invocation: "muse --yolo".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+        },
     ]
 }
 
@@ -9989,7 +10007,7 @@ mod tests {
                 ]),
             },
         ];
-        let expected_builtins = starters
+        let mut expected_builtins = starters
             .iter()
             .cloned()
             .map(|profile| farhelm_proto::Profile {
@@ -9998,6 +10016,19 @@ mod tests {
                 ..profile
             })
             .collect::<Vec<_>>();
+        for (id, name, invocation) in [
+            ("builtin-muse", "muse", "muse"),
+            ("builtin-muse-yolo", "muse-yolo", "muse --yolo"),
+        ] {
+            expected_builtins.push(farhelm_proto::Profile {
+                id: id.to_string(),
+                builtin: true,
+                name: name.to_string(),
+                invocation: invocation.to_string(),
+                agent_kind: farhelm_proto::AgentKind::Generic,
+                resume_template: None,
+            });
+        }
         assert_eq!(store.profiles().await.unwrap(), expected_builtins);
         {
             let conn = store.conn.lock().unwrap();

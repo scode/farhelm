@@ -4312,6 +4312,67 @@ mod tests {
         assert_eq!(seen[0].intent_key.as_deref(), Some("resolved-key"));
     }
 
+    /// Muse's built-ins must reach the supervisor as ordinary generic launches.
+    /// Pin both command spellings and the absence of integration/resume data:
+    /// a catalog entry alone would not catch a resolver that changed the bundle.
+    /// The remembered default must retain the built-in ID like any stored ID.
+    #[farhelm_testtrace::test]
+    async fn muse_profiles_forward_generic_launches_and_remember_their_ids() {
+        for (name, invocation, id) in [
+            ("muse", "muse", "builtin-muse"),
+            ("muse-yolo", "muse --yolo", "builtin-muse-yolo"),
+        ] {
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_create_responder(peer, None);
+            let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+            let definition = h.store.profile(id).await.unwrap().expect("built-in exists");
+            assert_eq!(definition.invocation, invocation);
+            assert!(definition.builtin);
+            let outcome = HelmAgentRequests::for_state(&h.state)
+                .handle(
+                    origin_of(&h, local),
+                    "asker",
+                    AgentVerb::Create {
+                        host: Some("user@builder".to_string()),
+                        cwd: "/srv/project".to_string(),
+                        profile_name: Some(name.to_string()),
+                        invocation: None,
+                        title: None,
+                        intent_key: Some("muse-launch".to_string()),
+                    },
+                )
+                .await;
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Ok {
+                        reply: AgentReply::Created { .. }
+                    }
+                ),
+                "{outcome:?}"
+            );
+            let requests = seen.lock().expect("seen mutex").clone();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].invocation.as_deref(), Some(invocation));
+            assert_eq!(
+                requests[0].agent_kind,
+                Some(farhelm_proto::AgentKind::Generic)
+            );
+            assert_eq!(requests[0].resume_template, None);
+            assert_eq!(
+                requests[0].source_profile,
+                Some(farhelm_proto::ProfileSnapshot {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                })
+            );
+            assert_eq!(
+                h.store.remembered_profile().await.unwrap().as_deref(),
+                Some(id)
+            );
+        }
+    }
+
     /// Spec: a create the TARGET supervisor refuses — a directory that does
     /// not exist there is the case this stands for — reaches the agent as
     /// that supervisor's own refusal text, verbatim.
