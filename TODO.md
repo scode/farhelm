@@ -19,6 +19,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Add Muse support equivalent to the existing Codex and Claude support.
+
 - Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
   combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.
 
