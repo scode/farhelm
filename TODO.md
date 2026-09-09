@@ -4,11 +4,12 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Five buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "near term" is what should be picked up next; "deflake" gathers test and
-harness reliability work, including CI execution and restoring gates; "maybe later" is wanted but not soon, and may
-never happen; "unbucketized" is everything not yet sorted, which carries no implication either way. Within a bucket, no
-order unless the bucket explicitly says so.
+Six buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
+the decision is made, only the work remains; "near term" is what should be picked up next; "tricky bugs" retains
+unresolved bug reports and their investigation findings; "deflake" gathers test and harness reliability work, including
+CI execution and restoring gates; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is
+everything not yet sorted, which carries no implication either way. Within a bucket, no order unless the bucket
+explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
@@ -18,15 +19,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
+  combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.
+
+## Tricky bugs
+
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
   `include a SPEC.md` to a prompt quickly made the display show `include a SPE` followed by another line containing
   scattered fragments such as `COMMI`, `PR`, and repeated `SPEC` text, with large gaps between them, before submission.
   No bug screenshot or logs were supplied. Whether the underlying input was corrupted or only its rendering is unknown.
   [Investigation findings](docs/codex-input-investigation.md): direct tmux and Linux Chromium/WebKit probes did not
   reproduce the scattered current input; the report remains unresolved, including native macOS coverage.
-
-- Simplify sidebar filtering to hosts only for now. Replace the large "filter" button and its panel with a single
-  combobox offering "ALL", "This machine", and one option per configured machine. Remove the other filter controls.
 
 - Investigate Codex resuming the existing conversation after using "Replace" on a session. Reported in ordinary use: the
   replacement retained the previous conversation and could summarize the earlier work, instead of starting a fresh
