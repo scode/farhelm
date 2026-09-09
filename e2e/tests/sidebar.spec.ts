@@ -15,7 +15,7 @@
  * row actions menu's own contracts (containment, float, selection
  * isolation, rename-in-panel, consequence wrap, stale-menu
  * reconciliation) and the sidebar's on-demand chrome (host details, the
- * filter popover, and the applied-filter note).
+ * permanent host selector).
  *
  * The menu's own group is the largest of those and is worth naming, since
  * almost none of it can be checked anywhere else: the anchor's covered-
@@ -46,7 +46,6 @@ import {
   forceBuildSkew,
   hideSeenState,
   localHostId,
-  openFilterBar,
   openHostMenu,
   openHostsPanel,
   openRowMenu,
@@ -1049,11 +1048,15 @@ test("an archived row's four-item menu navigates on its own length", async ({ pa
   try {
     const archived = await request.post(`/api/sessions/${session.id}/archive`);
     expect(archived.ok(), await archived.text()).toBeTruthy();
+    const archivedListing = await request.get("/api/sessions?include_archived=true");
+    expect(archivedListing.ok(), await archivedListing.text()).toBeTruthy();
+    const body = await archivedListing.json();
+    const stamp = archivedListing.headers()["x-farhelm-build"] ?? "";
+    await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({ headers: { "content-type": "application/json", "x-farhelm-build": stamp }, json: body });
+    });
     await page.goto("/");
-    // The filter popover is on-demand chrome; its checkbox is not in the DOM
-    // until it is open (see `openFilterBar`'s own doc).
-    await openFilterBar(page);
-    await page.locator(".filter-include-archived").check();
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsListSettled(page);
@@ -1397,7 +1400,7 @@ test("a confirm prompt ignores the menu's keys and keeps its state", async ({ pa
  * dropping it on the document body.
  *
  * Escape is not the only way this menu closes. A sidebar scroll or
- * resize, host details or the filter popover opening, the create form, and a
+ * resize, host details, the create form, and a
  * refresh that reorders the row all close it through `ListView`, which
  * owns `menu_open` and does not consult the row at all. If an item held
  * focus, unmounting it leaves the user at the top of the document — one
@@ -2049,14 +2052,13 @@ test("the archive consequence wraps fully visible inside the panel", async ({
 
 /**
  * The sidebar's resting chrome keeps one host list, the compact session
- * heading, session rows, and create control visible. Host details and the
- * filter popover remain closed until requested.
+ * heading, session rows, create control, and permanent host selector visible.
  *
  * This pins the one-list contract directly: a regression that hides the
  * list, restores the old duplicate strip, or makes host actions hover-only
  * fails at the resting state where those choices matter.
  */
-test("the host list is permanent while details and filtering stay on demand", async ({
+test("the host list and host selector are permanent while details stay on demand", async ({
   page,
 }) => {
   await page.goto("/");
@@ -2066,8 +2068,7 @@ test("the host list is permanent while details and filtering stay on demand", as
   const hostHeading = page.locator(".hosts-heading");
   const details = hostHeading.getByRole("checkbox", { name: "details", exact: true });
   await expect(details).toBeVisible();
-  await expect(page.locator(".filter-toggle")).toBeVisible();
-  // Count, compact, and new share one heading; filter and sort share the
+  // Count, compact, and new share one heading; host and sort share the
   // following control row. DOM order matters because each count explains
   // the rows before the controls that can change them.
   const header = page.locator(".list-header");
@@ -2075,11 +2076,10 @@ test("the host list is permanent while details and filtering stay on demand", as
   await expect(header.locator(":scope > .session-heading .compact-toggle")).toHaveCount(1);
   await expect(header.locator(":scope > .session-heading .new-session-button")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls")).toHaveCount(1);
-  await expect(header.locator(":scope > .list-header-controls .filter-toggle")).toHaveCount(1);
+  await expect(header.locator(":scope > .list-header-controls .filter-host")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls .sort-select")).toHaveCount(1);
   await expect(details).not.toBeChecked();
-  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
+  await expect(page.locator(".filter-host")).toHaveValue("");
   const rows = page.locator(".host-row");
   await expect(rows.first()).toBeVisible({ timeout: 20_000 });
   const count = await rows.count();
@@ -2112,9 +2112,6 @@ test("the host list is permanent while details and filtering stay on demand", as
   await page.keyboard.press("Space");
   await expect(details).not.toBeChecked();
 
-  await openFilterBar(page);
-  await page.locator(".filter-toggle").click();
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
 });
 
 /**
@@ -2248,29 +2245,6 @@ test("host details reveal every row's version line together", async ({ page, req
 });
 
 /**
- * An applied filter remains visible in the count while its popover is closed.
- */
-test("a closed filter popover still announces an applied filter", async ({ page }) => {
-  // No fixture is needed: a unique query proves that the committed count,
-  // rather than a separate status note, remains the closed-filter signal.
-  const needle = `no-such-title-${Date.now()}`;
-  await page.goto("/");
-  await openFilterBar(page);
-  await page.locator(".filter-title").fill(needle);
-  await expect(page.locator(".session-count")).toContainText("0 matching", {
-    timeout: 20_000,
-  });
-  // Closing the popover keeps the committed filter in force.
-  await page.locator(".filter-toggle").click();
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
-  await expect(page.locator(".session-count")).toContainText("0 matching");
-  // Reopening and clearing restores the ordinary count wording.
-  await openFilterBar(page);
-  await page.locator(".filter-clear").click();
-  await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/, { timeout: 20_000 });
-});
-
-/**
  * A menu whose row leaves the listing does not come back already open
  * when the row returns.
  *
@@ -2283,15 +2257,20 @@ test("a closed filter popover still announces an applied filter", async ({ page 
  * re-requested, exposing controls for a session whose state may have
  * changed while the row was gone.
  */
-test("a filtered-out row's open menu stays closed when the row returns", async ({
+test("a host-filtered-out row's open menu stays closed when it returns", async ({
   page,
   request,
 }) => {
   const marker = `stale-menu-${Date.now()}`;
+  const local = await localHostId(request);
+  const hosts = await (await request.get("/api/hosts")).json();
+  const remote = hosts.hosts.find((host: { id: number }) => host.id !== local);
+  expect(remote, "the fixture needs another host to make membership observable").toBeTruthy();
   const target = await createSession(request, {
     title: marker,
     cwd: "/tmp",
     invocation: "sleep 300",
+    host: local,
   });
   let decoy: { id: string } | undefined;
   try {
@@ -2299,20 +2278,20 @@ test("a filtered-out row's open menu stays closed when the row returns", async (
       title: `decoy-${Date.now()}`,
       cwd: "/tmp",
       invocation: "sleep 300",
+      host: remote.id,
     });
     await page.goto("/");
     await expect(row(page, target.id)).toBeVisible({ timeout: 20_000 });
     await openRowMenu(row(page, target.id));
 
-    // Filter the open-menu row OUT (the decoy keeps the list non-empty,
-    // so an empty-fleet placeholder cannot mask a wrong result)...
-    await openFilterBar(page);
-    await page.locator(".filter-title").fill(`decoy-`);
+    // The decoy keeps the result non-empty, so an empty placeholder cannot
+    // mask a failure to reconcile the menu after the host reply commits.
+    await page.locator(".filter-host").selectOption(String(remote.id));
     await expect(row(page, target.id)).toHaveCount(0, { timeout: 20_000 });
     await expect(row(page, decoy.id)).toBeVisible();
 
     // ...and bring it back: present again, menu CLOSED.
-    await page.locator(".filter-clear").click();
+    await page.locator(".filter-host").selectOption("");
     await expect(row(page, target.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, target.id).locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(row(page, target.id).locator(".session-row-menu")).toHaveAttribute(
@@ -2321,6 +2300,75 @@ test("a filtered-out row's open menu stays closed when the row returns", async (
     );
   } finally {
     await cleanupSession(request, target.id);
+    if (decoy) await cleanupSession(request, decoy.id);
+  }
+});
+
+/**
+ * Filtering only changes the sidebar query. The terminal is selected state
+ * owned by the shell, so removing its row from one listing must neither
+ * navigate away nor remount the live terminal; ALL makes the same selected
+ * row visible again.
+ */
+test("filtering out the active session preserves its terminal and restores its selected row", async ({
+  page,
+  request,
+}) => {
+  const local = await localHostId(request);
+  const hosts = await (await request.get("/api/hosts")).json();
+  const remote = hosts.hosts.find((host: { id: number }) => host.id !== local);
+  expect(remote, "the fixture needs another host to filter the active local session out").toBeTruthy();
+  const active = await createSession(request, {
+    title: `active-host-filter-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+    host: local,
+  });
+  let decoy: { id: string } | undefined;
+  try {
+    decoy = await createSession(request, {
+      title: `active-host-filter-decoy-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+      host: remote.id,
+    });
+    // The server-side premise is explicit: the later absent row must be a
+    // host query result, not a remote fixture that never held the decoy.
+    const remoteListing = await (await request.get(`/api/sessions?host=${remote.id}`)).json();
+    expect(remoteListing.sessions.some((session: { id: string }) => session.id === decoy!.id)).toBe(true);
+    expect(remoteListing.sessions.some((session: { id: string }) => session.id === active.id)).toBe(false);
+
+    await page.goto("/");
+    await expect(row(page, active.id)).toBeVisible({ timeout: 20_000 });
+    await row(page, active.id).locator(".session-row-open").click();
+    await expect(page.locator(".titlebar .title")).toHaveText(active.title, { timeout: 20_000 });
+    const terminal = page.locator("#terminal");
+    await expect(terminal).toBeVisible();
+    await terminal.evaluate((node) => {
+      (window as typeof window & { __farhelmHostFilterTerminal?: Element }).__farhelmHostFilterTerminal = node;
+    });
+
+    const host = page.locator(".filter-host");
+    await host.focus();
+    await expect(host).toBeFocused();
+    await host.selectOption(String(remote.id));
+    await expect(row(page, active.id)).toHaveCount(0, { timeout: 20_000 });
+    await expect(row(page, decoy.id)).toBeVisible();
+    await expect(page.locator(".titlebar .title")).toHaveText(active.title);
+    await expect(terminal).toBeVisible();
+    expect(await terminal.evaluate((node) => (
+      node === (window as typeof window & { __farhelmHostFilterTerminal?: Element }).__farhelmHostFilterTerminal
+    ))).toBe(true);
+
+    await host.selectOption("");
+    await expect(row(page, active.id)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, active.id)).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(".titlebar .title")).toHaveText(active.title);
+    expect(await terminal.evaluate((node) => (
+      node === (window as typeof window & { __farhelmHostFilterTerminal?: Element }).__farhelmHostFilterTerminal
+    ))).toBe(true);
+  } finally {
+    await cleanupSession(request, active.id);
     if (decoy) await cleanupSession(request, decoy.id);
   }
 });
@@ -3497,13 +3545,13 @@ test("scrolling the sidebar closes an open row menu", async ({ page, request }) 
 
 /**
  * The sidebar's own on-demand controls are layout causes too: opening host
- * details, the filter popover, or the create dialog each changes content
+ * details or the create dialog each changes content
  * section above the rows (list.rs's `use_effect` near `show_create`), which
  * is exactly the kind of internal shift `layout_epoch` does NOT cover (that
  * counter is for the ancestor-owned scroll/resize listeners in lib.rs) —
  * this component watches these three signals directly instead. One test
  * per surface, because each is a separate signal the effect subscribes to
- * and a regression could plausibly drop any one of the three independently.
+ * and a regression could plausibly drop either independently.
  */
 test("opening host details closes an open row menu", async ({ page, request }) => {
   const session = await createSession(request, {
@@ -3543,139 +3591,6 @@ test("opening host details closes an open host-row menu", async ({ page }) => {
   await expect(host.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
 });
 
-/** The filter is anchored below the host list, so changing every host row's
- * detail height must invalidate that fixed measurement too. */
-test("opening host details closes the filter popover", async ({ page }) => {
-  await page.goto("/");
-  await waitForHostsListSettled(page);
-  await openFilterBar(page);
-
-  await page.locator(".host-details-toggle").click();
-  await expect(page.locator(".host-details-toggle")).toBeChecked();
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
-  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-});
-
-/** Mounting and unmounting Add host move the filter's session-header anchor.
- * Both directions must discard the old fixed coordinates. */
-test("toggling the add-host form closes the filter popover", async ({ page }) => {
-  await page.goto("/");
-  await waitForHostsListSettled(page);
-
-  await openFilterBar(page);
-  await page.locator(".add-host-button").click();
-  await expect(page.locator(".add-host-form")).toBeVisible();
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
-  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-
-  await openFilterBar(page);
-  await page.locator(".add-host-button").click();
-  await expect(page.locator(".add-host-form")).toHaveCount(0);
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
-  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-});
-
-/** Opening a host row menu is the reverse half of filter/menu mutual
- * exclusion; only the newly requested surface may remain. */
-test("opening a host-row menu closes the filter popover", async ({ page }) => {
-  await page.goto("/");
-  await waitForHostsListSettled(page);
-  await openFilterBar(page);
-
-  const host = page.locator(".host-row").first();
-  await openHostMenu(host);
-  await expect(host.locator(".host-row-menu-panel")).toBeVisible();
-  await expect(page.locator(".filter-popover")).toHaveCount(0);
-  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-});
-
-/** Session menus enter the same mutual-exclusion path through a separate
- * signal, so they need their own browser boundary. */
-test("opening a session-row menu closes the filter popover", async ({ page, request }) => {
-  const session = await createSession(request, {
-    title: `filter-session-menu-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
-  try {
-    await page.goto("/");
-    const target = row(page, session.id);
-    await expect(target).toBeVisible();
-    await waitForHostsListSettled(page);
-    await openFilterBar(page);
-
-    await openRowMenu(target);
-    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
-    await expect(page.locator(".filter-popover")).toHaveCount(0);
-    await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-  } finally {
-    await cleanupSession(request, session.id);
-  }
-});
-
-/** See "opening host details closes an open row menu" — same contract,
- * the filter popover's own toggle. */
-test("opening the filter popover closes an open row menu", async ({ page, request }) => {
-  const session = await createSession(request, {
-    title: `menu-filter-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
-  try {
-    await page.goto("/");
-    const target = row(page, session.id);
-    await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsListSettled(page);
-    await openRowMenu(target);
-
-    await page.locator(".filter-toggle").click();
-    await expect(page.locator(".filter-popover")).toBeVisible();
-
-    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
-    await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
-  } finally {
-    await cleanupSession(request, session.id);
-  }
-});
-
-/**
- * A fixed filter surface is only attached to the rect measured on open.
- * Scrolling the sidebar moves that toggle, so the surface must dismiss rather
- * than remain at stale viewport coordinates over unrelated content.
- */
-test("scrolling the sidebar dismisses the filter popover after its toggle moves", async ({
-  page,
-  request,
-}) => {
-  const session = await createSession(request, {
-    title: `filter-scroll-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
-  try {
-    // The scroll is the stimulus, not the number or density of session rows.
-    // Reserve overflow explicitly so a denser layout or fixture cleanup
-    // cannot turn this into a test that never scrolls its real container.
-    await page.setViewportSize({ width: 1280, height: 360 });
-    await page.goto("/");
-    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
-    const sidebar = page.locator(".app-sidebar");
-    const viewportHeight = await sidebar.evaluate((el) => el.clientHeight);
-    await page.locator(".session-list").evaluate((el, height) => {
-      (el as HTMLElement).style.minHeight = `${height * 2}px`;
-    }, viewportHeight);
-    await expect.poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1)).toBe(true);
-    await page.locator(".filter-toggle").click();
-    const before = await page.locator(".filter-toggle").boundingBox();
-    await sidebar.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-    await expect.poll(async () => (await page.locator(".filter-toggle").boundingBox())?.y).not.toBe(before?.y);
-    await expect(page.locator(".filter-popover")).toHaveCount(0);
-    await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
-  } finally {
-    await cleanupSession(request, session.id);
-  }
-});
-
 /**
  * The list header is rendered in every listing state, not only after a
  * successful read: filter and sort are the only way to change or clear a
@@ -3703,11 +3618,10 @@ test("the session header controls are usable while the first listing read is pen
   );
   try {
     await page.goto("/");
-    await expect(page.locator(".list-header-controls .filter-toggle")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".list-header-controls .filter-host")).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".list-header-controls .sort-select")).toBeVisible();
     await expect(page.locator(".session-count")).toHaveCount(0);
-    await page.locator(".filter-toggle").click();
-    await expect(page.locator(".filter-popover")).toBeVisible();
+    await expect(page.locator(".filter-host")).toHaveValue("");
   } finally {
     release();
     await page.unroute((url) => url.pathname === "/api/sessions");

@@ -93,8 +93,8 @@ struct SessionListBody {
     truncated: bool,
 }
 
-/// The session list's query surface: SPEC.md's dimensions, as the values a
-/// user typed or chose.
+/// The session-list API query surface, including fields the current sidebar
+/// does not expose.
 ///
 /// Filtering is a QUERY, not a render pass. Every field here becomes a
 /// parameter on `GET /api/sessions` and the helm answers with the matching

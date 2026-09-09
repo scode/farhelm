@@ -1009,8 +1009,8 @@ test.describe("agent profiles", () => {
 
   /**
    * An inert sidebar click closes profiles after focus remains on the document
-   * body, matching the adjacent filter popover without stealing focus back to
-   * the profiles toggle. Click while opening is still allowed to be pending:
+   * body without stealing focus back to the profiles toggle. Click while
+   * opening is still allowed to be pending:
    * waiting for its focus handoff would hide a stale request stealing focus
    * back after the user's outside choice.
    */
@@ -1053,6 +1053,11 @@ test.describe("agent profiles", () => {
           inBudget: performance.now() <= hold.deadline,
           focused: document.activeElement?.matches(".new-profile-button") === true,
         };
+        // Release during this trusted event rather than after Playwright makes
+        // a second cross-process round trip. Promise continuations run after
+        // propagation, so the app bar has published its synchronous veto
+        // before the held focus commit can continue.
+        hold.release();
         document.removeEventListener("pointerdown", observeOutside, true);
       };
       document.addEventListener("pointerdown", observeOutside, true);
@@ -1063,11 +1068,9 @@ test.describe("agent profiles", () => {
       page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitHold.pending)
     ).toBe(true);
     await page.mouse.click(x, y);
-    const receipt = await page.evaluate(() => {
-      const hold = (window as any).__farhelmTestProfiles.focusCommitHold;
-      hold.release();
-      return hold.outsideReceipt;
-    });
+    const receipt = await page.evaluate(() =>
+      (window as any).__farhelmTestProfiles.focusCommitHold.outsideReceipt
+    );
     expect(receipt, "the trusted click must reach a held, unexpired opening commit").toEqual({
       trusted: true, pending: true, inBudget: true, focused: false,
     });
@@ -2644,12 +2647,6 @@ test.describe("agent profiles", () => {
     await page.keyboard.press("Escape");
     await expect(section(page), "Escape cannot unmount the in-flight reply destination")
       .toBeVisible();
-    // The open popup physically covers this control, so drive the busy-surface
-    // contract directly rather than pretending a pointer can reach it.
-    await page.locator(".filter-toggle").dispatchEvent("click");
-    await expect(page.locator(".filter-popover"), "a competing filter is refused while busy")
-      .toHaveCount(0);
-    await expect(section(page)).toBeVisible();
     await page.setViewportSize({ width: 900, height: 650 });
     await expect(section(page), "resize dismissal waits for the mutation reply").toBeVisible();
 
@@ -2954,28 +2951,6 @@ test.describe("agent profiles", () => {
     await expect(section(page)).toBeVisible();
     releaseSave!();
     await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
-  });
-
-  /**
-   * Profiles and filters are mutually exclusive in both opening directions.
-   * Testing each direction prevents two independent reactive effects from
-   * drifting into an asymmetric two-popover state.
-   */
-  test("profiles and filters exclude each other in both opening directions", async ({ page }) => {
-    await listWithStubbedFeed(page);
-
-    await page.locator(".filter-toggle").click();
-    await expect(page.locator(".filter-popover")).toBeVisible();
-    await openProfiles(page);
-    await expect(page.locator(".filter-popover")).toHaveCount(0);
-    await closeProfiles(page);
-
-    await openProfiles(page);
-    // The open popup physically covers this control, so drive mutual exclusion
-    // directly rather than pretending a pointer can reach it.
-    await page.locator(".filter-toggle").dispatchEvent("click");
-    await expect(page.locator(".filter-popover")).toBeVisible();
-    await expect(section(page)).toHaveCount(0);
   });
 
   /**

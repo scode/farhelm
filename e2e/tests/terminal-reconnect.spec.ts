@@ -29,7 +29,7 @@
 
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type Page, type APIRequestContext } from "@playwright/test";
-import { openFilterBar, stubFeed } from "./helpers/fleet";
+import { localHostId, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
   addTab,
@@ -1798,6 +1798,7 @@ try {
 // header before anything is rewritten), compares it, and says something
 // actionable when the two disagree.
 test("client-helm-skew-prompts-reload", async ({ page, request }) => {
+  const local = await localHostId(request);
   const live = await request.get("/api/sessions");
   expect(
     live.headers()["x-farhelm-build"],
@@ -1816,7 +1817,6 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
   });
 
   await page.goto("/");
-  await openFilterBar(page);
   const notice = page.locator(".build-skew");
   await expect(notice).toBeVisible({ timeout: 15_000 });
   await expect(notice).toContainText("9999.0.0-from-a-newer-helm");
@@ -1838,21 +1838,26 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
   // page withdraws every UNATTENDED behavior — the feed, the fallback poll,
   // the heartbeat, automatic reconnect — while "anything the user explicitly
   // asks for keeps working". Nothing reads on its own here, so a test that
-  // waited for a read would wait forever; each live filter action below is a
+  // waited for a read would wait forever; each host choice below is a
   // person asking and issues an attended read.
   //
   // So these two waits assert the explicit half of that rule as much as they
   // stage the latch: a page that stood its EXPLICIT reads down under skew
   // would hang here rather than fail an assertion, which is the shape this
-  // exact regression took on WebKit. Two live edits, two agreeing replies.
+  // exact regression took on WebKit. Two choices, two agreeing replies.
   await page.unroute("**/api/**");
   for (let i = 0; i < 2; i++) {
     const landed = page.waitForResponse(
       (response) =>
-        response.request().method() === "GET" && /\/api\/sessions/.test(response.url()),
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/sessions" &&
+        new URL(response.url()).searchParams.get("host") === (i === 0 ? String(local) : null),
       { timeout: 30_000 },
     );
-    await page.locator(".filter-include-archived").setChecked(i === 0);
+    const host = page.locator(".filter-host");
+    await host.focus();
+    await expect(host).toBeFocused();
+    await host.selectOption(i === 0 ? String(local) : "");
     await landed;
   }
   await expect(

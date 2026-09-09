@@ -275,17 +275,16 @@ carried by three cues instead of by proximity alone — the toggle holds a press
 the panel is a raised surface with a shadow. **One at a time:** at most one row's menu is open, and it closes on any
 layout change that could have moved the row it was measured against (a sidebar scroll or resize, the host list's shape
 changing, the create form opening, the row reordering under a refresh), because the panel's coordinates are a one-time
-snapshot. Opening the fixed filter popover also closes a row menu, but that is mutual exclusion between floating
-surfaces rather than a geometry event: opening the popover does not reflow the rows. **Keyboard:** it is a real
-`role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands focus on the first command and
-ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a single tab stop via roving
-`tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close that took the menu away from
-a focused item hands focus back to the toggle rather than dropping it on the document body. An item made inert by an
-in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather than going natively `disabled`,
-because a browser cannot focus a disabled control and a menu that went busy under the user would otherwise swallow every
-navigation key. **Confirm in place:** a destructive item swaps the panel's own contents for the consequence line and a
-confirm/cancel pair with focus on cancel, rather than opening a second surface; that sub-state is a `role="dialog"`
-inside the same positioned box, and it survives the panel closing, which is why it deliberately does not answer Escape.
+snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown)
+lands focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is
+a single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
+that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body.
+An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather than
+going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the user
+would otherwise swallow every navigation key. **Confirm in place:** a destructive item swaps the panel's own contents
+for the consequence line and a confirm/cancel pair with focus on cancel, rather than opening a second surface; that
+sub-state is a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it
+deliberately does not answer Escape.
 
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. Rename and
@@ -1302,18 +1301,17 @@ reports a failed listing rather than a silently shortened one.
   projecting rows before the reply could exceed a frame and reports it through the same `truncated` flag.
 - A listing reply carries two counts, and they answer different questions. `matching` is how many rows satisfy the
   caller's filter across the whole merged view, and it is present exactly when a predicate is active. `total` is how big
-  the VIEW is — the denominator the UI's "N matching of M sessions" prints — and it deliberately does not move when the
-  user types, because a denominator that tracked the filter would compare a number against itself. The one thing that
-  does move it is the archive-inclusion switch: that switch selects which list is being served rather than narrowing
-  one, so the default view's rows and its total are both about the non-archived fleet and `include_archived=true` widens
-  both. The flag is denormalized into a `session_cache.archived` column (schema version 10, backfilled from each
-  payload) so the default view can leave an archived row unread rather than decoding it to find out. A row whose payload
-  no longer decodes is in NEITHER count: it is dropped at the read with a warning, so `total` and `matching` describe
-  rows a client can see and "showing 4 of 5" never appears over a row nobody can render (the corruption is for the log).
-  Changed 2026-08-22: `total` used to count archived rows in every view, so out of the box the default list showed ten
-  rows above a count of twelve, with no filter typed and nothing on screen able to explain the gap. The accepted
-  consequence is that the ordinary list now reads as unfiltered — "M sessions" — and the filtered wording belongs to
-  filters a person applied.
+  the VIEW is — the denominator the UI's "N matching of M sessions" prints — and it deliberately does not move when a
+  query narrows membership, because a denominator that tracked the query would compare a number against itself. The
+  archive-inclusion API parameter instead selects which list is being served, so the default view's rows and its total
+  are both about the non-archived fleet and `include_archived=true` widens both. The flag is denormalized into a
+  `session_cache.archived` column (schema version 10, backfilled from each payload) so the default view can leave an
+  archived row unread rather than decoding it to find out. A row whose payload no longer decodes is in NEITHER count: it
+  is dropped at the read with a warning, so `total` and `matching` describe rows a client can see and "showing 4 of 5"
+  never appears over a row nobody can render (the corruption is for the log). Changed 2026-08-22: `total` used to count
+  archived rows in every view, so out of the box the default list showed ten rows above a count of twelve, with no
+  filter typed and nothing on screen able to explain the gap. The accepted consequence is that the ordinary list now
+  reads as unfiltered — "M sessions" — and the filtered wording belongs to filters a person applied.
 - At most one HOST may cache a given session id, as a schema invariant. Session ids are supervisor-minted UUIDs, so two
   hosts naming one is either a bug or a hostile supervisor claiming a session it does not own — and the consequence is a
   routing decision, not a display one: owner lookup would resolve one host while the list showed another's row, so a
